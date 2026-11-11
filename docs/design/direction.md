@@ -453,8 +453,9 @@ Will's step on inix and NEO-REX.
    effect once the receiver holds the entry; the store-order refinement
    comes with feeds in phase 4. Re-express, then delete: actor tokens and
    capability lists, delivery grants and selectors, `reach`, `operator`,
-   assistant grants, gateway and A2A tokens. Decide at the receiver; the
-   local API gets its credential.
+   assistant grants, gateway and A2A tokens, all replaced by one actor
+   grant (question 8). Decide at the receiver; the local API gets its
+   credential.
 4. **Many-to-many ids, one store.** Add feeds and stored ids (project,
    agent, org, space) with checkouts as rows; claims become (project,
    relative path) with a one-time mapping; consolidate the dozen state
@@ -501,7 +502,8 @@ change edits the spec first. Not verified formally: parsers and drift
 
 ## Open questions for Will
 
-Questions 1, 2, 4 and 5 are decided, so nothing gates phase 3. The rest
+Questions 1, 2, 4 and 5, and 8's grants, are decided, so nothing gates
+phase 3. The rest
 can wait for the phase that needs them.
 
 1. **The person's root key, the presence check and the chain rules.**
@@ -554,9 +556,20 @@ can wait for the phase that needs them.
    COSE_Sign1 for outside interop? Recommended: keep, revisit in phase 6.
 7. **Claims.** Stay advisory with a deterministic winner, or allow a
    project to name one arbiter machine for exclusive leases?
-8. **Retire now** the SSH hosts prototype and the cloud-assistant read
-   grants? Recommended: yes to both; the grants come back as Biscuit read
-   tokens if wanted.
+8. **Actor grants and the SSH hosts prototype.** The grants are decided
+   by Will on 2026-11-10: every actor (a local actor, a bot such as Grok
+   Bot or Hermes, a cloud assistant) holds one actor grant, a Biscuit
+   rooted at the machine that names what the actor may read and what it
+   may do (send messages, answer, start sessions, claim, hand off), each
+   right scoped to the machines and networks the token names and the
+   projects a receiver-side row names until phase 4's stored ids. There
+   is no read-only assistant grant beside it: the cloud assistants' reads
+   (`xenonet mcp assistant`), with their per-project scope, expiry,
+   revoke, disable and audit, are this grant's read right. The receiver
+   decides every read and act with `xenonet-authz`. Issuing or widening
+   a grant needs the person's presence, as an Allow does; narrowing and
+   revoking need none. Still open: retire the SSH hosts prototype?
+   Recommended: yes.
 9. **The remote map.** Is it acceptable that other machines show as
    session cards from presence, not today's relayed full graph?
 10. **Defaults.** Two mailboxes per network, named by the person
