@@ -7,9 +7,14 @@ measures up and what to build next.
 
 ## The one-sentence version
 
-XenoNet is a system, a data model and a set of protocols that let networks of
-actors (people and bots) and agents (harness sessions and other AI processes)
-get work done together, securely, across machines.
+XenoNet is a system, a data model and a set of protocols that let actors
+(people and bots) collaborate to take an intent to an outcome, securely,
+across machines. To get there they use three kinds of thing, each within
+what they are allowed:
+
+- **Hosts**: the machines and other resources work runs on.
+- **Identities**: the accounts work is done as.
+- **Running sessions**: the agents and harnesses doing the work.
 
 The console, the CLI and the MCP servers are surfaces onto that system. They
 matter, but they are not the core. Xenolith, the shared context, is one of the
@@ -77,6 +82,8 @@ system's layers and follows the same model.
 Every design doc, plan and non-trivial PR answers these before it is built:
 
 - Which goal does this serve? If none, why build it?
+- How does it help actors take an intent to an outcome, and which hosts,
+  identities and sessions does it use?
 - Does it add a one-of-anything assumption (one person, one machine, one
   network, one gateway, one folder)? If so, goal 2 says no.
 - Who can do this, to whom, under what authority, and how is that authority
