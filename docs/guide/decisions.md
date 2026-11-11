@@ -1,6 +1,6 @@
 # Decision models
 
-XenoNet occasionally needs a judgment its own rules can't make, such as which folders in your projects folder are really projects. Until now it asked Codex, which takes a while and writes its answer as text. A decision model answers typed questions instead: yes or no, one of a few options, or a place on a scale, each with how sure it is. XenoNet keeps only the answers it's sure enough of, and its own rules decide the rest.
+XenoNet occasionally needs a judgment its own rules can't make, such as which folders in your projects folder are really projects. It can ask Codex, which takes a while and writes its answer as text, or a decision model, which answers typed questions: yes or no, one of a few options, or a place on a scale, each with how sure it is. XenoNet keeps only the answers it's sure enough of, and its own rules decide the rest.
 
 XenoNet uses Jev by default, TypeSafe's decision model on [OpenRouter](https://openrouter.ai/docs/guides/community/jev). It costs a fraction of a cent per question. `XENONET_DECISION_MODEL` picks another.
 
@@ -15,7 +15,7 @@ Token use always shows an OpenRouter row. With no key stored it shows a key: cli
 
 ## What it decides
 
-- **Which folders are projects.** In the projects panel, **Show what would be sent** now offers **Send to jev** beside **Send to Codex**. Jev gets the same outline you see: each folder's path inside your projects folder, its well-known files, counts and file types, and how many sessions ran there. Each folder is one question (project, a group of projects, or just a folder), and XenoNet keeps a pick only when Jev is at least 75% sure and the pick changes something. Your own rules still win.
+- **Which folders are projects.** In the projects panel, **Show what would be sent** offers **Send to jev** beside **Send to Codex** once a key is stored. Jev gets the same outline you see: each folder's path inside your projects folder, its well-known files, counts and file types, and how many sessions ran there. Each folder is one question (project, a group of projects, or just a folder), and XenoNet keeps a pick only when Jev is at least 75% sure and the pick changes something. Your own rules still win.
 
 **Route task** and **Review decisions** add opt-in agent suggestions through JevRouter, with scores and recorded outcomes. They use the same credential store and zero-retention request. See [Agent workflows](integrations.md) for the preview, privacy and execution boundaries.
 

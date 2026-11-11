@@ -24,7 +24,7 @@ Turning it off stops the copy that started at login, and Desktop starts its own 
 - `xenonet service stop` stops it until you next log in. launchd doesn't restart a clean stop.
 - Its output goes to the service's log in the runtime folder, `service-47840.log`, as it does when Desktop starts it. `xenonet logs` lists its errors.
 
-macOS lists it in System Settings › General › Login Items & Extensions. Turning it off there keeps it from starting at login. A launch agent starts at login, not at boot: a Mac that should be in a network, or serve as an SSH host, before anyone logs in needs automatic login.
+macOS lists it in System Settings › General › Login Items & Extensions. Turning it off there keeps it from starting at login. A launch agent starts at login, not at boot: a Mac that should be in a network before anyone logs in needs automatic login.
 
 When XenoNet's tray is installed, `install` also sets it up (see [The tray on macOS](#the-tray-on-macos)): it copies `XenoNet Tray.app` to `~/Applications` and writes a second launch agent, `~/Library/LaunchAgents/dev.xenonet.tray.plist`. `uninstall` removes both.
 
@@ -96,6 +96,6 @@ On macOS and Linux, `xenonet service run` adds your login shell's `PATH`, as Des
 - whether it starts at login;
 - whether the launch agent, unit or task is what `xenonet service install` writes now, and the program it runs is there (if not, run `xenonet service install` again);
 - whether launchd, systemd or Task Scheduler has it loaded, and if it's running;
-- on Linux, whether lingering starts it at boot. That's a warning only where you have no graphical session, as on a host you reach over SSH, where the service would otherwise run only while you're logged in.
+- on Linux, whether lingering starts it at boot. That's a warning only where you have no graphical session, as on a machine you reach only over SSH, where the service would otherwise run only while you're logged in.
 
 The supervisors have their own views: `launchctl print gui/$(id -u)/dev.xenonet.service` on a Mac, `systemctl --user status xenonet` on Linux, and `schtasks /query /tn "XenoNet Service" /v /fo list` on Windows.
