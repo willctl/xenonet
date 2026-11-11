@@ -1,5 +1,5 @@
-//! The tray app's API (docs/design/always-on.md, "The tray app"; contracts
-//! section 14):
+//! The tray app's API (docs/design/always-on.md and contracts.md, "The
+//! tray app"):
 //!
 //!   GET  /api/tray/v1/status         a tray/status/v1
 //!   GET  /api/tray/v1/events         the status again whenever it changes

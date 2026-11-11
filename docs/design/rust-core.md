@@ -461,7 +461,7 @@ Which binary those entries run, and the command on PATH, a local host's
 `XENONET_LAUNCHER_ROOT`; else the running binary. Installed XenoNet's
 launcher keeps its own copy of the Tools' binary at
 `<runtime>/launcher/xenonet`, which never moves
-([contracts.md](contracts.md), section 12).
+([contracts.md](contracts.md), "Integration points").
 
 ## Toolchain
 
