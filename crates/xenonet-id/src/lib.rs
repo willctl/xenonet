@@ -19,9 +19,12 @@
 //!   key, the person's device key and its check, and sealing the person's
 //!   root seed to the device key.
 //! - `did`: a key as a did:key.
+//! - `hlc`: a hybrid logical clock, to order entries from several machines
+//!   for display.
 
 pub mod codec;
 pub mod did;
+pub mod hlc;
 pub mod keys;
 pub mod presence;
 pub mod sign;

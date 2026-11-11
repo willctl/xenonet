@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-id"
-description = "Who signed what: Ed25519 keys and key ids, signatures bound to their purpose, the signers that hold a key, key stores, presence blocks that prove a person was there, and did:key names. Usable alone."
+description = "Who signed what: Ed25519 keys and key ids, signatures bound to their purpose, the signers that hold a key, key stores, presence blocks that prove a person was there, did:key names, and a hybrid logical clock to order what several machines wrote. Usable alone."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,6 +18,10 @@ serde_json.workspace = true
 x25519-dalek.workspace = true
 # Owner-only files on Windows (the key files).
 xenonet-os.workspace = true
+
+[dev-dependencies]
+# Random clocks, steps and remote values for the HLC's properties.
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true
