@@ -1,5 +1,6 @@
 //! Properties over generated tokens: a narrowed token never allows what
-//! its parent refuses, and a revoked id is refused, whichever block's.
+//! its parent refuses, a revoked id is refused, whichever block's, and an
+//! actor's Allow is never wider than its allow scope.
 
 use crate::common::*;
 use proptest::prelude::*;
@@ -112,4 +113,51 @@ fn a_revoked_id_is_refused_whichever_block_it_names() {
             Ok(())
         })
         .unwrap();
+}
+
+#[test]
+fn an_actors_allow_is_never_wider_than_its_scope() {
+    let mut runner = TestRunner::new(Config { cases: 256, ..Config::default() });
+    let kinds = |mask: u8| PromptKind::ALL.into_iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0).map(|(_, k)| k).collect::<Vec<_>>();
+    let sessions = ["s1", "s2", "s3"].map(|s| SessionId::new(s).unwrap());
+    let (allowed, refused) = (Cell::new(0), Cell::new(0));
+    runner
+        .run(
+            &(any::<u8>(), proptest::option::of(any::<u8>()), -HOUR..HOUR, 0..3usize, 0..PromptKind::ALL.len(), 0..Attestation::ALL.len(), any::<bool>()),
+            |(kind_mask, session_mask, until, s, k, by, deny)| {
+                let mut f = world();
+                let token = f.m1_root.mint_actor(&actor_grant("muse", &[Action::Answer])).unwrap();
+                let id = token.revocation_ids().into_iter().next().unwrap();
+                let within = match session_mask {
+                    None => Set::All,
+                    Some(m) => Set::Only(sessions.iter().enumerate().filter(|(i, _)| m & (1 << i) != 0).map(|(_, s)| s.clone()).collect()),
+                };
+                let scope = AllowScope { sessions: within, kinds: kinds(kind_mask), until: NOW + until };
+                f.world.scopes.insert(id, scope.clone());
+                let asked = Asked { session: sessions[s].clone(), by: Attestation::ALL[by], kind: PromptKind::ALL[k], delegated_by: None };
+                f.world.asks.insert(AskId::new("q1").unwrap(), asked.clone());
+                let decision = if deny { AnswerDecision::Deny } else { AnswerDecision::Allow };
+                let r = Request::new(
+                    Principal::Actor { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") },
+                    Resource::Session(asked.session.clone()),
+                    Act::Answer { ask: AskId::new("q1").unwrap(), decision },
+                    Door::Local,
+                    NOW,
+                    None,
+                );
+                let ok = decide(Some(&token), &r, &f.world, None).is_allow();
+                if deny {
+                    // A Deny with the right is always taken.
+                    prop_assert!(ok);
+                } else {
+                    let inside = scope.until >= NOW && scope.sessions.has(&asked.session) && scope.kinds.contains(&asked.kind) && asked.by >= Attestation::ProcessChecked;
+                    prop_assert_eq!(ok, inside, "{:?} {:?}", scope, asked);
+                    allowed.set(allowed.get() + usize::from(ok));
+                    refused.set(refused.get() + usize::from(!ok));
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert!(allowed.get() > 0 && refused.get() > 0, "allowed {}, refused {}", allowed.get(), refused.get());
 }

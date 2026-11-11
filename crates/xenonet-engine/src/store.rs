@@ -242,7 +242,7 @@ const REVOKED_KEPT_MS: f64 = 400.0 * DAY_MS;
 
 /// The steps the database's shape takes; PRAGMA user_version counts those
 /// taken.
-pub const ENGINE_VERSION: usize = 9;
+pub const ENGINE_VERSION: usize = 10;
 
 /// The statements step `i` (0 for the first) runs, given whether a table
 /// has a column already: a database from before versions were counted can
@@ -307,6 +307,15 @@ pub fn engine_step<E>(i: usize, has_column: &mut dyn FnMut(&str, &str) -> std::r
         }
         // 9: one grant for every actor: the actors' tables afresh.
         8 => vec![STEP_NINE],
+        // 10: what an actor's grant may Allow (its allow scope), beside
+        // its other scopes.
+        9 => {
+            if has_column("grant_scopes", "allows")? {
+                vec![]
+            } else {
+                vec!["ALTER TABLE grant_scopes ADD COLUMN allows TEXT"]
+            }
+        }
         _ => vec![],
     })
 }
@@ -1110,19 +1119,22 @@ impl EngineStore {
     // What a grant may use, beside its token: `sessions` (the selector of
     // sessions it may see and reach), `projects` (the JSON list of project
     // ids it may read), `identities` (the JSON list of accounts it may act
-    // as; none set is today's default, the machine's own), and `intents`,
-    // kept for when intents are built. Keyed by the token's revocation id,
-    // so the scope goes with the token.
+    // as; none set is today's default, the machine's own), `allows` (what
+    // it may Allow of the prompts it answers: `{ sessions: "all" | [ids],
+    // kinds: [prompt kinds], until }`; none, and its right to answer is a
+    // Deny's), and `intents`, kept for when intents are built. Keyed by the
+    // token's revocation id, so the scope goes with the token.
 
     /// A grant's scopes, made or changed: `{ token, actor, sessions?,
-    /// projects?, identities?, at, until? }`; a field left out stays.
+    /// projects?, identities?, allows?, at, until? }`; a field left out
+    /// stays.
     pub fn put_scope(&self, r: &Value) -> Result<()> {
         let token = field(r, "token", 1)?;
         self.transaction(|| {
             self.run("INSERT OR IGNORE INTO grant_scopes (token, actor, at) VALUES (?, ?, ?)", &[token.clone(), field(r, "actor", 2)?, field(r, "at", 3)?])?;
             self.run("UPDATE grant_scopes SET at = ? WHERE token = ?", &[field(r, "at", 1)?, token.clone()])?;
             // Each column the caller names; the names are this list's.
-            for k in ["sessions", "projects", "identities", "until"] {
+            for k in ["sessions", "projects", "identities", "allows", "until"] {
                 if r.get(k).is_some() {
                     self.run(&format!("UPDATE grant_scopes SET {k} = ? WHERE token = ?"), &[field_or_null(r, k, 1)?, token.clone()])?;
                 }
@@ -1330,7 +1342,7 @@ mod tests {
     #[test]
     fn a_new_store_takes_every_step_and_keeps_messages() {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
-        assert_eq!(s.version().unwrap(), Version { from: 0, version: 9, newer: false });
+        assert_eq!(s.version().unwrap(), Version { from: 0, version: 10, newer: false });
         let id = s.send(&json!({ "sender": "claude:a", "target": "codex:b", "body": "hi", "recipients": ["codex:b"] }), 1000.0).unwrap();
         assert_eq!(id, 1.0);
         let unseen = s.unseen("codex:b").unwrap();
@@ -1430,12 +1442,16 @@ mod tests {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
         s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "sessions": "project:atlas", "at": 1.0, "until": 9.0 })).unwrap();
         s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "projects": "[\"prj_1\"]", "at": 2.0 })).unwrap();
+        let allows = r#"{"sessions":"all","kinds":["read"],"until":5}"#;
+        s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "allows": allows, "at": 3.0 })).unwrap();
         let r = s.scope("i1").unwrap().unwrap();
         assert_eq!(
-            (r.text("sessions"), r.text("projects"), r.num("until"), r.text("identities")),
-            (Some("project:atlas"), Some("[\"prj_1\"]"), Some(9.0), None),
+            (r.text("sessions"), r.text("projects"), r.num("until"), r.text("identities"), r.text("allows")),
+            (Some("project:atlas"), Some("[\"prj_1\"]"), Some(9.0), None, Some(allows)),
             "a field left out stays"
         );
+        s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "allows": null, "at": 4.0 })).unwrap();
+        assert_eq!(s.scope("i1").unwrap().unwrap().text("allows"), None, "ended");
         s.drop_scope("i1").unwrap();
         assert!(s.scope("i1").unwrap().is_none());
     }

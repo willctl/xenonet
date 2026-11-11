@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/operator/v2.json",
   "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
-  "title": "The person's answer from another machine",
-  "description": "Allow or deny for a run's permission prompt, given at another machine's console, signed by the person's device there with their presence.",
+  "title": "An answer from another machine",
+  "description": "Allow or deny for a run's permission prompt, from another machine: an Allow with the person's presence there, a Deny from its window or an actor with the right.",
   "type": "object",
   "properties": {
     "schema": {
@@ -134,17 +134,19 @@
               "description": "The device that signed, by its key's id"
             },
             "sig": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "pattern": "^[A-Za-z0-9_-]*$",
-              "description": "The device's signature over the act's hash (xenonet-authz's act_hash), base64url"
+              "description": "The device's signature over the act's hash (xenonet-authz's act_hash), base64url; left out when the presence block stands for it"
             }
           },
           "required": [
             "person",
-            "device",
-            "sig"
+            "device"
           ],
-          "description": "For an act as the person: their device's signature over it",
+          "description": "For an act as the person: their device, and its signature over the act unless the presence block stands for it",
           "additionalProperties": {}
         },
         "presence": {
@@ -190,7 +192,7 @@
             "at",
             "sig"
           ],
-          "description": "For an act that needs the person there: a presence block for it",
+          "description": "For an act that needs the person there (an answer's Allow, an admit, a widening): a presence block for it",
           "additionalProperties": {}
         },
         "personHead": {
@@ -202,7 +204,7 @@
           "description": "The head of the person's chain the sender held: a receiver with an older one asks for the rest"
         }
       },
-      "description": "The person's device signature over the answer, and their presence for it",
+      "description": "For an Allow: the person, by their presence for it; for a Deny, the person, an actor's token, or nothing, when the sending window host relays its window's Deny",
       "additionalProperties": {}
     },
     "at": {

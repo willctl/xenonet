@@ -444,6 +444,32 @@ impl ActorRoutes<'_> {
         Ok(Reply::json(200, self.registration().rotate(&slug)?))
     }
 
+    /// What an actor may Allow of the prompts it answers: `PUT` with `{
+    /// sessions: "all" or [session ids], kinds: [read, edit, command, web,
+    /// tool], until }`, from the window, since widening asks you; `DELETE`
+    /// ends it (its right to answer is then a Deny's), yours from anywhere.
+    async fn allows(&self, req: &mut Req, raw: &str) -> Result<Reply, CoreError> {
+        let put = req.method == "PUT";
+        let refused = if put { self.window_only(req).await } else { self.ctx.from_you(req).await.map(|r| fail(403, "yours", r, &[], &none())) };
+        if let Some(r) = refused {
+            return Ok(r);
+        }
+        let Some(slug) = slug_of(raw) else { return Ok(fail(404, "not-found", "XenoNet has no such actor", &[], &none())) };
+        let scope = if put {
+            match req.json(4 << 10).await {
+                Ok(b) => b,
+                Err(e) => return Ok(Reply::error(e.status, e.message)),
+            }
+        } else {
+            Value::Null
+        };
+        match self.ctx.cores.engine.actor_allows(&slug, scope, put).await {
+            Ok(v) => Ok(Reply::json(200, v)),
+            Err(e) if e.is_pending() => Ok(pending_reply(&e)),
+            Err(e) => Ok(fail(e.status.unwrap_or(409), "refused", e.message, &[], &none())),
+        }
+    }
+
     async fn remove(&self, req: &Req, raw: &str) -> Result<Reply, CoreError> {
         if let Some(r) = self.ctx.from_you(req).await {
             return Ok(fail(403, "yours", r, &[], &none()));
@@ -725,6 +751,13 @@ impl ActorRoutes<'_> {
             ["requests", id] if one(id) => {
                 if m == "POST" {
                     self.decide(req, id).await
+                } else {
+                    Ok(not_found())
+                }
+            }
+            [slug, "allows"] if one(slug) => {
+                if m == "PUT" || m == "DELETE" {
+                    self.allows(req, slug).await
                 } else {
                     Ok(not_found())
                 }

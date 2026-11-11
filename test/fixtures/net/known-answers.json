@@ -155,9 +155,45 @@
             }
           }
         ]
+      },
+      {
+        "n": 2,
+        "prev": "Sqg_BjdOF75W_MbrpcHww4-wKNJvgZQlLGGDCr_6jEU",
+        "op": "delegate",
+        "delegation": {
+          "id": "dlg_00112233445566778899aabb",
+          "devices": "all",
+          "work": [
+            "answer",
+            "start"
+          ],
+          "prompts": [
+            "command",
+            "edit",
+            "read",
+            "tool"
+          ],
+          "limits": "routine-in-folder",
+          "until": 1823048000000
+        },
+        "at": 1792512200000,
+        "signers": [
+          {
+            "key": "xns1_3t33jjgt7nsag3xvth4yd5r6wqzuxida",
+            "sig": "qMD7iGJsRhbdSlDsu0CJThO6UkDlpsNtum9m7pItcMMCvu_6i7S1bqb6Iu1JVhW2G69zGIgM9ijmFkoJT7Q2CA",
+            "presence": {
+              "device": "xns1_3t33jjgt7nsag3xvth4yd5r6wqzuxida",
+              "what": "delegate",
+              "act": "CS5TG1XsTogEzt65kGEAVgKYitFyXDuwuElbW6Ph_Pc",
+              "nonce": "MzMzMzMzMzMzMzMzMzMzMw",
+              "at": 1792512200000,
+              "sig": "GLtDjDTS_OrOKOO4xlKuIwj1kgjh08JsDGgw82KXkkylwcJFTk-dd4-v27Gv_IazSvRS66qWNUE_PJetxyKABQ"
+            }
+          }
+        ]
       }
     ],
-    "head": "Sqg_BjdOF75W_MbrpcHww4-wKNJvgZQlLGGDCr_6jEU"
+    "head": "kRzBMp_94DTuS9_b469JgMHL5UX5ZKHwt-rjym83dSI"
   },
   "roster": [
     {

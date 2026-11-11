@@ -92,8 +92,7 @@ fn built(r: &Roster, c: &mut Choices<'_>) -> Entry {
     let mut e = r.draft(op, host_ref, gateway, net::T0 + i64::from(c.i16()));
     e.person_head = net::person().head();
     if op == Op::Settings {
-        let start = *c.pick(&Start::ALL);
-        e.settings = Some(Settings { start, wake: *c.pick(&Wake::ALL), grant: (start == Start::Delegate).then(|| xenonet_net::roster::Grant::standard(net::T0 + 1_000_000)) });
+        e.settings = Some(Settings { start: *c.pick(&Start::ALL), wake: *c.pick(&Wake::ALL) });
     }
     let what = e.presence_for(&r.view());
     match c.below(8) {

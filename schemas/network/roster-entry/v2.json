@@ -167,57 +167,11 @@
                 "network"
               ],
               "description": "Who may wake its sessions for a message: your consent per session, or any sender in the network, within the budgets"
-            },
-            "grant": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "starts": {
-                      "type": "boolean",
-                      "description": "Runs may be started under it"
-                    },
-                    "answers": {
-                      "type": "boolean",
-                      "description": "It answers those runs' permission prompts, within its limits"
-                    },
-                    "requires": {
-                      "type": "string",
-                      "description": "The weakest check of an agent it covers: process-checked or harness-signed",
-                      "minLength": 1,
-                      "maxLength": 32
-                    },
-                    "limits": {
-                      "type": "string",
-                      "description": "What it allows: routine-in-folder, the delegation judge's rules",
-                      "minLength": 1,
-                      "maxLength": 32
-                    },
-                    "until": {
-                      "type": "number",
-                      "description": "Epoch milliseconds"
-                    }
-                  },
-                  "required": [
-                    "starts",
-                    "answers",
-                    "requires",
-                    "limits",
-                    "until"
-                  ],
-                  "additionalProperties": {}
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Exactly when start is delegate"
             }
           },
           "required": [
             "start",
-            "wake",
-            "grant"
+            "wake"
           ],
           "additionalProperties": {}
         },

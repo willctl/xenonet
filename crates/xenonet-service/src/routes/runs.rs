@@ -17,7 +17,10 @@
 //!   xenonet MCP server's `permission` tool (x-xenonet-agent): held until
 //!   you answer, and refused for a session XenoNet didn't start.
 //! - `GET /api/runs/asks`, `POST /api/runs/answer`: the prompts waiting,
-//!   here and from other machines, and your Allow or Deny, from the window.
+//!   here and from other machines, and an answer: yours from the window (an
+//!   Allow asks you once, a Deny not at all), or an actor's on this
+//!   machine with its token and the answer-prompts capability (a Deny, or
+//!   an Allow inside its grant's allow scope).
 //! - `GET /api/runs/forks`: the copies of sessions XenoNet forked to answer
 //!   a message while the session was open elsewhere, each with the session
 //!   it came from, which the console links them to.
@@ -137,28 +140,60 @@ async fn permission(ctx: &Ctx, req: &mut Req) -> Reply {
     core_reply(ctx.cores.engine.permission(&me, title, body).await)
 }
 
-/// The permission prompts waiting, for the window.
+/// An actor of this machine, by its token, allowed to answer prompts (the
+/// answer-prompts capability): its token, or the refusal.
+async fn answering_actor(ctx: &Ctx, req: &Req) -> Result<String, Reply> {
+    let Some(caller) = ctx.caller.as_ref() else { return Err(fail(503, "off", "Actors are off here (XENONET_ACTORS=off)", &[], &json!({}))) };
+    let auth = caller.authenticate(req, false).await.map_err(|r| fail(r.status, &r.code, r.error, &r.headers, &r.extra))?;
+    caller.check(req, &auth, Value::Null).await.map_err(|r| fail(r.status, &r.code, r.error, &[], &json!({})))?;
+    if !auth["capabilities"].as_array().is_some_and(|c| c.iter().any(|w| w == "answer-prompts")) {
+        return Err(Reply::coded(403, "no-right", "answering prompts needs the answer-prompts capability, which this actor wasn't allowed"));
+    }
+    req.header("authorization")
+        .and_then(bearer_of)
+        .map(str::to_string)
+        .ok_or_else(|| Reply::coded(401, "no-token", "this route takes an actor's token, as Authorization: Bearer <token>"))
+}
+
+/// The permission prompts waiting, for the window, or an actor that
+/// answers them.
 async fn asks(ctx: &Ctx, req: &Req) -> Reply {
-    if let Some(why) = ctx.from_window(req).await {
+    if req.header("authorization").is_some() {
+        if let Err(r) = answering_actor(ctx, req).await {
+            return r;
+        }
+    } else if let Some(why) = ctx.from_window(req).await {
         return Reply::coded(403, "yours", why);
     }
     core_reply(ctx.cores.engine.asks().await)
 }
 
-/// Your Allow or Deny, from the window: signed by your device with your
-/// presence (it asks you), then decided here for an ask here, or sent to
-/// the machine whose ask it is, which decides it (the engine does both).
+/// An Allow or Deny: yours from the window, where an Allow asks for your
+/// presence (once) and a Deny for nothing; or an actor's, by its token.
+/// Decided here for an ask here, or sent to the machine whose ask it is,
+/// which decides it (the engine does both).
 async fn answer(ctx: &Ctx, req: &mut Req) -> Reply {
-    if let Some(why) = ctx.from_window(req).await {
+    let token = if req.header("authorization").is_some() {
+        match answering_actor(ctx, req).await {
+            Ok(t) => Some(t),
+            Err(r) => return r,
+        }
+    } else if let Some(why) = ctx.from_window(req).await {
         return Reply::coded(403, "yours", why);
-    }
+    } else {
+        None
+    };
     let body = match req.json(4 << 10).await {
         Ok(b) => b,
         Err(e) => return Reply::error(e.status, e.message),
     };
     let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let (id, decision) = (text("ask"), text("decision"));
-    let r = match ctx.cores.engine.answer(&id, &decision).await {
+    let answered = match &token {
+        Some(t) => ctx.cores.engine.answer_as(t, &id, &decision).await,
+        None => ctx.cores.engine.answer(&id, &decision).await,
+    };
+    let r = match answered {
         Ok(r) => r,
         Err(e) => return core_reply(Err(e)),
     };

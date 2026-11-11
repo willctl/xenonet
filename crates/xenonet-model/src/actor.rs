@@ -96,6 +96,7 @@ crate::open!(Capability of KnownCapability {
     Schedule = "schedule",
     Browse = "browse",
     UseComputer = "use-computer",
+    AnswerPrompts = "answer-prompts",
 });
 
 crate::open!(Relation of KnownRelation {

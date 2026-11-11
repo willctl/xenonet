@@ -52,7 +52,7 @@ pub fn hex(bytes: &[u8]) -> String {
 /// The actions a token minted for these capability words has the right
 /// to: reading what its scopes let it see, which every actor does, and
 /// sessions it may start, messages and handoffs it may send, files it may
-/// claim.
+/// claim, permission prompts it may answer.
 pub fn rights(capabilities: &[String]) -> Vec<Action> {
     let mut out = vec![Action::Read];
     for c in capabilities {
@@ -60,6 +60,8 @@ pub fn rights(capabilities: &[String]) -> Vec<Action> {
             "spawn-sessions" => &[Action::Start][..],
             "message-agents" => &[Action::Message, Action::Handoff],
             "edit-repos" => &[Action::Claim],
+            // A Deny's; what it may Allow is its grant's allow scope.
+            "answer-prompts" => &[Action::Answer],
             _ => &[],
         });
     }
@@ -121,6 +123,7 @@ mod tests {
         assert_eq!(rights(&words(&["browse", "message-agents", "spawn-sessions"])), [Action::Message, Action::Start, Action::Handoff, Action::Read]);
         assert_eq!(rights(&words(&["edit-repos", "run-commands"])), [Action::Claim, Action::Read]);
         assert_eq!(rights(&words(&["use-computer"])), [Action::Read], "every actor reads");
+        assert_eq!(rights(&words(&["answer-prompts"])), [Action::Answer, Action::Read]);
     }
 
     #[test]

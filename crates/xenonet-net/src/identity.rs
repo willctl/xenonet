@@ -19,7 +19,9 @@
 //! What prompts: signing with a biometric device key, and opening the
 //! sealed root. Founding asks once (the root pairs the device under the
 //! device's presence), pairing another device twice (the root's opening
-//! and the device's presence), and every method that may ask takes
+//! and the device's presence), issuing or widening a delegation twice (the
+//! device's presence and its signature on the entry), narrowing or ending
+//! one once (the signature), and every method that may ask takes
 //! `at_window`, refusing without asking when the act didn't come from
 //! XenoNet's window.
 
@@ -337,6 +339,48 @@ impl Identity {
         let block = self.prove(true, person::PAIR, &e.digest(), "pair a machine with your XenoNet identity", now)?;
         let root = self.root(&xenonet_id_reason("pair a machine with your XenoNet identity"))?;
         e.sign(&root.public().id(), &root, Some(block)).map_err(refused)?;
+        {
+            let mut own = self.own.writing();
+            own.offer(e.clone())?;
+            self.write_own(&own)?;
+        }
+        let made = vec![e];
+        self.told(&made);
+        Ok(made)
+    }
+
+    /// Issues a delegation in this person's chain, or changes the one with
+    /// its id, signed by this device; one that widens carries the device's
+    /// presence too. Signing asks the person where the device key asks
+    /// (Touch ID on a Mac), so only from the window. The entries appended.
+    pub fn delegate(&self, at_window: bool, d: person::Delegation, now: i64) -> R<Vec<person::Entry>> {
+        let widens = self.own.reading().person().is_some_and(|p| p.delegations.get(&d.id).is_none_or(|(old, _)| !d.within(old)));
+        let reason = "let your devices run and answer the work you delegate";
+        self.append(at_window, person::Op::Delegate(d), widens, reason, now)
+    }
+
+    /// Ends the delegation `id`: narrowing, so no presence, but still this
+    /// device's signature.
+    pub fn undelegate(&self, at_window: bool, id: &str, now: i64) -> R<Vec<person::Entry>> {
+        self.append(at_window, person::Op::Undelegate { id: id.to_string() }, false, "end a delegation of yours", now)
+    }
+
+    // An entry of this person's own, signed by this device, with its
+    // presence when `present`.
+    fn append(&self, at_window: bool, op: person::Op, present: bool, reason: &str, now: i64) -> R<Vec<person::Entry>> {
+        if !at_window {
+            return Err(not_at_window("that"));
+        }
+        if !self.can_act() {
+            return Err(no_person());
+        }
+        let device = self.device_key()?.ok_or_else(no_device)?;
+        let mut e = self.own.reading().next(person::Body { op, at: now });
+        let block = if present { Some(self.prove(true, e.op.presence_for(), &e.digest(), reason, now)?) } else { None };
+        let id = device.signer.public().id();
+        let mut signed = None;
+        self.vault()?.asking(reason, &mut || signed = Some(e.sign(&id, device.signer.as_ref(), block.clone())));
+        signed.unwrap_or_else(|| Err(xenonet_id::IdError::internal("the vault didn't ask"))).map_err(refused)?;
         {
             let mut own = self.own.writing();
             own.offer(e.clone())?;

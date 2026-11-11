@@ -36,7 +36,7 @@ const RECORDED_MAX: usize = 4096;
 
 /// What a registered actor may be allowed to do, in the order the
 /// registry lists them; an observer's actor gets the ones its product has.
-pub const CAPABILITIES: [&str; 8] = ["spawn-sessions", "edit-repos", "run-commands", "message-people", "message-agents", "schedule", "browse", "use-computer"];
+pub const CAPABILITIES: [&str; 9] = ["spawn-sessions", "edit-repos", "run-commands", "message-people", "message-agents", "schedule", "browse", "use-computer", "answer-prompts"];
 
 // The presences an actor is heard from in; offline and unknown are said
 // once.

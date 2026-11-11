@@ -1,21 +1,22 @@
 //! The facts this machine decides on (`xenonet_authz::Ground`), from its
 //! own copies: the network's chain (members, admins, the founder, each
-//! member's settings and machine key), the person's chain (devices), this
-//! machine's token root certificates, and when governance was last
-//! synced. A `Facts` is a snapshot, taken for one decision. What only the
-//! engine holds (the asks waiting, consent rows, revocations, another
-//! machine's token roots as an act carried them) is the runtime's to add
-//! over it (xenonet-runtime's ground).
+//! member's settings, device and machine key), the person's chain (devices,
+//! delegations), this machine's token root certificates, and when
+//! governance was last synced. A `Facts` is a snapshot, taken for one
+//! decision. What only the engine holds (the asks waiting, consent rows,
+//! revocations, actors' allow scopes, another machine's token roots as an
+//! act carried them) is the runtime's to add over it (xenonet-runtime's
+//! ground).
 
 use crate::identity::Identity;
 use std::sync::Arc;
 use xenonet_authz::{
-    Attestation, Consent, Device, DeviceId, DeviceKind, Ground, MachineId, NetworkId, PersonId, Role, RootCertificate, SessionId, Settings, StandingGrant, StartSetting,
-    WakeSetting,
+    AllowScope, Asked, Consent, Device, DeviceId, DeviceKind, Ground, MachineId, NetworkId, PersonId, PromptKind, Role, RootCertificate, SessionId, Set, Settings, StandingGrant,
+    StartSetting, WakeSetting,
 };
 use xenonet_id::sign::VerifyingKey;
 use xenonet_log::network::{self, Start, View, Wake};
-use xenonet_log::person::DeviceKind as Kind;
+use xenonet_log::person::{self, DeviceKind as Kind};
 
 /// What a machine that isn't in a network calls itself in a request.
 pub const LOCAL: &str = "local";
@@ -118,22 +119,46 @@ impl Ground for Facts {
         Consent::default()
     }
 
-    fn standing_grant(&self, machine: &MachineId) -> Option<StandingGrant> {
-        if machine != &self.machine {
-            return None;
-        }
-        let g = self.own()?.settings.grant.as_ref()?;
-        let requires = if g.requires == "harness-signed" { Attestation::HarnessSigned } else { Attestation::ProcessChecked };
-        Some(StandingGrant { starts: g.starts, answers: g.answers, requires, until: g.until })
+    /// This machine's from its identity; another's as the network's chain
+    /// names it.
+    fn device_of(&self, machine: &MachineId) -> Option<DeviceId> {
+        let id = if machine == &self.machine { self.identity.device_id() } else { self.view.as_ref()?.member(machine.as_str())?.device.clone() };
+        id.and_then(|d| DeviceId::new(&d).ok())
     }
 
-    fn asker(&self, _ask: &xenonet_authz::AskId) -> Option<Attestation> {
+    /// The delegations in the person's chain this machine holds: its own
+    /// person's, or the network's owner's.
+    fn delegations(&self) -> Vec<StandingGrant> {
+        let Some(person) = self.own_person() else { return Vec::new() };
+        let Some(chain) = self.identity.chain_of(person.as_str()) else { return Vec::new() };
+        chain.person().map(|p| p.delegations.values().map(|(d, _)| grant_of(d)).collect()).unwrap_or_default()
+    }
+
+    /// Actors' allow scopes are the engine's rows: the runtime's ground
+    /// answers them.
+    fn allow_scope(&self, _token: &[u8]) -> Option<AllowScope> {
+        None
+    }
+
+    /// The prompts waiting are the engine's too.
+    fn ask(&self, _ask: &xenonet_authz::AskId) -> Option<Asked> {
         None
     }
 
     fn governance_synced_at(&self) -> Option<i64> {
         self.synced_at
     }
+}
+
+/// A delegation as a decision reads it. One that names a device id that
+/// doesn't read is taken as naming the ones that do.
+pub fn grant_of(d: &person::Delegation) -> StandingGrant {
+    let devices = match &d.devices {
+        person::DeviceSet::All => Set::All,
+        person::DeviceSet::Only(list) => Set::Only(list.iter().filter_map(|id| DeviceId::new(id).ok()).collect()),
+    };
+    let answers = if d.covers("answer") { d.prompts.iter().filter_map(|p| PromptKind::parse(p)).collect() } else { Vec::new() };
+    StandingGrant { devices, starts: d.covers("start"), answers, until: d.until }
 }
 
 /// What the engine reads this machine's governance through: the facts for

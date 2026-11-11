@@ -6,7 +6,10 @@
 // fixed nonces, so all of it is reproducible. The roster is
 // `xenonet-roster/2`: entry 0 names its owner person, whose chain (a root
 // key and studio's device) is here too, and laptop's admit carries the
-// presence block from studio's device that the chain checks it by.
+// presence block from studio's device that the chain checks it by. The
+// person's chain goes on past the head the roster names, with a delegation
+// (the standard one, every device, a year) signed by that device with its
+// presence, as a widening is.
 //
 // XENONET_WRITE_FIXTURES=1 cargo test -p xenonet-net --test known_answers
 // writes the file again.
@@ -112,6 +115,12 @@ fn answers() -> Value {
     let admit = block(&device, ADMIT, add.digest(), 0x22, 1_792_512_100_000);
     add.sign_with("studio", &studio, Some(admit));
     r.offer(add).unwrap();
+    let mut owner = owner;
+    let mut dlg =
+        owner.next(person::Body { op: person::Op::Delegate(person::Delegation::standard("dlg_00112233445566778899aabb".into(), 1_823_048_000_000)), at: 1_792_512_200_000 });
+    let b = block(&device, person::DELEGATE, dlg.digest(), 0x33, 1_792_512_200_000);
+    dlg.sign(&device.public().id(), &device, Some(b)).unwrap();
+    owner.offer(dlg).unwrap();
     let req_body = br#"{"frames":[]}"#;
     let target = "/net/v1/frames";
     let headers = request::sign(&laptop, NET, "laptop", "POST", target, 1_792_512_345_000, "cmVxdWVzdC1ub25jZQ", req_body);
@@ -201,6 +210,7 @@ fn the_fixtures_check_from_their_own_values() {
     assert_eq!(owner.id(), v["person"]["id"].as_str());
     let device = SeedSigner::from_seed(&unb64_n::<32>(v["person"]["deviceSeed"].as_str().unwrap()).unwrap(), KeyHome::File).unwrap();
     assert!(owner.person().unwrap().active_device(&device.public().id()).is_some());
+    assert_eq!(owner.person().unwrap().delegations_of(&device.public().id()).count(), 1);
     let r = Roster::from_json_with(NetworkPolicy::with(std::sync::Arc::new(owner)), &v["roster"]).unwrap();
     assert_eq!(r.head().as_deref(), v["rosterHead"].as_str());
     // Without the owner's chain, the admit's presence can't be checked.

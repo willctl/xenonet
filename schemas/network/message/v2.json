@@ -174,17 +174,19 @@
               "description": "The device that signed, by its key's id"
             },
             "sig": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "pattern": "^[A-Za-z0-9_-]*$",
-              "description": "The device's signature over the act's hash (xenonet-authz's act_hash), base64url"
+              "description": "The device's signature over the act's hash (xenonet-authz's act_hash), base64url; left out when the presence block stands for it"
             }
           },
           "required": [
             "person",
-            "device",
-            "sig"
+            "device"
           ],
-          "description": "For an act as the person: their device's signature over it",
+          "description": "For an act as the person: their device, and its signature over the act unless the presence block stands for it",
           "additionalProperties": {}
         },
         "presence": {
@@ -230,7 +232,7 @@
             "at",
             "sig"
           ],
-          "description": "For an act that needs the person there: a presence block for it",
+          "description": "For an act that needs the person there (an answer's Allow, an admit, a widening): a presence block for it",
           "additionalProperties": {}
         },
         "personHead": {

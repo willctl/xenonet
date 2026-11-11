@@ -92,10 +92,16 @@ impl Ground for Facts {
     fn consent(&self, _: &xenonet_authz::SessionId) -> Consent {
         Consent::default()
     }
-    fn standing_grant(&self, _: &MachineId) -> Option<StandingGrant> {
+    fn device_of(&self, _: &MachineId) -> Option<xenonet_authz::DeviceId> {
         None
     }
-    fn asker(&self, _: &xenonet_authz::AskId) -> Option<xenonet_authz::Attestation> {
+    fn delegations(&self) -> Vec<StandingGrant> {
+        Vec::new()
+    }
+    fn allow_scope(&self, _: &[u8]) -> Option<xenonet_authz::AllowScope> {
+        None
+    }
+    fn ask(&self, _: &xenonet_authz::AskId) -> Option<xenonet_authz::Asked> {
         None
     }
     fn governance_synced_at(&self) -> Option<i64> {

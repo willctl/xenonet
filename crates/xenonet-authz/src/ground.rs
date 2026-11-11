@@ -1,12 +1,12 @@
 //! The facts a decision rests on, as the receiver holds them: its own copy
 //! of each network's chain (members, admins, the founder, each member's
-//! settings), the person's chain (devices, revocations), the token roots it
-//! trusts, its consent rows and the person's standing grant. They come
-//! through a trait so the crate needs no store of its own, and another
-//! project can bring its own. Everything here is the receiver's; nothing
-//! comes from the sender's word.
+//! settings), the person's chain (devices, revocations, delegations), the
+//! token roots it trusts, its consent rows, the actors' allow scopes and
+//! the prompts waiting. They come through a trait so the crate needs no
+//! store of its own, and another project can bring its own. Everything
+//! here is the receiver's; nothing comes from the sender's word.
 
-use crate::vocab::{AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, SessionId};
+use crate::vocab::{AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, PromptKind, SessionId};
 use crate::RootCertificate;
 use xenonet_id::sign::VerifyingKey;
 
@@ -112,19 +112,64 @@ pub struct Device {
     pub kind: DeviceKind,
 }
 
-/// The person's standing grant for this machine (a delegation): signed by
-/// the person, checked by whoever implements [`Ground`], with its limits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Everything of a kind, or only these.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Set<T> {
+    All,
+    Only(Vec<T>),
+}
+
+impl<T: PartialEq> Set<T> {
+    pub fn has(&self, x: &T) -> bool {
+        match self {
+            Set::All => true,
+            Set::Only(list) => list.contains(x),
+        }
+    }
+}
+
+/// The person's delegation (a standing grant in their chain, signed by one
+/// of their devices with their presence): the devices it names may run
+/// provider sessions, and answer their prompts within its limits, for work
+/// the person started on any device it names. The limits themselves (the
+/// delegation judge's, today routine work inside the run's folder) are
+/// checked by whoever answers under it, before it asks `decide`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StandingGrant {
+    /// The person's devices it names, or all of them, those paired later
+    /// too.
+    pub devices: Set<DeviceId>,
     /// Runs may be started under it.
     pub starts: bool,
-    /// It answers runs' permission prompts.
-    pub answers: bool,
-    /// The weakest attestation of an agent it covers: never below
-    /// process-checked for answers, whatever it says.
-    pub requires: Attestation,
+    /// The kinds of prompt an Allow under it may cover; none, and it
+    /// answers nothing.
+    pub answers: Vec<PromptKind>,
     /// Milliseconds since 1970 when it ends.
     pub until: i64,
+}
+
+/// What an actor's grant lets it Allow, as the row this machine keeps by
+/// the grant's token holds it. Issued or widened with the person there;
+/// a plain right to answer, without one, lets an actor Deny only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllowScope {
+    pub sessions: Set<SessionId>,
+    pub kinds: Vec<PromptKind>,
+    /// Milliseconds since 1970 when it ends.
+    pub until: i64,
+}
+
+/// A permission prompt waiting here, as this machine holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    /// The session whose run asked it.
+    pub session: SessionId,
+    /// How that run's agent was checked.
+    pub by: Attestation,
+    pub kind: PromptKind,
+    /// The machine whose principal started the run under the person's
+    /// delegation; None for a run that wasn't started under it.
+    pub delegated_by: Option<MachineId>,
 }
 
 /// The facts the receiver holds. Object-safe, so a decision takes
@@ -162,12 +207,21 @@ pub trait Ground {
     /// The consent rows for one of this machine's sessions.
     fn consent(&self, session: &SessionId) -> Consent;
 
-    /// The person's standing grant for `machine`, when one covers it.
-    fn standing_grant(&self, machine: &MachineId) -> Option<StandingGrant>;
+    /// The person's device on `machine`, as the network's chain names it
+    /// (this machine's own from its identity): where a delegation's work
+    /// runs and where it was started.
+    fn device_of(&self, machine: &MachineId) -> Option<DeviceId>;
 
-    /// How the agent of the run that asked `ask` was checked, when the
-    /// question is waiting here.
-    fn asker(&self, ask: &AskId) -> Option<Attestation>;
+    /// The delegations in this machine's person's chain, unended; whether
+    /// one covers a device is `decide`'s to work out.
+    fn delegations(&self) -> Vec<StandingGrant>;
+
+    /// The allow scope of the actor grant whose token's first revocation id
+    /// is `token`, when this machine keeps one.
+    fn allow_scope(&self, token: &[u8]) -> Option<AllowScope>;
+
+    /// The permission prompt `ask`, when it waits here.
+    fn ask(&self, ask: &AskId) -> Option<Asked>;
 
     /// When this machine last synced governance (the chains) from another
     /// member, in milliseconds since 1970.

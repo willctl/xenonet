@@ -1,6 +1,7 @@
 //! A made-up world for the tests: three machines in one network, one
-//! person with a biometric and a weaker device, token roots for two of the
-//! machines, and a ground that answers from plain fields.
+//! person with a biometric device (on m1, this machine) and a weaker one
+//! (on m2), token roots for two of the machines, a question waiting, and a
+//! ground that answers from plain fields.
 
 use std::collections::{HashMap, HashSet};
 use xenonet_authz::*;
@@ -61,8 +62,10 @@ pub struct World {
     pub roots: Vec<RootCertificate>,
     pub keys: HashMap<MachineId, VerifyingKey>,
     pub consent: Consent,
-    pub grant: Option<StandingGrant>,
-    pub askers: HashMap<AskId, Attestation>,
+    pub delegations: Vec<StandingGrant>,
+    pub machine_devices: HashMap<MachineId, DeviceId>,
+    pub scopes: HashMap<Vec<u8>, AllowScope>,
+    pub asks: HashMap<AskId, Asked>,
     pub synced: Option<i64>,
 }
 
@@ -94,15 +97,33 @@ impl Ground for World {
     fn consent(&self, _session: &SessionId) -> Consent {
         self.consent
     }
-    fn standing_grant(&self, machine: &MachineId) -> Option<StandingGrant> {
-        (machine == &self.own).then_some(self.grant).flatten()
+    fn device_of(&self, machine: &MachineId) -> Option<DeviceId> {
+        self.machine_devices.get(machine).cloned()
     }
-    fn asker(&self, ask: &AskId) -> Option<Attestation> {
-        self.askers.get(ask).copied()
+    fn delegations(&self) -> Vec<StandingGrant> {
+        self.delegations.clone()
+    }
+    fn allow_scope(&self, token: &[u8]) -> Option<AllowScope> {
+        self.scopes.get(token).cloned()
+    }
+    fn ask(&self, ask: &AskId) -> Option<Asked> {
+        self.asks.get(ask).cloned()
     }
     fn governance_synced_at(&self) -> Option<i64> {
         self.synced
     }
+}
+
+/// The question q1: session s1's run asks to run a command, a run m2
+/// started under the person's delegation.
+pub fn asked(by: Attestation) -> Asked {
+    Asked { session: SessionId::new("s1").unwrap(), by, kind: PromptKind::Command, delegated_by: Some(machine("m2")) }
+}
+
+/// A delegation of every device, for starts and command prompts, for an
+/// hour.
+pub fn delegation() -> StandingGrant {
+    StandingGrant { devices: Set::All, starts: true, answers: vec![PromptKind::Command], until: NOW + HOUR }
 }
 
 /// The world and the token roots of m1 (this machine) and m2.
@@ -129,8 +150,10 @@ pub fn fixture() -> Fixture {
         roots: vec![m1_root.certificate().clone(), m2_root.certificate().clone()],
         keys: HashMap::from([(machine("m1"), m1_key().public()), (machine("m2"), m2_key().public()), (machine("m3"), m3_key().public())]),
         consent: Consent::default(),
-        grant: None,
-        askers: HashMap::from([(AskId::new("q1").unwrap(), Attestation::HarnessSigned)]),
+        delegations: Vec::new(),
+        machine_devices: HashMap::from([(machine("m1"), device_id(&bio_device())), (machine("m2"), device_id(&weak_device()))]),
+        scopes: HashMap::new(),
+        asks: HashMap::from([(AskId::new("q1").unwrap(), asked(Attestation::HarnessSigned))]),
         synced: Some(NOW - 60_000),
     };
     Fixture { world, m1_root, m2_root }

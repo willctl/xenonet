@@ -62,7 +62,8 @@
               "message-agents",
               "schedule",
               "browse",
-              "use-computer"
+              "use-computer",
+              "answer-prompts"
             ]
           },
           {

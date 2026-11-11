@@ -40,21 +40,32 @@ on and can't read them.
                                    address, who may start sessions here (you,
                                    by default; network adds the network's
                                    sessions and actors; delegate is the
-                                   network, with what they start running on
-                                   your standing grant, within its limits)
-                                   and who may wake them for a message (your
-                                   consent per session, by default, or the
-                                   network). Start and wake are entries in
-                                   the network's chain: narrowing is done at
+                                   network, with what they start running
+                                   under your delegation) and who may wake
+                                   them for a message (your consent per
+                                   session, by default, or the network).
+                                   Start and wake are entries in the
+                                   network's chain: narrowing is done at
                                    once, and widening asks you, so it's done
-                                   from XenoNet's window
+                                   from XenoNet's window. Your delegation is
+                                   an entry in your own chain, signed by
+                                   your device: it names your devices (all
+                                   of them, unless you narrow it), lets
+                                   them start sessions and allow routine
+                                   prompts inside the session's folder for
+                                   work you started on any of them, and
+                                   lasts a year. Setting delegate makes it
+                                   when none names the machine's device,
+                                   which asks you once more
   xenonet net set --on <id> [--start …] [--wake …] [--approve <id>]
                                    another machine's start and wake, from a
                                    window host. Narrowing is done at once;
                                    network and delegate ask you, so they're
                                    set from XenoNet's window, and take the
                                    founder, or wait for another window host
-                                   to --approve it there
+                                   to --approve it there. Delegate needs the
+                                   machine to have a device of yours, which
+                                   your delegation names
   xenonet net gateway take [--lan <ip:port>]
                                    makes this machine the network's gateway,
                                    at that LAN address or through the actor

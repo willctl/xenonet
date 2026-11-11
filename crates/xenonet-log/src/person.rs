@@ -9,6 +9,23 @@
 //! | `found` | the root key, alone, as entry 0 |
 //! | `add-device`, `remove-device` | the root key with a device's presence block, or two devices each with its own |
 //! | `revoke` a token or a device | one device with its presence block (or the root key with a device's) |
+//! | `delegate` that issues or widens a delegation | one device with its presence block (or the root key with a device's) |
+//! | `delegate` that narrows one, `undelegate` | one device, or the root key; no presence |
+//!
+//! **Delegation.** A `delegate` entry is a standing grant from the person to
+//! a set of their devices (named, or all of them, those paired later too):
+//! any device in the set may run provider sessions, and answer their
+//! permission prompts within the grant's limits, for work the person
+//! started on any device in the set. `work` says which (`start`,
+//! `answer`), `prompts` which kinds of prompt an Allow under it may cover,
+//! `limits` the rules a covered prompt must pass (today one set,
+//! `routine-in-folder`, the delegation judge's), and `until` when it ends.
+//! A delegation has an id; a `delegate` with an id the person already has
+//! replaces that one, and it widens unless every field is within the old
+//! one's. Widening asks for the person there; narrowing and ending
+//! (`undelegate`) can't let anyone do more, so they don't. The set is
+//! named as devices, not machines, so the intents phase 4 adds (made on
+//! one device, worked on the others) take the same grant.
 //!
 //! Signers are keys, by their `xns1_` id: the root's, or a device's. A
 //! device that was removed or revoked can't sign. Every signature but the
@@ -45,6 +62,24 @@ pub const LABEL_MAX: usize = 64;
 pub const PAIR: &str = "pair";
 /// What a presence block approves to remove or revoke.
 pub const REVOKE: &str = "revoke";
+/// What a presence block approves to issue or widen a delegation.
+pub const DELEGATE: &str = "delegate";
+/// The kinds of work a delegation covers.
+pub const WORK: [&str; 2] = ["start", "answer"];
+/// The kinds of permission prompt an Allow under a delegation may cover:
+/// xenonet-authz's prompt kinds, by their words.
+pub const PROMPTS: [&str; 5] = ["read", "edit", "command", "web", "tool"];
+/// The rule sets a delegation's covered prompts must pass: today's one is
+/// the delegation judge's (routine work inside the folder the run started
+/// in; `xenonet_engine::delivery::delegation`).
+pub const LIMITS: [&str; 1] = ["routine-in-folder"];
+/// The most delegations a person holds at once, and devices one names.
+pub const DELEGATIONS_MAX: usize = 16;
+
+/// `dlg_` and 16 to 32 lowercase hex characters.
+pub fn is_delegation_id(id: &str) -> bool {
+    id.strip_prefix("dlg_").is_some_and(|h| (16..=32).contains(&h.len()) && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+}
 
 /// `xns1_` and 32 base32 characters: a signing key's id.
 pub fn is_key_id(id: &str) -> bool {
@@ -107,12 +142,135 @@ pub enum Revocation {
     Device(String),
 }
 
+/// The devices a delegation names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceSet {
+    /// Every device of the person's, those paired later too.
+    All,
+    /// These, by their keys' ids.
+    Only(Vec<String>),
+}
+
+impl DeviceSet {
+    pub fn has(&self, device: &str) -> bool {
+        match self {
+            DeviceSet::All => true,
+            DeviceSet::Only(list) => list.iter().any(|d| d == device),
+        }
+    }
+
+    fn within(&self, other: &DeviceSet) -> bool {
+        match (self, other) {
+            (_, DeviceSet::All) => true,
+            (DeviceSet::All, DeviceSet::Only(_)) => false,
+            (DeviceSet::Only(a), DeviceSet::Only(b)) => a.iter().all(|d| b.contains(d)),
+        }
+    }
+}
+
+/// A standing grant from the person to a set of their devices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delegation {
+    pub id: String,
+    /// The devices that may work under it, and that work under it may have
+    /// been started from.
+    pub devices: DeviceSet,
+    /// Of `WORK`, sorted, at least one.
+    pub work: Vec<String>,
+    /// Of `PROMPTS`, sorted: what an Allow under it may cover.
+    pub prompts: Vec<String>,
+    /// One of `LIMITS`.
+    pub limits: String,
+    /// Milliseconds since 1970 when it ends.
+    pub until: i64,
+}
+
+impl Delegation {
+    /// The delegation a machine set to take delegated work gets when none
+    /// names it: every device, starts and answers, for the prompts the
+    /// delegation judge may let through (reading, editing, routine commands,
+    /// the tools that report back), within its limits, until `until`.
+    pub fn standard(id: String, until: i64) -> Delegation {
+        let words = |l: &[&str]| l.iter().map(ToString::to_string).collect();
+        Delegation { id, devices: DeviceSet::All, work: words(&["answer", "start"]), prompts: words(&["command", "edit", "read", "tool"]), limits: LIMITS[0].into(), until }
+    }
+
+    /// Whether it lets no one do more than `old`.
+    pub fn within(&self, old: &Delegation) -> bool {
+        self.devices.within(&old.devices)
+            && self.work.iter().all(|w| old.work.contains(w))
+            && self.prompts.iter().all(|p| old.prompts.contains(p))
+            && self.limits == old.limits
+            && self.until <= old.until
+    }
+
+    pub fn covers(&self, work: &str) -> bool {
+        self.work.iter().any(|w| w == work)
+    }
+
+    fn to_json(&self) -> Value {
+        let devices = match &self.devices {
+            DeviceSet::All => Value::String("all".into()),
+            DeviceSet::Only(list) => json!(list),
+        };
+        json!({ "id": self.id, "devices": devices, "work": self.work, "prompts": self.prompts, "limits": self.limits, "until": self.until })
+    }
+
+    fn parse(v: &Value) -> Option<Delegation> {
+        let words = |k: &str, of: &[&str]| -> Option<Vec<String>> {
+            let list: Vec<String> = v.get(k)?.as_array()?.iter().map(|w| w.as_str().filter(|w| of.contains(w)).map(str::to_string)).collect::<Option<_>>()?;
+            Some(list)
+        };
+        let devices = match v.get("devices")? {
+            Value::String(s) if s == "all" => DeviceSet::All,
+            Value::Array(a) => DeviceSet::Only(a.iter().map(|d| d.as_str().filter(|d| is_key_id(d)).map(str::to_string)).collect::<Option<_>>()?),
+            _ => return None,
+        };
+        Some(Delegation {
+            id: v.get("id")?.as_str().filter(|i| is_delegation_id(i))?.to_string(),
+            devices,
+            work: words("work", &WORK)?,
+            prompts: words("prompts", &PROMPTS)?,
+            limits: v.get("limits")?.as_str().filter(|l| LIMITS.contains(l))?.to_string(),
+            until: v.get("until")?.as_i64()?,
+        })
+    }
+
+    // Lists sorted and without repeats, so one grant has one form, and
+    // within the bounds.
+    fn well_formed(&self) -> bool {
+        let sorted = |l: &[String]| l.windows(2).all(|w| w[0] < w[1]);
+        let devices = match &self.devices {
+            DeviceSet::All => true,
+            DeviceSet::Only(list) => !list.is_empty() && list.len() <= DELEGATIONS_MAX && sorted(list) && list.iter().all(|d| is_key_id(d)),
+        };
+        is_delegation_id(&self.id)
+            && devices
+            && !self.work.is_empty()
+            && sorted(&self.work)
+            && self.work.iter().all(|w| WORK.contains(&w.as_str()))
+            && sorted(&self.prompts)
+            && self.prompts.iter().all(|p| PROMPTS.contains(&p.as_str()))
+            && LIMITS.contains(&self.limits.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
-    Found { root: VerifyingKey },
+    Found {
+        root: VerifyingKey,
+    },
     AddDevice(NewDevice),
-    RemoveDevice { device: String },
+    RemoveDevice {
+        device: String,
+    },
     Revoke(Revocation),
+    /// Issues a delegation, or changes the one with its id.
+    Delegate(Delegation),
+    /// Ends the delegation with this id.
+    Undelegate {
+        id: String,
+    },
 }
 
 impl Op {
@@ -122,6 +280,8 @@ impl Op {
             Op::AddDevice(_) => "add-device",
             Op::RemoveDevice { .. } => "remove-device",
             Op::Revoke(_) => "revoke",
+            Op::Delegate(_) => "delegate",
+            Op::Undelegate { .. } => "undelegate",
         }
     }
 
@@ -129,6 +289,7 @@ impl Op {
     pub fn presence_for(&self) -> &'static str {
         match self {
             Op::AddDevice(_) => PAIR,
+            Op::Delegate(_) | Op::Undelegate { .. } => DELEGATE,
             _ => REVOKE,
         }
     }
@@ -177,6 +338,8 @@ pub struct Person {
     pub devices: BTreeMap<String, Device>,
     /// The revoked tokens' ids, with the entry that revoked each.
     pub revoked_tokens: BTreeMap<String, u64>,
+    /// The delegations unended, by id, with the entry that last set each.
+    pub delegations: BTreeMap<String, (Delegation, u64)>,
 }
 
 impl Person {
@@ -195,6 +358,13 @@ impl Person {
 
     pub fn is_revoked(&self, token: &str) -> bool {
         self.revoked_tokens.contains_key(token)
+    }
+
+    /// The delegations that name `device`, an active device of the
+    /// person's: whether one covers a piece of work is the caller's.
+    pub fn delegations_of<'a>(&'a self, device: &'a str) -> impl Iterator<Item = &'a Delegation> {
+        let active = self.active_device(device).is_some();
+        self.delegations.values().map(|(d, _)| d).filter(move |d| active && d.devices.has(device))
     }
 }
 
@@ -251,6 +421,12 @@ impl Policy for PersonPolicy {
                 };
                 out.insert("revoke".into(), what);
             }
+            Op::Delegate(d) => {
+                out.insert("delegation".into(), d.to_json());
+            }
+            Op::Undelegate { id } => {
+                out.insert("delegation".into(), Value::String(id.clone()));
+            }
         }
         out.insert("at".into(), Value::from(b.at));
     }
@@ -279,6 +455,8 @@ impl Policy for PersonPolicy {
                     _ => return Err(bad("revocation")),
                 }
             }
+            Some("delegate") => Op::Delegate(v.get("delegation").and_then(Delegation::parse).ok_or_else(|| bad("delegation"))?),
+            Some("undelegate") => Op::Undelegate { id: text(v, "delegation").filter(|i| is_delegation_id(i)).ok_or_else(|| bad("delegation"))? },
             _ => return Err(bad("op")),
         };
         let at = v.get("at").and_then(Value::as_i64).ok_or_else(|| bad("time"))?;
@@ -294,6 +472,9 @@ impl Policy for PersonPolicy {
             Op::RemoveDevice { device } | Op::Revoke(Revocation::Device(device)) if !is_key_id(device) => Err(bad("device")),
             Op::Revoke(Revocation::Token(t)) if !is_token_id(t) => Err(bad("revocation")),
             Op::RemoveDevice { .. } | Op::Revoke(_) => Ok(()),
+            Op::Delegate(d) if !d.well_formed() => Err(bad("delegation")),
+            Op::Undelegate { id } if !is_delegation_id(id) => Err(bad("delegation")),
+            Op::Delegate(_) | Op::Undelegate { .. } => Ok(()),
         }
     }
 
@@ -383,6 +564,27 @@ impl Policy for PersonPolicy {
                     return Err(ChainError::no_change("that token is revoked already"));
                 }
             }
+            Op::Delegate(d) => {
+                if let DeviceSet::Only(list) = &d.devices {
+                    if let Some(id) = list.iter().find(|id| p.active_device(id).is_none()) {
+                        return Err(no_device(id));
+                    }
+                }
+                let old = p.delegations.get(&d.id).map(|(o, _)| o);
+                if old == Some(d) {
+                    return Err(ChainError::no_change("that delegation is so already"));
+                }
+                if old.is_none() && p.delegations.len() >= DELEGATIONS_MAX {
+                    return Err(refused(format!("a person holds {DELEGATIONS_MAX} delegations at most: end one first")));
+                }
+                return delegation_signers(p, e, old.is_none_or(|o| !d.within(o)));
+            }
+            Op::Undelegate { id } => {
+                if !p.delegations.contains_key(id) {
+                    return Err(ChainError::new(404, "no-delegation", format!("{id} isn't one of this person's delegations")));
+                }
+                return delegation_signers(p, e, false);
+            }
         }
         let what = e.op.presence_for();
         let act = e.digest();
@@ -414,7 +616,7 @@ impl Policy for PersonPolicy {
     fn apply(&self, person: Option<Person>, e: &Entry) -> Person {
         let Some(mut p) = person else {
             let Op::Found { root } = &e.op else { unreachable!("scope takes only `found` as a person's entry 0") };
-            return Person { id: person_id(e), root: root.clone(), devices: BTreeMap::new(), revoked_tokens: BTreeMap::new() };
+            return Person { id: person_id(e), root: root.clone(), devices: BTreeMap::new(), revoked_tokens: BTreeMap::new(), delegations: BTreeMap::new() };
         };
         match &e.op {
             Op::Found { .. } => {}
@@ -435,6 +637,12 @@ impl Policy for PersonPolicy {
             Op::Revoke(Revocation::Token(t)) => {
                 p.revoked_tokens.insert(t.clone(), e.n);
             }
+            Op::Delegate(d) => {
+                p.delegations.insert(d.id.clone(), (d.clone(), e.n));
+            }
+            Op::Undelegate { id } => {
+                p.delegations.remove(id);
+            }
         }
         p
     }
@@ -449,6 +657,32 @@ fn presence_from_device(p: &Person, e: &Entry, s: &Signature, what: &str, act: &
         _ => &p.active_device(&block.device).ok_or_else(|| refused("the root key's presence is from a device this person doesn't hold"))?.key,
     };
     block.signed_for(key, what, act).map_err(|err| refused(err.message))
+}
+
+/// The signers of a delegation's entry: one is enough, the root key or a
+/// device (signer_key let only those through). One that widens carries the
+/// person's presence: a device's own block, or the root's from a device the
+/// person holds. A block that's there is checked either way.
+fn delegation_signers(p: &Person, e: &Entry, widens: bool) -> R<()> {
+    let act = e.digest();
+    let mut present = false;
+    for s in &e.signers {
+        let Some(block) = &s.presence else { continue };
+        if s.by == p.root.id() {
+            presence_from_device(p, e, s, DELEGATE, &act)?;
+        } else {
+            let key = p.active_device(&s.by).map(|d| &d.key).ok_or_else(|| no_device(&s.by))?;
+            if block.device != s.by {
+                return Err(refused(format!("{}'s presence is another device's", s.by)));
+            }
+            block.signed_for(key, DELEGATE, &act).map_err(|err| refused(err.message))?;
+        }
+        present = true;
+    }
+    if widens && !present {
+        return Err(refused("issuing or widening a delegation signs with the person's presence"));
+    }
+    Ok(())
 }
 
 fn root_alone() -> ChainError {

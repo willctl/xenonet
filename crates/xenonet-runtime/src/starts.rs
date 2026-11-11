@@ -3,7 +3,9 @@
 //!
 //! - **Here:** xenonet-authz decides (`crate::ground`) by this machine's
 //!   start setting in the network's chain, the person's signature for a
-//!   start as you, and the standing grant for a delegated one; the limits
+//!   start as you, and the person's delegation (in their chain, naming this
+//!   machine's device and the one the start came from) for a delegated
+//!   one; the limits
 //!   hold (20 starts an hour, 10 from one machine, and the runner's cap),
 //!   the folder is one this machine knows, and the shared runner starts the
 //!   app's CLI with the first prompt framed with who asked. A watcher tells
@@ -61,11 +63,13 @@ pub struct StartSide {
     /// Copies of sessions XenoNet forked to answer a message, each with the
     /// session it came from: the last 200.
     forks: Mutex<Vec<(String, String)>>,
-    /// Sessions started under a standing delegation, each with the folder
-    /// it started in: what its permission prompts are judged against
-    /// (`xenonet_engine::delivery::delegation`). Kept in memory: after a
-    /// restart its prompts go to your console, as any run's do.
-    delegations: Mutex<HashMap<String, String>>,
+    /// Sessions started under the person's delegation, each with the
+    /// folder it started in, what its permission prompts are judged against
+    /// (`xenonet_engine::delivery::delegation`), and the machine it was
+    /// started from (None for this one), which the delegation must name.
+    /// Kept in memory: after a restart its prompts go to your console, as
+    /// any run's do.
+    delegations: Mutex<HashMap<String, (String, Option<String>)>>,
 }
 
 /// One turn: of XENONET_RUNS_BIN's program when it names one (the tests'
@@ -205,7 +209,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     let session = (!ways.picks_id).then(|| format!("{}:{id}", r.app));
     let key = session.clone().unwrap_or_else(|| format!("start:{id}"));
     let runs = std::path::Path::new(&w.setup.state_dir).join("runs");
-    // Under a standing delegation, a session or actor asking is told it was
+    // Under the person's delegation, a session or actor asking is told it was
     // your user's delegation, set where and when, as this machine keeps it.
     let delegation = (reach.start == "delegate" && kind != Kind::You).then(|| reach.delegated.clone()).flatten();
     let on = delegation.as_ref().map(|(_, at)| xenonet_text::time::iso(*at as f64).chars().take(10).collect::<String>());
@@ -250,7 +254,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     };
     w.starts.history.locked().push((now, bucket));
     if let (Some(session), Some(_)) = (&session, &delegation) {
-        w.starts.delegations.locked().insert(session.clone(), cwd.clone());
+        w.starts.delegations.locked().insert(session.clone(), (cwd.clone(), from.map(str::to_string)));
     }
     let folder = xenonet_os::paths::tilde(&cwd, &w.setup.home);
     w.log(
@@ -314,9 +318,10 @@ pub fn sign_in(w: &Runtime, action: &str, pasted: &str) -> Result<Value, (u16, S
     Ok(json!({ "signedIn": kept, "store": kind }))
 }
 
-/// The folder a session was started in under a standing delegation, if it
-/// was: what a delegation covers is judged against it.
-pub fn delegated_folder(w: &Runtime, session: &str) -> Option<String> {
+/// The folder a session was started in under the person's delegation, if
+/// it was, and the machine it was started from (None for this one): what
+/// a delegation covers is judged against them.
+pub fn delegated(w: &Runtime, session: &str) -> Option<(String, Option<String>)> {
     w.starts.delegations.locked().get(session).cloned()
 }
 

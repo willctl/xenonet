@@ -326,14 +326,15 @@ crate::pattern! {
     pub struct SigningKeyId(r"^xns1_[a-z2-7]{32}$");
 }
 
-/// The person, by one of their devices' signature over the act
+/// The person, by one of their devices: its signature over the act, or, for an act that takes a presence block, that block alone, which the device signs over the act's hash too
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PersonAuthority {
     pub person: PersonId,
     /// The device that signed, by its key's id
     pub device: SigningKeyId,
-    /// The device's signature over the act's hash (xenonet-authz's act_hash), base64url
-    pub sig: Base64Bytes,
+    /// The device's signature over the act's hash (xenonet-authz's act_hash), base64url; left out when the presence block stands for it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sig: Option<Base64Bytes>,
 }
 
 // A presence block: the device's signed word that the person was there,
@@ -374,10 +375,10 @@ pub struct Authority {
     /// The certificate of the token's root, which the receiver checks against the sending machine's signing key in the network's chain
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<RootCertificate>,
-    /// For an act as the person: their device's signature over it
+    /// For an act as the person: their device, and its signature over the act unless the presence block stands for it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub person: Option<PersonAuthority>,
-    /// For an act that needs the person there: a presence block for it
+    /// For an act that needs the person there (an answer's Allow, an admit, a widening): a presence block for it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presence: Option<PresenceProof>,
     /// The head of the person's chain the sender held: a receiver with an older one asks for the rest
@@ -444,20 +445,21 @@ pub struct AnswerAct {
     pub decision: Decision,
 }
 
-/// The person's answer from another machine.
+/// An answer from another machine.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Operator {
     pub schema: OperatorTag,
     pub answer: AnswerAct,
-    /// The person's device signature over the answer, and their presence for it
+    /// For an Allow: the person, by their presence for it; for a Deny, the person, an actor's token, or nothing, when the sending window host relays its window's Deny
     pub authority: Authority,
     pub at: Ms,
 }
 
 impl Document for Operator {
     const ID: &'static str = "network/operator/v2";
-    const TITLE: &'static str = "The person's answer from another machine";
-    const DESCRIPTION: &'static str = "Allow or deny for a run's permission prompt, given at another machine's console, signed by the person's device there with their presence.";
+    const TITLE: &'static str = "An answer from another machine";
+    const DESCRIPTION: &'static str =
+        "Allow or deny for a run's permission prompt, from another machine: an Allow with the person's presence there, a Deny from its window or an actor with the right.";
 }
 
 // ---- network/presence/v1
@@ -689,27 +691,11 @@ pub struct PublicKey {
     pub key: Base64Bytes,
 }
 
-// The person's standing grant for a machine set to delegate.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RosterGrant {
-    /// Runs may be started under it
-    pub starts: bool,
-    /// It answers those runs' permission prompts, within its limits
-    pub answers: bool,
-    /// The weakest check of an agent it covers: process-checked or harness-signed
-    pub requires: Text<1, 32>,
-    /// What it allows: routine-in-folder, the delegation judge's rules
-    pub limits: Text<1, 32>,
-    pub until: Ms,
-}
-
 // A machine's settings, for op settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RosterSettings {
     pub start: StartReach,
     pub wake: WakeReach,
-    /// Exactly when start is delegate
-    pub grant: Nullable<RosterGrant>,
 }
 
 // The host an entry is about, with its keys.

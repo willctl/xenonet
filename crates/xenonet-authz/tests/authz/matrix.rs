@@ -1,6 +1,6 @@
-//! Every action, by every kind of principal, here and from another machine
-//! in every role, under every start and wake setting, consent, standing
-//! grant and governance age: `decide` against `expected`, a plain
+//! Every action (an answer's Allow and Deny apart), by every kind of
+//! principal, here and from another machine in every role, under every
+//! start and wake setting, consent, delegation and governance age: `decide` against `expected`, a plain
 //! statement of the rules written apart from the code. `ROWS` spells out
 //! the cases worth reading, and checks both.
 
@@ -50,6 +50,7 @@ enum Do {
     StartAsks,
     StartDelegated,
     Answer,
+    Deny,
     Claim,
     Handoff,
     ReadMap,
@@ -62,12 +63,13 @@ enum Do {
     Revoke,
 }
 
-const DOS: [Do; 15] = [
+const DOS: [Do; 16] = [
     Do::Message,
     Do::Wake,
     Do::StartAsks,
     Do::StartDelegated,
     Do::Answer,
+    Do::Deny,
     Do::Claim,
     Do::Handoff,
     Do::ReadMap,
@@ -136,9 +138,19 @@ fn expected(c: &Case) -> Outcome {
                 _ => c.wake == WakeSetting::Network || c.consent.here,
             },
             Do::StartAsks | Do::StartDelegated => starts(),
-            // The question's asker is harness-signed, and the grant asks
-            // for process-checked.
+            // An Allow: the person there, or this machine under the
+            // delegation (its question is a command prompt, from a run m2
+            // started under it, and the delegation names every device). No
+            // actor here has an allow scope.
             Do::Answer => present || (c.kind == Machine && !remote && c.grant),
+            // A Deny narrows: the person, this machine, a window host, an
+            // actor with the right; never an agent.
+            Do::Deny => match c.kind {
+                Person { .. } => true,
+                Machine => !remote || role >= Some(Role::Admin),
+                Actor { .. } => true,
+                Agent(_) => false,
+            },
             Do::Claim => !(remote && c.kind == Agent(Unchecked)),
             Do::ReadMap => true,
             Do::ReadTranscripts => match c.kind {
@@ -170,6 +182,7 @@ fn act_of(what: Do) -> (Resource, Act) {
         Do::StartAsks => (run(), start(StartMode::Asks)),
         Do::StartDelegated => (run(), start(StartMode::Delegated)),
         Do::Answer => (run(), Act::Answer { ask: AskId::new("q1").unwrap(), decision: AnswerDecision::Allow }),
+        Do::Deny => (run(), Act::Answer { ask: AskId::new("q1").unwrap(), decision: AnswerDecision::Deny }),
         Do::Claim => (m1(), Act::Claim),
         Do::Handoff => (m1(), Act::Handoff),
         Do::ReadMap => (m1(), Act::Read { scope: ReadScope::Map, filters: None }),
@@ -224,7 +237,7 @@ fn run_case(m: &mut Made, c: &Case) -> Decision {
     let w = &mut m.f.world;
     w.settings = Settings { start: c.start, wake: c.wake };
     w.consent = c.consent;
-    w.grant = c.grant.then_some(StandingGrant { starts: true, answers: true, requires: ProcessChecked, until: NOW + HOUR });
+    w.delegations = if c.grant { vec![delegation()] } else { Vec::new() };
     w.synced = Some(if c.stale { NOW - 11 * 60_000 } else { NOW - 60_000 });
     match c.place {
         Place::Remote(Some(role)) => {
@@ -294,14 +307,14 @@ fn every_case_decides_as_the_rules_say() {
             }
         }
     }
-    assert_eq!(n, 15 * 8 * 5 * 4 * 2 * 4 * 2 * 2);
+    assert_eq!(n, 16 * 8 * 5 * 4 * 2 * 4 * 2 * 2);
     // Neither side of the matrix is empty.
     assert!(allowed > 1000 && held > 100, "{allowed} allowed, {held} held of {n}");
 }
 
 /// The cases worth reading, each with the reason's code when refused.
 #[rustfmt::skip]
-const ROWS: [(Do, Kind, Place, StartSetting, Outcome, &str); 22] = [
+const ROWS: [(Do, Kind, Place, StartSetting, Outcome, &str); 29] = [
     // Messages: members, local agents, actors with the right.
     (Do::Message,         Kind::Agent(Unchecked),           Place::Here,                       StartSetting::You,      Outcome::Allow,  ""),
     (Do::Message,         Kind::Agent(HarnessSigned),       Place::Remote(None),               StartSetting::You,      Outcome::Refuse, "member"),
@@ -316,11 +329,20 @@ const ROWS: [(Do, Kind, Place, StartSetting, Outcome, &str); 22] = [
     (Do::StartDelegated,  Kind::Actor { rights: true },     Place::Here,                       StartSetting::Network,  Outcome::Refuse, "settings"),
     (Do::StartDelegated,  Kind::Actor { rights: true },     Place::Here,                       StartSetting::Delegate, Outcome::Refuse, "grant"),
     (Do::StartAsks,       Kind::Machine,                    Place::Here,                       StartSetting::Network,  Outcome::Refuse, "principal"),
-    // Answers: the person present, or this machine under the grant.
+    // An Allow: the person present, or this machine under the delegation;
+    // an actor only inside an allow scope.
     (Do::Answer,          Kind::Person { presence: false }, Place::Here,                       StartSetting::You,      Outcome::Refuse, "presence"),
     (Do::Answer,          Kind::Person { presence: true },  Place::Here,                       StartSetting::You,      Outcome::Allow,  ""),
     (Do::Answer,          Kind::Agent(HarnessSigned),       Place::Here,                       StartSetting::Delegate, Outcome::Refuse, "principal"),
     (Do::Answer,          Kind::Machine,                    Place::Here,                       StartSetting::You,      Outcome::Refuse, "grant"),
+    (Do::Answer,          Kind::Actor { rights: true },     Place::Here,                       StartSetting::You,      Outcome::Refuse, "scope"),
+    // A Deny: no presence, and no window host's relay but an admin's.
+    (Do::Deny,            Kind::Person { presence: false }, Place::Here,                       StartSetting::You,      Outcome::Allow,  ""),
+    (Do::Deny,            Kind::Machine,                    Place::Here,                       StartSetting::You,      Outcome::Allow,  ""),
+    (Do::Deny,            Kind::Machine,                    Place::Remote(Some(Role::Member)), StartSetting::You,      Outcome::Refuse, "role"),
+    (Do::Deny,            Kind::Machine,                    Place::Remote(Some(Role::Admin)),  StartSetting::You,      Outcome::Allow,  ""),
+    (Do::Deny,            Kind::Actor { rights: true },     Place::Remote(Some(Role::Member)), StartSetting::You,      Outcome::Allow,  ""),
+    (Do::Deny,            Kind::Agent(HarnessSigned),       Place::Here,                       StartSetting::You,      Outcome::Refuse, "principal"),
     // Claims: an unchecked agent only on its own machine.
     (Do::Claim,           Kind::Agent(Unchecked),           Place::Here,                       StartSetting::You,      Outcome::Allow,  ""),
     (Do::Claim,           Kind::Agent(Unchecked),           Place::Remote(Some(Role::Admin)),  StartSetting::You,      Outcome::Refuse, "attestation"),
@@ -376,34 +398,66 @@ fn a_remote_start_holds_on_stale_governance_and_a_local_one_doesnt() {
 }
 
 #[test]
-fn the_standing_grant_answers_only_for_attested_askers() {
+fn a_delegation_answers_only_what_it_names_on_the_devices_it_names() {
     let mut f = fixture();
     let (resource, act) = act_of(Do::Answer);
     let r = Request::new(Principal::Machine { id: machine("m1") }, resource, act, Door::Local, NOW, None);
     let ask = AskId::new("q1").unwrap();
-    for (requires, asker, ok) in [
-        (Unchecked, Unchecked, false),
-        (Unchecked, ProcessChecked, true),
-        (ProcessChecked, ProcessChecked, true),
-        (HarnessSigned, ProcessChecked, false),
-        (HarnessSigned, HarnessSigned, true),
-    ] {
-        f.world.grant = Some(StandingGrant { starts: false, answers: true, requires, until: NOW + HOUR });
-        f.world.askers.insert(ask.clone(), asker);
-        let d = decide(None, &r, &f.world, None);
-        assert_eq!(d.is_allow(), ok, "{requires:?} {asker:?}: {:?}", d.reason());
-        if let Decision::Allow(a) = d {
-            assert_eq!(a.authority(), &Authority::StandingGrant);
-        }
+    let decides = |f: &Fixture| decide(None, &r, &f.world, None);
+    f.world.delegations = vec![delegation()];
+    let Decision::Allow(a) = decides(&f) else { panic!("allowed") };
+    assert_eq!(a.authority(), &Authority::StandingGrant);
+    // Only for a run whose agent was checked.
+    for (by, ok) in [(Unchecked, false), (ProcessChecked, true), (HarnessSigned, true)] {
+        f.world.asks.insert(ask.clone(), asked(by));
+        assert_eq!(decides(&f).is_allow(), ok, "{by:?}");
     }
-    // An expired grant, or one that doesn't answer, is none.
-    f.world.grant = Some(StandingGrant { starts: true, answers: true, requires: Unchecked, until: NOW - 1 });
-    assert!(!decide(None, &r, &f.world, None).is_allow());
-    f.world.grant = Some(StandingGrant { starts: true, answers: false, requires: Unchecked, until: NOW + HOUR });
-    assert!(!decide(None, &r, &f.world, None).is_allow());
+    // The devices: this machine's and the one the run was started from,
+    // both named and both still the person's.
+    let only = |ds: &[&dyn xenonet_id::sign::Signer]| StandingGrant { devices: Set::Only(ds.iter().map(|d| device_id(*d)).collect()), ..delegation() };
+    for (grant, ok) in [(only(&[&bio_device()]), false), (only(&[&weak_device()]), false), (only(&[&bio_device(), &weak_device()]), true)] {
+        f.world.delegations = vec![grant];
+        assert_eq!(decides(&f).is_allow(), ok);
+    }
+    f.world.devices.remove(&(person(), device_id(&weak_device())));
+    assert_eq!(decides(&f).reason().unwrap().code(), "grant", "a revoked device is named by no delegation");
+    let mut f = fixture();
+    // Another kind of prompt, an ended delegation, none.
+    for grant in [StandingGrant { answers: vec![PromptKind::Read, PromptKind::Edit], ..delegation() }, StandingGrant { until: NOW - 1, ..delegation() }] {
+        f.world.delegations = vec![grant];
+        assert_eq!(decides(&f).reason().unwrap().code(), "grant");
+    }
+    // A run that wasn't started under it.
+    f.world.delegations = vec![delegation()];
+    f.world.asks.insert(ask.clone(), Asked { delegated_by: None, ..asked(HarnessSigned) });
+    assert_eq!(decides(&f).reason().unwrap().code(), "grant");
     // A question that isn't waiting here.
-    f.world.askers.clear();
-    assert_eq!(decide(None, &r, &f.world, None).reason().unwrap().code(), "ask");
+    f.world.asks.clear();
+    assert_eq!(decides(&f).reason().unwrap().code(), "ask");
+}
+
+#[test]
+fn a_delegated_start_needs_a_delegation_naming_both_devices() {
+    let mut f = fixture();
+    f.world.settings.start = StartSetting::Delegate;
+    f.world.roles.insert((network(), machine("m2")), Role::Member);
+    let (resource, act) = act_of(Do::StartDelegated);
+    let agent = |m: &str| Principal::Agent { id: AgentId::new("a1").unwrap(), machine: machine(m), attestation: ProcessChecked };
+    let from_m2 = Request::new(agent("m2"), resource.clone(), act.clone(), Door::Network, NOW, Some(network()));
+    let only_here = StandingGrant { devices: Set::Only(vec![device_id(&bio_device())]), ..delegation() };
+    f.world.delegations = vec![only_here.clone()];
+    assert_eq!(decide(None, &from_m2, &f.world, None).reason().unwrap().code(), "grant", "m2's device isn't named");
+    // Here, the device is this machine's own, which it names.
+    assert!(decide(None, &Request::new(agent("m1"), resource.clone(), act.clone(), Door::Local, NOW, None), &f.world, None).is_allow());
+    // A machine with no device of the person's isn't named by any.
+    f.world.delegations = vec![delegation()];
+    assert!(decide(None, &from_m2, &f.world, None).is_allow());
+    f.world.machine_devices.remove(&machine("m2"));
+    assert_eq!(decide(None, &from_m2, &f.world, None).reason().unwrap().code(), "grant");
+    // One that doesn't start.
+    f.world.machine_devices.insert(machine("m2"), device_id(&weak_device()));
+    f.world.delegations = vec![StandingGrant { starts: false, ..delegation() }];
+    assert_eq!(decide(None, &from_m2, &f.world, None).reason().unwrap().code(), "grant");
 }
 
 #[test]

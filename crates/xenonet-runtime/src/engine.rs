@@ -619,6 +619,15 @@ impl Engine for EngineDriver {
         let host = crate::asks::answer(&self.0, id, decision).map_err(|why| CoreError::status(409, why))?;
         Ok(serde_json::json!({ "host": host }))
     }
+    async fn answer_as(&self, token: &str, id: &str, decision: &str) -> R<Value> {
+        let host = crate::asks::answer_as_actor(&self.0, token, id, decision).map_err(|why| CoreError::status(409, why))?;
+        Ok(serde_json::json!({ "host": host }))
+    }
+    async fn actor_allows(&self, slug: &str, scope: Value, at_window: bool) -> R<Value> {
+        let scope = (!scope.is_null()).then_some(scope);
+        crate::grants::set_allows(&self.0, at_window, slug, scope.as_ref(), &format!("let actor:{slug} allow permission prompts")).map_err(|why| CoreError::status(409, why))?;
+        Ok(serde_json::json!({ "ok": true, "actor": format!("actor:{slug}"), "allows": scope }))
+    }
     async fn answer_sent(&self, id: &str, decision: &str) -> R<()> {
         crate::asks::answer_sent(&self.0, id, decision);
         Ok(())

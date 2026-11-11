@@ -11,8 +11,10 @@
 //! Who's who at the receiver:
 //!
 //! - the person: their device's signature over the act, checked against
-//!   this machine's copy of their chain, and for an answer (and anything
-//!   else that needs them there) a presence block for the act, taken once;
+//!   this machine's copy of their chain; for an act that takes a presence
+//!   block, that block alone, which the device signs over the act too, so
+//!   the person is asked once; for an Allow (and anything else that widens)
+//!   the block is taken once, within a minute;
 //! - an agent on another machine: vouched for by that machine, which
 //!   checked its process before it sent (process-checked);
 //! - an actor: its token. Here, the token it called with; from another
@@ -21,14 +23,15 @@
 //!   that machine's signing key in the network's chain. Revocations are
 //!   the issuing machine's: it checked the actor's own token before it
 //!   minted one for the act, and only that machine could mint for it;
-//! - another machine itself: a member of the network.
+//! - another machine itself: a member of the network; for a Deny, a window
+//!   host relaying its window's, with no signature of the person's.
 
 use crate::runtime::Runtime;
 use std::collections::HashMap;
 use std::sync::Arc;
 use xenonet_authz::{
-    decide, Act, Action, ActorGrant, ActorSlug, AskId, Attestation, Consent, Decision, Device, DeviceId, Door, Ground, MachineId, Narrowing, NetworkId, PersonId, PersonSigned,
-    Principal, Request, Resource, Role, RootCertificate, SessionId, Settings, StandingGrant, Token, VerifiedPresence, ACTOR_PREFIX,
+    decide, Act, Action, ActorGrant, ActorSlug, AllowScope, AskId, Asked, Attestation, Consent, Decision, Device, DeviceId, Door, Ground, MachineId, Narrowing, NetworkId,
+    PersonId, PersonSigned, Principal, PromptKind, Request, Resource, Role, RootCertificate, SessionId, Set, Settings, StandingGrant, Token, VerifiedPresence, ACTOR_PREFIX,
 };
 use xenonet_id::presence::PresenceBlock;
 use xenonet_id::sign::VerifyingKey;
@@ -40,9 +43,10 @@ use xenonet_os::sync::ReadWrite;
 /// and the token roots of other machines that came with an act.
 pub struct EngineGround {
     pub facts: Facts,
-    /// Each ask waiting here, with how its run's agent was checked: a run
-    /// XenoNet started, so process-checked.
-    pub asks: HashMap<String, Attestation>,
+    /// Each ask waiting here: its session, how its run's agent was checked
+    /// (a run XenoNet started, so process-checked), its kind, and the
+    /// machine it was started from under the person's delegation.
+    pub asks: HashMap<String, Asked>,
     /// The engine's store, whose revoked table holds every token taken back.
     pub store: Option<xenonet_engine::store::Shared>,
     /// Another machine's root certificates an act carried, unverified: a
@@ -83,11 +87,21 @@ impl Ground for EngineGround {
     fn consent(&self, session: &SessionId) -> Consent {
         self.facts.consent(session)
     }
-    fn standing_grant(&self, machine: &MachineId) -> Option<StandingGrant> {
-        self.facts.standing_grant(machine)
+    fn device_of(&self, machine: &MachineId) -> Option<DeviceId> {
+        self.facts.device_of(machine)
     }
-    fn asker(&self, ask: &AskId) -> Option<Attestation> {
-        self.asks.get(ask.as_str()).copied()
+    fn delegations(&self) -> Vec<StandingGrant> {
+        self.facts.delegations()
+    }
+    /// The allow scope in the grant scopes row kept by this token's id. A
+    /// token minted elsewhere has no row here, so it allows nothing.
+    fn allow_scope(&self, token: &[u8]) -> Option<AllowScope> {
+        let store = self.store.as_ref()?;
+        let row = store.with(|s| s.scope(&xenonet_id::codec::hex(token))).ok().flatten()?;
+        allow_scope_of(&serde_json::from_str(row.text("allows")?).ok()?)
+    }
+    fn ask(&self, ask: &AskId) -> Option<Asked> {
+        self.asks.get(ask.as_str()).cloned()
     }
     fn governance_synced_at(&self) -> Option<i64> {
         self.facts.governance_synced_at()
@@ -105,14 +119,38 @@ pub fn set_governance(w: &Runtime, g: Option<Arc<dyn Governance>>) {
 }
 
 /// The ground for one decision, with the asks waiting here and any
-/// `extra` (an ask about to be made, for the standing grant).
-pub fn ground(w: &Runtime, extra: Option<&str>) -> Option<EngineGround> {
+/// `extra` (an ask about to be made, for the person's delegation).
+pub fn ground(w: &Runtime, extra: Option<(&str, crate::asks::Waiting)>) -> Option<EngineGround> {
     let facts = governance(w)?.facts();
-    let mut asks: HashMap<String, Attestation> = crate::asks::waiting_ids(w).into_iter().map(|id| (id, Attestation::ProcessChecked)).collect();
-    if let Some(id) = extra {
-        asks.insert(id.to_string(), Attestation::ProcessChecked);
+    let mut waiting = crate::asks::waiting(w);
+    if let Some((id, a)) = extra {
+        waiting.push((id.to_string(), a));
     }
+    let asks = waiting.into_iter().filter_map(|(id, a)| Some((id, asked(&facts.machine, a)?))).collect();
     Some(EngineGround { facts, asks, store: Some(w.store.clone()), roots: Vec::new() })
+}
+
+// An ask as a decision reads it. A run XenoNet started is process-checked;
+// one started under the delegation from this machine names it.
+fn asked(own: &MachineId, a: crate::asks::Waiting) -> Option<Asked> {
+    let delegated_by = match a.delegated_from {
+        None => None,
+        Some(None) => Some(own.clone()),
+        Some(Some(host)) => Some(MachineId::new(&host).ok()?),
+    };
+    Some(Asked { session: SessionId::new(&a.session).ok()?, by: Attestation::ProcessChecked, kind: a.kind, delegated_by })
+}
+
+/// An allow scope from its row's JSON: `{ sessions: "all" | [ids], kinds:
+/// [prompt kinds], until }`. One that doesn't read is none.
+pub fn allow_scope_of(v: &serde_json::Value) -> Option<AllowScope> {
+    let sessions = match v.get("sessions")? {
+        serde_json::Value::String(s) if s == "all" => Set::All,
+        serde_json::Value::Array(a) => Set::Only(a.iter().map(|s| s.as_str().and_then(|s| SessionId::new(s).ok())).collect::<Option<_>>()?),
+        _ => return None,
+    };
+    let kinds = v.get("kinds")?.as_array()?.iter().map(|k| k.as_str().and_then(PromptKind::parse)).collect::<Option<_>>()?;
+    Some(AllowScope { sessions, kinds, until: v.get("until")?.as_i64()? })
 }
 
 /// Why something wasn't allowed, in words for a receipt or a refusal.
@@ -129,7 +167,9 @@ pub fn why(d: &Decision) -> String {
 /// token with its root's certificate.
 #[derive(Debug, Clone, Default)]
 pub struct Carried {
-    pub person: Option<(String, String, Vec<u8>)>,
+    /// The person, their device, and its signature over the act unless the
+    /// presence block stands for it.
+    pub person: Option<(String, String, Option<Vec<u8>>)>,
     pub presence: Option<PresenceBlock>,
     pub person_head: Option<String>,
     pub token: Option<String>,
@@ -140,8 +180,8 @@ impl Carried {
     pub fn parse(v: &serde_json::Value) -> Carried {
         let p = v.get("person");
         let text = |v: Option<&serde_json::Value>, k: &str| v.and_then(|v| v.get(k)).and_then(serde_json::Value::as_str).map(str::to_string);
-        let person = match (text(p, "person"), text(p, "device"), text(p, "sig").and_then(|s| xenonet_id::codec::unb64(&s))) {
-            (Some(a), Some(b), Some(c)) => Some((a, b, c)),
+        let person = match (text(p, "person"), text(p, "device")) {
+            (Some(a), Some(b)) => Some((a, b, text(p, "sig").and_then(|s| xenonet_id::codec::unb64(&s)))),
             _ => None,
         };
         Carried {
@@ -154,19 +194,24 @@ impl Carried {
     }
 }
 
-/// The authority this machine's person gives an act made here: their
-/// device's signature over it, with a presence block when it needs one,
-/// and the head of their chain. Asks the person, so only for an act from
-/// XenoNet's window (`at_window`).
+/// The authority this machine's person gives an act made here: for an act
+/// that takes a presence block, the block alone, which the device signs
+/// over the act (one prompt: Touch ID once); for any other, the device's
+/// signature over it. With the head of their chain. Asks the person, so
+/// only for an act from XenoNet's window (`at_window`).
 pub fn authority(identity: &Identity, at_window: bool, resource: &Resource, act: &Act, reason: &str, now: i64) -> Result<serde_json::Value, String> {
     let hash = xenonet_authz::act_hash(resource, act);
     let person = identity.person_id().ok_or("this machine has no identity of yours yet: make or join a network from XenoNet's window")?;
-    let (device, sig) = identity.sign_act(at_window, &hash, reason).map_err(|e| e.message)?;
-    let mut out = serde_json::json!({ "person": { "person": person, "device": device, "sig": xenonet_id::codec::b64(&sig) } });
-    if let Some(what) = act.presence_what() {
+    let mut out = if let Some(what) = act.presence_what() {
+        if !identity.can_act() {
+            return Err("this machine has no identity of yours yet: make or join a network from XenoNet's window".into());
+        }
         let block = identity.prove(at_window, what, &hash, reason, now).map_err(|e| e.message)?;
-        out["presence"] = block.to_json();
-    }
+        serde_json::json!({ "person": { "person": person, "device": block.device }, "presence": block.to_json() })
+    } else {
+        let (device, sig) = identity.sign_act(at_window, &hash, reason).map_err(|e| e.message)?;
+        serde_json::json!({ "person": { "person": person, "device": device, "sig": xenonet_id::codec::b64(&sig) } })
+    };
     if let Some(head) = identity.head() {
         out["personHead"] = serde_json::Value::String(head);
     }
@@ -186,7 +231,13 @@ pub fn person(w: &Runtime, g: &EngineGround, from: Option<&str>, carried: &Carri
     }
     let person = PersonId::new(person).map_err(|e| e.message)?;
     let device = DeviceId::new(device).map_err(|e| e.message)?;
-    PersonSigned::verify(g, &person, &device, resource, act, sig).map(Principal::Person).map_err(|e| e.message)
+    let signed = match (sig, &carried.presence) {
+        (Some(sig), _) => PersonSigned::verify(g, &person, &device, resource, act, sig),
+        // The block stands for the signature, from the device it names.
+        (None, Some(block)) if block.device == device.as_str() => PersonSigned::from_presence(g, &person, block, resource, act),
+        _ => return Err("an act as you comes with your device's signature, or its presence for the act".into()),
+    };
+    signed.map(Principal::Person).map_err(|e| e.message)
 }
 
 /// How long a token minted for one act to another machine lasts: past the
@@ -364,7 +415,9 @@ mod tests {
     }
 
     /// laptop's ground in a network studio founded, desk and vm1 in it too;
-    /// laptop's person founded on its own device.
+    /// laptop's person founded on its own device. ask_1 waits here: a
+    /// command prompt from claude:run, which wasn't started under a
+    /// delegation.
     fn ground(name: &str, settings: chain::Settings, synced: Option<i64>) -> (EngineGround, Arc<Identity>, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("xenonet-runtime-ground-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -377,7 +430,17 @@ mod tests {
             view.members.insert(id.into(), member(id, window, s));
         }
         let facts = Facts { machine: MachineId::new("laptop").unwrap(), view: Some(view), identity: identity.clone(), synced_at: synced, now: NOW };
-        (EngineGround { facts, asks: HashMap::from([("ask_1".to_string(), Attestation::ProcessChecked)]), store: None, roots: Vec::new() }, identity, dir)
+        let asks = HashMap::from([("ask_1".to_string(), waiting(None))]);
+        (EngineGround { facts, asks, store: None, roots: Vec::new() }, identity, dir)
+    }
+
+    fn waiting(delegated_by: Option<&str>) -> Asked {
+        Asked {
+            session: SessionId::new("claude:run").unwrap(),
+            by: Attestation::ProcessChecked,
+            kind: PromptKind::Command,
+            delegated_by: delegated_by.map(|m| MachineId::new(m).unwrap()),
+        }
     }
 
     fn run() -> Resource {
@@ -388,11 +451,29 @@ mod tests {
         Act::Start { app: xenonet_authz::AppId::new("claude").unwrap(), folder: Folder::new("~/atlas").unwrap(), mode }
     }
 
+    fn session() -> Resource {
+        Resource::Session(SessionId::new("claude:run").unwrap())
+    }
+
+    fn answer(decision: AnswerDecision) -> Act {
+        Act::Answer { ask: AskId::new("ask_1").unwrap(), decision }
+    }
+
+    /// The person's authority for an act, as this machine makes it, and the
+    /// principal a receiver takes from it, as `person` does.
+    fn authorized(identity: &Identity, g: &EngineGround, resource: &Resource, act: &Act) -> (Principal, Carried) {
+        let carried = Carried::parse(&authority(identity, true, resource, act, "", NOW).unwrap());
+        let (person, device, sig) = carried.person.clone().unwrap();
+        let person = PersonId::new(&person).unwrap();
+        let signed = match &sig {
+            Some(sig) => PersonSigned::verify(g, &person, &DeviceId::new(&device).unwrap(), resource, act, sig),
+            None => PersonSigned::from_presence(g, &person, carried.presence.as_ref().unwrap(), resource, act),
+        };
+        (Principal::Person(signed.unwrap()), carried)
+    }
+
     fn signed(identity: &Identity, g: &EngineGround, resource: &Resource, act: &Act) -> Principal {
-        let auth = authority(identity, true, resource, act, "", NOW).unwrap();
-        let carried = Carried::parse(&auth);
-        let (person, device, sig) = carried.person.unwrap();
-        Principal::Person(PersonSigned::verify(g, &PersonId::new(&person).unwrap(), &DeviceId::new(&device).unwrap(), resource, act, &sig).unwrap())
+        authorized(identity, g, resource, act).0
     }
 
     #[test]
@@ -402,14 +483,16 @@ mod tests {
         // Start: you, by default: an agent on another member is refused.
         let d = decide_with(&g, &remote(&g, agent("claude:a", &studio).unwrap(), run(), start(StartMode::Asks)), None);
         assert!(!d.is_allow() && why(&d).contains("start setting is you"), "{}", why(&d));
-        // The person, signed by their device, from another member.
-        let p = signed(&identity, &g, &run(), &start(StartMode::Asks));
+        // The person, signed by their device, from another member: a start
+        // takes no presence, so the device signs it.
+        let (p, carried) = authorized(&identity, &g, &run(), &start(StartMode::Asks));
+        assert!(carried.person.as_ref().unwrap().2.is_some() && carried.presence.is_none());
         assert!(decide_with(&g, &remote(&g, p, run(), start(StartMode::Asks)), None).is_allow());
         // A signature over another act doesn't verify for this one.
         let other = Resource::Run { machine: MachineId::new("laptop").unwrap(), app: xenonet_authz::AppId::new("codex").unwrap(), folder: Folder::new("~/atlas").unwrap() };
         let auth = Carried::parse(&authority(&identity, true, &other, &start(StartMode::Asks), "", NOW).unwrap());
         let (person, device, sig) = auth.person.unwrap();
-        assert!(PersonSigned::verify(&g, &PersonId::new(&person).unwrap(), &DeviceId::new(&device).unwrap(), &run(), &start(StartMode::Asks), &sig).is_err());
+        assert!(PersonSigned::verify(&g, &PersonId::new(&person).unwrap(), &DeviceId::new(&device).unwrap(), &run(), &start(StartMode::Asks), &sig.unwrap()).is_err());
         // Not from the window: nothing is signed, nothing asks.
         assert!(authority(&identity, false, &run(), &start(StartMode::Asks), "", NOW).is_err());
         // A machine that isn't in the network.
@@ -419,57 +502,104 @@ mod tests {
     }
 
     #[test]
-    fn network_and_delegate_let_agents_start_and_the_grant_answers_its_runs() {
-        let delegate = chain::Settings { start: chain::Start::Delegate, wake: chain::Wake::Consent, grant: Some(chain::Grant::standard(NOW + 1000)) };
-        let (g, _identity, dir) = ground("delegate", delegate, Some(NOW));
+    fn a_delegation_in_the_persons_chain_lets_delegated_runs_start_and_answers_them() {
+        let delegate = chain::Settings { start: chain::Start::Delegate, wake: chain::Wake::Consent };
+        let (mut g, identity, dir) = ground("delegate", delegate, Some(NOW));
+        let laptop = MachineId::new("laptop").unwrap();
         let studio = MachineId::new("studio").unwrap();
-        assert!(decide_with(&g, &remote(&g, agent("claude:a", &studio).unwrap(), run(), start(StartMode::Delegated)), None).is_allow());
-        // The machine answers its own runs under the grant, for an ask
-        // waiting here.
-        let answer = |ask: &str| Act::Answer { ask: AskId::new(ask).unwrap(), decision: AnswerDecision::Allow };
-        let me = Principal::Machine { id: MachineId::new("laptop").unwrap() };
-        let session = Resource::Session(SessionId::new("claude:run").unwrap());
-        assert!(decide_with(&g, &local(&g, me.clone(), session.clone(), answer("ask_1")), None).is_allow());
-        assert!(!decide_with(&g, &local(&g, me, session, answer("ask_2")), None).is_allow(), "an ask that doesn't wait here");
+        let delegated = |g: &EngineGround, by: &MachineId| decide_with(g, &local_or_remote(g, by, start(StartMode::Delegated)), None);
+        // No delegation yet: delegated work is refused, here and from studio.
+        assert_eq!(delegated(&g, &laptop).reason().map(xenonet_authz::Reason::code), Some("grant"));
+        // The person's standard delegation, signed by laptop's device with
+        // its presence, names every device: laptop's own work runs.
+        identity.delegate(true, xenonet_log::person::Delegation::standard("dlg_0123456789abcdef".into(), NOW + 1000), NOW).unwrap();
+        g.facts.identity = identity.clone();
+        assert!(delegated(&g, &laptop).is_allow());
+        // studio has no device of the person's, so no delegation names it.
+        assert_eq!(delegated(&g, &studio).reason().map(xenonet_authz::Reason::code), Some("grant"));
+        // This machine allows a command prompt of a run started under it,
+        // from here; not one of a run that wasn't.
+        let me = Principal::Machine { id: laptop.clone() };
+        assert!(!decide_with(&g, &local(&g, me.clone(), session(), answer(AnswerDecision::Allow)), None).is_allow(), "not started under it");
+        g.asks.insert("ask_1".into(), waiting(Some("laptop")));
+        assert!(decide_with(&g, &local(&g, me.clone(), session(), answer(AnswerDecision::Allow)), None).is_allow());
+        // A web prompt isn't one the standard delegation answers.
+        g.asks.insert("ask_1".into(), Asked { kind: PromptKind::Web, ..waiting(Some("laptop")) });
+        assert!(!decide_with(&g, &local(&g, me.clone(), session(), answer(AnswerDecision::Allow)), None).is_allow());
+        // Ended: nothing is answered under it, and nothing delegated starts.
+        identity.undelegate(true, "dlg_0123456789abcdef", NOW).unwrap();
+        g.asks.insert("ask_1".into(), waiting(Some("laptop")));
+        assert!(!decide_with(&g, &local(&g, me, session(), answer(AnswerDecision::Allow)), None).is_allow());
+        assert!(!delegated(&g, &laptop).is_allow());
         let _ = std::fs::remove_dir_all(dir);
-        // Network, no grant: the machine answers nothing itself.
-        let network = chain::Settings { start: chain::Start::Network, ..chain::Settings::default() };
-        let (g, _identity, dir) = ground("network", network, Some(NOW));
-        assert!(decide_with(&g, &remote(&g, agent("claude:a", &studio).unwrap(), run(), start(StartMode::Asks)), None).is_allow());
-        assert!(!decide_with(&g, &remote(&g, agent("claude:a", &studio).unwrap(), run(), start(StartMode::Delegated)), None).is_allow());
+    }
+
+    fn local_or_remote(g: &EngineGround, by: &MachineId, act: Act) -> Request {
+        let p = agent("claude:a", by).unwrap();
+        if by == g.own_machine() {
+            local(g, p, run(), act)
+        } else {
+            remote(g, p, run(), act)
+        }
+    }
+
+    #[test]
+    fn an_allow_asks_once_and_needs_presence_and_a_deny_asks_nothing() {
+        let (g, identity, dir) = ground("answer", chain::Settings::default(), Some(NOW));
+        let allow = answer(AnswerDecision::Allow);
+        // The authority an Allow carries is a presence block alone: one
+        // prompt, not a signature and a block.
+        let (p, carried) = authorized(&identity, &g, &session(), &allow);
+        assert!(carried.person.as_ref().unwrap().2.is_none());
+        let block = carried.presence.unwrap();
+        let req = remote(&g, p.clone(), session(), allow.clone());
+        // No presence: refused.
+        assert!(!decide_with(&g, &req, None).is_allow());
+        assert!(decide_with(&g, &req, Some(&block)).is_allow());
+        // Once: the same block again is refused.
+        assert!(!decide_with(&g, &req, Some(&block)).is_allow(), "a block counts once");
+        // A Deny's block lifted onto the Allow doesn't count.
+        let deny = answer(AnswerDecision::Deny);
+        let deny_block = Carried::parse(&authority(&identity, true, &session(), &deny, "", NOW).unwrap()).presence.unwrap();
+        assert!(!decide_with(&g, &req, Some(&deny_block)).is_allow());
+        // A Deny needs no presence: the person's device, this machine for
+        // its window, a window host relaying its window's; not a member that
+        // has no window.
+        let p_deny = signed(&identity, &g, &session(), &deny);
+        assert!(decide_with(&g, &remote(&g, p_deny, session(), deny.clone()), None).is_allow());
         let me = Principal::Machine { id: MachineId::new("laptop").unwrap() };
-        let d = decide_with(&g, &local(&g, me, Resource::Session(SessionId::new("claude:run").unwrap()), answer("ask_1")), None);
-        assert!(!d.is_allow(), "no standing grant");
+        assert!(decide_with(&g, &local(&g, me, session(), deny.clone()), None).is_allow());
+        let studio = Principal::Machine { id: MachineId::new("studio").unwrap() };
+        assert!(decide_with(&g, &remote(&g, studio.clone(), session(), deny.clone()), None).is_allow());
+        let vm1 = Principal::Machine { id: MachineId::new("vm1").unwrap() };
+        assert_eq!(decide_with(&g, &remote(&g, vm1, session(), deny.clone()), None).reason().map(xenonet_authz::Reason::code), Some("role"));
+        // A window host relays a Deny, never an Allow.
+        assert!(!decide_with(&g, &remote(&g, studio, session(), allow.clone()), None).is_allow());
+        let _ = std::fs::remove_dir_all(dir);
+        // Governance synced long ago: an Allow from another machine holds;
+        // a Deny doesn't.
+        let (g, identity, dir) = ground("stale", chain::Settings::default(), Some(NOW - 11 * 60_000));
+        let (p, carried) = authorized(&identity, &g, &session(), &allow);
+        let d = decide_with(&g, &remote(&g, p, session(), allow), carried.presence.as_ref());
+        assert!(matches!(d, Decision::Hold(_)), "{}", why(&d));
+        let studio = Principal::Machine { id: MachineId::new("studio").unwrap() };
+        assert!(decide_with(&g, &remote(&g, studio, session(), deny), None).is_allow());
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn an_answer_needs_presence_for_it_once_and_holds_on_stale_governance() {
-        let (g, identity, dir) = ground("answer", chain::Settings::default(), Some(NOW));
-        let session = Resource::Session(SessionId::new("claude:run").unwrap());
-        let act = Act::Answer { ask: AskId::new("ask_1").unwrap(), decision: AnswerDecision::Allow };
-        let p = signed(&identity, &g, &session, &act);
-        let req = remote(&g, p.clone(), session.clone(), act.clone());
-        // No presence: refused.
-        assert!(!decide_with(&g, &req, None).is_allow());
-        let carried = Carried::parse(&authority(&identity, true, &session, &act, "", NOW).unwrap());
-        let block = carried.presence.unwrap();
-        assert!(decide_with(&g, &req, Some(&block)).is_allow());
-        // Once: the same block again is refused.
-        assert!(!decide_with(&g, &req, Some(&block)).is_allow(), "a block counts once");
-        // A block lifted onto another answer (deny) doesn't count.
-        let deny = Act::Answer { ask: AskId::new("ask_1").unwrap(), decision: AnswerDecision::Deny };
-        let fresh = Carried::parse(&authority(&identity, true, &session, &act, "", NOW).unwrap()).presence.unwrap();
-        let p_deny = signed(&identity, &g, &session, &deny);
-        assert!(!decide_with(&g, &remote(&g, p_deny, session.clone(), deny), Some(&fresh)).is_allow());
-        let _ = std::fs::remove_dir_all(dir);
-        // Governance synced long ago: an answer from another machine holds.
-        let (g, identity, dir) = ground("stale", chain::Settings::default(), Some(NOW - 11 * 60_000));
-        let p = signed(&identity, &g, &session, &act);
-        let block = Carried::parse(&authority(&identity, true, &session, &act, "", NOW).unwrap()).presence.unwrap();
-        let d = decide_with(&g, &remote(&g, p, session, act), Some(&block));
-        assert!(matches!(d, Decision::Hold(_)), "{}", why(&d));
-        let _ = std::fs::remove_dir_all(dir);
+    fn an_allow_scope_reads_from_its_row() {
+        let scope = allow_scope_of(&serde_json::json!({ "sessions": ["claude:run"], "kinds": ["command", "edit"], "until": NOW })).unwrap();
+        assert_eq!((scope.kinds, scope.until), (vec![PromptKind::Command, PromptKind::Edit], NOW));
+        assert_eq!(allow_scope_of(&serde_json::json!({ "sessions": "all", "kinds": [], "until": 1 })).unwrap().sessions, Set::All);
+        for bad in [
+            serde_json::json!({ "sessions": "some", "kinds": [], "until": 1 }),
+            serde_json::json!({ "sessions": "all", "kinds": ["fly"], "until": 1 }),
+            serde_json::json!({ "sessions": ["two words"], "kinds": [], "until": 1 }),
+            serde_json::json!({ "sessions": "all", "kinds": [] }),
+        ] {
+            assert!(allow_scope_of(&bad).is_none(), "{bad}");
+        }
     }
 
     #[test]
@@ -488,7 +618,7 @@ mod tests {
         c.offer(e.clone()).unwrap();
         identity.offer(&identity.person_id().unwrap(), &[e.to_json()]).unwrap();
         let (person, device, sig) = carried.person.unwrap();
-        assert!(PersonSigned::verify(&g, &PersonId::new(&person).unwrap(), &DeviceId::new(&device).unwrap(), &resource, &act, &sig).is_err());
+        assert!(PersonSigned::verify(&g, &PersonId::new(&person).unwrap(), &DeviceId::new(&device).unwrap(), &resource, &act, &sig.unwrap()).is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

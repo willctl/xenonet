@@ -274,8 +274,8 @@ fn window_hosts_gateway_moves_and_their_removal_need_the_founder_or_two() {
 fn settings_narrow_by_one_admin_or_the_machine_and_widen_by_the_founder_or_two() {
     let h = hosts();
     let mut r = network(&h);
-    let set = |start, wake, grant| Settings { start, wake, grant };
-    let network_both = set(Start::Network, Wake::Network, None);
+    let set = |start, wake| Settings { start, wake };
+    let network_both = set(Start::Network, Wake::Network);
     // A widening: one admin waits for a second; the founder alone is enough.
     assert_eq!(r.clone().offer(h.settings(&r, "laptop", network_both.clone(), &["desk"])).unwrap_err().code, "needs-approval");
     assert_eq!(r.clone().offer(h.settings(&r, "laptop", network_both.clone(), &["laptop"])).unwrap_err().code, "needs-approval", "not by itself");
@@ -285,32 +285,28 @@ fn settings_narrow_by_one_admin_or_the_machine_and_widen_by_the_founder_or_two()
     assert_eq!((m.settings, m.settings_by.map(|b| b.0)), (network_both.clone(), Some(vec!["studio".to_string()])));
     // Widening needs presence from each admin that counts.
     let mut e = h.draft(&r, Op::Settings, r.host_ref("desk").unwrap());
-    e.settings = Some(set(Start::Delegate, Wake::Consent, Some(Grant::standard(T + 86_400_000))));
+    e.settings = Some(set(Start::Delegate, Wake::Consent));
     e.sign_by("studio", &h.keys["studio"]);
     assert_eq!(r.clone().offer(e).unwrap_err().code, "presence");
     // Narrowing: any admin, or the machine itself, with no presence.
     let mut narrow = h.draft(&r, Op::Settings, r.host_ref("laptop").unwrap());
-    narrow.settings = Some(set(Start::Off, Wake::Consent, None));
+    narrow.settings = Some(set(Start::Off, Wake::Consent));
     narrow.sign_by("laptop", &h.keys["laptop"]);
     assert_eq!(r.clone().offer(narrow.clone()).unwrap(), Offered::Appended);
     narrow.signers.clear();
     narrow.sign_by("nook", &h.keys["nook"]);
     r.offer(narrow).unwrap();
-    // Delegate takes a grant, and only delegate does; the same settings
-    // again change nothing.
-    assert!(Settings::parse(&json!({ "start": "delegate", "wake": "consent", "grant": null })).is_none());
-    assert!(Settings::parse(&json!({ "start": "network", "wake": "consent", "grant": Grant::standard(1).to_json() })).is_none());
-    assert!(Settings::parse(
-        &json!({ "start": "delegate", "wake": "consent", "grant": { "starts": true, "answers": true, "requires": "unchecked", "limits": "routine-in-folder", "until": 1 } })
-    )
-    .is_none());
-    let delegate = set(Start::Delegate, Wake::Consent, Some(Grant::standard(T + 86_400_000)));
+    // Settings are start and wake alone: what a delegated run may do is
+    // the person's delegation, in their chain. The same settings again
+    // change nothing.
+    assert_eq!(set(Start::Delegate, Wake::Consent).to_json(), json!({ "start": "delegate", "wake": "consent" }));
+    let delegate = set(Start::Delegate, Wake::Consent);
     r.offer(h.settings(&r, "laptop", delegate.clone(), &["studio"])).unwrap();
     assert_eq!(r.clone().offer(h.settings(&r, "laptop", delegate, &["studio"])).unwrap_err().code, "no-change");
     // Stepping back from delegate to the network is a narrowing.
-    r.offer(h.settings(&r, "laptop", set(Start::Network, Wake::Consent, None), &["laptop"])).unwrap();
+    r.offer(h.settings(&r, "laptop", set(Start::Network, Wake::Consent), &["laptop"])).unwrap();
     // A settings entry about a machine names it as the chain has it.
-    let mut e = h.settings(&r, "laptop", set(Start::Off, Wake::Consent, None), &[]);
+    let mut e = h.settings(&r, "laptop", set(Start::Off, Wake::Consent), &[]);
     e.host.device = None;
     e.sign_by("laptop", &h.keys["laptop"]);
     assert_eq!(r.offer(e).unwrap_err().code, "no-host");

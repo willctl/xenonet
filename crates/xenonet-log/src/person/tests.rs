@@ -450,3 +450,112 @@ fn an_entry_that_couldnt_be_read_back_is_refused() {
     sign(&mut e, &laptop, Some(&laptop));
     assert_eq!(c.clone().offer(e).unwrap_err().code, "bad-request");
 }
+
+fn delegation(devices: DeviceSet, work: &[&str], prompts: &[&str], until: i64) -> Delegation {
+    Delegation {
+        id: "dlg_0123456789abcdef".into(),
+        devices,
+        work: work.iter().map(ToString::to_string).collect(),
+        prompts: prompts.iter().map(ToString::to_string).collect(),
+        limits: LIMITS[0].into(),
+        until,
+    }
+}
+
+fn delegate(c: &PersonChain, d: Delegation) -> Entry {
+    c.next(Body { op: Op::Delegate(d), at: T + c.len() as i64 })
+}
+
+#[test]
+fn a_delegation_is_issued_and_widened_with_presence_and_narrowed_or_ended_without() {
+    let (mut c, root, laptop, desk) = person();
+    let wide = delegation(DeviceSet::All, &["answer", "start"], &["command", "edit", "read"], T + 86_400_000);
+    // Issuing widens: a device's signature alone isn't enough.
+    let mut e = delegate(&c, wide.clone());
+    sign(&mut e, &laptop, None);
+    assert!(c.clone().offer(e).unwrap_err().message.contains("presence"));
+    // With its presence, one device issues it; so does the root with a
+    // device's.
+    let mut by_root = delegate(&c, wide.clone());
+    sign(&mut by_root, &root, Some(&laptop));
+    assert_eq!(c.clone().offer(by_root).unwrap(), Offered::Appended);
+    let mut e = delegate(&c, wide.clone());
+    sign(&mut e, &laptop, Some(&laptop));
+    c.offer(e).unwrap();
+    let p = c.person().unwrap();
+    assert_eq!(p.delegations_of(&laptop.public().id()).collect::<Vec<_>>(), vec![&wide]);
+    assert_eq!(p.delegations_of(&desk.public().id()).count(), 1, "all devices, the weaker one too");
+    // A block for another op's word doesn't count.
+    let mut lifted = delegate(&c, Delegation { until: T + 2 * 86_400_000, ..wide.clone() });
+    let b = prove(&laptop, Some(&FixedCheck(true)), REVOKE, &lifted.digest(), "", T).unwrap();
+    lifted.sign(&laptop.public().id(), &laptop, Some(b)).unwrap();
+    assert!(c.clone().offer(lifted).unwrap_err().message.contains("approves revoke"));
+    // Later, more prompts or another kind of work: each widens.
+    for wider in [Delegation { until: T + 2 * 86_400_000, ..wide.clone() }, delegation(DeviceSet::All, &["answer", "start"], &["command", "edit", "read", "web"], T + 86_400_000)] {
+        let mut e = delegate(&c, wider);
+        sign(&mut e, &desk, None);
+        assert!(c.clone().offer(e).unwrap_err().message.contains("presence"));
+    }
+    // Narrowing: fewer devices, less work, fewer prompts, sooner. No
+    // presence, by any device of the person's.
+    let narrow = delegation(DeviceSet::Only(vec![laptop.public().id()]), &["answer"], &["read"], T + 3_600_000);
+    let mut e = delegate(&c, narrow.clone());
+    sign(&mut e, &desk, None);
+    c.offer(e).unwrap();
+    let p = c.person().unwrap();
+    assert_eq!(p.delegations_of(&laptop.public().id()).collect::<Vec<_>>(), vec![&narrow]);
+    assert_eq!(p.delegations_of(&desk.public().id()).count(), 0);
+    // From named devices back to all of them widens again.
+    let mut e = delegate(&c, Delegation { devices: DeviceSet::All, ..narrow.clone() });
+    sign(&mut e, &desk, None);
+    assert!(c.clone().offer(e).unwrap_err().message.contains("presence"));
+    // The same again changes nothing; ending it needs no presence.
+    let mut same = delegate(&c, narrow.clone());
+    sign(&mut same, &desk, None);
+    assert_eq!(c.clone().offer(same).unwrap_err().code, "no-change");
+    let mut end = c.next(Body { op: Op::Undelegate { id: narrow.id.clone() }, at: T + 50 });
+    sign(&mut end, &desk, None);
+    c.offer(end).unwrap();
+    assert!(c.person().unwrap().delegations.is_empty());
+    let mut again = c.next(Body { op: Op::Undelegate { id: narrow.id.clone() }, at: T + 51 });
+    sign(&mut again, &desk, None);
+    assert_eq!(c.offer(again).unwrap_err().code, "no-delegation");
+}
+
+#[test]
+fn a_delegation_names_only_devices_the_person_holds_and_reads_back() {
+    let (mut c, _root, laptop, desk) = person();
+    let stranger = key(9);
+    let mut e = delegate(&c, delegation(DeviceSet::Only(vec![stranger.public().id()]), &["start"], &[], T + 1000));
+    sign(&mut e, &laptop, Some(&laptop));
+    assert_eq!(c.clone().offer(e).unwrap_err().code, "no-device");
+    // Lists are sorted, without repeats, and of the known words.
+    let mut ids = [laptop.public().id(), desk.public().id()];
+    ids.sort();
+    for bad in [
+        delegation(DeviceSet::Only(vec![ids[1].clone(), ids[0].clone()]), &["start"], &[], T),
+        delegation(DeviceSet::All, &["start", "answer"], &[], T),
+        delegation(DeviceSet::All, &[], &[], T),
+        delegation(DeviceSet::All, &["start"], &["read", "read"], T),
+        delegation(DeviceSet::All, &["fly"], &[], T),
+        Delegation { id: "dlg_x".into(), ..delegation(DeviceSet::All, &["start"], &[], T) },
+    ] {
+        let mut e = delegate(&c, bad);
+        sign(&mut e, &laptop, Some(&laptop));
+        assert!(c.clone().offer(e).is_err());
+    }
+    let d = delegation(DeviceSet::Only(ids.to_vec()), &["answer", "start"], &["command", "read"], T + 1000);
+    let mut e = delegate(&c, d.clone());
+    sign(&mut e, &laptop, Some(&laptop));
+    c.offer(e).unwrap();
+    // A device that's revoked drops out of what it names.
+    let mut r = revoke(&c, Revocation::Device(desk.public().id()));
+    sign(&mut r, &laptop, Some(&laptop));
+    c.offer(r).unwrap();
+    assert_eq!(c.person().unwrap().delegations_of(&desk.public().id()).count(), 0);
+    assert_eq!(c.person().unwrap().delegations_of(&laptop.public().id()).count(), 1);
+    // The whole chain reads back the same.
+    let back = PersonChain::from_json(&c.to_json()).unwrap();
+    assert_eq!(back.person(), c.person());
+    assert_eq!(back.head(), c.head());
+}

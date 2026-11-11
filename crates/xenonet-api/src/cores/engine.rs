@@ -108,6 +108,18 @@ pub trait Engine: Send + Sync {
     async fn answer(&self, _id: &str, _decision: &str) -> R<Value> {
         pending(ENGINE)
     }
+    /// This machine's actor's Allow or Deny, by the token it called with:
+    /// { host } as `answer` gives it.
+    async fn answer_as(&self, _token: &str, _id: &str, _decision: &str) -> R<Value> {
+        pending(ENGINE)
+    }
+    /// What this machine's actor `slug` may Allow of the prompts it
+    /// answers (`{ sessions, kinds, until }`), or none (null). Widening
+    /// asks for the person there, so `at_window` says it came from the
+    /// window.
+    async fn actor_allows(&self, _slug: &str, _scope: Value, _at_window: bool) -> R<Value> {
+        pending(ENGINE)
+    }
     /// Another machine's ask, once the answer's frame is on its way: taken
     /// off this console.
     async fn answer_sent(&self, _id: &str, _decision: &str) -> R<()> {

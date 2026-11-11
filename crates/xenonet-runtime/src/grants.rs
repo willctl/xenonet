@@ -112,3 +112,48 @@ impl Grants for GrantsDriver {
         }
     }
 }
+
+/// Whether `a` lets an actor Allow nothing more than `b`.
+fn within(a: &xenonet_authz::AllowScope, b: &xenonet_authz::AllowScope) -> bool {
+    let sessions = match (&a.sessions, &b.sessions) {
+        (_, xenonet_authz::Set::All) => true,
+        (xenonet_authz::Set::All, _) => false,
+        (xenonet_authz::Set::Only(x), xenonet_authz::Set::Only(y)) => x.iter().all(|s| y.contains(s)),
+    };
+    sessions && a.kinds.iter().all(|k| b.kinds.contains(k)) && a.until <= b.until
+}
+
+/// What this machine's actor `slug` may Allow of the prompts it answers:
+/// `scope` (`{ sessions: "all" | [session ids], kinds: [read, edit,
+/// command, web, tool], until }`), or none, when its right to answer is a
+/// Deny's alone. Kept in its grant's scopes row. Issuing or widening it is
+/// widening the grant, so it takes the person's presence for the grant's
+/// rights and this scope, from the window; narrowing or ending it doesn't.
+pub fn set_allows(w: &Runtime, at_window: bool, slug: &str, scope: Option<&Value>, reason: &str) -> Result<(), String> {
+    let row = w.store.with(|s| s.actor_row(slug)).map_err(|e| e.to_string())?.ok_or_else(|| format!("XenoNet has no actor {slug}"))?;
+    let token = row.text("token_id").ok_or_else(|| format!("actor:{slug} has no token to scope: give it one first"))?.to_string();
+    let words: Vec<String> = row.text("token_rights").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
+    let rights = xenonet_actors::tokens::rights(&words);
+    if !rights.contains(&Action::Answer) {
+        return Err(format!("actor:{slug} has no right to answer prompts: allow it the answer-prompts capability first"));
+    }
+    let new = match scope {
+        None => None,
+        Some(v) => Some(crate::ground::allow_scope_of(v).ok_or("an allow scope is { sessions: \"all\" or [session ids], kinds: [read, edit, command, web, tool], until }")?),
+    };
+    let had = w
+        .store
+        .with(|s| s.scope(&token))
+        .ok()
+        .flatten()
+        .and_then(|r| r.text("allows").and_then(|t| serde_json::from_str::<Value>(t).ok()))
+        .and_then(|v| crate::ground::allow_scope_of(&v));
+    let widens = new.as_ref().is_some_and(|n| had.as_ref().is_none_or(|h| !within(n, h)));
+    if widens {
+        let scopes = serde_json::json!({ "allows": scope });
+        crate::ground::present(w, at_window, slug, rights, scopes_hash(&scopes), reason)?;
+    }
+    let now = xenonet_text::time::now_ms();
+    let allows = scope.map_or(Value::Null, |v| Value::String(v.to_string()));
+    w.store.with(|s| s.put_scope(&serde_json::json!({ "token": token, "actor": format!("actor:{slug}"), "allows": allows, "at": now }))).map_err(|e| e.to_string())
+}

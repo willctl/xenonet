@@ -2085,22 +2085,25 @@ impl Node {
     /// by an admin, or by the machine itself; a widening (start to network
     /// or delegate, wake to network) takes the founder, or waits for a
     /// second admin, each with the person's presence, so it's done from
-    /// the window. Delegate brings the person's standing grant: starts and
-    /// answers under the delegation's limits, for process-checked agents,
-    /// for a year unless it's narrowed first.
+    /// the window. Delegate lets the machine take delegated work; what that
+    /// work may do is a delegation of the person's, in their own chain, that
+    /// names the machine's device. Set to delegate from the window with no
+    /// delegation naming that device, the person's standard one is issued
+    /// too (every device, starts and answers within the delegation judge's
+    /// limits, for a year), signed by this machine's device with presence.
     pub async fn set_reach(&self, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, key) = self.me()?;
         let start = start.map(|s| crate::roster::Start::parse(s).ok_or_else(|| NetError::bad("start is off, you, network or delegate"))).transpose()?;
         let wake = wake.map(|w| crate::roster::Wake::parse(w).ok_or_else(|| NetError::bad("wake is consent or network"))).transpose()?;
-        let (target, had) = {
+        let (target, had, device) = {
             let r = n.roster();
             let v = r.view_ref().ok_or_else(not_in)?;
             let m = v.member(host).ok_or_else(|| NetError::new(404, "no-host", format!("{host} isn't in the network")))?;
             if host != net.host && !v.is_window(&net.host) {
                 return Err(NetError::new(403, "not-window", "another machine's settings are changed from a window host"));
             }
-            (r.host_ref(host).ok_or_else(not_in)?, m.settings.clone())
+            (r.host_ref(host).ok_or_else(not_in)?, m.settings.clone(), m.device.clone())
         };
         let now = n.gateway_now() as i64;
         let mut to = had.clone();
@@ -2110,13 +2113,11 @@ impl Node {
         if let Some(w) = wake {
             to.wake = w;
         }
-        to.grant = match (to.start, &had.grant) {
-            (crate::roster::Start::Delegate, Some(g)) if start.is_none() || had.start == crate::roster::Start::Delegate => Some(g.clone()),
-            (crate::roster::Start::Delegate, _) => Some(crate::roster::Grant::standard(now + 365 * 24 * 3600 * 1000)),
-            _ => None,
-        };
         if to == had {
             return Ok(self.state());
+        }
+        if to.start == crate::roster::Start::Delegate && had.start != crate::roster::Start::Delegate {
+            self.delegation_for(host, device.as_deref(), at_window, now)?;
         }
         let mut e = n.draft(Op::Settings, target, None);
         e.settings = Some(to);
@@ -2126,6 +2127,22 @@ impl Node {
         };
         e.sign_with(&net.host, &key, presence);
         self.decide_entry(e, "this machine asked to widen what the network may do there; the founder or another window host approves it").await
+    }
+
+    /// A delegation of the person's that names `host`'s device for starts
+    /// and answers: the one there is, or the standard one, issued now.
+    fn delegation_for(&self, host: &str, device: Option<&str>, at_window: bool, now: i64) -> R<()> {
+        let Some(device) = device else {
+            return Err(NetError::new(409, "no-device", format!("{host} has no device of yours, so no delegation can name it, and it takes no delegated work")));
+        };
+        let id = &self.shared.identity;
+        let named = id.chain().person().is_some_and(|p| p.delegations_of(device).any(|d| d.until > now && d.covers("start") && d.covers("answer")));
+        if named {
+            return Ok(());
+        }
+        let dlg = format!("dlg_{}", xenonet_id::codec::hex(&xenonet_id::codec::random::<8>()?));
+        id.delegate(at_window, xenonet_log::person::Delegation::standard(dlg, now + 365 * 24 * 3600 * 1000), now)?;
+        Ok(())
     }
 
     /// An entry this machine signed: to the gateway, or, signed by too few,

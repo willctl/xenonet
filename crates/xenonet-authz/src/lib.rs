@@ -29,13 +29,13 @@ mod token;
 mod vocab;
 
 pub use decide::{decide, Authority, Authorized, Decision, Reason, HOLD_AFTER_MS};
-pub use ground::{Consent, Device, DeviceKind, Ground, Role, Settings, StandingGrant, StartSetting, WakeSetting};
+pub use ground::{AllowScope, Asked, Consent, Device, DeviceKind, Ground, Role, Set, Settings, StandingGrant, StartSetting, WakeSetting};
 pub use info::Information;
 pub use proof::{PersonSigned, VerifiedPresence};
 pub use token::{ActorGrant, Bearer, Narrowing, RootCertificate, Token, TokenRoot, ACTOR_PREFIX, CURSOR_MS, GATEWAY_PREFIX};
 pub use vocab::{
-    act_hash, Act, Action, ActorSlug, AgentId, AnswerDecision, AppId, AskId, Attestation, DeviceId, Door, Folder, MachineId, NetworkId, PersonId, Principal, ReadScope, Request,
-    Resource, Revocation, ServiceId, SessionId, StartMode,
+    act_hash, Act, Action, ActorSlug, AgentId, AnswerDecision, AppId, AskId, Attestation, DeviceId, Door, Folder, MachineId, NetworkId, PersonId, Principal, PromptKind, ReadScope,
+    Request, Resource, Revocation, ServiceId, SessionId, StartMode,
 };
 
 use std::fmt;

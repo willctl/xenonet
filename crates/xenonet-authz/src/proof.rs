@@ -1,5 +1,6 @@
 //! What proves the person: their device's signature over one act, and for
-//! the acts that need them there, a presence block for the same act. Both
+//! the acts that need them there, a presence block for the same act, which
+//! stands for the signature too (one prompt, not two). Both
 //! are checked here against the device key the receiver's own copy of the
 //! person's chain gives, and each keeps the hash of the act it was checked
 //! for, so a decision can tell that it's this request's. They can't be
@@ -29,6 +30,21 @@ impl PersonSigned {
             return Err(AuthzError::new("person", format!("that isn't {device}'s signature over this act")));
         }
         Ok(PersonSigned { person: person.clone(), device: device.clone(), act: hash })
+    }
+
+    /// The person, from a presence block alone, for an act that takes one:
+    /// the block is the device's signature over the act's hash (and what it
+    /// approves, a nonce and the time), so it binds the device to this one
+    /// act as the act signature does, and the person is asked once, not
+    /// twice. Checked here for what it signs; `VerifiedPresence::check`
+    /// takes it once, within a minute, where the act needs the person there.
+    pub fn from_presence(ground: &dyn Ground, person: &PersonId, block: &PresenceBlock, resource: &Resource, act: &Act) -> R<PersonSigned> {
+        let what = act.presence_what().ok_or_else(|| AuthzError::new("person", format!("a {} is signed by the device, not proven by a presence", act.action().as_str())))?;
+        let device = DeviceId::new(&block.device)?;
+        let key = ground.device(person, &device).ok_or_else(|| AuthzError::new("person", format!("{device} isn't one of {person}'s devices, or it was revoked")))?.key;
+        let hash = act_hash(resource, act);
+        block.signed_for(&key, what, &hash).map_err(|e| AuthzError::new("person", e.message))?;
+        Ok(PersonSigned { person: person.clone(), device, act: hash })
     }
 
     /// The device's side: its signature over the act done to `resource`.

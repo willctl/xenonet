@@ -119,6 +119,24 @@ const NEVER: [&str; 36] = [
     "reg delete",
 ];
 
+/// What kind of prompt a tool call is, by its word: `read`, `edit`,
+/// `command`, `web` or `tool` (xenonet-authz's prompt kinds). What an
+/// actor's allow scope or a delegation names; the judge below is the
+/// delegation's limits within it.
+pub fn prompt_kind(tool: &str) -> &'static str {
+    if READING.contains(&tool) {
+        "read"
+    } else if EDITING.contains(&tool) {
+        "edit"
+    } else if matches!(tool, "Bash" | "PowerShell") {
+        "command"
+    } else if matches!(tool, "WebFetch" | "WebSearch") {
+        "web"
+    } else {
+        "tool"
+    }
+}
+
 /// Whether a delegation started in `folder` (a path on this machine) covers
 /// the tool call `tool` with `input`, as Claude Code's permission prompt
 /// tool receives it. `home` is where ~ is; `windows` says how paths read.
@@ -380,6 +398,12 @@ mod tests {
         for t in ["mcp__xenonet__start_session", "mcp__xenonet__permission", "mcp__xenonet__ask_gateway_token", "mcp__other__send", "WebFetch", "Task", "SomethingNew"] {
             assert!(asks(judge_unix(t, json!({}))), "{t}");
         }
+    }
+
+    #[test]
+    fn a_tool_call_is_one_kind_of_prompt() {
+        let kinds: Vec<&str> = ["Read", "Grep", "Edit", "Write", "Bash", "PowerShell", "WebFetch", "mcp__xenonet__send", "Task"].iter().map(|t| prompt_kind(t)).collect();
+        assert_eq!(kinds, ["read", "read", "edit", "edit", "command", "command", "web", "tool", "tool"]);
     }
 
     #[test]

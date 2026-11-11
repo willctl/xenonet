@@ -64,7 +64,7 @@ fn show_status(st: &Value) {
     print(format!("  {}  start: {}, wake: {}", c::dim("sessions"), t(st, "start"), t(st, "wake")));
     if let Some(d) = st.get("delegated").filter(|d| d.is_object()) {
         print(format!(
-            "  {}  delegated by {} on {}: what its sessions and actors start here runs on your standing delegation",
+            "  {}  delegated by {} on {}: what its sessions and actors start here runs under your delegation",
             c::dim("        "),
             t(d, "by"),
             xenonet_text::time::iso(num(d, "at")).chars().take(10).collect::<String>()

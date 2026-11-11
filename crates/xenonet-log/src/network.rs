@@ -122,8 +122,8 @@ pub enum Start {
     You,
     /// The person, and the network's agents and actors.
     Network,
-    /// As network, and what they start runs under the person's standing
-    /// grant.
+    /// As network, and what they start may run under a delegation of the
+    /// person's that names this machine's device.
     Delegate,
 }
 
@@ -179,94 +179,30 @@ impl Wake {
     }
 }
 
-/// The weakest check of an agent a standing grant covers, by its word:
-/// never an unchecked one.
-pub const REQUIRES: [&str; 2] = ["process-checked", "harness-signed"];
-/// What a standing grant allows, by its rule set's name: today's one is
-/// the delegation judge's (routine work inside the folder the run started
-/// in; `xenonet_engine::delivery::delegation`).
-pub const LIMITS: [&str; 1] = ["routine-in-folder"];
-
-/// The person's standing grant for a machine set to delegate: what it
-/// covers and until when.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Grant {
-    /// Runs may be started under it.
-    pub starts: bool,
-    /// It answers those runs' permission prompts, within `limits`.
-    pub answers: bool,
-    /// One of `REQUIRES`.
-    pub requires: String,
-    /// One of `LIMITS`.
-    pub limits: String,
-    /// Milliseconds since 1970 when it ends.
-    pub until: i64,
-}
-
-impl Grant {
-    /// Today's delegation: starts and answers, for process-checked agents,
-    /// within the judge's limits, until `until`.
-    pub fn standard(until: i64) -> Grant {
-        Grant { starts: true, answers: true, requires: REQUIRES[0].into(), limits: LIMITS[0].into(), until }
-    }
-
-    fn to_json(&self) -> Value {
-        json!({ "starts": self.starts, "answers": self.answers, "requires": self.requires, "limits": self.limits, "until": self.until })
-    }
-
-    fn parse(v: &Value) -> Option<Grant> {
-        let text = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
-        Some(Grant {
-            starts: v.get("starts")?.as_bool()?,
-            answers: v.get("answers")?.as_bool()?,
-            requires: text("requires").filter(|r| REQUIRES.contains(&r.as_str()))?,
-            limits: text("limits").filter(|l| LIMITS.contains(&l.as_str()))?,
-            until: v.get("until")?.as_i64()?,
-        })
-    }
-
-    fn ok(&self) -> bool {
-        REQUIRES.contains(&self.requires.as_str()) && LIMITS.contains(&self.limits.as_str())
-    }
-}
-
-/// A machine's settings: who may start runs there and wake its sessions,
-/// and the standing grant when it's set to delegate.
+/// A machine's settings: who may start runs there and wake its sessions.
+/// What a delegated run may do is the person's delegation, in their own
+/// chain (`person::Delegation`), not a setting of the machine's.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Settings {
     pub start: Start,
     pub wake: Wake,
-    /// Present exactly when `start` is delegate.
-    pub grant: Option<Grant>,
 }
 
 impl Settings {
     pub fn to_json(&self) -> Value {
-        json!({ "start": self.start.as_str(), "wake": self.wake.as_str(), "grant": self.grant.as_ref().map_or(Value::Null, Grant::to_json) })
+        json!({ "start": self.start.as_str(), "wake": self.wake.as_str() })
     }
 
     pub fn parse(v: &Value) -> Option<Settings> {
-        let start = Start::parse(v.get("start")?.as_str()?)?;
-        let wake = Wake::parse(v.get("wake")?.as_str()?)?;
-        let grant = match v.get("grant") {
-            None | Some(Value::Null) => None,
-            Some(g) => Some(Grant::parse(g)?),
-        };
-        let s = Settings { start, wake, grant };
-        s.ok().then_some(s)
-    }
-
-    fn ok(&self) -> bool {
-        (self.start == Start::Delegate) == self.grant.is_some() && self.grant.as_ref().is_none_or(Grant::ok)
+        Some(Settings { start: Start::parse(v.get("start")?.as_str()?)?, wake: Wake::parse(v.get("wake")?.as_str()?)? })
     }
 
     /// Whether going from `self` to `to` lets the network do more: start
-    /// to network or delegate, wake to network, or a new grant.
+    /// to network or delegate, wake to network.
     pub fn widens_to(&self, to: &Settings) -> bool {
         let start = to.start.rank() >= 2 && to.start.rank() > self.start.rank();
         let wake = to.wake == Wake::Network && self.wake != Wake::Network;
-        let grant = to.grant.is_some() && to.grant != self.grant;
-        start || wake || grant
+        start || wake
     }
 }
 
@@ -573,7 +509,7 @@ impl Policy for NetworkPolicy {
         if b.owner.as_deref().is_some_and(|o| !is_person_id(o)) || (b.owner.is_some() && b.op != Op::Found) {
             return Err(bad("owner"));
         }
-        if b.settings.is_some() != (b.op == Op::Settings) || b.settings.as_ref().is_some_and(|s| !s.ok()) {
+        if b.settings.is_some() != (b.op == Op::Settings) {
             return Err(bad("settings"));
         }
         if b.person_head.as_deref().is_some_and(|p| p.is_empty() || !is_b64(p)) {

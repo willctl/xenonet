@@ -28,7 +28,7 @@
 //!   message        reach     reach     reach     reach
 //!   wake           wake      wake      wake      reach
 //!   start          -         start     start     start
-//!   answer         grant     -         -         presence
+//!   answer         answer    -         answer    answer
 //!   claim          reach     claim     reach     reach
 //!   handoff        reach     reach     reach     reach
 //!   read           read      read      read      reach
@@ -46,8 +46,9 @@
 //!   start     start off refuses everyone; you lets only the person;
 //!             network and delegate let agents and actors too, but never
 //!             an unchecked agent; a delegated run needs start delegate
-//!             (the person needs none) and the person's standing grant for
-//!             starts, with the agent's attestation at least the grant's
+//!             (the person needs none) and a delegation of the person's
+//!             for starts that names this machine's device and the device
+//!             the start came from
 //!   claim     reach, but an unchecked agent claims only on its own machine
 //!   read      the map: reach; transcripts and search: here, an agent
 //!             process-checked at least; from another machine, an admin
@@ -56,19 +57,27 @@
 //!             device that signed it; a weaker device is allowed and the
 //!             decision says so. Register-actor is issuing an actor's
 //!             grant or widening it; narrowing and revoking need no act
-//!   grant     this machine itself, under the person's standing grant for
-//!             answers, for a question whose asker is process-checked at
-//!             least and at least what the grant requires
+//!   answer    a Deny can only narrow, so it needs no presence: the person;
+//!             this machine for its own window; a window host (an admin)
+//!             relaying its window's; an actor whose token has the right.
+//!             An Allow widens, and never for a run whose agent is
+//!             unchecked: the person, with a presence block for it; an
+//!             actor, inside the allow scope its grant's row holds here
+//!             (sessions, prompt kinds, until); this machine itself, for a
+//!             run started under a delegation of the person's that answers
+//!             that kind of prompt and names this machine's device and the
+//!             device the run was started from
 //! ```
 //!
 //! 5. **Hold**: start, answer, admit, widen and publish for another machine
 //!    (a principal not of this machine, or the person over the network)
 //!    hold instead of allowing when governance was last synced more than
 //!    ten minutes ago, or never. This machine acting on its own is exempt,
-//!    so a laptop on a plane still answers its own prompts.
+//!    so a laptop on a plane still answers its own prompts, and so is a
+//!    Deny, which only narrows.
 
 use crate::proof::VerifiedPresence;
-use crate::vocab::{Act, Action, Attestation, DeviceId, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
+use crate::vocab::{Act, Action, AnswerDecision, Attestation, DeviceId, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
 use crate::{DeviceKind, Door, Ground, Role, StandingGrant, StartSetting, Token, WakeSetting};
 use std::fmt;
 
@@ -113,8 +122,10 @@ pub enum Authority {
     Person { device: DeviceId },
     /// The person was there, at a device of this kind.
     Presence { device: DeviceId, kind: DeviceKind },
-    /// The person's standing grant for this machine.
+    /// A delegation of the person's.
     StandingGrant,
+    /// An actor's allow scope, by its token's first revocation id.
+    AllowScope { revocation_id: Vec<u8> },
 }
 
 /// An allowed request, as only [`decide`] makes one: who, what, to what,
@@ -196,10 +207,10 @@ enum Rule {
     Claim,
     Read,
     Presence,
-    Grant,
+    Answer,
 }
 
-use Rule::{Claim, Grant, No, Presence, Reach, Read, Start, Wake};
+use Rule::{Answer, Claim, No, Presence, Reach, Read, Start, Wake};
 
 /// The rule table (the module's doc draws it). Columns: machine, agent,
 /// actor, person.
@@ -209,7 +220,7 @@ const TABLE: [(Action, [Rule; 4]); 13] = [
     (Action::Message,       [Reach,    Reach,    Reach,    Reach]),
     (Action::Wake,          [Wake,     Wake,     Wake,     Reach]),
     (Action::Start,         [No,       Start,    Start,    Start]),
-    (Action::Answer,        [Grant,    No,       No,       Presence]),
+    (Action::Answer,        [Answer,   No,       Answer,   Answer]),
     (Action::Claim,         [Reach,    Claim,    Reach,    Reach]),
     (Action::Handoff,       [Reach,    Reach,    Reach,    Reach]),
     (Action::Read,          [Read,     Read,     Read,     Reach]),
@@ -257,7 +268,9 @@ pub fn decide(token: Option<&Token>, request: &Request, ground: &dyn Ground, pre
     match judged {
         Err(reason) => Decision::Refuse(reason),
         Ok((arrival, authority, note)) => {
-            if HOLDS.contains(&request.action()) && !arrival.own {
+            // A Deny only narrows, so it never waits on governance.
+            let deny = matches!(request.act(), Act::Answer { decision: AnswerDecision::Deny, .. });
+            if HOLDS.contains(&request.action()) && !arrival.own && !deny {
                 let stale = ground.governance_synced_at().is_none_or(|t| request.at() - t > HOLD_AFTER_MS);
                 if stale {
                     return Decision::Hold(Reason::new(
@@ -304,7 +317,11 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
         (Act::Start { app, folder, .. }, Resource::Run { app: a, folder: f, .. }) if app != a || folder != f => {
             Err(Reason::new("resource", "the start names another run than its resource"))
         }
-        (Act::Answer { ask, .. }, _) if ground.asker(ask).is_none() => Err(Reason::new("ask", format!("no question {ask} waits here"))),
+        (Act::Answer { ask, .. }, resource) => match ground.ask(ask) {
+            None => Err(Reason::new("ask", format!("no question {ask} waits here"))),
+            Some(a) if matches!(resource, Resource::Session(s) if s != &a.session) => Err(Reason::new("ask", format!("{ask} wasn't asked by that session"))),
+            Some(_) => Ok(()),
+        },
         _ => Ok(()),
     }
 }
@@ -394,8 +411,27 @@ fn token_holds(token: &Token, request: &Request, ground: &dyn Ground) -> Step<Au
     Ok(Authority::Token { revocation_id: ids.into_iter().next().unwrap_or_default() })
 }
 
-fn grant_now(ground: &dyn Ground, request: &Request) -> Option<StandingGrant> {
-    ground.standing_grant(ground.own_machine()).filter(|g| g.until >= request.at())
+// A delegation of the person's, unended at the request's time, that names
+// this machine's device and `from`'s (the device the work was started on)
+// and passes `covers`.
+fn delegation(ground: &dyn Ground, request: &Request, from: Option<&DeviceId>, covers: impl Fn(&StandingGrant) -> bool) -> Option<StandingGrant> {
+    let person = ground.own_person()?;
+    let here = ground.device_of(ground.own_machine())?;
+    let from = from?;
+    let held = |d: &DeviceId| ground.device(&person, d).is_some();
+    if !held(&here) || !held(from) {
+        return None;
+    }
+    ground.delegations().into_iter().find(|g| g.until >= request.at() && g.devices.has(&here) && g.devices.has(from) && covers(g))
+}
+
+// The device a principal's work comes from: the person's signing device,
+// or the device of the machine an agent or actor is on.
+fn origin(ground: &dyn Ground, principal: &Principal) -> Option<DeviceId> {
+    match principal {
+        Principal::Person(signed) => Some(signed.device().clone()),
+        _ => principal.machine().and_then(|m| ground.device_of(m)),
+    }
 }
 
 // Step 4: the request's cell in the rule table.
@@ -432,9 +468,12 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
                 Principal::Agent { attestation, .. } => Some(*attestation),
                 _ => None,
             };
+            let delegated = || delegation(ground, request, origin(ground, principal).as_ref(), |g| g.starts).is_some();
+            let no_grant =
+                || Reason::new("grant", "a delegated run needs a delegation of the person's for starts that names this machine's device and the one it was started from");
             if matches!(principal, Principal::Person(_)) {
-                if *mode == StartMode::Delegated && !grant_now(ground, request).is_some_and(|g| g.starts) {
-                    return Err(Reason::new("grant", "a delegated run needs the person's standing grant for starts on this machine"));
+                if *mode == StartMode::Delegated && !delegated() {
+                    return Err(no_grant());
                 }
                 return Ok((authority, None));
             }
@@ -448,11 +487,8 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
                 if setting != StartSetting::Delegate {
                     return Err(Reason::new("settings", "a delegated run needs this machine's start setting to be delegate"));
                 }
-                let Some(grant) = grant_now(ground, request).filter(|g| g.starts) else {
-                    return Err(Reason::new("grant", "a delegated run needs the person's standing grant for starts on this machine"));
-                };
-                if attestation.is_some_and(|a| a < grant.requires) {
-                    return Err(Reason::new("attestation", format!("the person's standing grant covers agents {} at least", grant.requires.as_str())));
+                if !delegated() {
+                    return Err(no_grant());
                 }
             }
             Ok((authority, None))
@@ -486,34 +522,79 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
             }
             Ok((authority, None))
         }
-        Presence => {
-            let Principal::Person(signed) = principal else {
-                return Err(Reason::new("presence", "only the person is proven present"));
-            };
-            let p = presence.ok_or_else(|| Reason::new("presence", format!("a {action} needs the person there: a presence block for it")))?;
-            if p.act() != &request.act_hash() || p.person() != signed.person() || p.device() != signed.device() {
-                return Err(Reason::new("presence", "that presence is for another act or another device"));
+        Presence => present(request, ground, presence),
+        Answer => answer(request, ground, presence, arrival, authority),
+    }
+}
+
+// The person, there for this act: a presence block for it from the device
+// that signed it, from a device they still hold.
+fn present(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresence>) -> Step<(Authority, Option<&'static str>)> {
+    let Principal::Person(signed) = request.principal() else {
+        return Err(Reason::new("presence", "only the person is proven present"));
+    };
+    let action = request.action().as_str();
+    let p = presence.ok_or_else(|| Reason::new("presence", format!("a {action} needs the person there: a presence block for it")))?;
+    if p.act() != &request.act_hash() || p.person() != signed.person() || p.device() != signed.device() {
+        return Err(Reason::new("presence", "that presence is for another act or another device"));
+    }
+    let device = ground.device(signed.person(), signed.device()).ok_or_else(|| Reason::new("presence", "that device was revoked"))?;
+    let note = (device.kind == DeviceKind::Weaker).then_some("the person's device proves presence with a passphrase, polkit or a PIN, which is weaker than biometric");
+    Ok((Authority::Presence { device: signed.device().clone(), kind: device.kind }, note))
+}
+
+// An answer: a Deny from whoever may relay one, an Allow only with the
+// person there or under an allow scope or a delegation (the module's doc
+// says which).
+fn answer(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresence>, arrival: &Arrival, authority: Authority) -> Step<(Authority, Option<&'static str>)> {
+    let Act::Answer { ask, decision } = request.act() else {
+        return Err(Reason::new("act", "an answer's act is an answer"));
+    };
+    // Step 1 found it waiting here.
+    let asked = ground.ask(ask).ok_or_else(|| Reason::new("ask", format!("no question {ask} waits here")))?;
+    let principal = request.principal();
+    if *decision == AnswerDecision::Deny {
+        return match principal {
+            Principal::Machine { .. } if !arrival.own && arrival.role.is_none_or(|r| r < Role::Admin) => {
+                Err(Reason::new("role", "only a window host relays its window's Deny from another machine"))
             }
-            let device = ground.device(signed.person(), signed.device()).ok_or_else(|| Reason::new("presence", "that device was revoked"))?;
-            let note = (device.kind == DeviceKind::Weaker).then_some("the person's device proves presence with a passphrase or polkit, which is weaker than biometric");
-            Ok((Authority::Presence { device: signed.device().clone(), kind: device.kind }, note))
+            Principal::Person(signed) => Ok((Authority::Person { device: signed.device().clone() }, None)),
+            _ => Ok((authority, None)),
+        };
+    }
+    if asked.by < Attestation::ProcessChecked {
+        return Err(Reason::new("attestation", format!("nothing allows a prompt from a run whose agent is {}", asked.by.as_str())));
+    }
+    match principal {
+        Principal::Person(_) => present(request, ground, presence),
+        Principal::Actor { .. } => {
+            let Authority::Token { revocation_id } = authority else {
+                return Err(Reason::new("token", "an actor proves itself with its token"));
+            };
+            let scope =
+                ground.allow_scope(&revocation_id).ok_or_else(|| Reason::new("scope", "that actor's grant has no allow scope here: its plain right to answer is a Deny's"))?;
+            if scope.until < request.at() {
+                return Err(Reason::new("scope", "that actor's allow scope ended"));
+            }
+            if !scope.sessions.has(&asked.session) {
+                return Err(Reason::new("scope", format!("that actor's allow scope doesn't cover {}", asked.session)));
+            }
+            if !scope.kinds.contains(&asked.kind) {
+                return Err(Reason::new("scope", format!("that actor's allow scope doesn't cover {} prompts", asked.kind.as_str())));
+            }
+            Ok((Authority::AllowScope { revocation_id }, None))
         }
-        Grant => {
-            let own = ground.own_machine();
-            if !matches!(principal, Principal::Machine { id } if id == own) || !arrival.own {
-                return Err(Reason::new("grant", "only this machine answers under the person's standing grant, for its own runs"));
+        Principal::Machine { id } => {
+            if id != ground.own_machine() || !arrival.own {
+                return Err(Reason::new("grant", "only this machine allows under the person's delegation, for its own runs"));
             }
-            let Act::Answer { ask, .. } = request.act() else {
-                return Err(Reason::new("act", "an answer's act is an answer"));
-            };
-            let Some(grant) = grant_now(ground, request).filter(|g| g.answers) else {
-                return Err(Reason::new("grant", "no standing grant of the person's answers prompts on this machine"));
-            };
-            let asker = ground.asker(ask).unwrap_or(Attestation::Unchecked);
-            if asker < Attestation::ProcessChecked.max(grant.requires) {
-                return Err(Reason::new("attestation", format!("the standing grant doesn't answer for a run whose agent is {}", asker.as_str())));
+            let from = asked.delegated_by.as_ref().ok_or_else(|| Reason::new("grant", "that run wasn't started under the person's delegation, so its prompts are the person's"))?;
+            let covered = delegation(ground, request, ground.device_of(from).as_ref(), |g| g.answers.contains(&asked.kind)).is_some();
+            if !covered {
+                return Err(Reason::new("grant", format!("no delegation of the person's answers {} prompts for a run started from {from} on this machine", asked.kind.as_str())));
             }
             Ok((Authority::StandingGrant, None))
         }
+        Principal::Agent { .. } => Err(Reason::new("principal", "an agent doesn't answer")),
     }
 }

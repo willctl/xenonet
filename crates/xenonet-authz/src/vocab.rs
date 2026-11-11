@@ -268,6 +268,41 @@ pub enum AnswerDecision {
     Deny,
 }
 
+/// What a permission prompt asks to do, as the machine whose run asked it
+/// sorted the tool call: what an actor's allow scope or the person's
+/// delegation names when it lets an Allow through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PromptKind {
+    /// Reading or searching files.
+    Read,
+    /// Creating or changing files.
+    Edit,
+    /// Running a command.
+    Command,
+    /// Reaching the web.
+    Web,
+    /// Any other tool.
+    Tool,
+}
+
+impl PromptKind {
+    pub const ALL: [PromptKind; 5] = [PromptKind::Read, PromptKind::Edit, PromptKind::Command, PromptKind::Web, PromptKind::Tool];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PromptKind::Read => "read",
+            PromptKind::Edit => "edit",
+            PromptKind::Command => "command",
+            PromptKind::Web => "web",
+            PromptKind::Tool => "tool",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<PromptKind> {
+        PromptKind::ALL.into_iter().find(|k| k.as_str() == s)
+    }
+}
+
 /// What a read reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReadScope {
@@ -370,8 +405,9 @@ impl Act {
         }
     }
 
-    /// What a presence block for this act approves, for the acts that need
-    /// the person there.
+    /// What a presence block for this act approves, for the acts that may
+    /// take the person there. An answer takes one either way, so the block
+    /// can stand for the device's signature, but only an Allow needs it.
     pub fn presence_what(&self) -> Option<&'static str> {
         match self {
             Act::Answer { .. } => Some("answer"),
@@ -381,6 +417,16 @@ impl Act {
             Act::Revoke { .. } => Some("revoke"),
             Act::RegisterActor { .. } => Some("grant"),
             _ => None,
+        }
+    }
+
+    /// Whether this act widens what anyone may do, so the person must be
+    /// there for it: every act that takes a presence, but a Deny, which
+    /// can only narrow.
+    pub fn needs_presence(&self) -> bool {
+        match self {
+            Act::Answer { decision, .. } => *decision == AnswerDecision::Allow,
+            _ => self.presence_what().is_some(),
         }
     }
 }

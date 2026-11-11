@@ -501,7 +501,7 @@ fn check_prefix(prefix: &str) -> R<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Attestation, Consent, Device, PersonId, Settings, StandingGrant};
+    use crate::{Consent, Device, PersonId, Settings, StandingGrant};
     use xenonet_id::sign::{KeyHome, SeedSigner};
 
     const NOW: i64 = 1_800_000_000_000;
@@ -541,10 +541,16 @@ mod tests {
         fn consent(&self, _: &crate::SessionId) -> Consent {
             Consent::default()
         }
-        fn standing_grant(&self, _: &MachineId) -> Option<StandingGrant> {
+        fn device_of(&self, _: &MachineId) -> Option<crate::DeviceId> {
             None
         }
-        fn asker(&self, _: &crate::AskId) -> Option<Attestation> {
+        fn delegations(&self) -> Vec<StandingGrant> {
+            Vec::new()
+        }
+        fn allow_scope(&self, _: &[u8]) -> Option<crate::AllowScope> {
+            None
+        }
+        fn ask(&self, _: &crate::AskId) -> Option<crate::Asked> {
             None
         }
         fn governance_synced_at(&self) -> Option<i64> {
