@@ -193,7 +193,7 @@ impl Node {
                 return Ok((o.door.clone(), ticket(&o.door)?));
             }
         }
-        let settings = Settings { relays: relays_of(relays), lan: if lan { LanLookup::On } else { LanLookup::Off }, bind: self.shared.opts.join_bind };
+        let settings = Settings { relays: relays_of(relays), lan: if lan { LanLookup::On } else { LanLookup::Off }, bind: self.shared.opts.bind };
         let admission = Arc::new(Admission::new());
         let dial = Arc::new(IrohDial::bind(key, &settings, admission.clone()).await?);
         let door = Arc::new(Door::new(Arc::new(Mesh::new(dial.clone(), admission))));
@@ -255,7 +255,7 @@ impl Node {
             add["device"] = identity::device_json(&d.signer.public(), kind, &n.opts.platform);
         }
         let add = add.to_string();
-        let settings = Settings { relays: relays_of(inv.relay.as_slice()), lan: if lan { LanLookup::On } else { LanLookup::Off }, bind: n.opts.join_bind };
+        let settings = Settings { relays: relays_of(inv.relay.as_slice()), lan: if lan { LanLookup::On } else { LanLookup::Off }, bind: n.opts.bind };
         let admission = Arc::new(Admission::new());
         let dial = Arc::new(IrohDial::bind(&key, &settings, admission.clone()).await?);
         if at.is_some() || inv.relay.is_some() {

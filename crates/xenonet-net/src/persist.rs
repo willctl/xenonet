@@ -85,6 +85,12 @@ pub trait Persist: Send + Sync {
     fn put_feed_writer(&self, network: &str, author: &str, at: WriterAt, kept: Option<&FeedEntry>) -> R<()>;
     /// The kept entries it wrote after `after`, in order, at most `limit`.
     fn feed_out_after(&self, network: &str, after: Pos, limit: usize) -> R<Vec<FeedEntry>>;
+    /// The kept entries of this machine's feed in `network` from `from` on,
+    /// in order, at most `limit`: what answers a Want, and what a peer's
+    /// hello says it hasn't got.
+    fn range(&self, network: &str, from: Pos, limit: usize) -> R<Vec<FeedEntry>> {
+        self.feed_out_after(network, Pos::new(from.inc, from.seq.saturating_sub(1)), limit)
+    }
     /// How far `member` said it holds this machine's feed.
     fn feed_ack(&self, network: &str, member: &str) -> R<Option<Pos>>;
     /// `member` holds it up to `at`; kept only when that's further.

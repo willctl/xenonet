@@ -142,6 +142,11 @@ pub trait Wire: Send + Sync + fmt::Debug {
     /// it with one of `Close`'s codes.
     fn closed(&self) -> Fut<'_, Option<Close>>;
     fn is_closed(&self) -> bool;
+    /// The path the connection takes now: "direct" or "relay", when the
+    /// transport knows.
+    fn path(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// A transport: dials machines by endpoint id and hands over the
@@ -235,6 +240,11 @@ impl Link {
 
     pub fn is_closed(&self) -> bool {
         self.wire.is_closed()
+    }
+
+    /// "direct" or "relay", when the transport says.
+    pub fn path(&self) -> Option<&'static str> {
+        self.wire.path()
     }
 }
 

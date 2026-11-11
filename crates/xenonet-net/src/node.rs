@@ -20,6 +20,11 @@
 //! Nothing here waits on the gateway: `send` puts frames in the outbox and
 //! returns, and the link sends them when it can. The outbox is in memory:
 //! what has to outlive a restart is sent again from the store.
+//!
+//! **link/2** (`node_link.rs`) runs beside the gateway's link when the
+//! options say so: the same entries and presence go both ways, and the copy
+//! that comes second, the other way, is dropped by its entry's id before
+//! anything in it is read.
 
 use crate::codec::{frame_id, is_b64};
 use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, KEY};
@@ -30,9 +35,10 @@ use crate::gwstore::{Caps, GwStore, TicketRow};
 use crate::identity::{self, Identity};
 use crate::keys::{HostKey, PublicKeys};
 use crate::link::{self, Transport};
+use crate::link2;
 use crate::persist::{Persist, WriterAt};
 use crate::roster::{Entry, HostRef, NetworkPolicy, Offered, Op, Removal, Roster};
-use crate::sink::{entry_kind, Arrived, LogFn, SinkSlot};
+use crate::sink::{entry_kind, LogFn, SinkSlot};
 use crate::svc::{self, Answer, Services};
 use crate::{request, ticket, NetError, R};
 use serde_json::{json, Value};
@@ -99,9 +105,14 @@ pub struct Options {
     /// Where the network and the person are kept (the store, through the
     /// runtime).
     pub persist: Arc<dyn Persist>,
-    /// Where the endpoint for a join with an invite binds: None for every
-    /// interface (the tests give loopback).
-    pub join_bind: Option<std::net::SocketAddr>,
+    /// Where the network's endpoints bind, join/2's and link/2's: None for
+    /// every interface (the tests give loopback).
+    pub bind: Option<std::net::SocketAddr>,
+    /// Whether link/2 runs beside the gateway's link: the service's own
+    /// node does; a test's, only when it says.
+    pub link: bool,
+    /// Finding members on the LAN by mDNS, as the machine's setting says.
+    pub lan: crate::endpoint::LanLookup,
 }
 
 impl Options {
@@ -119,7 +130,9 @@ impl Options {
             log,
             svc_ms: svc::TIMEOUT_MS,
             vault: None,
-            join_bind: None,
+            bind: None,
+            link: false,
+            lan: crate::endpoint::LanLookup::Unasked,
         }
     }
 }
@@ -255,6 +268,12 @@ pub struct Shared {
     /// This host's own agents as its presence lists them, and whether each
     /// waits on the person, for its row: `peers` has only the others.
     me_agents: Mutex<BTreeMap<String, bool>>,
+    /// link/2, while it runs.
+    link2: RwLock<Option<Arc<link2n::Transport2>>>,
+    /// The entries taken lately and the way each came, so the second of
+    /// the two copies dual sending makes is dropped.
+    taken: Mutex<link2n::Taken>,
+    clocks: Mutex<link2n::Clocks>,
 }
 
 /// How full the outbox is.
@@ -905,6 +924,7 @@ impl Shared {
             Op::Add => self.pending.locked().retain(|p| p.host != e.host.id),
             _ => {}
         }
+        self.members_changed();
         Ok(offered)
     }
 
@@ -1266,7 +1286,7 @@ impl Shared {
         if f.in_relay_batch() && !self.relay_ids.locked().take(&f.id, at, gw_now) {
             return false;
         }
-        let body = match open_frame(&net.id, key, f) {
+        let mut body = match open_frame(&net.id, key, f) {
             Ok(b) => b,
             Err(e) => {
                 self.log("net.frame", &format!("a frame from {} didn't open: {}", f.from, e.message));
@@ -1298,11 +1318,27 @@ impl Shared {
         if kind == Kind::Message {
             return self.message_in(&f.from, window, &body);
         }
-        if kind == Kind::Presence && !self.note_presence(&f.from, &body) {
+        if kind == Kind::Presence && !self.note_presence(&f.from, &mut body) {
             return false;
         }
         self.sink.receive(Incoming { network: net.id.clone(), from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
         false
+    }
+
+    /// A presence from `from` that came on link/2: kept for the hosts'
+    /// list and passed to the engine as one through the gateway is, once
+    /// whichever way it came first.
+    pub(crate) fn presence_in(&self, net: &NetFile, from: &str, mut body: Value, window: bool) {
+        {
+            let mut peers = self.peers.locked();
+            let p = peers.entry(from.to_string()).or_default();
+            p.seen = Some(self.now());
+            p.online = true;
+        }
+        if !self.note_presence(from, &mut body) {
+            return;
+        }
+        self.sink.receive(Incoming { network: net.id.clone(), from: from.to_string(), kind: Kind::Presence, body, at: self.now(), from_window_host: window });
     }
 
     /// `from`'s act at this machine, decided on its own facts: a member of
@@ -1365,12 +1401,8 @@ impl Shared {
                 return false;
             }
         };
-        if v.kind == xenonet_log::feed::Kind::Message && v.body.get("target").and_then(Value::as_str) == Some(PERSON_TARGET) {
-            return self.decide_member(&host) && self.person_in(&host, &v.body);
-        }
         let authority = body.get("authority").cloned().unwrap_or_else(|| json!({}));
-        self.sink.entry(Arrived { host, entry: v, authority, window });
-        false
+        self.take_entry(host, v, authority, window, link2n::Via::Gateway)
     }
 
     /// An entry from `from`, taken only when its author is a member of the
@@ -1491,9 +1523,10 @@ impl Shared {
         };
         let e = self.write_entry(kind, out.body).map_err(|e| e.message)?;
         let body = entry_body(&e, out.authority.as_ref());
-        for to in others {
-            self.queue(net, key, &to, &body)?;
+        for to in &others {
+            self.queue(net, key, to, &body)?;
         }
+        self.link2_entry(net, &e, &others, out.authority.as_ref());
         Ok(())
     }
 
@@ -1603,6 +1636,11 @@ impl Shared {
     /// and the person is kept for this host's row, and when they last
     /// worked here goes by the gateway's clock, as the frame's time does.
     fn own_presence(&self, mut body: Value) -> Value {
+        // Where its endpoint is, for link/2: the gateway carries it sealed
+        // to each member, which finds this machine with it.
+        if let Some(r) = self.address_record() {
+            body["address"] = r;
+        }
         let you = body.get("you").and_then(Value::as_bool).unwrap_or(false);
         let at = body.get("youAt").and_then(Value::as_f64).filter(|t| t.is_finite() && *t > 0.0);
         *self.me_you.locked() = (you, at);
@@ -1614,12 +1652,16 @@ impl Shared {
     }
 
     /// A presence, kept for the hosts' list: false when it's older than one
-    /// already had.
-    fn note_presence(&self, from: &str, body: &Value) -> bool {
+    /// already had, or the same one again (the copy the other way brought).
+    /// The address record in it goes to link/2, not the engine.
+    fn note_presence(&self, from: &str, body: &mut Value) -> bool {
+        if let Some(r) = body.as_object_mut().and_then(|o| o.remove("address")) {
+            self.address_in(from, &r, "presence");
+        }
         let counter = body.get("counter").and_then(Value::as_u64).unwrap_or(0);
         let mut peers = self.peers.locked();
         let p = peers.entry(from.to_string()).or_default();
-        if counter != 0 && counter < p.counter {
+        if counter != 0 && counter <= p.counter {
             return false;
         }
         p.counter = counter;
@@ -1984,12 +2026,18 @@ impl Net for Shared {
         if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "ack": { "inc": inc, "high": high } })) {
             self.log("net.feed", &format!("an ack for {host} wasn't queued: {why}"));
         }
+        if let Some(author) = self.roster().view_ref().and_then(|v| v.member(host).map(|m| m.machine.id())) {
+            self.link2_control(host, link2::Control::Ack { network: net.id.clone(), author, inc, high });
+        }
     }
 
     fn want(&self, network: &str, host: &str, inc: u64, from: u64) {
         let (Some(net), Some(key)) = (self.in_network(network), self.key()) else { return };
         if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "want": { "inc": inc, "from": from } })) {
             self.log("net.feed", &format!("a want for {host} wasn't queued: {why}"));
+        }
+        if let Some(author) = self.roster().view_ref().and_then(|v| v.member(host).map(|m| m.machine.id())) {
+            self.link2_control(host, link2::Control::Want { network: net.id.clone(), author, inc, from });
         }
     }
 
@@ -2055,6 +2103,9 @@ impl Net for Shared {
             let id = frame_id().map_err(|e| e.message)?;
             let d = Draft { network: &net.id, id, kind: out.kind.as_str(), from: &net.host, to: &to, at };
             let f = host_frame(&d, &key, &keys, body, None).map_err(|e| e.message)?;
+            if out.kind == Kind::Presence {
+                self.link2_presence(&net, &to, body);
+            }
             if out.kind.queued() {
                 self.outbox.locked().push(&f, &to, now, &self.opts.outbox);
             } else if self.is_live() {
@@ -2124,6 +2175,9 @@ impl Node {
             signed: Mutex::new(Vec::new()),
             me_you: Mutex::new((false, None)),
             me_agents: Mutex::new(BTreeMap::new()),
+            link2: RwLock::new(None),
+            taken: Mutex::new(link2n::Taken::default()),
+            clocks: Mutex::new(link2n::Clocks::default()),
         });
         // What the person appends here, the network's other machines hear.
         let weak = Arc::downgrade(&shared);
@@ -2182,6 +2236,9 @@ impl Node {
             link::http(address)?
         };
         tasks.extend(link::spawn(n.clone(), transport));
+        if n.opts.link {
+            tasks.push(tokio::spawn(link2n::run(Arc::downgrade(n))));
+        }
         *self.tasks.locked() = tasks;
         Ok(())
     }
@@ -2191,6 +2248,7 @@ impl Node {
         for t in self.tasks.locked().drain(..) {
             t.abort();
         }
+        link2n::stop(&self.shared);
         if let Some(g) = self.shared.gateway.writing().take() {
             g.stop();
         }
@@ -2682,6 +2740,9 @@ impl Node {
                 "shareLoad": true,
                 "start": "you",
                 "wake": "consent",
+                "networks": [],
+                "relays": [],
+                "mailboxes": [],
             });
         };
         let (view, head) = {
@@ -2697,6 +2758,11 @@ impl Node {
         let gw = n.gateway();
         let info = gw.as_ref().map(|g| g.host_info()).unwrap_or_default();
         let now = n.now();
+        // How each member stands on link/2: the path its connection takes,
+        // how its address was found, and its clock against this one's.
+        let t2 = n.link2();
+        let on_link = t2.as_ref().map(|t| t.links.peers()).unwrap_or_default();
+        let found = t2.as_ref().map(|t| t.found.locked().clone()).unwrap_or_default();
         let mut hosts = Vec::new();
         let mut ids: Vec<&String> = view.members.keys().collect();
         ids.sort_by_key(|h| (**h != net.host, (*h).clone()));
@@ -2723,6 +2789,9 @@ impl Node {
                 // null and none for a host whose XenoNet doesn't say.
                 "reach": n.reach_of(id).to_json(),
                 "can": if me { json!(xenonet_model::ops::CAN) } else { json!(p.map(|p| p.can.clone()).unwrap_or_default()) },
+                "path": if me { None } else { on_link.get(&crate::endpoint::peer_id(&m.keys)).and_then(|l| l.path) },
+                "found": if me { None } else { found.get(id).map(|f| f.iter().copied().collect::<Vec<_>>()) },
+                "skewMs": if me { None } else { on_link.get(&crate::endpoint::peer_id(&m.keys)).and_then(|l| l.skew_ms) },
             }));
         }
         // The gateway's host lists every ticket that waits; another window
@@ -2761,7 +2830,7 @@ impl Node {
         let mut out = json!({
             "schema": "network/state/v1",
             "network": { "id": net.id, "name": net.name },
-            "self": { "id": net.host, "keyId": key_id, "window": view.is_window(&net.host), "founder": view.founder == net.host, "gateway": is_gateway },
+            "self": { "id": net.host, "keyId": key_id, "window": view.is_window(&net.host), "founder": view.founder == net.host, "gateway": is_gateway, "hlcAheadMs": n.hlc_ahead_ms(), "link2": t2.is_some() },
             "gateway": {
                 "address": address,
                 "keyId": net.gateway.key_id,
@@ -2783,7 +2852,21 @@ impl Node {
             "wake": reach.wake,
             "delegated": reach.delegated.as_ref().map(|(by, at)| json!({ "by": by, "at": at })),
             "person": person,
+            "relays": view.relays,
+            "mailboxes": view.mailboxes,
         });
+        // Every network this machine is in, each with its own members: one
+        // on the gateway's path (several come with commit 13).
+        out["networks"] = json!([{
+            "id": net.id,
+            "name": net.name,
+            "host": net.host,
+            "hosts": out["hosts"].clone(),
+            "relays": out["relays"].clone(),
+            "mailboxes": out["mailboxes"].clone(),
+            "frozen": out["frozen"].clone(),
+            "sharing": n.sharing(&net.id).to_json(),
+        }]);
         out["invites"] = self.invites.json(now as i64);
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());
@@ -2966,6 +3049,10 @@ impl Drop for Node {
 // join/2: `invite` and `join_invite`.
 #[path = "node_join.rs"]
 mod join2;
+
+// link/2 beside the gateway's link.
+#[path = "node_link.rs"]
+pub mod link2n;
 
 #[cfg(test)]
 mod tests {

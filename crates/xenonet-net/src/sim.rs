@@ -193,6 +193,10 @@ impl Wire for SimWire {
     fn is_closed(&self) -> bool {
         self.state.borrow().is_closed()
     }
+
+    fn path(&self) -> Option<&'static str> {
+        Some("direct")
+    }
 }
 
 /// What one machine's dial shares with its listener.

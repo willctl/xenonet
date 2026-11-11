@@ -369,6 +369,18 @@ impl Wire for IrohWire {
     fn is_closed(&self) -> bool {
         self.conn.close_reason().is_some()
     }
+
+    fn path(&self) -> Option<&'static str> {
+        let paths = self.conn.paths();
+        let selected = paths.iter().find(iroh::endpoint::Path::is_selected)?;
+        if selected.is_relay() {
+            Some("relay")
+        } else if selected.is_ip() {
+            Some("direct")
+        } else {
+            None
+        }
+    }
 }
 
 /// This machine's iroh endpoint, its doors, and what it knows of where

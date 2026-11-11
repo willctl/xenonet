@@ -130,8 +130,11 @@ fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = caps;
-    // join/2's endpoints on loopback alone.
-    o.join_bind = Some("127.0.0.1:0".parse().unwrap());
+    // join/2's endpoints on loopback alone, and link/2's.
+    o.bind = Some("127.0.0.1:0".parse().unwrap());
+    // The link2 tests run link/2 beside the gateway's link; the others the
+    // gateway's alone.
+    o.link = dir.file_name().is_some_and(|f| f.to_string_lossy().starts_with("xenonet-net-it-link2-"));
     o
 }
 
@@ -375,6 +378,71 @@ async fn what_goes_names_its_network_and_presence_shows_only_what_is_shared_into
     b.svc.net().send(Outgoing::new(To::All, Kind::Presence, presence(2))).unwrap();
     until("the second presence", 10, || heard(2).is_some()).await;
     assert_eq!(heard(2).unwrap(), json!([{ "id": "claude:web", "projectKey": "prj_web" }]));
+}
+
+/// What reaches the engine's feeds, counted.
+#[derive(Default)]
+struct CountedFeeds(Mutex<Vec<String>>);
+
+impl xenonet_net::sink::Feeds for CountedFeeds {
+    fn entry(&self, a: xenonet_net::sink::Arrived) {
+        self.0.lock().unwrap().push(a.entry.id());
+    }
+    fn unfreeze(&self, _author: &str, _network: &str) -> Result<usize, String> {
+        Ok(0)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn link2_runs_beside_the_gateway_and_the_second_copy_of_an_entry_is_silent() {
+    let [port] = common::free_ports();
+    let (a, b, c) = network("link2", port, Caps::default(), [0.0; 3]).await;
+    let id = b.state().await["network"]["id"].as_str().unwrap().to_string();
+    // Presence carries each machine's address record, sealed, through the
+    // gateway: that is how laptop and desk find each other's endpoints.
+    for (i, h) in [&a, &b, &c].into_iter().enumerate() {
+        let body = json!({ "schema": "network/presence/v1", "counter": i + 1, "full": true, "agents": [], "removed": [], "you": false, "roster": "" });
+        h.svc.net().send(Outgoing::new(To::All, Kind::Presence, body)).unwrap();
+    }
+    let path = |s: &Value, of: &str| s["hosts"].as_array().unwrap().iter().find(|h| h["id"] == of).map(|h| h["path"].clone());
+    for _ in 0..400 {
+        if path(&b.state().await, "desk") == Some(json!("direct")) && path(&c.state().await, "laptop") == Some(json!("direct")) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let s = c.state().await;
+    let laptop = s["hosts"].as_array().unwrap().iter().find(|h| h["id"] == "laptop").unwrap().clone();
+    assert_eq!(laptop["path"], "direct", "{laptop}");
+    assert!(laptop["found"].as_array().unwrap().contains(&json!("presence")), "{laptop}");
+    assert!(laptop["skewMs"].is_i64(), "{laptop}");
+    assert_eq!(s["self"]["hlcAheadMs"], 0);
+    assert_eq!((s["relays"].clone(), s["mailboxes"].clone()), (json!([]), json!([])));
+    assert_eq!(s["networks"][0]["id"], json!(id));
+    assert_eq!(s["networks"][0]["hosts"], s["hosts"]);
+
+    // A message goes both ways and reaches desk's feeds once: the copy
+    // that came second, the other way, was dropped before anything read
+    // it.
+    let feeds = Arc::new(CountedFeeds::default());
+    c.svc.sinks().set_feeds(feeds.clone());
+    // A connection that two dials crossed on may close under a message:
+    // the gateway's copy still comes, and the next message tries again.
+    let mut sent = 0;
+    while c.svc.node().shared().second_copies() == 0 {
+        assert!(sent < 10, "no second copy came in {sent} messages");
+        b.send("desk", Kind::Message, &format!("both ways {sent}"));
+        sent += 1;
+        until("the message at desk", 20, || feeds.0.lock().unwrap().len() == sent).await;
+        for _ in 0..40 {
+            if c.svc.node().shared().second_copies() > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(feeds.0.lock().unwrap().len(), sent, "each once into the feeds");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

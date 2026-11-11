@@ -83,6 +83,9 @@ impl NetService {
     pub fn options(state_dir: &str, persist: Arc<dyn Persist>, home: &str, version: &str, log: LogFn) -> Options {
         let mut o = Options::new(Path::new(state_dir).join("network"), persist, version, crate::borrowed::platform(), log);
         o.desktop = desktop_installed(home);
+        // link/2 beside the gateway's link (phase 5). mDNS stays off until
+        // the person answers its question at network setup.
+        o.link = true;
         o
     }
 

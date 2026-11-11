@@ -42,6 +42,10 @@
 //!   and a door per protocol.
 //! - `share`: what each network is shown of this machine: the sessions
 //!   in projects shared into it, all of them in the first network.
+//! - `link2`: `xenonet/link/2`, members' feeds, messages and presence
+//!   between machines on one connection per peer: a hello with each
+//!   shared network's heads, Want/Ack, kept, loose and live streams, every
+//!   record checked against the networks the connection carries.
 //! - `join`: joining over `xenonet/join/2`: the invite, the code apart
 //!   from it, proofs both ways, the inviter's tickets, and the joiner's
 //!   check of the chain from its genesis. `ticket`'s gateway proofs stay
@@ -62,6 +66,7 @@ pub mod identity;
 pub mod join;
 pub mod keys;
 pub mod link;
+pub mod link2;
 pub mod node;
 pub mod persist;
 pub mod request;
