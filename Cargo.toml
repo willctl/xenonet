@@ -161,6 +161,10 @@ iroh = { version = "1.4.1", default-features = false, features = ["tls-ring"] }
 # the first network setup. 0.x, so pinned exactly: a minor release may
 # break it.
 iroh-mdns-address-lookup = "=0.6.1"
+# A simulated network for the transport's tests (MIT): hosts, partitions,
+# loss and latency, on one seeded clock. A dev-dependency only, so it never
+# ships.
+turmoil = "0.7.2"
 # base64url for the network's keys, signatures and sealed bodies (in the
 # lock already through reqwest).
 base64 = "0.23"

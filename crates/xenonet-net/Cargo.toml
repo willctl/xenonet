@@ -35,6 +35,8 @@ xenonet-text.workspace = true
 [dev-dependencies]
 # Fake keys for the tests' person and devices: never the machine's own.
 xenonet-keys.workspace = true
+# The transport's simulated network (src/sim.rs).
+turmoil.workspace = true
 
 [lints]
 workspace = true

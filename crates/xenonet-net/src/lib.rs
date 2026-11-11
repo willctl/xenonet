@@ -56,6 +56,8 @@ pub mod persist;
 pub mod request;
 pub mod roots;
 pub mod roster;
+#[cfg(test)]
+pub mod sim;
 pub mod sink;
 pub mod svc;
 pub mod ticket;
