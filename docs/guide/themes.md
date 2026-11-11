@@ -96,7 +96,7 @@ A theme of your own names the theme it `extends`, and needs only the fields it c
 
 ## The fields
 
-`core/themes.js` has XenoNet's own value for every field, and each built-in theme's values.
+`src/shared/themes.js` has XenoNet's own value for every field, and each built-in theme's values.
 
 - `colors` sets colors by role, such as `bg`, `surface`, `text`, `muted`, `dim`, `accent`, `claude`, `codex`, `grok`, `attention`, `danger` and `collision`. `actor` and `human` are for actors.
 - `categories` holds the colors of tool families, and `pages` the colors of Xenolith's page types.
