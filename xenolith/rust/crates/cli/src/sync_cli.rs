@@ -39,10 +39,6 @@ pub fn run(args: &[String]) -> ! {
     match words.first().copied() {
         None | Some("status") => status(json_out),
         Some("grant") => grant(),
-        Some(w @ ("share" | "follow")) => {
-            eprintln!("xenolith sync {w}: gone; join with an invite instead (xenolith invite on the curator, xenolith join here)");
-            std::process::exit(2)
-        }
         _ => usage(),
     }
 }

@@ -370,7 +370,6 @@ your own agents from each other.
 | Endpoint | Who |
 | --- | --- |
 | `/mcp` | a local request without a token, or a token |
-| `/sync/v1` | a token, always, even from this machine (`/sync/v1/pair` takes a pairing code's proof instead) |
 | `/status`, `/ui`, `/api` | local requests only, never a token |
 | `/health` | anyone: name, version, build, pid and uptime, nothing private |
 
@@ -432,9 +431,9 @@ to have a new one made.
 
 ### Tokens
 
-A grant does nothing until its subject holds a token. Tokens are
-`xenolith_` and 64 hex digits; Xenolith keeps only their SHA-256, and shows a
-token once:
+A grant does nothing until its subject holds a token. A token is a Biscuit
+grant under this Xenolith's token root, `xenolith_grant_` and base64url;
+Xenolith keeps only its revocation id and row, and shows a token once:
 
 ```bash
 xenolith token create actor:hermes --label "Hermes on the server" --days 90
@@ -447,7 +446,7 @@ a token may do in a space is the lower of its own scopes and its subject's live
 grants there, so a token never reaches past what you granted, and revoking
 either one takes effect on connections already open.
 
-- **Over HTTP** a token travels as `Authorization: Bearer`, at `/mcp` and `/sync/v1` only. The
+- **Over HTTP** a token travels as `Authorization: Bearer`, at `/mcp` only. The
   service acts as an OAuth 2.1 resource server the way MCP's authorization spec
   describes: its metadata is at `/.well-known/oauth-protected-resource`, a
   missing or bad token gets a 401 with a `WWW-Authenticate` challenge, and a
@@ -505,140 +504,79 @@ xenolith status          # the service's health, and whether the chain holds and
 
 ### Sync between machines
 
-Each space has one curator: the machine whose Xenolith files its notes into
-pages. A space you start is curated where you start it. Another machine can
-**follow** it: it keeps a copy, where its sessions read pages and leave notes
-as usual, and its own curator leaves that space alone. Once a minute (or on
-`xenolith sync`) it pushes the notes waiting there to the curator, as entries,
-and pulls the curator's pages, its removals and the last 7 days of its log
-back, so `context_start` on the copy shows recent activity.
+Each space has one curator: the Xenolith that files its notes into pages. A
+space you start is curated where you start it. Another Xenolith that the
+space's chain shares it with keeps a copy, where its sessions read pages and
+leave notes as usual. Its notes and its edits of the copy go to the curator;
+the curator's pages, removals and the last 7 days of its log come back to every
+member as soon as they change. Sync is `xenolith/sync/2` over QUIC (iroh), in
+the service alone, and starts once the upgrade from 1.x has run.
 
-On the curator, grant the other machine and make it a token:
-
-```bash
-xenolith grant machine:laptop ctx:write:project:atlas
-xenolith token create machine:laptop
-```
-
-On the other machine, name it, add the curator as a peer (the token comes on
-stdin, so it never shows in a process list), and follow the space:
+**Joining, without XenoNet.** On the curator, make an invite for one Xenolith
+(it needs the running service and the [owner key](#the-owner-key)):
 
 ```bash
-xenolith sync name laptop
-xenolith sync peer add studio https://studio.example/xenolith < studio.token
-xenolith sync follow project:atlas studio
-xenolith sync
+xenolith invite project:atlas --level write
 ```
 
-A peer's URL is the base of its Xenolith service: `https://` anywhere, or
-`http://` only to this machine, since a token never crosses a network in the
-clear. The base may carry a path (`https://box.example/xenolith`): the sync
-routes go under it, at `<base>/sync/v1/...`. Xenolith serves them at the root of
-its own port, so whatever forwards an address to it (a reverse proxy, a tunnel)
-must strip its own path prefix before passing a request on, and send it to
-`127.0.0.1:<port>` with that as its Host. The token is kept in
-`peers/<name>.token` in the config folder, readable by you alone from the
-moment it exists: mode 0600, or on Windows a protected ACL for you and SYSTEM.
-`sync.json` and `access.json` are written the same way, also readable by the
-Windows service, which checks tokens and curators with them. One request to a
-peer may take 90 seconds; a peer behind a slow forwarder may need longer:
-`xenolith sync timeout <seconds>` (`timeoutSeconds` in `sync.json`).
-
-**Who the curator is.** Each curated space has a random curator id, made the
-first time a follower asks (`.curator/sync/curator.json` in the space). A
-follower pins it in `sync.json` at its first pull. If the peer's address later
-answers as another curator (two machines curating one space, or the curator set
-up again), the follower refuses to push or pull and says so in `xenolith sync`,
-`xenolith sync status` and `/status`. When the new curator is the right one,
-`xenolith sync follow <space> <peer>` again accepts it.
-
-**What travels.** The curator takes entries at
-`/sync/v1/spaces/<kind>/<name>/entries`: a note needs append, a replaced or
-removed page needs write. Each entry is taken once, however often it is sent,
-and is stamped as the pushing token's subject's (`by: machine:laptop`), so a
-`user` source from the other machine counts as `agent` here. A page replaced on
-the other machine carries the version it was written against. When the
-curator's page has changed since, the push gets **409** and the write becomes a
-**proposal**: a change that waits for your OK even when approvals are
-automatic, listed by `xenolith held --space <space>` and decided there with
-`xenolith held approve|deny <batch>:<index> --space <space>` (or through the
-window's API with `space` and the [owner key](#the-owner-key)). Approving it
-applies it only if the page hasn't changed again.
-
-- **Edits in a copy.** A page changed in the follower's copy since the last
-  pull (by hand, or by a session writing directly) becomes an entry: a replace
-  against the version last pulled. The copy then shows the curator's page again
-  until the curator files the change; the edit stays in `.history/`.
-- **Removals.** A page removed in a copy is sent as a removal against the
-  version last pulled. The curator removes it too when that is still its
-  version (keeping it in `.history/`), and makes it a proposal otherwise; until
-  then the next pull brings the page back. A page removed on the curator, by
-  any means, is listed as removed for 30 days, and each follower removes its
-  copy, keeping it in `.history/`.
-- **Batches.** Entries go 100 at a time, one batch a pass. A backlog over 1,000
-  is pushed batch after batch until it is drained.
-- **Failures.** An entry the curator refuses for good, because the token may not
-  do it (403) or the entry is invalid (400), moves to the copy's
-  `.curator/sync/dead/` with the reason on its first line and is never sent
-  again. `xenolith sync status` and `/status` count them. A push that fails for
-  any other reason leaves its entries to the next pass, and the pull still
-  runs. Only a refused token (401, or 403 for the whole request) stops both. A
-  page that disappears between the list and its fetch is skipped.
-
-Nothing written on either machine is lost: each pushed note moves to
-`.curator/sent/` with what the curator said, and each pull keeps the page it
-replaces or removes in `.history/`. Log lines written directly in a copy stay
-after the curator's when its log is pulled. A machine that only follows a
-space sends anyone who asks it for that space on to the curator (421, with the
-curator's URL when it is an `https://` one). Both machines record each sync in
-their audit chains.
-
-#### One home, many satellites (pairing)
-
-Following spaces one by one is for splitting them between machines on purpose.
-For the usual setup, one **home** machine runs the curator and Ask, and every
-other machine is a **satellite** that joins with one code. A satellite keeps a
-full local copy, so `context_start`, search and reads work offline, and its
-sessions leave notes as usual; its own curator and Ask are off. It follows
-every space home lists that it has no follow of its own for, spaces made later
-included, and `xenolith sync follow` still works for one you want to pin.
-`xenolith sync status` names home.
-
-On home (needs the running service and the [owner key](#the-owner-key), like
-deciding a held change):
+It prints the invite, a code and the line to run on the other machine. Give the
+code another way than the invite: `xenolith join` reads it from a prompt or
+stdin, never an argument.
 
 ```bash
-xenolith pair offer          # prints <home-id>.<secret>; --json for programs
+xenolith join xlj1_… --at 192.168.1.20:47851
 ```
 
-The code is valid for 10 minutes and one join. On the satellite, give the
-address of home's Xenolith service (the same kind of base URL as a peer's) and
-type or paste the code at the prompt, or send it on stdin; it is never an
-argument:
+An invite works once, for ten minutes, and five wrong codes retire it. The
+joiner proves the code first, and follows nothing until the chains it was sent
+check against the invite and share each space with its own key at its own
+endpoint. Xenolith's own endpoint listens on UDP 47851 (`sync.bind` in
+config.json), only once a space is shared with another Xenolith or an invite
+or a join needs it, and uses no relay and no mDNS unless `sync.relays` or
+`sync.mdns` names them.
+
+**With XenoNet (shared mode).** On a machine where XenoNet runs, Xenolith also
+syncs over XenoNet's endpoint, with the members of the networks the machine is
+in, and needs no invite for them. XenoNet gives Xenolith an actor grant that
+names `forward(xenolith/sync/2)` and Xenolith's context key; keep it with
+`xenolith sync grant` (the grant on stdin). Xenolith then attaches to XenoNet's
+forward socket in XenoNet's runtime folder (`sync.xenonet.socket` names
+another; `"sync": {"xenonet": "off"}` turns shared mode off), after checking
+the socket and the process on it are your account's. XenoNet hands it copies of
+its networks' chains and the person chains of their owners, which Xenolith
+checks from genesis itself. A space reaches a network's members once its owner
+is the person and it's shared into that network, both signed by one of the
+person's devices with their presence:
 
 ```bash
-xenolith pair join --url https://home.example/xenolith
+xenolith spaces draft project:atlas --move-owner prs_… --person-head …
+xenolith spaces draft project:atlas --share-network net_… --level append --person-head …
+xenolith spaces sequence project:atlas < signed-entry.json
 ```
 
-`--name` sets this machine's name at home (default: the host name) and `--peer`
-what the satellite calls home (default `home`). The join makes a keypair here
-and posts its public key and an HMAC of it under the code's secret to
-`/sync/v1/pair`; home answers with a machine token sealed to that key, kept as
-`peers/<name>.token` like any peer's. A code seen by someone else is useless
-without its secret, a second join on the same code is refused, and `/sync/v1/pair`
-shares the bad-token limit (20 bad tries a minute from one source, then 429).
-The token holds `ctx:read` and `ctx:append` for every space and never reaches
-`machine:local`; home also grants `machine:<name>` `ctx:append:all` for ten
-years, because a token reaches a space only through a grant too. Pages are not
-written from a satellite; `xenolith revoke machine:<name>` and
-`xenolith token revoke machine:<name>` end the pairing. Both machines record the
-pairing in their audit chains with the token's id, never the code or the token.
+`draft` prints the entry and the act to sign; XenoNet's window signs it with
+the person's device; `sequence` appends it as the curator. The standalone owner
+key alone can share a space into no network and can move it to no one but the
+person. A peer over XenoNet counts only when its hello's grant is rooted at the
+machine that owns the connection's endpoint, by the network's chain, and names
+the context key that signed the hello. A space shared into one network is never
+named to a machine in another. A note from another of your machines keeps its
+`user` source only when that machine's device is one of yours in the space
+owner's person chain.
 
-Restart the satellite's curator (quit the tray and open it again) after
-joining: it then only syncs, once a minute. Notes left in the satellite's own
-`machine:local` space stay there unfiled while it is a satellite. Moving home
-means pairing again on the new machine; the satellite refuses the new curator
-until you do (the curator id is pinned).
+**What travels.** Notes and copy edits go to the curator alone. A replace
+against a version the curator has changed since becomes a **proposal**, a held
+change of kind "sync" that waits for your OK (`xenolith held --space <space>`).
+A page the curator replaces or removes is kept in the copy's `.history/`. A
+member keeps the curator's entries it took and serves them to other members
+while the curator is away. Texts travel beside their entries, named by hash, so
+`xenolith forget` drops them on every member of the spaces this Xenolith
+curates. `xenolith sync status` shows this Xenolith's key and endpoint, each
+space's members and who's connected, and shared mode.
+
+1.x's sync (`/sync/v1`, peer tokens, pairing) is gone, and 1.x and 2.x don't
+sync with each other. `xenolith doctor` names the files 1.x left; 2.0 never
+deletes them.
 
 ## The curator
 
@@ -1025,7 +963,7 @@ folder in your home. On Windows:
 | Path | What |
 | --- | --- |
 | `%APPDATA%\Xenolith\config.json` | `wikiDir`, `version`, `httpPort`, `writeMode`, `curator`, `logs`, `publicUrl` |
-| `%APPDATA%\Xenolith\access.json`, `sync.json`, `pair.json`, `peers\` | who may use which space, tokens' hashes, sync peers and their tokens, the pairing code waiting (yours alone) |
+| `%APPDATA%\Xenolith\access.json` | who may use which space, and the tokens' revocation ids and rows (yours alone) |
 | `%LOCALAPPDATA%\Xenolith\runtime\` | `xenolith.exe`, `xenolith-service.exe` and `ui/` (the Xenolith window) |
 | `%LOCALAPPDATA%\Xenolith\service\` | the service's ini |
 | `%LOCALAPPDATA%\Xenolith\tray\` | `xenolith-tray.exe`, its ini, its logon-task definition, icons and the window's data folder (`webview\`) |
@@ -1075,17 +1013,12 @@ two things with Xenolith:
   log and the inbox, as [FORMAT.md](FORMAT.md) describes them) and shows each
   session's writes next to the pages they touch. It only reads; Xenolith's
   server does all the writing.
-- **It can carry sync between machines.** A XenoNet network can pass one
-  host's Xenolith sync routes (`/sync/v1/`) to another host, which then follows
-  the curator at a loopback address XenoNet gives it, with a path prefix
-  XenoNet strips before it passes a request on. To Xenolith that is an ordinary
-  [peer](#sync-between-machines), with one more header: to a `/api/svc/`
-  address on 127.0.0.1 or localhost, Xenolith sends that XenoNet's local API
-  credential, read from XenoNet's runtime folder (or `XENONET_RUNTIME_DIR`) at
-  each request. The request carries Xenolith's own token, a
-  forwarded request is never this machine's own, and the curator's grants
-  decide what the other machine may do. XenoNet's guide says how to
-  [publish the service](../docs/guide/network.md#services-through-the-network). A tunnel or reverse proxy of your own works the same way.
+- **It can carry sync between machines.** With a grant from XenoNet, Xenolith
+  syncs over XenoNet's endpoint with the members of its networks
+  ([shared mode](#sync-between-machines)). XenoNet terminates QUIC, so it
+  reads what it carries: the same account, which reads the folder anyway.
+  Xenolith decides again on its own copies of the chains and each peer's
+  signed hello.
 
 ## Repo layout
 
@@ -1097,7 +1030,7 @@ rust/crates/mcp/       xenolith-mcp: the MCP server's tools, resources and promp
 rust/crates/cli/       xenolith: serve (MCP over stdio), hook, install and uninstall, migrate agent-wiki
                        (journal, rollback, finish; its fixture tests in src/migrate/tests.rs and
                        tests/migrate_agent_wiki.rs), spaces, grants, tokens, audit, sync and held changes
-rust/crates/service/   xenolith-service: serve --http (MCP over HTTP, /health, /status, /ui, /api, /sync),
+rust/crates/service/   xenolith-service: serve --http (MCP over HTTP, /health, /status, /ui, /api),
                        curator, service (Windows)
 rust/crates/net/       xenolith-net: Xenolith between machines on XenoNet's xenonet-net (empty so far)
 rust/crates/tray/      xenolith-tray: the tray or menu bar icon, its menu, and the window

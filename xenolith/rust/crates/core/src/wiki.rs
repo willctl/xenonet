@@ -277,7 +277,7 @@ pub fn fsync_dir(dir: &Path) {
     let _ = dir;
 }
 
-/// Writes a file only its owner may read (access.json, sync.json, peer tokens, the owner key): on
+/// Writes a file only its owner may read (access.json, the token roots, the owner key): on
 /// Unix mode 0600 from the moment it exists, on Windows a protected DACL that also lets `readers`
 /// (SIDs: `paths::service_readers`, or the installing user for what the service writes) read it.
 /// Atomic, as xenonet_os::private_file::write is; and forgotten by the read cache.

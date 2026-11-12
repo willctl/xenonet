@@ -153,9 +153,10 @@ describe('join/1: an invite and its code', { timeout: 180_000 }, () => {
       const r = await fetch(`http://127.0.0.1:${m.service.port}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Xenolith': 'cli' }, body: JSON.stringify(body) });
       assert.equal(r.status, 403, `${route}: ${await r.text()}`);
     }
+    // No command writes a share by hand: a join writes it.
     const r = cli(studio, ['sync', 'share', 'project:atlas', 'xns1_x', 'f'.repeat(64)]);
     assert.equal(r.code, 2);
-    assert.match(r.err, /gone; join with an invite/);
+    assert.match(r.err, /usage: xenolith sync/);
   });
 
   test('an invite names only spaces this Xenolith curates', () => {
