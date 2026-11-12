@@ -14,10 +14,10 @@ its rules for working beside other agents.
 ## Where things are
 
 - `rust/`: the programs that ship, in their own workspace and `Cargo.lock`. `crates/core`
-  (xenolith-core: the folder, curator, held changes, search, spaces and their chains, grants
-  and access, on xenonet-id, -log and -authz), `crates/mcp` (xenolith-mcp: the MCP server's tools, resources and
-  prompts), `crates/cli` (`xenolith`: the stdio server, the session hook, the commands and the
-  installer, on the core alone, since the hook starts it for every conversation), `crates/service`
+  (xenolith-core: the folder, curator, held changes, search, spaces and their chains, the
+  upgrade from 1.x, grants and access, on xenonet-id, -log and -authz), `crates/mcp`
+  (xenolith-mcp: the MCP server's tools, resources and prompts), `crates/cli` (`xenolith`: the
+  stdio server, the session hook, the commands and the installer, on the core alone, since the hook starts it for every conversation), `crates/service`
   (`xenolith-service`: the HTTP service, the window API, the curator and the Windows service),
   `crates/net` (xenolith-net: Xenolith between machines on xenonet-net, so iroh and tokio; only
   the service takes it) and `crates/tray` (`xenolith-tray`). Nothing but xenolith-net and the
@@ -108,6 +108,7 @@ A release is a tag `xenolith-v<version>` and four archives, built by
 | The context signing key, the transport key and the standalone owner key are separate files in `<state>/keys`; one that can't be read is an error, never replaced by a new key | `keys::Keys::load_or_create`, `keys::tests`, `test/tokens.mjs` |
 | The standalone owner key signs only for a request with the owner key; a space it owns is weaker, shares into no network, and moves to a person only, never to a key | `keys::OwnerSigner::signer`; xenonet-log's space policy (`xenonet_log::space`), checked with this Xenolith's own keys in `keys::tests` |
 | Each space's chain lives in the state folder; a space folder's `xenolith-space.json` is information only, signed by the context key, and decides nothing; a space followed from another machine is never founded here | `chains::reconcile`, `chains::tests`, `test/spaces.mjs` |
+| On a folder 1.x left, 2.0 founds, marks, moves and binds nothing until `xenolith upgrade --run`, records each change in `<state>/upgrade.json` before making it, and `--undo` takes back exactly those; it never deletes a 1.x file (`xenolith doctor` names them). A program that may make the folder first opens it with `upgrade::open_folder`, never `wiki::ensure_wiki` | `upgrade::tests`, the upgrade tests in `test/spaces.mjs` |
 | Files in the shared context folder are untrusted input (held changes, journals, settings, space markers) | `held::parse_file`, `curator::journal_problem`, `settings::approvals_and_problem`, `chains::reconcile`, and their tests |
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |
 | The installer leaves an app's config alone while that app runs | Claude desktop: `install::desktop_running` and its sandbox test. Codex and Claude Code: judgment |

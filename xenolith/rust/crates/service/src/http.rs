@@ -307,6 +307,9 @@ pub fn status_report(app: &App, st: &State) -> Value {
     s.insert("wikiDir".into(), st.wiki_dir.as_ref().map(|d| json!(wiki::disp(d))).unwrap_or(Value::Null));
     s.insert("mcpUrl".into(), json!(format!("http://127.0.0.1:{}/mcp", app.port)));
     s.insert("writeMode".into(), json!(if st.curated { "curated" } else { "direct" }));
+    // Where the upgrade from 1.x stands: while it waits the service works as a folder reader and
+    // writer and founds nothing, which isn't a fault, so it never makes the health degraded.
+    s.insert("upgrade".into(), xenolith_core::upgrade::status_json(&AppPaths::current()));
     if let Some(e) = &st.setup_error {
         s.insert("error".into(), json!(e));
     }
@@ -811,14 +814,19 @@ fn spaces_stamp(root: &std::path::Path) -> Vec<Option<std::time::SystemTime>> {
     std::iter::once(base.clone()).chain(xenolith_core::spaces::KINDS.iter().map(|k| base.join(k))).map(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok()).collect()
 }
 
-/// Founds a chain for each space this Xenolith curates that has none, and puts the markers right
-/// (xenolith_core::chains). Without the keys or the owner key, nothing is founded until they're
-/// there, and the log says why.
+/// Once the upgrade from 1.x has run, founds a chain for each space this Xenolith curates that has
+/// none, and puts the markers right, recording each change in the upgrade's manifest
+/// (xenolith_core::upgrade). Until then it does nothing. Without the keys or the owner key, nothing
+/// is founded until they're there, and the log says why.
 fn found_spaces(app: &App, root: &std::path::Path) {
-    let r = app.signers().and_then(|(context, owner)| xenolith_core::chains::reconcile(&AppPaths::current(), root, context, owner, now_ms()));
+    let paths = AppPaths::current();
+    if !xenolith_core::upgrade::stage(&paths).is_ok_and(|s| s.upgraded()) {
+        return;
+    }
+    let r = app.signers().and_then(|(context, owner)| xenolith_core::upgrade::reconcile(&paths, root, context, owner, now_ms()));
     match r {
-        Ok(r) if r.is_empty() => {}
-        Ok(r) => log(&format!("spaces: {}", r.to_json())),
+        Ok(Some(r)) if !r.is_empty() => log(&format!("spaces: {}", r.to_json())),
+        Ok(_) => {}
         Err(e) => log(&format!("the spaces' chains were not brought up to date: {e}")),
     }
 }
@@ -883,17 +891,15 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
 
     let exe = std::env::current_exe().ok().filter(|_| watch_exe);
     let stamp = exe.as_deref().and_then(exe_stamp);
-    // A chain for each space this Xenolith curates, before the first request; then again whenever
-    // a space folder appears (a stdio server or a command made it).
+    // Once the upgrade from 1.x has run: a chain for each space this Xenolith curates, before the
+    // first request; then again whenever a space folder appears (a stdio server or a command made
+    // it). Until then nothing changes in the folder or the state folder that 1.x didn't change too.
     let root = app.state.read().unwrap().wiki_dir.clone();
     let mut spaces_seen = root.as_deref().map(spaces_stamp);
+    if let Some(next) = xenolith_core::upgrade::status_json(&AppPaths::current())["next"].as_str() {
+        log(next);
+    }
     if let Some(root) = &root {
-        // A 1.x satellite's copies of the spaces it followed go aside, kept, the first time.
-        match xenolith_core::chains::move_1x_copies(&AppPaths::current(), root) {
-            Ok(r) if r.is_empty() => {}
-            Ok(r) => log(&format!("spaces: {}", r.to_json())),
-            Err(e) => log(&format!("1.x's copies of followed spaces were not moved aside: {e}")),
-        }
         found_spaces(&app, root);
     }
     let shared = app.clone();

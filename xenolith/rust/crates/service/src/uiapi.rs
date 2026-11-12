@@ -4,7 +4,8 @@
 //! - read (GET), and ask a question: what access.json gives local callers (read), or the owner key;
 //! - pause the curator, choose models, set the cleanup schedule: local admin, or the owner key;
 //! - decide held changes and proposals, revert or undo a change, change the approvals setting,
-//!   forget text, leave a note as the person: the owner key only (owner.rs), audited with who.
+//!   forget text, leave a note as the person, bind a space, make a token, run the upgrade from
+//!   1.x: the owner key only (owner.rs), audited with who.
 //!
 //! Every POST also needs the X-Xenolith header ("ui", or "cli" from `xenolith`), which a page from
 //! another site cannot send.
@@ -295,6 +296,7 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             "/api/forget" => Some(("Forgetting", ", or run `xenolith forget` in a terminal")),
             "/api/note" => Some(("A note from you", "")),
             "/api/spaces/bind" => Some(("Binding a space", ", or run `xenolith spaces bind` in a terminal")),
+            "/api/upgrade/run" => Some(("Running the upgrade", ", or run `xenolith upgrade --run` in a terminal")),
             "/api/tokens" => Some(("Making a token", ", or run `xenolith token create` in a terminal")),
             "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
             _ => None,
@@ -530,6 +532,22 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             Ok(v) => {
                 entry.result = Some("space bound".into());
                 json_reply(200, &v)
+            }
+            Err(e) => json_reply(409, &json!({ "error": e })),
+        };
+    }
+    if path == "/api/upgrade/run" && method == "POST" {
+        // The upgrade from 1.x (xenolith_core::upgrade): founds and marks the spaces this Xenolith
+        // curates and moves 1.x's copies of followed ones aside, each change recorded so
+        // `xenolith upgrade --undo` can take it back. Signed as the owner and the curator.
+        let paths = AppPaths::current();
+        let done = app.signers().and_then(|(context, owner)| xenolith_core::upgrade::run(&paths, wiki_dir, context, owner, xenolith_core::text::now_ms()));
+        let changed = done.as_ref().is_ok_and(|r| r.already.is_none());
+        audit::best_effort(&paths, "upgrade", by, vec![("event", json!("run")), ("done", json!(done.is_ok())), ("changed", json!(changed))]);
+        return match done {
+            Ok(r) => {
+                entry.result = Some(if changed { "upgrade ran" } else { "upgrade had run" }.into());
+                json_reply(200, &r.to_json())
             }
             Err(e) => json_reply(409, &json!({ "error": e })),
         };

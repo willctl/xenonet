@@ -15,9 +15,13 @@
 //!   xenolith held [...]                 the changes waiting for your OK, in any space; deciding one
 //!                                       uses the running service and its owner key (see held_cli.rs)
 //!   xenolith status [--port N] [--json]  the service's health and whether the audit chain is written
+//!   xenolith upgrade [--run | --undo]   the upgrade from 1.x: a dry run, doing it, taking it back
+//!                                       (see upgrade_cli.rs)
+//!   xenolith doctor [--json]            where the upgrade stands, and what 1.x left
 //!   xenolith --version
 
 mod access_cli;
+mod doctor_cli;
 mod embeddings;
 mod forget;
 mod held_cli;
@@ -29,6 +33,7 @@ mod note_cli;
 mod owner_client;
 mod status_cli;
 mod stdio;
+mod upgrade_cli;
 
 // The MCP server, shared with xenolith-service.
 use xenolith_mcp::{mcp, resources};
@@ -44,7 +49,7 @@ fn set_if_unset(k: &str, v: &str) {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith serve [--read-only | --init] | xenolith hook | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space> | bind <space> [--project prj_…] [--run]] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith token create|revoke ... | xenolith audit [verify | tail] | xenolith held [...] | xenolith note \"<title>\" [--body <text>] | xenolith migrate agent-wiki [--dry-run | --run | --resume | --rollback | --finish [--move-wiki] | --update-protocol] [--json] | xenolith status [--port N] [--json] | xenolith --version\n(the HTTP service, the curator and the Windows service: xenolith-service)"
+        "usage: xenolith serve [--read-only | --init] | xenolith hook | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space> | bind <space> [--project prj_…] [--run]] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith token create|revoke ... | xenolith audit [verify | tail] | xenolith held [...] | xenolith note \"<title>\" [--body <text>] | xenolith migrate agent-wiki [--dry-run | --run | --resume | --rollback | --finish [--move-wiki] | --update-protocol] [--json] | xenolith status [--port N] [--json] | xenolith upgrade [--run | --undo] [--json] | xenolith doctor [--json] | xenolith --version\n(the HTTP service, the curator and the Windows service: xenolith-service)"
     );
     std::process::exit(2)
 }
@@ -94,6 +99,8 @@ fn main() {
         Some("held") => held_cli::run(&args[1..]),
         Some("note") => note_cli::run(&args[1..]),
         Some("status") => status_cli::run(&args[1..]),
+        Some("upgrade") => upgrade_cli::run(&args[1..]),
+        Some("doctor") => doctor_cli::run(&args[1..]),
         Some(cmd @ ("spaces" | "grant" | "revoke" | "access" | "token" | "audit")) => access_cli::run(cmd, &args[1..]),
         Some("embeddings") => embeddings::run(&args[1..]),
         Some("models") => models::run(&args[1..]),

@@ -106,7 +106,9 @@ not a space.
 Each space folder Xenolith curates, the root included, holds
 `xenolith-space.json`: which chain the folder is, for a reader that wants to
 tie a space to what it's about. It's information only: Xenolith decides
-nothing by it and writes it again when it differs.
+nothing by it and writes it again when it differs. A folder 1.x left gets
+markers only once the person runs `xenolith upgrade --run`, so a reader can
+meet a space folder without one and shows it by its name.
 
 ```json
 {

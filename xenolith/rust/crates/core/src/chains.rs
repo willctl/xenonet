@@ -2,12 +2,16 @@
 //! each space, and what it's about. The chains live in the state folder (`<state>/spaces/`), never
 //! in the shared context folder, whose files anyone with the folder can write.
 //!
-//! - **Founding.** The service founds a chain for each space this Xenolith curates and that has
-//!   none yet: at its start, and when a space folder appears. It's founded under its name
+//! - **Founding.** Once the upgrade from 1.x has run (upgrade.rs: `xenolith upgrade --run`, or a
+//!   folder 2.0 made itself), the service founds a chain for each space this Xenolith curates and
+//!   that has none yet: at its start, and when a space folder appears. It's founded under its name
 //!   (`name:project:atlas`), owned by the standalone owner key and curated by this Xenolith's
 //!   context key (keys.rs). A space this machine follows from another (1.x's sync.json `follow`)
-//!   is never founded here, since its curator is elsewhere. `move_1x_copies` moves its copy to
-//!   `<state>/1x-copies/`, kept, once, and the space comes back by a share from its curator.
+//!   is never founded here, since its curator is elsewhere. `move_1x_copies` (part of the upgrade)
+//!   moves its copy to `<state>/1x-copies/`, kept, once, and the space comes back by a share from
+//!   its curator.
+//! - **Changes.** Founding, marking and moving say each change to a `Record` before making it
+//!   (`Change`), so the upgrade's manifest can take back exactly what was made.
 //! - **Folders.** `index.json` maps each chain to its folder. The first space of a kind and name
 //!   keeps `spaces/<kind>/<name>/`; a later one with that name, from another Xenolith, gets
 //!   `<name>~<the first 6 characters of its spc_ after the prefix>` (FORMAT.md), so two spaces
@@ -40,12 +44,69 @@ const MARKER_TAG: &str = "xenolith-space-marker/1";
 /// How many characters of the spc_ a later space of the same name adds to its folder.
 pub const SUFFIX_CHARS: usize = 6;
 
+/// The file that says 1.x's copies were moved aside, in the chains' folder.
+const MOVED_FLAG: &str = "1x-moved";
+
+/// One change to the shared folder or the state folder, said before it's made, so the upgrade
+/// (upgrade.rs) can take back exactly what was made and nothing else.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// A folder that wasn't there.
+    Dir { path: PathBuf },
+    /// A file written, with what it held before: None when it wasn't there.
+    File { path: PathBuf, before: Option<Vec<u8>> },
+    /// A space folder moved aside, kept.
+    Moved { address: SpaceId, from: PathBuf, to: PathBuf },
+}
+
+/// Where changes are said before they're made. An error stops the change.
+pub type Record<'a> = &'a mut dyn FnMut(Change) -> Result<(), String>;
+
+/// A Record that keeps nothing, for changes no upgrade takes back (a bind, a received space).
+pub fn unrecorded(_: Change) -> Result<(), String> {
+    Ok(())
+}
+
+/// Makes `path` and any folder above it that's missing, saying each first.
+fn make_dir(path: &Path, rec: Record) -> Result<(), String> {
+    let mut missing = vec![];
+    let mut at = Some(path);
+    while let Some(d) = at.filter(|d| !d.as_os_str().is_empty() && fs::symlink_metadata(d).is_err()) {
+        missing.push(d.to_path_buf());
+        at = d.parent();
+    }
+    for d in missing.into_iter().rev() {
+        rec(Change::Dir { path: d.clone() })?;
+        fs::create_dir(&d).or_else(|e| if d.is_dir() { Ok(()) } else { Err(e) }).map_err(|e| format!("cannot make {}: {e}", wiki::disp(&d)))?;
+    }
+    Ok(())
+}
+
+/// Writes `text` to `file` unless it holds exactly that, saying the change (with what was there)
+/// first. Returns whether it wrote.
+fn write(file: &Path, text: &str, rec: Record) -> Result<bool, String> {
+    if let Some(p) = file.parent() {
+        make_dir(p, rec)?;
+    }
+    let before = match fs::read(file) {
+        Ok(b) => Some(b),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("cannot read {}: {e}", wiki::disp(file))),
+    };
+    if before.as_deref() == Some(text.as_bytes()) {
+        return Ok(false);
+    }
+    rec(Change::File { path: file.to_path_buf(), before })?;
+    wiki::atomic_write(file, text, None, None).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 /// The chains' folder.
 pub fn dir(paths: &AppPaths) -> PathBuf {
     paths.state_dir.join("spaces")
 }
 
-/// Where a 1.x satellite's copies of spaces curated elsewhere go at the first start.
+/// Where a 1.x satellite's copies of spaces curated elsewhere go when the upgrade runs (upgrade.rs).
 pub fn copies_dir(paths: &AppPaths) -> PathBuf {
     paths.state_dir.join("1x-copies")
 }
@@ -70,14 +131,14 @@ pub struct Placed {
     pub address: SpaceId,
 }
 
-/// A 1.x copy moved aside at the first start.
+/// A 1.x copy moved aside by the upgrade.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Moved {
     pub address: SpaceId,
     pub to: PathBuf,
 }
 
-/// What the state folder says of the spaces: `None` before the first start founded anything.
+/// What the state folder says of the spaces: `None` before anything was founded.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Index {
     pub spaces: Vec<Placed>,
@@ -110,14 +171,14 @@ impl Index {
         Ok(Some(index))
     }
 
-    fn save(&self, paths: &AppPaths) -> Result<(), String> {
+    fn save(&self, paths: &AppPaths, rec: Record) -> Result<(), String> {
         let v = json!({
             "v": 1,
             "spaces": self.spaces.iter().map(|p| json!({ "id": p.id, "address": p.address.to_string() })).collect::<Vec<_>>(),
             "moved": self.moved.iter().map(|m| json!({ "address": m.address.to_string(), "to": m.to.to_string_lossy() })).collect::<Vec<_>>(),
         });
         let text = format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default());
-        wiki::atomic_write(&index_file(paths), &text, None, None).map_err(|e| e.to_string())
+        write(&index_file(paths), &text, rec).map(|_| ())
     }
 
     pub fn by_address(&self, address: &SpaceId) -> Option<&Placed> {
@@ -141,9 +202,9 @@ pub fn load_space(paths: &AppPaths, id: &str) -> Result<Space, String> {
     Ok(space)
 }
 
-fn save_space(paths: &AppPaths, space: &Space) -> Result<(), String> {
+fn save_space(paths: &AppPaths, space: &Space, rec: Record) -> Result<(), String> {
     let text = format!("{}\n", space.to_json());
-    wiki::atomic_write(&chain_file(paths, space.id()), &text, None, None).map_err(|e| e.to_string())
+    write(&chain_file(paths, space.id()), &text, rec).map(|_| ())
 }
 
 /// The space a folder's address names, as the state folder has it.
@@ -191,7 +252,7 @@ pub fn verify_marker(v: &Value) -> Option<(String, String, String, VerifyingKey)
 }
 
 /// Writes `space`'s marker into its folder when the one there isn't exactly it.
-fn mark(root: &Path, address: &SpaceId, space: &Space, context: &dyn Signer) -> Result<bool, String> {
+fn mark(root: &Path, address: &SpaceId, space: &Space, context: &dyn Signer, rec: Record) -> Result<bool, String> {
     let file = spaces::space_dir(root, address).join(MARKER);
     let want = marker(space, context)?;
     let have: Option<Value> = fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok());
@@ -199,8 +260,14 @@ fn mark(root: &Path, address: &SpaceId, space: &Space, context: &dyn Signer) -> 
         return Ok(false);
     }
     let text = format!("{}\n", serde_json::to_string_pretty(&want).unwrap_or_default());
-    wiki::atomic_write(&file, &text, None, None).map_err(|e| e.to_string())?;
-    Ok(true)
+    write(&file, &text, rec)
+}
+
+/// Whether a space folder's marker is a good one for the chain `id` (the dry run's guess at
+/// whether a pass would write it: which key signed isn't checked here).
+fn marked_for(root: &Path, address: &SpaceId, id: &str) -> bool {
+    let file = spaces::space_dir(root, address).join(MARKER);
+    fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| verify_marker(&v)).is_some_and(|(s, ..)| s == id)
 }
 
 /// What a space founded here under its folder's name is about.
@@ -243,10 +310,12 @@ impl Report {
     }
 }
 
-fn locked<T>(paths: &AppPaths, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    let d = dir(paths);
-    fs::create_dir_all(&d).map_err(|e| format!("cannot make {}: {e}", wiki::disp(&d)))?;
-    let mut guard = match crate::lock::acquire(&d, "chains", &crate::lock::LockOpts::default()) {
+/// Runs `f` holding the chains' lock. It's taken in the state folder itself, not the chains'
+/// folder, so an undo can remove that folder while it holds the lock.
+pub(crate) fn locked<T>(paths: &AppPaths, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let d = &paths.state_dir;
+    fs::create_dir_all(d).map_err(|e| format!("cannot make {}: {e}", wiki::disp(d)))?;
+    let mut guard = match crate::lock::acquire(d, "chains", &crate::lock::LockOpts::default()) {
         Ok(g) => g,
         Err(crate::lock::AcquireError::Busy(b)) => return Err(b.0),
         Err(crate::lock::AcquireError::Io(e)) => return Err(e.to_string()),
@@ -257,11 +326,8 @@ fn locked<T>(paths: &AppPaths, f: impl FnOnce() -> Result<T, String>) -> Result<
 }
 
 /// Moves a folder aside, keeping it: a rename, or a copy when the state folder is on another
-/// volume (the original goes only once the copy is whole).
-fn move_aside(from: &Path, to: &Path) -> Result<(), String> {
-    if let Some(p) = to.parent() {
-        fs::create_dir_all(p).map_err(|e| format!("cannot make {}: {e}", wiki::disp(p)))?;
-    }
+/// volume (the original goes only once the copy is whole). `to`'s parent must be there.
+pub(crate) fn move_aside(from: &Path, to: &Path) -> Result<(), String> {
     if wiki::retrying(|| fs::rename(from, to)).is_ok() {
         return Ok(());
     }
@@ -293,65 +359,104 @@ fn free_dir(base: &Path, name: &str) -> PathBuf {
     p
 }
 
-/// One pass: at the first start, moves 1.x copies of followed spaces aside; then founds a chain for
-/// each space folder this Xenolith curates that has none, and puts every curated space's marker
-/// right. `context` is this Xenolith's context key (the curator), `owner` the standalone owner key.
-pub fn reconcile(paths: &AppPaths, root: &Path, context: &dyn Signer, owner: &dyn Signer, now: i64) -> Result<Report, String> {
-    locked(paths, || {
-        let loaded = Index::load(paths)?;
-        let first = loaded.is_none();
-        let mut index = loaded.unwrap_or_default();
-        let followed = followed(paths);
-        let mut report = Report::default();
-        for address in spaces::list(root) {
-            if followed.contains(&address.to_string()) {
-                continue;
-            }
-            let space = match index.by_address(&address) {
-                Some(p) => load_space(paths, &p.id)?,
-                None => {
-                    let g = found(about_of(&address), Owner::Key(owner.public()), context, Some(owner), address.base_name(), random::<16>().map_err(|e| e.message)?, now).map_err(|e| e.message)?;
-                    let space = Space::found(SpacePolicy::default(), g).map_err(|e| e.message)?;
-                    save_space(paths, &space)?;
-                    index.spaces.push(Placed { id: space.id().to_string(), address: address.clone() });
-                    report.founded.push(address.clone());
-                    space
-                }
-            };
-            if mark(root, &address, &space, context)? {
-                report.marked.push(address);
-            }
+/// One pass: founds a chain for each space folder this Xenolith curates that has none, and puts
+/// every curated space's marker right, saying each change to `rec` first. `context` is this
+/// Xenolith's context key (the curator), `owner` the standalone owner key. The caller holds
+/// `locked` and has checked that the upgrade ran (upgrade.rs).
+pub(crate) fn reconcile(paths: &AppPaths, root: &Path, context: &dyn Signer, owner: &dyn Signer, now: i64, rec: Record) -> Result<Report, String> {
+    let mut index = Index::load(paths)?.unwrap_or_default();
+    let followed = followed(paths);
+    let mut report = Report::default();
+    for address in spaces::list(root) {
+        if followed.contains(&address.to_string()) {
+            continue;
         }
-        if first || !report.founded.is_empty() {
-            index.save(paths)?;
+        let space = match index.by_address(&address) {
+            Some(p) => load_space(paths, &p.id)?,
+            None => {
+                let g = found(about_of(&address), Owner::Key(owner.public()), context, Some(owner), address.base_name(), random::<16>().map_err(|e| e.message)?, now).map_err(|e| e.message)?;
+                let space = Space::found(SpacePolicy::default(), g).map_err(|e| e.message)?;
+                save_space(paths, &space, &mut *rec)?;
+                index.spaces.push(Placed { id: space.id().to_string(), address: address.clone() });
+                report.founded.push(address.clone());
+                space
+            }
+        };
+        if mark(root, &address, &space, context, &mut *rec)? {
+            report.marked.push(address);
         }
-        Ok(report)
-    })
+    }
+    index.save(paths, rec)?;
+    Ok(report)
 }
 
 /// Moves a 1.x satellite's copies of the spaces it followed (sync.json) out of the folder into
 /// `<state>/1x-copies/`, kept, once: the first time it runs, it records what it moved, and later
-/// passes move nothing. Those spaces come back by a share from their curator.
-pub fn move_1x_copies(paths: &AppPaths, root: &Path) -> Result<Report, String> {
-    locked(paths, || {
-        let mut index = Index::load(paths)?.unwrap_or_default();
-        let mut report = Report::default();
-        let file = dir(paths).join("1x-moved");
-        if file.exists() {
-            return Ok(report);
+/// passes move nothing. Those spaces come back by a share from their curator. The caller holds
+/// `locked`.
+pub(crate) fn move_1x_copies(paths: &AppPaths, root: &Path, rec: Record) -> Result<Report, String> {
+    let mut index = Index::load(paths)?.unwrap_or_default();
+    let mut report = Report::default();
+    let flag = dir(paths).join(MOVED_FLAG);
+    if flag.exists() {
+        return Ok(report);
+    }
+    for (address, to) in copies_to_move(paths, root) {
+        let from = spaces::space_dir(root, &address);
+        if let Some(p) = to.parent() {
+            make_dir(p, &mut *rec)?;
         }
-        let followed = followed(paths);
-        for address in spaces::list(root).into_iter().filter(|s| !s.is_local() && followed.contains(&s.to_string())) {
-            let from = spaces::space_dir(root, &address);
-            let to = free_dir(&copies_dir(paths).join(&address.kind), &address.name);
-            move_aside(&from, &to)?;
-            index.moved.push(Moved { address: address.clone(), to });
-            report.moved.push(address);
+        rec(Change::Moved { address: address.clone(), from: from.clone(), to: to.clone() })?;
+        move_aside(&from, &to)?;
+        index.moved.push(Moved { address: address.clone(), to });
+        report.moved.push(address);
+    }
+    index.save(paths, &mut *rec)?;
+    write(&flag, "1\n", rec)?;
+    Ok(report)
+}
+
+/// The 1.x copies the first move would take aside, and where each would go.
+fn copies_to_move(paths: &AppPaths, root: &Path) -> Vec<(SpaceId, PathBuf)> {
+    let followed = followed(paths);
+    spaces::list(root)
+        .into_iter()
+        .filter(|s| !s.is_local() && followed.contains(&s.to_string()))
+        .map(|a| {
+            let to = free_dir(&copies_dir(paths).join(&a.kind), &a.name);
+            (a, to)
+        })
+        .collect()
+}
+
+/// What the upgrade would do now, without doing it: the copies it would move aside (and where),
+/// the spaces it would found, and the space folders whose marker it would write.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Plan {
+    pub moved: Vec<(SpaceId, PathBuf)>,
+    pub founded: Vec<SpaceId>,
+    pub marked: Vec<SpaceId>,
+}
+
+/// The plan, read only: the choices `move_1x_copies` and `reconcile` would make.
+pub fn plan(paths: &AppPaths, root: &Path) -> Result<Plan, String> {
+    let index = Index::load(paths)?.unwrap_or_default();
+    let followed = followed(paths);
+    let mut plan = Plan::default();
+    if !dir(paths).join(MOVED_FLAG).exists() {
+        plan.moved = copies_to_move(paths, root);
+    }
+    for address in spaces::list(root).into_iter().filter(|a| !followed.contains(&a.to_string())) {
+        match index.by_address(&address) {
+            None => {
+                plan.founded.push(address.clone());
+                plan.marked.push(address);
+            }
+            Some(p) if !marked_for(root, &address, &p.id) => plan.marked.push(address),
+            Some(_) => {}
         }
-        index.save(paths)?;
-        wiki::atomic_write(&file, "1\n", None, None).map_err(|e| e.to_string())?;
-        Ok(report)
-    })
+    }
+    Ok(plan)
 }
 
 /// The kind of folder a space about `about` lives in.
@@ -389,10 +494,10 @@ pub fn receive(paths: &AppPaths, root: &Path, chain: &Value, context: &dyn Signe
         let v = space.view();
         let address = address_for(root, &index, kind_of(&v.about), &v.name, space.id())?;
         spaces::create(root, &address).map_err(|e| e.to_string())?;
-        save_space(paths, &space)?;
+        save_space(paths, &space, &mut unrecorded)?;
         index.spaces.push(Placed { id: space.id().to_string(), address: address.clone() });
-        index.save(paths)?;
-        mark(root, &address, &space, context)?;
+        index.save(paths, &mut unrecorded)?;
+        mark(root, &address, &space, context, &mut unrecorded)?;
         Ok(address)
     })
 }
@@ -415,7 +520,7 @@ pub fn describe(space: &Space) -> Value {
 /// What binding `address` to `to` would do, without doing it: the space, what it's about now,
 /// what it would be about, and why it can't be bound when it can't.
 pub fn bind_plan(paths: &AppPaths, address: &SpaceId, to: Option<&EntityRef>, repo: Option<&str>) -> Result<Value, String> {
-    let (id, space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet: the service founds one when it starts"))?;
+    let (id, space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet: the service founds one once the upgrade has run (`xenolith upgrade`)"))?;
     let v = space.view();
     let remote = repo.map(xenonet_model::ids::normalize_remote).filter(|r| !r.is_empty());
     let why = if v.about.is_bound() {
@@ -451,8 +556,8 @@ pub fn bind(paths: &AppPaths, root: &Path, address: &SpaceId, to: EntityRef, own
             e.sign(&context.public().id(), context, None).map_err(|e| e.message)?;
         }
         space.offer(e).map_err(|e| e.message)?;
-        save_space(paths, &space)?;
-        mark(root, address, &space, context)?;
+        save_space(paths, &space, &mut unrecorded)?;
+        mark(root, address, &space, context, &mut unrecorded)?;
         Ok(describe(&space))
     })
 }
@@ -490,7 +595,7 @@ mod tests {
 
     impl Home {
         fn reconcile(&self) -> Report {
-            reconcile(&self.paths, &self.root, &self.context, &self.owner, T).unwrap()
+            locked(&self.paths, || reconcile(&self.paths, &self.root, &self.context, &self.owner, T, &mut unrecorded)).unwrap()
         }
         fn id(&self, a: &str) -> String {
             of_address(&self.paths, &SpaceId::parse(a).unwrap()).unwrap().0
@@ -575,7 +680,7 @@ mod tests {
         let r = h.reconcile();
         assert_eq!(r.founded, vec![sp("machine:local"), sp("project:mine")], "only what this machine curates");
         assert!(!spaces::space_dir(&h.root, &sp("project:atlas")).join(MARKER).exists(), "no marker in a copy this machine doesn't curate");
-        let moved = move_1x_copies(&h.paths, &h.root).unwrap();
+        let moved = locked(&h.paths, || move_1x_copies(&h.paths, &h.root, &mut unrecorded)).unwrap();
         assert_eq!(moved.moved, vec![sp("project:atlas"), sp("project:shared")]);
         assert_eq!(Index::load(&h.paths).unwrap().unwrap().moved.len(), 2, "and the index says where they went");
         for s in ["atlas", "shared"] {
@@ -587,7 +692,7 @@ mod tests {
         // Its copy made again (by 1.x, say): still nothing founded, and moved only once.
         spaces::create(&h.root, &sp("project:atlas")).unwrap();
         assert!(h.reconcile().is_empty());
-        assert!(move_1x_copies(&h.paths, &h.root).unwrap().is_empty());
+        assert!(locked(&h.paths, || move_1x_copies(&h.paths, &h.root, &mut unrecorded)).unwrap().is_empty());
         assert!(spaces::exists(&h.root, &sp("project:atlas")) && of_address(&h.paths, &sp("project:atlas")).is_none());
         assert!(!spaces::space_dir(&h.root, &sp("project:atlas")).join(MARKER).exists(), "no marker in a copy this machine doesn't curate");
     }

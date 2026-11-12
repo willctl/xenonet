@@ -45,6 +45,7 @@ pub fn run(args: &[String]) -> ! {
                 "port": port,
                 "service": service.as_ref().ok(),
                 "serviceError": service.as_ref().err(),
+                "upgrade": xenolith_core::upgrade::status_json(&paths),
                 "audit": {
                     "file": xenolith_core::wiki::disp(&file),
                     "lines": verified.as_ref().ok().map(|v| v.lines),
@@ -67,6 +68,10 @@ pub fn run(args: &[String]) -> ! {
                 }
             }
             Err(e) => println!("Service: not answering on port {port} ({e})"),
+        }
+        // Read here, not from the service, so it shows with the service stopped too.
+        if let Some(next) = xenolith_core::upgrade::status_json(&paths)["next"].as_str() {
+            println!("Upgrade: {next}");
         }
         match (&verified, &writable) {
             (Err(e), _) => println!("Audit chain: ! cannot be read: {e}"),

@@ -299,3 +299,151 @@ describe('a chain per space', { timeout: 60_000 }, () => {
     }
   });
 });
+
+/** Every file under `dir` (base64) and every folder ('/' after it), leaving out lock bookkeeping
+ * and the paths in `skip` (relative to `dir`). */
+function snapshot(dir, skip = []) {
+  const out = {};
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      const rel = path.relative(dir, p).split(path.sep).join('/');
+      if (e.name === '.locks' || skip.some((s) => rel === s || rel.startsWith(`${s}/`))) continue;
+      if (e.isDirectory()) {
+        out[`${rel}/`] = '';
+        walk(p);
+      } else out[rel] = fs.readFileSync(p).toString('base64');
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  return out;
+}
+
+/** A 1.x satellite as 1.x leaves it: its sync and pairing files, a 1.x token in access.json, a
+ * space it curates (project:mine), two it follows from inix (project:atlas, with a note it never
+ * sent, and project:shared), and 1.x's sync state in a space. */
+function satellite() {
+  const E = makeEnv();
+  fs.writeFileSync(path.join(E.home, 'sync.json'), JSON.stringify({ machine: 'neo', home: 'inix', peers: { inix: 'https://inix.example' }, follow: { 'project:atlas': { peer: 'inix', curator: '0123456789abcdef0123456789abcdef' }, 'project:shared': { peer: 'inix', auto: true } } }));
+  fs.writeFileSync(path.join(E.home, 'pair.json'), JSON.stringify({ offers: [] }));
+  fs.mkdirSync(path.join(E.home, 'peers'));
+  fs.writeFileSync(path.join(E.home, 'peers', 'inix.token'), `xenolith_${'0'.repeat(64)}\n`);
+  fs.writeFileSync(path.join(E.home, 'access.json'), JSON.stringify({ local: 'admin', grants: [], tokens: [{ hash: 'a'.repeat(64), subject: 'machine:inix', scopes: ['ctx:read:all'], label: 'inix', createdAt: 1, expiresAt: 4_102_444_800_000 }] }));
+  assert.equal(cli(E.env, 'serve', '--init').code, 0);
+  for (const s of ['mine', 'atlas', 'shared']) {
+    assert.equal(cli(E.env, 'spaces', 'add', `project:${s}`).code, 0);
+    fs.writeFileSync(path.join(E.wikiDir, 'spaces', 'project', s, 'pages', 'p.md'), `---\ntitle: ${s}\n---\n# ${s}\n`);
+  }
+  fs.writeFileSync(path.join(E.wikiDir, 'spaces', 'project', 'atlas', 'inbox', '2026-11-10-unsent.md'), '---\ntitle: never sent\n---\nA note 1.x never pushed.\n');
+  const sync = path.join(E.wikiDir, 'spaces', 'project', 'mine', '.curator', 'sync');
+  fs.mkdirSync(sync, { recursive: true });
+  fs.writeFileSync(path.join(sync, 'curator.json'), '{"id":"0123456789abcdef0123456789abcdef"}\n');
+  return E;
+}
+
+describe('the upgrade from 1.x', { timeout: 120_000 }, () => {
+  test('a 2.0 start changes nothing 1.x left until `xenolith upgrade --run`; the dry run lists the plan; --run twice, then --undo, puts every byte back', async () => {
+    const E = satellite();
+    const folder0 = snapshot(E.wikiDir);
+    const home0 = snapshot(E.home, ['logs']);
+    let s = await startService(E.env);
+    try {
+      await pause(2500); // a pass of the service's loop
+      const st = JSON.parse(cli(E.env, 'status', '--port', String(s.port), '--json').out);
+      assert.equal(st.service.health, 'ok', 'waiting is no fault');
+      assert.equal(st.service.upgrade.stage, 'waiting');
+      assert.match(cli(E.env, 'status', '--port', String(s.port)).out, /^Upgrade: the upgrade from 1\.x is waiting: `xenolith upgrade` shows what it will do/m);
+    } finally {
+      await stopService(s);
+    }
+    assert.deepEqual(snapshot(E.wikiDir), folder0, 'the folder is untouched, byte for byte');
+    const home1 = snapshot(E.home, ['logs']);
+    for (const [rel, bytes] of Object.entries(home0)) assert.equal(home1[rel], bytes, `${rel} is untouched`);
+    // What a 2.0 start adds of its own: its keys and token roots, the start's owner key (in
+    // runtime/), and the audit chain. Never a chain, a move or a manifest.
+    const added = Object.keys(home1).filter((rel) => !(rel in home0));
+    assert.deepEqual(added.filter((rel) => !/^(keys\/|audit\/|runtime\/|owner|http-sessions)/.test(rel)), [], 'the home gains only what a 2.0 start makes');
+
+    // Doctor: the upgrade waits, and 1.x's leftovers are named, the unsent note among them.
+    const doc = JSON.parse(cli(E.env, 'doctor', '--json').out);
+    assert.equal(doc.upgrade.stage, 'waiting');
+    const what = doc.leftovers.map((l) => l.what).join('\n');
+    for (const re of [/sync settings/, /pairing offers/, /peer tokens \(1\)/, /1 1\.x token\(s\) in access\.json/, /1\.x's sync state for project:mine/, /1 note\(s\) in project:atlas's inbox that 1\.x never sent/]) assert.match(what, re);
+
+    // The dry run: what --run would do, and nothing done.
+    const dry = cli(E.env, 'upgrade', '--json');
+    assert.equal(dry.code, 0, dry.err);
+    const { plan } = JSON.parse(dry.out).upgrade;
+    assert.deepEqual(plan.found, ['machine:local', 'project:mine']);
+    assert.deepEqual(plan.mark, ['machine:local', 'project:mine']);
+    assert.deepEqual(plan.moveAside.map((m) => m.space), ['project:atlas', 'project:shared']);
+    assert.deepEqual(plan.bind, []);
+    assert.match(cli(E.env, 'upgrade').out, /is waiting\. `xenolith upgrade --run` would:\n- move 2 copy\(ies\)[^]*- found a chain for 2 space\(s\)[^]*- bind nothing: [^]*Nothing was changed: this was a dry run\./);
+    assert.deepEqual(snapshot(E.wikiDir), folder0);
+
+    s = await startService(E.env);
+    try {
+      // Notes still go to the inbox as 1.x's did while it waits.
+      const inbox = path.join(E.wikiDir, 'spaces', 'project', 'mine', 'inbox');
+      const c = await connect(E.env);
+      try {
+        await ok(c, 'context_log', { app: 'codex', space: 'project:mine', title: 'Mine still works', body: 'Filed to the inbox.' });
+      } finally {
+        await c.close();
+      }
+      assert.equal(files(inbox).length, 1);
+      // Everything but logs and the audit chain (which records the run and the undo), as the
+      // running service has it.
+      const skip = ['logs', 'audit'];
+      const before = [snapshot(E.wikiDir), snapshot(E.home, skip)];
+
+      const run = cli(E.env, 'upgrade', '--run', '--json');
+      assert.equal(run.code, 0, run.err);
+      const r = JSON.parse(run.out).upgrade;
+      assert.deepEqual([r.founded, r.marked, r.moved, r.already], [plan.found, plan.mark, ['project:atlas', 'project:shared'], null], 'it did what the dry run said');
+      const mine = await chainOf(E.env, 'project:mine');
+      assert.equal(readMarker(markerOf(E, 'spaces', 'project', 'mine')).space, mine.id);
+      assert.ok(!fs.existsSync(path.join(E.wikiDir, 'spaces', 'project', 'atlas')), 'the copy is out of the folder');
+      assert.ok(fs.existsSync(path.join(E.home, '1x-copies', 'project', 'atlas', 'inbox', '2026-11-10-unsent.md')), 'and kept, with its unsent note');
+      assert.equal(JSON.parse(cli(E.env, 'status', '--port', String(s.port), '--json').out).service.upgrade.stage, 'done');
+      assert.match(JSON.parse(cli(E.env, 'doctor', '--json').out).leftovers.map((l) => l.what).join('\n'), /copy of project:atlas, moved aside by the upgrade, with 1 note\(s\) never sent/);
+      await pause(2500); // the service's loop sees the moved folders, and changes nothing more
+      const after = [snapshot(E.wikiDir), snapshot(E.home, skip)];
+      const again = cli(E.env, 'upgrade', '--run', '--json');
+      assert.equal(again.code, 0, again.err);
+      assert.equal(JSON.parse(again.out).upgrade.already, 'done');
+      assert.deepEqual([snapshot(E.wikiDir), snapshot(E.home, skip)], after, 'a second --run is a no-op');
+
+      const undo = cli(E.env, 'upgrade', '--undo', '--json');
+      assert.equal(undo.code, 0, undo.err);
+      assert.deepEqual(JSON.parse(undo.out).undo.left, []);
+      await pause(2500); // the loop again: waiting, so nothing is founded
+      assert.deepEqual(snapshot(E.wikiDir), before[0], 'the folder is back, byte for byte');
+      assert.deepEqual(snapshot(E.home, skip), before[1], 'and the state folder');
+      assert.equal(JSON.parse(cli(E.env, 'upgrade', '--json').out).upgrade.stage, 'waiting');
+      assert.match(cli(E.env, 'upgrade', '--undo').out, /Nothing to undo/);
+    } finally {
+      await stopService(s);
+    }
+  });
+
+  test('a folder 1.x made, with no sync at all, waits too; one 2.0 makes itself is upgraded at once', async () => {
+    const E = makeEnv();
+    // Made by another install before this one ever ran: there's something in it.
+    assert.equal(spawnSync(rustBin(), ['serve', '--init'], { env: { ...E.env, XENOLITH_HOME: path.join(E.dir, 'old-home') } }).status, 0);
+    assert.equal(cli(E.env, 'spaces', 'add', 'project:atlas').code, 0);
+    const s = await startService(E.env);
+    try {
+      await pause(2500);
+      assert.equal(JSON.parse(cli(E.env, 'spaces', '--json').out).spaces[1].chain, null);
+      assert.match(cli(E.env, 'spaces').out, /no chain yet: the upgrade from 1\.x is waiting/);
+      assert.ok(!fs.existsSync(markerOf(E)) && !fs.existsSync(path.join(E.home, 'upgrade.json')));
+    } finally {
+      await stopService(s);
+    }
+    const F = makeEnv();
+    assert.equal(cli(F.env, 'serve', '--init').code, 0);
+    assert.equal(JSON.parse(cli(F.env, 'upgrade', '--json').out).upgrade.stage, 'fresh');
+    assert.match(cli(F.env, 'doctor').out, /made by 2\.0, so it counted as upgraded/);
+  });
+});

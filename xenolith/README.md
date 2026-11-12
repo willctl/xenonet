@@ -114,6 +114,29 @@ After installing, sign the curator in once: tray icon > **Curator** > **Sign in
 to ChatGPT for the curator...** (see [The curator](#the-curator)). Until then,
 notes wait in the inbox, where you can see them.
 
+### From 1.x to 2.0
+
+2.0 keeps who may use each space in a chain per space, in its state folder, and
+writes a signed `xenolith-space.json` into each space folder it curates
+([FORMAT.md](FORMAT.md)). On a folder and state folder 1.x left, it does none of
+that until you ask. Until then the service reads and writes the folder as 1.x
+did, and `xenolith status` and `xenolith doctor` say the upgrade is waiting.
+
+```bash
+xenolith upgrade          # a dry run: what it would found, move aside, mark and bind
+xenolith upgrade --run    # do it (the service must be running)
+xenolith upgrade --undo   # take back exactly what --run did
+```
+
+`--run` moves the copies of spaces this machine followed from another under 1.x
+into `1x-copies/` in the state folder, kept. It founds a chain for each space
+this machine curates and writes its marker. It records each change in
+`upgrade.json` in the state folder before making it. `--undo` takes back those
+changes and nothing else, and works with the service stopped. 2.0 never deletes
+a 1.x file: `xenolith doctor` lists them, with any notes that never reached
+their curator, for you to delete once you no longer want a way back to 1.x. A
+folder 2.0 makes itself, where nothing was before, is upgraded from the start.
+
 ## Moving from agent-wiki
 
 Xenolith reads agent-wiki's wiki folder as it is. One command moves an

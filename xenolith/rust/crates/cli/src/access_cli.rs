@@ -54,6 +54,14 @@ pub fn root() -> PathBuf {
     }
 }
 
+/// The folder, set up before a space is made in it, as every program that may make it first does
+/// (xenolith_core::upgrade::open_folder).
+fn opened_root(paths: &AppPaths) -> PathBuf {
+    let root = root();
+    xenolith_core::upgrade::open_folder(paths, &root).unwrap_or_else(|e| fail(&e.to_string()));
+    root
+}
+
 fn positional(args: &[String]) -> Vec<&str> {
     let mut out = vec![];
     let mut skip = false;
@@ -102,8 +110,9 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 .map(|id| {
                     let dir = spaces::space_dir(&root, &id);
                     let pages = wiki::list_pages(&dir).map(|p| p.len()).unwrap_or(0);
-                    // Its chain, as the state folder has it: none yet until the service founds it,
-                    // and none for a copy of a space another machine curates.
+                    // Its chain, as the state folder has it: none until the upgrade from 1.x has
+                    // run and the service founds it, and none for a copy of a space another
+                    // machine curates.
                     let chain = chains::of_address(&paths, &id).map(|(_, s)| chains::describe(&s)).unwrap_or(Value::Null);
                     json!({ "space": id.to_string(), "pages": pages, "identities": policy.facts(&id).identities, "chain": chain })
                 })
@@ -116,6 +125,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                         s["identities"].as_array().filter(|a| !a.is_empty()).map(|a| format!("  (identity {})", a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))).unwrap_or_default();
                     let chain = match s["chain"]["id"].as_str() {
                         Some(id) => format!("  {id}, about {}{}", s["chain"]["about"].as_str().unwrap_or("?"), if s["chain"]["weaker"] == true { ", owned by this Xenolith's owner key" } else { "" }),
+                        None if !xenolith_core::upgrade::stage(&paths).is_ok_and(|s| s.upgraded()) => "  (no chain yet: the upgrade from 1.x is waiting, see `xenolith upgrade`)".into(),
                         None => "  (no chain yet)".into(),
                     };
                     println!("{:<32} {:>4} page(s){ids}{chain}", s["space"].as_str().unwrap_or(""), s["pages"]);
@@ -165,7 +175,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             if !identities.is_empty() && id.kind != "project" {
                 fail("--identity is for project spaces: an identity's own space is identity:<name>");
             }
-            let root = root();
+            let root = opened_root(&paths);
             let dir = spaces::create(&root, &id).unwrap_or_else(|e| fail(&e.to_string()));
             if !identities.is_empty() {
                 access::update(&paths, |p| {
@@ -194,7 +204,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             let g = access::update(&paths, |p| p.grant(subject, scope.clone(), ms, "you", now)).unwrap_or_else(|e| fail(&e.to_string()));
             audit::best_effort(&paths, "grant", "you", vec![("subject", json!(g.subject)), ("scope", json!(format_scope(&g.scope))), ("expiresAt", json!(g.expires_at))]);
             if let Some(id) = named_space(&scope).filter(|id| !id.is_local()) {
-                spaces::create(&root(), &id).unwrap_or_else(|e| fail(&e.to_string()));
+                spaces::create(&opened_root(&paths), &id).unwrap_or_else(|e| fail(&e.to_string()));
             }
             if json_out {
                 println!("{}", json!({ "subject": g.subject, "scope": format_scope(&g.scope), "expiresAt": g.expires_at }));

@@ -71,7 +71,7 @@ pub fn run(args: &[String]) -> ! {
     let paths = AppPaths::current();
     let cfg = CuratorCfg::from_config(&config, &paths);
     let (root, _) = wiki::resolve_wiki_dir(&env).unwrap_or_else(|e| fatal(&e.to_string()));
-    wiki::ensure_wiki(&root).unwrap_or_else(|e| fatal(&e.to_string()));
+    xenolith_core::upgrade::open_folder(&paths, &root).unwrap_or_else(|e| fatal(&e.to_string()));
     // The maintenance commands work on one space: this machine's unless --space names another.
     let wiki_dir: PathBuf = match args.iter().position(|a| a == "--space").and_then(|i| args.get(i + 1)) {
         Some(s) => {

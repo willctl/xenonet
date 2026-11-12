@@ -337,7 +337,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     c.insert("logs".into(), logs);
     write_lf(&p.config, &to_json(&config))?;
     info(&format!("config -> {} (writes: {write_mode})", fwd(&p.config)));
-    xenolith_core::wiki::ensure_wiki(&wiki_dir).map_err(|e| InstallError(format!("cannot set up the wiki at {}: {e}", fwd(&wiki_dir))))?;
+    xenolith_core::upgrade::open_folder(&xenolith_core::paths::AppPaths::from_env(&env), &wiki_dir).map_err(|e| InstallError(format!("cannot set up the wiki at {}: {e}", fwd(&wiki_dir))))?;
     info(&format!("wiki -> {}", fwd(&wiki_dir)));
     match xenolith_core::wiki::refresh_protocol(&wiki_dir) {
         Ok(true) => info("PROTOCOL.md -> this release's (you had not edited it; the old one is in .history/)"),

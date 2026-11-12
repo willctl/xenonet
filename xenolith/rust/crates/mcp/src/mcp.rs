@@ -52,7 +52,8 @@ pub fn setup() -> State {
     st.curated = mode.as_deref() != Some("direct");
     let r = (|| -> wiki::Result<PathBuf> {
         let (dir, _) = wiki::resolve_wiki_dir(&env)?;
-        wiki::ensure_wiki(&dir)?;
+        // Set up as 2.0 opens it: a folder it makes itself counts as upgraded (upgrade.rs).
+        xenolith_core::upgrade::open_folder(&AppPaths::from_env(&env), &dir)?;
         cleanup_locks(&dir);
         wiki::with_lock(&dir, || wiki::refresh_index(&dir, None).map(|_| ()))?;
         Ok(dir)
