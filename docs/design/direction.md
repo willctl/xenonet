@@ -1,12 +1,13 @@
 # Direction: from the prototype to the system
 
-Status: analysis and target shape, last updated 2026-11-11. Written for the goals in
-[goals.md](goals.md). Phases 1 to 4 of the order of work are done;
-phases 5 and 6 are being built on `main`, and each says below what has
-landed and what is left. "Where the code stands" is the measure taken
-before phase 1, with the rows phase 3 answered stated as they stand; the
-order of work says what each phase changed. Will decides the open
-questions at the end as each phase reaches them.
+Status: analysis and target shape, last updated 2026-11-12. Written for the goals in
+[goals.md](goals.md). Phases 1 to 5 of the order of work are done;
+phase 6 is being built on `main`, and says below what has landed and
+what is left. "Where the code stands" is the measure taken before phase
+1, with the rows phase 3 answered stated as they stand; the order of work
+says what each phase changed. Will decides the open questions at the end
+as each phase reaches them; a question decided "as recommended" took the
+recommendation by Will's standing word, and stays on his review list.
 
 ## Where the code stands
 
@@ -176,7 +177,7 @@ core crate depends on a surface crate or contains a registry id literal.
   | Chain | Who signs an entry | Notes |
   |---|---|---|
   | Person | Adding or removing a device: the root key, or two existing devices each with a presence block. Revoking: any one device with presence. | The root is used rarely; losing every device means the root or the recovery kit |
-  | Network | Adding a member or mailbox: one admin device with presence. Adding or removing an admin, moving relays, widening settings: the founder's root or two admin devices. Removing a member: one admin device. | Today's roster rules, with "window host" read as "admin device" |
+  | Network | Adding a member or mailbox: one admin device with presence. Adding or removing an admin, adding relays, widening settings: the founder or two admin devices, with presence where it widens. Removing a member: one admin device. A member's own rekey: itself, with presence. | The roster's rules ([network.md](network.md#the-network-chain)), with "window host" read as "admin device" |
   | Org | Adding a member: one admin. Adding or removing an admin: two admins, or the owner. | Orgs are an entry kind; the first cut builds none (question 5) |
   | Project | Sharing: one owner or maintainer device with presence. Merging two chains: an owner of each. | Readers and contributors cannot share |
   | Space | Sharing or moving the curator: the space's owner (the owner of the entity it is about). | Exactly one curator at a time |
@@ -218,55 +219,59 @@ Each stream kind declares its order and retention:
 | Claim, Release | project | add-wins set | kept until expiry |
 | Task events, Answer | run | per author | kept until the task ends, then 7 days |
 | Chain entries | group | hash chain | forever |
-| Presence | machine | last writer wins | live, TTL 30 s |
+| Presence | machine | last writer wins | live, while the connection is up and 30 s after |
 | Context notes and page versions | space | per author | forever |
 | Map, published services | machine | stream | live |
 
 ### Protocols
 
-- **Transport:** one iroh 1.x endpoint per machine under its machine key,
-  which is also its iroh endpoint id. ALPNs `xenonet/link/2`,
-  `xenonet/join/2`, `xenonet/svc/2`, and any other crate's (Xenolith's
-  `xenolith/sync/2`). A machine in several networks keeps one endpoint; the
-  envelope's scope names the network and `Admission` checks membership.
-- **Roles, not a gateway:** a **relay** is an iroh-relay any member can
-  run, listed in the network chain; a **mailbox** is a member machine the
-  person names that keeps sealed envelopes for away members under today's
-  gateway quotas, two per network by default; a **front door** is a surface
-  (MCP over HTTP, A2A) at an address the person chooses, or none. A
-  mailbox sees what today's gateway sees for the envelopes it holds (who,
+[network.md](network.md) has each of these as built.
+
+- **Transport:** one iroh 1.x endpoint per machine, keyed by its
+  transport key (`host.key`), whose Ed25519 half is its endpoint id; the
+  machine signing key signs everything a receiver keeps
+  ([The machine key](#the-machine-key)). ALPNs `xenonet/link/2`,
+  `xenonet/join/2`, `xenonet/svc/2`, and another program's carried by
+  `forward(alpn)` (Xenolith's `xenolith/sync/2`). A machine in several
+  networks keeps one endpoint and one connection per peer; each record
+  names its network and `Admission` checks membership.
+- **Roles, not a gateway:** a **relay** is an iroh-relay the network's
+  chain lists (the person's own, or n0's, named as n0's; never a default);
+  a **mailbox** is a member the chain names that keeps sealed envelopes for
+  away members, 10,000 or 50 MB per recipient for a week; a **holder** is
+  any member that applied an author's kept entries; a **front door** is a
+  surface (the actor gateway's MCP over HTTP, A2A) on one machine behind a
+  tunnel the person chooses, or none. A mailbox sees envelope heads (who,
   to whom, kind, size, time) and can drop or delay them, so it signs a
-  `Held(author, seq)` receipt for each envelope it takes, and withholding
-  shows as a held-but-undelivered gap. Sealed envelopes have no forward
-  secrecy: a machine key taken later opens what a mailbox still holds, so
-  the quotas keep a week at most and secrets never travel as kept
-  envelopes.
-- **Finding each other:** chains give keys; addresses come from LAN
-  discovery, small signed address records exchanged in scope, DNS or
-  pkarr if the person turns them on, or fixed addresses. A Tailscale or
-  WireGuard address is just another address.
-- **Envelope:** today's line head, tag `xenonet-net/2`, with scope, topic,
-  author, recipient, sequence, hybrid logical clock, class (live or kept)
-  and the body hash; the body is a versioned JSON `Act` whose schema comes
-  from the Rust types. The sealing math and the known-answer fixtures stay.
-  CBOR with COSE_Sign1 is an open question (below), not a change now.
-- **Joining:** an admin's device issues a Biscuit ticket authority ("admit
-  one machine as member of N for ten minutes"), prints a non-secret invite
-  (the network id, which is the hash of its genesis entry, and the
-  inviter's endpoint address) and a separate code. The joiner dials the
-  inviter by the key in the invite, so the channel is already
-  authenticated; today's HMAC proofs over the code, both ways, are enough,
-  and a password-authenticated exchange would add nothing while the
-  invite carries the key. The inviter must be online; the lockouts that
-  sit on the gateway today move to it. It appends to the chain, and the
-  joiner verifies the chain from the genesis the invite named. A second
+  batched `Held` receipt under its machine signing key, and withholding
+  shows as held, not delivered. Sealed envelopes have no forward secrecy:
+  a transport key taken later opens what a mailbox still holds, so the
+  quotas keep a week at most and acts carrying presence never rest there.
+- **Finding each other:** chains give keys; addresses come from signed
+  address records exchanged on link/2, mDNS on the LAN when the person
+  turns it on, the address a person gives at a join, or the relay. DNS and
+  pkarr are off. A Tailscale or WireGuard address is just another address.
+- **Envelope:** a line head, tag `xenonet-net/2`, for routing only: the
+  network, the entry's id, kind, author, recipient, place, time, class
+  (live, kept or loose), sealed and the body hash, bound by the sealing
+  and checked against the signed feed entry inside. The body is a feed
+  entry with its JSON body, whose schema comes from the Rust types. CBOR
+  with COSE_Sign1 is an open question (below), not a change now.
+- **Joining:** an admin's window opens a ticket and shows a non-secret
+  invite (the network id, the inviter's endpoint id, at most one relay and
+  a ticket id) and a separate code. The joiner dials the inviter by the key
+  in the invite, so the channel is already authenticated, and HMAC proofs
+  over the code go both ways, the joiner's first; a password-authenticated
+  exchange would add nothing while the invite carries the key. The inviter
+  must be online, and five wrong codes retire its ticket. It appends to
+  the chain, and the joiner verifies the chain from its genesis. A second
   network is the same command.
-- **Delivery:** FIFO per (author, topic), gapless, at-least-once on the
-  wire, exactly once into the store by (author, seq), with gaps filled
-  from the author or any member holding the feed. Into an agent's context:
-  at-least-once with the id visible, acked when the turn that showed it
-  ends. No global order; the HLC orders for display, `reply_to` gives
-  causality.
+- **Delivery:** kept entries gapless per (author, network), loose ones
+  each once by id; at-least-once on the wire, exactly once into the store,
+  with gaps filled from the author or any member holding the feed, one
+  holder at a time. Into an agent's context: at-least-once with the id
+  visible, acked when the turn that showed it ends. No global order; the
+  HLC orders for display, `reply_to` gives causality.
 - **Edges:** MCP (rmcp 3, the 2026-07-28 revision) is how agents and
   actors reach the engine, XenoNet's tools in one extension namespace. ACP
   (`agent-client-protocol`) lives in one generic adapter that starts,
@@ -342,10 +347,10 @@ key file or run the binary a keychain trusts, and sign as any agent on the
 machine. Presence checks guard the person's key; nothing guards the
 machine's. iroh needs the raw Ed25519 secret of the endpoint key for its
 QUIC handshake, so that key can never be hardware-backed. So a machine has
-two keys: a **transport key** in a file (`host.key`: QUIC authentication,
-today's frames, and the X25519 key envelopes are sealed to), and a
-**machine signing key** behind the `Signer` trait, which signs network
-chain entries, feed entries and address records and certifies token
+two keys: a **transport key** in a file (`host.key`: QUIC authentication
+and the X25519 key envelopes are sealed to), and a **machine signing key**
+behind the `Signer` trait, which signs network chain entries, feed
+entries, address records and mailbox receipts and certifies token
 roots. The machine's chain entry binds the two, and a `rekey` entry,
 signed by the machine signing key with the person's presence, replaces a
 stolen transport key without removing the machine. By Will's decision
@@ -404,7 +409,7 @@ X25519 and token code go.
 
 | Need | Decision | Why |
 |---|---|---|
-| Transport, NAT traversal, relays, discovery | Adopt iroh 1.x; run our own relay role | Dial by the Ed25519 key we already have; 1.x wire is stable; public relays are rate-limited with end-of-life dates |
+| Transport, NAT traversal, relays, discovery | Adopt iroh 1.x; relays are iroh-relay, the person's own or n0's, never a default | Dial by the Ed25519 key we already have; 1.x wire is stable; public relays are rate-limited with end-of-life dates |
 | Tokens, delegation, offline checks | Adopt biscuit-auth 6 | Public-key verifiable offline, attenuation only narrows, Datalog policy; UCAN crates are not 1.0 |
 | Relationship model | Borrow Zanzibar tuples and usersets; skip OpenFGA and SpiceDB servers | They need an always-on authority; a chain replica does the same offline |
 | Agents reaching XenoNet | Keep MCP, move to the 2026-07-28 revision on rmcp 3; one extension namespace | Already in use; stateless handles and per-message versions fit |
@@ -565,24 +570,47 @@ Will's step on inix and NEO-REX.
    (the store and the check are built); stopping, on cancel, a run that
    outlived a restart; and ending intents from a compact entry, which the
    intent's `until` covers meanwhile.
-5. **The transport.** `xenonet-net` on iroh with mailboxes, relay lists,
-   presence deltas, the HLC, several networks per machine and the
-   `xenonet-net/2` head; then the HTTP link, signed requests, the clock
-   offset, `gateway.sqlite`, `relay` and `svc` frames are deleted, and the
-   three-service tests run on iroh under turmoil. No release carries both
-   transports. Landed: the iroh dial, mesh and admission, with turmoil's
-   simulated dial; the `xenonet-net/2` envelope with a routing-only head;
-   chain ops for relays, mailboxes, rekey and address records, with the
-   network chain signed by the machine signing key; the HLC; the Quint
-   models of delivery and spaces; the engine's `Store` trait; retention
-   and compaction; the transport lab; `xenonet/join/2`; `link/2`,
-   holders, mailboxes and their receipts, presence deltas, several
-   networks per machine and self-hosted relays; `xenonet/svc/2` for
-   services and the window's reads of other machines (a per-launch window
-   key the person's device certifies); intents for any machine the
-   delegation names, taken with the person's signed checkout and given out
-   once by the arbiter the intent names. Left: the three-service tests on
-   iroh, and deleting the gateway and the remote relay.
+5. **The transport. Done (2026-11-12).** A network's machines reach each
+   other on iroh alone, with no gateway ([network.md](network.md)).
+   Landed: iroh 1.4.1 from `Builder::empty()` (no n0 defaults, no port
+   mapping, no 0-RTT), the `Dial` trait and its `Mesh`, and `Admission`
+   checked at the endpoint's hooks, each protocol's accept and the mesh,
+   with turmoil's simulated dial for the tests; the `xenonet-net/2`
+   envelope with a routing-only head, sealed per recipient, the act's
+   authority sealed beside its entry; the network chain signed by the
+   machine signing key, with `relays`, `mailboxes` and `rekey` ops and
+   signed address records; the HLC, clamped five minutes ahead, with skew
+   dropping only live data; `xenonet/link/2` (hello, Want/Ack, kept, loose
+   and live streams, the chain itself, the person's acts); fetching a gap
+   from any holder, one at a time, members only; mailboxes with batched
+   Held receipts; presence as a snapshot and deltas, valid while
+   connected; load to window hosts as live envelopes; several networks per
+   machine, each shown only the projects shared into it, and grants that
+   name their network; `xenonet/join/2` with invites and codes;
+   self-hosted relays with the person's own CA and doctor rows per relay;
+   `xenonet/svc/2` for services and the window's reads of other machines
+   under a per-launch window key the person's device certifies; intents
+   for any machine the delegation names, given out once by the arbiter the
+   intent names; retention and compaction in the feed; the engine's
+   `Store` trait; `formal/delivery.qnt`; three-service tests on iroh over
+   loopback (`net`, `net_engine`, `net_map`, `net_svc`, `net_many`); and
+   the transport lab, with three real iroh-relays. Deleted: the gateway
+   (`gateway.rs`, `gwstore.rs` and `gateway.sqlite`, the HTTP link and its
+   long poll, signed requests, `network/frame/v1` and its kinds, the
+   outbox and per-host queues, the clock offset, the gateway ticket and
+   join route, `/net/v1`, the LAN door, `xenonet net gateway`, `--lan`);
+   the remote map's relay (`xenonet-runtime`'s `remote/`, `RelaySink`,
+   relay frames, the hub, the merge and the snapshot cache,
+   `network/relay/v1`, `host/hello/v1`); the `@host:` qualified ids, for
+   `agt_` ids on every machine; the 2 s presence tick. Left for later: a
+   command or window control that names a mailbox; writing `rekey`
+   entries; writing compact entries on their own, and taking a holder's
+   `Compacted` answer; the mDNS setting for link/2, which is asked
+   nowhere yet; installing `relay-ca.pem` and setting a relay's token
+   from XenoNet; the lazy dial past 50 machines; the engine in several
+   networks (it takes the first as its own); the chain's inert `gateway`
+   op; collisions and MCP servers' details across machines; and the
+   Kani proofs of the HLC, written and not yet run.
 6. **Xenolith and the edges.** Xenolith adopts the libraries, never
    the app, and deletes its own pairing, tokens and crypto; spaces bind to
    model ids; the generic ACP adapter; A2A outbound; MCP 2026-07-28.
@@ -594,12 +622,16 @@ Will's step on inix and NEO-REX.
    Xenolith built from path dependencies on the libraries, held to them by
    the layering check, with keys of its own; the MCP and console surfaces
    on `xenonet-api` alone (the root gives them what else they need, and
-   the doctor tool runs `xenonet doctor --json` when the service is down).
-   Left: the network's generic
-   `link/2` and `forward`; Xenolith's chain per space, Biscuit grants,
-   `xenolith/sync/2`, joining, fetching from a holder, shared mode and
-   deleting its old code; dissolving the runtime, assistant and integrations crates; the lab and
-   the docs.
+   the doctor tool runs `xenonet doctor --json` when the service is down);
+   `link/2` and `join/2` generic over `Admission`, groups and
+   `JoinTarget`, and `forward(alpn)` for an actor's own protocol; Xenolith's
+   chain per space, its decisions through `xenonet-authz` with Biscuit
+   grants, `xenolith/sync/2` on its own endpoint and in shared mode over
+   XenoNet's forward, `xenolith/join/1` in place of pairing, fetching the
+   curator's feed from any member holding it, its grant minted and its
+   space entries signed at XenoNet's window, its 1.x sync code deleted, and
+   Xenolith in the VM lab. Left: dissolving the runtime, assistant and
+   integrations crates, and the docs.
 
 ## Verification plan
 
@@ -624,8 +656,10 @@ change edits the spec first. Not verified formally: parsers and drift
 
 ## Open questions for Will
 
-Questions 1, 2, 4, 5 and 8 are decided. The rest can wait
-for the phase that needs them.
+Questions 1, 2, 4, 5, 8 and 11 are decided by Will; 3, 6, 9 and 10 were
+decided as recommended in phase 5, and are on his review list with the
+other calls phase 5 took as recommended, which stand under 1, 2 and 4.
+Question 7 can wait for the phase that needs it.
 
 1. **The person's root key, the presence check and the chain rules.**
    Decided by Will on 2026-11-08. The root key lives in the first
@@ -642,6 +676,11 @@ for the phase that needs them.
    fallback, so an agent that can type cannot pass it. On Windows,
    Windows Hello with its PIN fallback is accepted (Will, 2026-11-10), and
    Linux uses polkit or a passphrase; both are marked weaker.
+   Decided as recommended in phase 5 (2026-11-11), within the network
+   chain's rules: a member's `rekey` takes its own signature with presence
+   (`admit`); adding a relay or a mailbox widens (`widen`), and a mailbox
+   follows the table's one admin with presence, not two; a mailbox may
+   take itself off the list.
 2. **The machine signing key.** Decided by Will on 2026-11-08: hardened
    by default. On macOS the key lives in the Secure Enclave and on Windows
    in the TPM, non-exportable: an agent that reads every file the account
@@ -650,9 +689,19 @@ for the phase that needs them.
    file and attestation says so. Running the service as its own OS user
    stays an option behind `xenonet setup --harden` for machines without a
    secure element. The transport key stays a file on every platform.
+   Decided as recommended in phase 5 (2026-11-11): the transport key is
+   the iroh endpoint key, one per machine across its networks. That costs
+   two things the docs name: mDNS announces one stable endpoint id on
+   every LAN the machine joins, and every network the machine is in sees
+   the same id. So mDNS for link/2 is the person's choice, off until they
+   answer it, rather than on by default. A per-start endpoint key,
+   certified by the signing key, is the later alternative.
 3. **Out of contact.** May a machine that has not heard from any other
    member in ten minutes still start runs, admit, widen or answer remote
-   prompts? Recommended: it holds them and answers only for itself.
+   prompts? Decided as recommended in phase 5: it holds them and answers
+   only for itself. A machine is in contact with a network while it holds
+   a link/2 connection to a member of it, or exchanged chain heads with
+   one within ten minutes, decided per network.
 4. **Answers and delegation.** Decided by Will on 2026-11-10. Allowing
    a permission prompt widens access, so an Allow needs presence, local
    and remote; a Deny can't widen anything and needs none. Delegation is
@@ -665,7 +714,11 @@ for the phase that needs them.
    attestation is `HarnessSigned` or `ProcessChecked`. Phase 3 builds the
    grant's authorization shape with tokens naming machines and networks;
    an intent made on one device fanning out to sessions on the others
-   needs the stored ids of phase 4 and is built there.
+   needs the stored ids of phase 4 and is built there. Decided as
+   recommended in phase 5 (2026-11-11): an intent for any machine names
+   an arbiter, the maker's machine by default, and only the arbiter gives
+   it out, to the first valid take in its store order; there's no
+   reassignment, so a stuck one ends with the person's cancel.
 5. **The first cut.** Decided by Will on 2026-11-08: one person with
    many machines and several networks. Phases 2 to 4 build the person,
    machine, network, project and space chains and no org chain; orgs are
@@ -674,7 +727,9 @@ for the phase that needs them.
    persons sharing a project is not in the first cut, so `Merge` ships
    with the data model but is exercised only by tests until then.
 6. **Wire format.** Keep the line head and JSON, or move to CBOR with
-   COSE_Sign1 for outside interop? Recommended: keep, revisit in phase 6.
+   COSE_Sign1 for outside interop? Decided as recommended in phase 5: the
+   `xenonet-net/2` envelope keeps the line head and JSON. CBOR and COSE
+   are revisited in phase 6.
 7. **Claims.** Stay advisory with a deterministic winner, or allow a
    project to name one arbiter machine for exclusive leases?
 8. **Actor grants and the SSH hosts prototype.** The grants are decided
@@ -691,12 +746,21 @@ for the phase that needs them.
    a grant needs the person's presence, as an Allow does; narrowing and
    revoking need none. The SSH hosts prototype is retired, as recommended
    here: machines join through the network, and another machine's
-   map reaches a console only through the network's relay.
+   sessions reach a console through its presence, its transcripts
+   through the window's reads.
 9. **The remote map.** Is it acceptable that other machines show as
-   session cards from presence, not today's relayed full graph?
-10. **Defaults.** Two mailboxes per network, named by the person
-    (recommended) or any member may volunteer? Networks start titles-only?
-    Direct LAN paths on by default?
+   session cards from presence, not a relayed full graph? Decided as
+   recommended in phase 5: they show as cards from presence, the window
+   reads another machine's transcripts and stats over svc/2, and the
+   relayed graph is deleted.
+10. **Defaults.** Mailboxes named by the person, or any member may
+    volunteer? Networks start titles-only? Direct LAN paths on by default?
+    Decided as recommended in phase 5: mailboxes are named by the person
+    in the chain, none by default and none volunteering; detail is on
+    inside a network; direct paths are on, and mDNS is asked (question
+    2). And what a network sees: a network's presence carries only the
+    sessions in projects the person shares into it; the first network a
+    machine is in shares all, and each one after starts with none.
 11. **Xenolith and XenoNet's code.** Decided by Will on 2026-11-11:
     "Libraries OK, never app." Xenolith may take the libraries (`xenonet-id`,
     `-log`, `-authz`, `-net`, with `-model`, `-os`, `-text` and `-keys`), never the service, runtime, surfaces
