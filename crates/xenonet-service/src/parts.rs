@@ -127,6 +127,13 @@ fn answered(r: R<Value>) -> NetResult {
     r.map_err(refusal)
 }
 
+impl NetService {
+    // The node of the network a call names, or the one this machine is in.
+    fn on(&self, network: Option<&str>) -> Result<Arc<xenonet_net::node::Node>, CoreError> {
+        self.nodes().pick(network).map_err(refusal)
+    }
+}
+
 #[async_trait]
 impl parts::Network for NetService {
     fn state(&self) -> Value {
@@ -135,11 +142,11 @@ impl parts::Network for NetService {
     fn network_name(&self) -> Option<String> {
         self.node().shared().network().map(|n| n.name)
     }
-    fn host(&self) -> Option<String> {
-        self.node().shared().network().map(|n| n.host)
+    fn host(&self, network: Option<&str>) -> Option<String> {
+        self.on(network).ok()?.shared().network().map(|n| n.host)
     }
-    fn is_gateway(&self) -> bool {
-        self.node().shared().is_gateway()
+    fn is_gateway(&self, network: Option<&str>) -> bool {
+        self.on(network).is_ok_and(|n| n.shared().is_gateway())
     }
     async fn listen(&self, addr: SocketAddr) -> Result<(), CoreError> {
         NetService::listen(self, addr).await.map_err(refusal)
@@ -147,73 +154,100 @@ impl parts::Network for NetService {
     fn unlisten(&self) {
         NetService::unlisten(self);
     }
-    fn lan(&self) -> Option<SocketAddr> {
-        NetService::lan(self)
+    fn lans(&self) -> Vec<SocketAddr> {
+        NetService::lans(self)
     }
-    fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult {
-        answered(self.node().create(name, host, address, lan, at_window))
+    async fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, relay: Option<&str>, at_window: bool) -> NetResult {
+        let r = self.nodes().create(name, host, address, lan, relay, at_window).await;
+        self.networks_changed().await;
+        answered(r)
     }
     async fn join(&self, address: &str, ticket: &str) -> NetResult {
-        answered(self.node().join(address, ticket).await)
+        let r = self.nodes().join(address, ticket).await;
+        self.networks_changed().await;
+        answered(r)
     }
     async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult {
-        answered(self.node().join_invite(invite, code, at, lan).await)
+        let r = self.nodes().join_invite(invite, code, at, lan).await;
+        self.networks_changed().await;
+        answered(r)
     }
-    async fn leave(&self, force: bool) -> NetResult {
-        answered(self.node().leave(force).await)
+    async fn leave(&self, network: Option<&str>, force: bool) -> NetResult {
+        let r = self.nodes().leave(network, force).await;
+        self.networks_changed().await;
+        answered(r)
     }
     fn tunnel_address(&self, address: Option<&str>) {
-        self.node().tunnel_address(address);
+        for n in self.nodes().nodes() {
+            n.tunnel_address(address);
+        }
     }
-    async fn ticket(&self, host: &str, window: bool, at_window: bool) -> NetResult {
-        answered(self.node().ticket(host, window, at_window).await)
+    async fn ticket(&self, network: Option<&str>, host: &str, window: bool, at_window: bool) -> NetResult {
+        answered(self.on(network)?.ticket(host, window, at_window).await)
     }
-    async fn invite(&self, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult {
-        answered(self.node().invite(host, window, lan, at_window).await)
+    async fn invite(&self, network: Option<&str>, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult {
+        answered(self.on(network)?.invite(host, window, lan, at_window).await)
     }
-    async fn remove(&self, host: &str) -> NetResult {
-        answered(self.node().remove(host).await)
+    async fn remove(&self, network: Option<&str>, host: &str) -> NetResult {
+        answered(self.on(network)?.remove(host).await)
     }
-    async fn replace(&self, host: &str, at_window: bool) -> NetResult {
-        answered(self.node().replace(host, at_window).await)
+    async fn replace(&self, network: Option<&str>, host: &str, at_window: bool) -> NetResult {
+        answered(self.on(network)?.replace(host, at_window).await)
     }
-    async fn approve(&self, id: &str, at_window: bool) -> NetResult {
-        answered(self.node().approve(id, at_window).await)
+    async fn approve(&self, network: Option<&str>, id: &str, at_window: bool) -> NetResult {
+        answered(self.on(network)?.approve(id, at_window).await)
     }
-    async fn take_gateway(&self, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult {
-        answered(self.node().take_gateway(address, lan, at_window).await)
+    async fn take_gateway(&self, network: Option<&str>, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult {
+        let r = self.on(network)?.take_gateway(address, lan, at_window).await;
+        self.networks_changed().await;
+        answered(r)
     }
-    async fn set_gateway(&self, address: &str) -> NetResult {
-        answered(self.node().set_gateway(address).await)
+    async fn set_gateway(&self, network: Option<&str>, address: &str) -> NetResult {
+        answered(self.on(network)?.set_gateway(address).await)
     }
-    async fn set_reach(&self, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> NetResult {
-        answered(self.node().set_reach(host, start, wake, at_window).await)
+    async fn set_reach(&self, network: Option<&str>, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> NetResult {
+        answered(self.on(network)?.set_reach(host, start, wake, at_window).await)
     }
-    async fn settings(&self, change: NetChange, at_window: bool) -> NetResult {
+    async fn settings(&self, network: Option<&str>, change: NetChange, at_window: bool) -> NetResult {
         let NetChange { titles_only, share_load, lan, start, wake } = change;
-        answered(self.node().settings(Change { titles_only, share_load, lan, start, wake }, at_window).await)
+        answered(self.on(network)?.settings(Change { titles_only, share_load, lan, start, wake }, at_window).await)
     }
-    fn svc_list(&self) -> Value {
-        self.node().shared().svc_list()
+    fn share(&self, network: Option<&str>, sharing: &Value, at_window: bool) -> NetResult {
+        answered(self.nodes().share(network, sharing, at_window))
     }
-    fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String], at_window: bool) -> NetResult {
-        answered(self.node().shared().svc_publish(name, target, paths, hosts, at_window))
+    async fn relay(&self, network: Option<&str>, url: &str, add: bool, mine: bool, at_window: bool) -> NetResult {
+        answered(self.nodes().relay(network, url, add, mine, at_window).await)
     }
+    fn svc_list(&self, network: Option<&str>) -> NetResult {
+        Ok(self.on(network)?.shared().svc_list())
+    }
+    fn svc_publish(&self, network: Option<&str>, name: &str, target: &str, paths: &[String], hosts: &[String], at_window: bool) -> NetResult {
+        answered(self.on(network)?.shared().svc_publish(name, target, paths, hosts, at_window))
+    }
+    // The person's chain is the machine's, whichever network carries it.
     fn revoke_device(&self, device: &str, at_window: bool) -> NetResult {
         answered(self.node().shared().revoke_device(device, at_window))
     }
-    fn svc_unpublish(&self, name: &str) -> NetResult {
-        answered(self.node().shared().svc_unpublish(name))
+    fn svc_unpublish(&self, network: Option<&str>, name: &str) -> NetResult {
+        answered(self.on(network)?.shared().svc_unpublish(name))
     }
-    fn unfreeze(&self, author: &str, at_window: bool) -> NetResult {
-        answered(self.node().shared().unfreeze(author, at_window))
+    fn unfreeze(&self, network: Option<&str>, author: &str, at_window: bool) -> NetResult {
+        answered(self.on(network)?.shared().unfreeze(author, at_window))
     }
     fn svc_port(&self, target: &str) -> Option<u16> {
         svc::Target::parse(target).ok().map(|t| t.port)
     }
+    // In the network `host` is a member of: a host id that names members of
+    // two networks is refused rather than taken for either.
     async fn svc_call(&self, host: &str, name: &str, call: SvcCall) -> SvcAnswer {
         let SvcCall { method, path, headers, body } = call;
-        let a = self.node().shared().svc_call(host, name, svc::Call { method, path, headers, body }).await;
+        let holding: Vec<_> = self.nodes().nodes().into_iter().filter(|n| n.shared().roster().view_ref().is_some_and(|v| v.member(host).is_some())).collect();
+        let node = match holding.as_slice() {
+            [one] => one.clone(),
+            [] => return SvcAnswer::refused(404, "no-host", &format!("{host} isn't in a network this machine is in")),
+            _ => return SvcAnswer::refused(409, "which-network", &format!("{host} names a machine in more than one of this machine's networks")),
+        };
+        let a = node.shared().svc_call(host, name, svc::Call { method, path, headers, body }).await;
         SvcAnswer { status: a.status, headers: a.headers, body: a.body }
     }
 }

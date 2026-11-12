@@ -256,7 +256,7 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         match NetService::open(opts) {
             Ok(svc) => {
                 if let Some(g) = &parts.gateway {
-                    g.gateway().set_net(svc.node().clone());
+                    g.gateway().set_net(svc.nodes().clone());
                 }
                 // The engine takes what arrives, and sends through it.
                 if let Some(plug) = &ctx.cores.on_net {

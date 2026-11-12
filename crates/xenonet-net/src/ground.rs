@@ -21,6 +21,31 @@ use xenonet_log::person::{self, DeviceKind as Kind};
 /// What a machine that isn't in a network calls itself in a request.
 pub const LOCAL: &str = "local";
 
+thread_local! {
+    static WITHIN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `f` for what arrived in `network`: the governance it reads is
+/// that network's chain, and what it sends naming no network goes in
+/// that network, so an act from one network is never decided against
+/// another's chain, nor answered into another.
+pub fn within<T>(network: &str, f: impl FnOnce() -> T) -> T {
+    struct Back(Option<String>);
+    impl Drop for Back {
+        fn drop(&mut self) {
+            let was = self.0.take();
+            WITHIN.with(|w| *w.borrow_mut() = was);
+        }
+    }
+    let _back = Back(WITHIN.with(|w| w.borrow_mut().replace(network.to_string())));
+    f()
+}
+
+/// The network `within` runs this thread for, if any.
+pub fn current() -> Option<String> {
+    WITHIN.with(|w| w.borrow().clone())
+}
+
 /// The facts, as of now.
 #[derive(Clone)]
 pub struct Facts {

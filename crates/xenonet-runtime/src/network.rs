@@ -204,9 +204,14 @@ impl EngineSink {
     }
 }
 
+// What arrived in a network is decided against that network's chain and
+// answered into it (`xenonet_net::ground::within`), never another's.
 impl Sink for EngineSink {
     fn receive(&self, incoming: Incoming) {
-        self.run(move |w| receive(w, incoming));
+        self.run(move |w| {
+            let network = incoming.network.clone();
+            xenonet_net::ground::within(&network, || receive(w, incoming));
+        });
     }
     fn linked(&self, up: bool) {
         self.run(move |w| linked(w, up));
@@ -222,13 +227,16 @@ impl Sink for EngineSink {
 
 impl Feeds for EngineSink {
     fn entry(&self, arrived: Arrived) {
-        self.run(move |w| entry_in(w, arrived));
+        self.run(move |w| {
+            let network = arrived.entry.group.clone();
+            xenonet_net::ground::within(&network, || entry_in(w, arrived));
+        });
     }
     // On the caller's thread: the window waits for it, and the store's
     // transaction keeps it apart from what the sink's thread applies.
     fn unfreeze(&self, author: &str, network: &str) -> std::result::Result<usize, String> {
         let w = self.w.upgrade().ok_or("XenoNet is stopping")?;
-        unfreeze(&w, author, network)
+        xenonet_net::ground::within(network, || unfreeze(&w, author, network))
     }
 }
 

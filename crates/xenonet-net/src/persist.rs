@@ -1,5 +1,5 @@
-//! What a machine keeps of its network and its person between starts: the
-//! network (this machine's id in it, the gateway it pinned), the roster's
+//! What a machine keeps of its networks and its person between starts:
+//! each network (this machine's id in it, the gateway it pinned), the roster's
 //! entries, how the link last stood and where it stands in the gateway's
 //! stream, the services published to it, its own feed (where it writes,
 //! the kept entries it wrote and how far each member acked them) and how
@@ -45,9 +45,14 @@ pub struct WriterAt {
 }
 
 pub trait Persist: Send + Sync {
-    /// The network this machine is in, if it's in one.
-    fn network(&self) -> R<Option<NetFile>>;
-    /// The network, made or changed.
+    /// Every network this machine is in, the one it founded or joined
+    /// first, first.
+    fn networks(&self) -> R<Vec<NetFile>>;
+    /// The first of `networks`, if it's in one.
+    fn network(&self) -> R<Option<NetFile>> {
+        Ok(self.networks()?.into_iter().next())
+    }
+    /// A network, made or changed.
     fn put_network(&self, n: &NetFile) -> R<()>;
     /// A network's roster: its entries from entry 0.
     fn roster(&self, network: &str) -> R<Vec<roster::Entry>>;
@@ -142,6 +147,14 @@ pub trait Persist: Send + Sync {
     fn put_sharing(&self, _network: &str, _sharing: &Sharing) -> R<()> {
         Err(crate::NetError::new(501, "not-kept", "this machine doesn't keep what is shared into each network yet"))
     }
+    /// The relays this machine adds of its own (`nodes`), by URL: a
+    /// setting of this machine, in no chain.
+    fn own_relays(&self) -> R<Vec<String>> {
+        Ok(Vec::new())
+    }
+    fn put_own_relays(&self, _urls: &[String]) -> R<()> {
+        Err(crate::NetError::new(501, "not-kept", "this machine doesn't keep relays of its own"))
+    }
 }
 
 /// Everything kept in memory, gone with it: for tests, and the doctor's
@@ -151,7 +164,7 @@ pub struct Memory(Mutex<Kept>);
 
 #[derive(Default, Clone)]
 struct Kept {
-    network: Option<NetFile>,
+    networks: Vec<NetFile>,
     rosters: BTreeMap<String, Vec<roster::Entry>>,
     links: BTreeMap<String, Value>,
     services: BTreeMap<String, Vec<Value>>,
@@ -164,6 +177,7 @@ struct Kept {
     acks: BTreeMap<(String, String), Pos>,
     sharing: BTreeMap<String, Sharing>,
     mail: Vec<Mail>,
+    own_relays: Vec<String>,
 }
 
 // The entries of `had` and those of `more` past them.
@@ -174,11 +188,15 @@ fn extend<E: Clone>(had: &mut Vec<E>, more: &[E]) {
 }
 
 impl Persist for Memory {
-    fn network(&self) -> R<Option<NetFile>> {
-        Ok(self.0.locked().network.clone())
+    fn networks(&self) -> R<Vec<NetFile>> {
+        Ok(self.0.locked().networks.clone())
     }
     fn put_network(&self, n: &NetFile) -> R<()> {
-        self.0.locked().network = Some(n.clone());
+        let mut k = self.0.locked();
+        match k.networks.iter_mut().find(|had| had.id == n.id) {
+            Some(had) => *had = n.clone(),
+            None => k.networks.push(n.clone()),
+        }
         Ok(())
     }
     fn roster(&self, network: &str) -> R<Vec<roster::Entry>> {
@@ -193,7 +211,7 @@ impl Persist for Memory {
     }
     fn put_link(&self, network: &str, status: &Value) -> R<()> {
         let mut k = self.0.locked();
-        if k.network.as_ref().is_some_and(|n| n.id == network) {
+        if k.networks.iter().any(|n| n.id == network) {
             k.links.insert(network.to_string(), status.clone());
         }
         Ok(())
@@ -207,9 +225,7 @@ impl Persist for Memory {
     }
     fn forget(&self, network: &str) -> R<()> {
         let mut k = self.0.locked();
-        if k.network.as_ref().is_some_and(|n| n.id == network) {
-            k.network = None;
-        }
+        k.networks.retain(|n| n.id != network);
         k.rosters.remove(network);
         k.links.remove(network);
         k.services.remove(network);
@@ -295,6 +311,13 @@ impl Persist for Memory {
     }
     fn put_sharing(&self, network: &str, sharing: &Sharing) -> R<()> {
         self.0.locked().sharing.insert(network.to_string(), sharing.clone());
+        Ok(())
+    }
+    fn own_relays(&self) -> R<Vec<String>> {
+        Ok(self.0.locked().own_relays.clone())
+    }
+    fn put_own_relays(&self, urls: &[String]) -> R<()> {
+        self.0.locked().own_relays = urls.to_vec();
         Ok(())
     }
     fn put_mail(&self, mail: &Mail, evict: usize) -> R<bool> {

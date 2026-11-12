@@ -61,10 +61,8 @@ fn net_file(n: Network) -> NetFile {
 }
 
 impl Persist for StorePersist {
-    // One network a machine on this transport (docs/design/direction.md,
-    // phase 5 brings several): the first the store holds.
-    fn network(&self) -> R<Option<NetFile>> {
-        Ok(self.0.networks().map_err(store)?.into_iter().next().map(net_file))
+    fn networks(&self) -> R<Vec<NetFile>> {
+        Ok(self.0.networks().map_err(store)?.into_iter().map(net_file).collect())
     }
     fn put_network(&self, n: &NetFile) -> R<()> {
         self.0.put_network(&network_of(n)).map_err(store)
@@ -146,6 +144,12 @@ impl Persist for StorePersist {
     }
     fn put_sharing(&self, network: &str, sharing: &Sharing) -> R<()> {
         self.0.put_sharing(network, &sharing.to_json()).map_err(store)
+    }
+    fn own_relays(&self) -> R<Vec<String>> {
+        self.0.own_relays().map_err(store)
+    }
+    fn put_own_relays(&self, urls: &[String]) -> R<()> {
+        self.0.put_own_relays(urls).map_err(store)
     }
     fn feed_heads(&self, network: &str) -> R<Vec<(String, Pos)>> {
         self.0.feed_heads(network).map_err(store)

@@ -1028,7 +1028,7 @@ async fn the_maps_relay_frames_cross_in_batches_and_a_bucket_of_their_own() {
     // At the gateway: relay frames only in a relay batch, and nothing else
     // in one.
     let gw = a.svc.node().gateway().unwrap();
-    let desk = c.svc.node().shared();
+    let desk = c.svc.node().shared().clone();
     let net = desk.network().unwrap();
     let key = desk.key().unwrap();
     let laptop_keys = desk.roster().view().member("laptop").unwrap().keys;
@@ -1074,7 +1074,7 @@ async fn relay_and_svc_frames_never_touch_the_gateways_store() {
     let heard = Arc::new(Relays::default());
     b.svc.sinks().set_relay("hear", heard.clone());
     let gw = a.svc.node().gateway().unwrap();
-    let desk = c.svc.node().shared();
+    let desk = c.svc.node().shared().clone();
     let net = desk.network().unwrap();
     let key = desk.key().unwrap();
     let laptop_keys = desk.roster().view().member("laptop").unwrap().keys;
@@ -1088,7 +1088,8 @@ async fn relay_and_svc_frames_never_touch_the_gateways_store() {
         desk.signed_request("POST", "/net/v1/frames?relay=1", batch.into_bytes()).unwrap().0
     };
     let stored = || {
-        let db = rusqlite::Connection::open_with_flags(a.dir.join("state").join("network").join("gateway.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let db =
+            rusqlite::Connection::open_with_flags(a.dir.join("state").join("network").join(&net.id).join("gateway.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         db.query_row("SELECT count(*) FROM queue WHERE kind IN ('relay', 'svc')", [], |r| r.get::<_, i64>(0)).unwrap()
     };
     let answer = gw.handle(post(&[frame("relay", 1), frame("svc", 0), frame("relay", 2)])).await.body_json();

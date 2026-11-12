@@ -38,7 +38,7 @@ use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Instant;
 use xenonet_net::gateway::{NetBody, NetReply, NetRequest, RELAY_LIMIT, SMALL_LIMIT, UP_LIMIT};
-use xenonet_net::node::Node;
+use xenonet_net::nodes::Nodes;
 use xenonet_os::sync::Locked;
 
 pub const NET_PREFIX: &str = "/net/v1/";
@@ -64,7 +64,7 @@ pub struct Door {
     pub kind: DoorKind,
     pub actor: Option<ActorGateway>,
     /// The network's node; on the tunnel's door it's the actor gateway's.
-    pub node: Option<Arc<Node>>,
+    pub node: Option<Arc<Nodes>>,
 }
 
 /// A JSON answer, as the actor gateway writes its own.
@@ -157,7 +157,7 @@ impl Door {
         }
     }
 
-    fn node(&self) -> Option<Arc<Node>> {
+    fn node(&self) -> Option<Arc<Nodes>> {
         self.node.clone().or_else(|| self.actor.as_ref().and_then(ActorGateway::net))
     }
 
@@ -213,8 +213,13 @@ impl Door {
         if header("origin").is_some() {
             return plain(403, &json!({ "error": "the network's routes take no requests from web pages" }));
         }
-        // Only while this host is the network's gateway.
-        let Some(gateway) = self.node().and_then(|n| n.gateway()) else { return not_found() };
+        // Only while this host is the gateway of the network this door is
+        // for: a LAN door's by its address, the tunnel's the one with none.
+        let lan = match self.kind {
+            DoorKind::Lan(addr) => Some(addr.to_string()),
+            DoorKind::Tunnel { .. } => None,
+        };
+        let Some(gateway) = self.node().and_then(|n| n.gateway_at(lan.as_deref())) else { return not_found() };
         let target = req.uri().path_and_query().map_or_else(|| req.uri().path().to_string(), |p| p.as_str().to_string());
         let mut net_req = NetRequest { method: req.method().as_str().to_string(), target, headers: Vec::new(), body: Vec::new(), source: self.source(&headers, peer) };
         let path = net_req.path().to_string();
@@ -307,7 +312,7 @@ pub fn net_reply(r: NetReply) -> Reply {
 
 /// A LAN-only gateway's listener: `/net/v1/…` alone, for `addr` in `Host`.
 /// Never 0.0.0.0: the person picks an address this machine has.
-pub async fn listen_lan(addr: SocketAddr, node: Arc<Node>) -> std::io::Result<tokio::task::JoinHandle<()>> {
+pub async fn listen_lan(addr: SocketAddr, node: Arc<Nodes>) -> std::io::Result<tokio::task::JoinHandle<()>> {
     if addr.ip().is_unspecified() || addr.port() == 0 {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "a LAN address is one this machine has, with a port: never 0.0.0.0"));
     }

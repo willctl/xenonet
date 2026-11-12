@@ -159,7 +159,7 @@ struct Inner {
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     /// The network's node, whose gateway routes the front door serves
     /// while this host is the network's gateway.
-    net: std::sync::OnceLock<Arc<xenonet_net::node::Node>>,
+    net: std::sync::OnceLock<Arc<xenonet_net::nodes::Nodes>>,
     /// A2A agents' side, whose card and JSON-RPC the front door serves
     /// while the owner has it on.
     a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
@@ -207,12 +207,12 @@ impl ActorGateway {
         self.inner.port
     }
 
-    /// The network's node, for the front door's `/net/v1/` routes.
-    pub fn set_net(&self, node: Arc<xenonet_net::node::Node>) {
+    /// The networks' nodes, for the front door's `/net/v1/` routes.
+    pub fn set_net(&self, node: Arc<xenonet_net::nodes::Nodes>) {
         let _ = self.inner.net.set(node);
     }
 
-    pub fn net(&self) -> Option<Arc<xenonet_net::node::Node>> {
+    pub fn net(&self) -> Option<Arc<xenonet_net::nodes::Nodes>> {
         self.inner.net.get().cloned()
     }
 

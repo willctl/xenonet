@@ -633,8 +633,8 @@ impl Drop for Wait<'_> {
 }
 
 impl Services {
-    /// The services kept for the network this machine is in, if any.
-    pub fn open(persist: Arc<dyn Persist>) -> Services {
+    /// The services kept for `network`, if it's in one.
+    pub fn open(persist: Arc<dyn Persist>, network: Option<String>) -> Services {
         let s = Services {
             persist,
             network: RwLock::new(None),
@@ -645,14 +645,12 @@ impl Services {
             client: OnceLock::new(),
             said: Mutex::new(HashMap::new()),
         };
-        s.load();
+        s.load(network);
         s
     }
 
-    /// What's kept for the network this machine is in, in place of what
-    /// was here.
-    pub fn load(&self) {
-        let network = self.persist.network().ok().flatten().map(|n| n.id);
+    /// What's kept for `network`, in place of what was here.
+    pub fn load(&self, network: Option<String>) {
         let list = network.as_deref().and_then(|n| self.persist.services(n).ok()).map(|l| l.iter().filter_map(Published::from_json).collect()).unwrap_or_default();
         *self.network.writing() = network;
         *self.published.writing() = list;
@@ -1131,7 +1129,7 @@ mod tests {
     #[test]
     fn requests_are_checked_in_order_before_they_go() {
         let kept = in_a_network();
-        let s = Services::open(kept.clone());
+        let s = Services::open(kept.clone(), Some("net_0".into()));
         s.publish(Published::new("xenolith", "http://127.0.0.1:4790", &["/sync/v1/".into()], &["laptop".into()], 0).unwrap()).unwrap();
         let req = |name: &str, method: &str, path: &str, body: usize| Request {
             id: request_id().unwrap(),
@@ -1151,15 +1149,15 @@ mod tests {
         let (p, n) = s.check("laptop", &req("xenolith", "POST", "/sync/v1/x?a=1", REQUEST_BODY), 0.0).unwrap();
         assert_eq!((p.name.as_str(), n.target(&p.target.prefix)), ("xenolith", "/sync/v1/x?a=1".to_string()));
         // Kept, and read again.
-        assert_eq!(Services::open(kept.clone()).list(), s.list());
+        assert_eq!(Services::open(kept.clone(), Some("net_0".into())).list(), s.list());
         assert!(s.unpublish("xenolith").unwrap());
         assert!(!s.unpublish("xenolith").unwrap());
-        assert_eq!(Services::open(kept).list(), Vec::new());
+        assert_eq!(Services::open(kept, Some("net_0".into())).list(), Vec::new());
     }
 
     #[test]
     fn a_caller_hears_only_from_the_host_it_asked() {
-        let s = Services::open(in_a_network());
+        let s = Services::open(in_a_network(), Some("net_0".into()));
         let mut w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
         assert!(!s.answered("desk", "svq_00000000000000000000000000000001", Answer::refused(200, "x", "x")), "another host can't answer it");
         assert!(w.answer.try_recv().is_err());
@@ -1176,7 +1174,7 @@ mod tests {
 
     #[test]
     fn a_wait_ends_when_its_call_goes() {
-        let s = Services::open(in_a_network());
+        let s = Services::open(in_a_network(), Some("net_0".into()));
         // The program that asked went away: its call, and the wait in it,
         // are dropped before any answer.
         let w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
@@ -1194,7 +1192,7 @@ mod tests {
 
     #[test]
     fn no_one_caller_holds_every_forwarding_slot() {
-        let s = Services::open(in_a_network());
+        let s = Services::open(in_a_network(), Some("net_0".into()));
         let laptop: Vec<Flight<'_>> = (0..IN_FLIGHT_EACH).map(|_| s.fly("laptop").ok().unwrap()).collect();
         assert_eq!(s.fly("laptop").err().map(|a| a.status), Some(503));
         let others: Vec<Flight<'_>> = (0..IN_FLIGHT - IN_FLIGHT_EACH).map(|i| s.fly(&format!("host{}", i / IN_FLIGHT_EACH)).ok().unwrap()).collect();

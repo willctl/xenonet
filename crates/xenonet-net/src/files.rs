@@ -1,10 +1,12 @@
-//! A host's network (docs/design/network.md, "The wire"): the network,
+//! A host's networks (docs/design/network.md, "The wire"): each network,
 //! this host's id in it, and the gateway's address and pinned key
 //! (`NetFile`), the roster, how the link last stood, which the doctor
 //! reads, and the services this host published, all kept through
-//! `Persist`; and the files in `<state>/network/`: this host's key and, on
-//! the gateway's host, the network's queues. Who may start and wake sessions here is the network's
-//! chain's (each member's `settings` entry).
+//! `Persist`; and the files in `<state>/network/`: this machine's key,
+//! one for every network it's in (one endpoint), and a folder for each
+//! network by its id, with the network's queues on its gateway's host.
+//! Who may start and wake sessions here is the network's chain's (each
+//! member's `settings` entry).
 
 use crate::persist::Persist;
 use crate::roster::{NetworkPolicy, Roster};
@@ -111,8 +113,24 @@ impl Dir {
         self.path.join(name)
     }
 
+    /// A file of one network's own, in its folder, which is made.
+    pub fn net_file(&self, network: &str, name: &str) -> R<PathBuf> {
+        if !network.starts_with("net_") || !network[4..].bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err(crate::NetError::internal(format!("{network} isn't a network's id")));
+        }
+        let dir = self.path.join(network);
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir.join(name))
+    }
+
+    /// The first network this machine is in, if it's in one.
     pub fn read_network(&self) -> R<Option<NetFile>> {
         self.persist.network()
+    }
+
+    /// Every network this machine is in, first joined first.
+    pub fn read_networks(&self) -> R<Vec<NetFile>> {
+        self.persist.networks()
     }
 
     /// `<state>/identity`, beside this folder: the person's keys on this
@@ -142,19 +160,23 @@ impl Dir {
         self.persist.link(network).ok().flatten()
     }
 
-    /// Forgets the network: what's kept of it, and every file here, the
-    /// key with them.
-    pub fn forget(&self) -> R<()> {
-        if let Some(n) = self.persist.network()? {
-            self.persist.forget(&n.id)?;
+    /// Forgets `network`: what's kept of it and its folder, and the key
+    /// with them when it was the `last` this machine was in.
+    pub fn forget(&self, network: &str, last: bool) -> R<()> {
+        self.persist.forget(network)?;
+        let gone = |path: PathBuf| match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+        let own = self.net_file(network, GATEWAY_DB)?;
+        for f in [GATEWAY_DB.to_string(), format!("{GATEWAY_DB}-wal"), format!("{GATEWAY_DB}-shm")] {
+            gone(own.with_file_name(f))?;
         }
-        for name in [KEY, GATEWAY_DB] {
-            for f in [name.to_string(), format!("{name}-wal"), format!("{name}-shm")] {
-                match std::fs::remove_file(self.file(&f)) {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-                    _ => {}
-                }
-            }
+        if let Some(dir) = own.parent() {
+            let _ = std::fs::remove_dir(dir);
+        }
+        if last {
+            gone(self.file(KEY))?;
         }
         Ok(())
     }

@@ -20,6 +20,7 @@ use xenonet_net::frame::{host_frame, Draft};
 use xenonet_net::identity::Identity;
 use xenonet_net::keys::HostKey;
 use xenonet_net::node::{Batch, Node, Options};
+use xenonet_net::nodes::Nodes;
 use xenonet_net::persist::{Memory, Persist};
 use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster, ADMIT};
 use xenonet_net::sink::{LogSink, SinkSlot};
@@ -107,7 +108,8 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey,
     o.vault = Some(vault);
     let c = clock.clone();
     o.clock = Arc::new(move || c.load(Ordering::SeqCst) as f64);
-    let node = Node::open(o, Arc::new(SinkSlot::new(Arc::new(LogSink::new(Arc::new(|_: &str, _: &str| {})))))).unwrap();
+    let nodes = Nodes::open(o, Arc::new(SinkSlot::new(Arc::new(LogSink::new(Arc::new(|_: &str, _: &str| {})))))).unwrap();
+    let node = nodes.first();
     (dir, node, clock, studio, laptop)
 }
 

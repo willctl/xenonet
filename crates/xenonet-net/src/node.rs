@@ -83,6 +83,7 @@ impl Default for Timing {
     }
 }
 
+#[derive(Clone)]
 pub struct Options {
     /// `<state>/network`.
     pub dir: PathBuf,
@@ -268,12 +269,65 @@ pub struct Shared {
     /// This host's own agents as its presence lists them, and whether each
     /// waits on the person, for its row: `peers` has only the others.
     me_agents: Mutex<BTreeMap<String, bool>>,
+    /// What this machine's networks share: its person, link/2, its HLC,
+    /// and the list of them.
+    pub(crate) common: Arc<Common>,
+    /// The sessions each member was shown through the gateway, so a delta
+    /// names no other (`share::presence_for`).
+    shown: Mutex<HashMap<String, std::collections::BTreeSet<String>>>,
+}
+
+/// What every network this machine is in shares: the person here, one
+/// link/2 endpoint (one connection per peer, whatever networks it
+/// carries), the entries taken lately, the HLC, and the networks
+/// themselves, in the order this machine founded or joined them.
+pub struct Common {
+    pub identity: Arc<Identity>,
     /// link/2, while it runs.
-    link2: RwLock<Option<Arc<link2n::Transport2>>>,
+    pub(crate) link2: RwLock<Option<Arc<link2n::Transport2>>>,
     /// The entries taken lately and the way each came, so the second of
     /// the two copies dual sending makes is dropped.
-    taken: Mutex<link2n::Taken>,
-    clocks: Mutex<link2n::Clocks>,
+    pub(crate) taken: Mutex<link2n::Taken>,
+    pub(crate) clocks: Mutex<link2n::Clocks>,
+    /// The networks, first founded or joined first.
+    nets: RwLock<Vec<Weak<Shared>>>,
+    /// When this machine last exchanged chain heads with a member of each
+    /// network (a hello on link/2), by its clock.
+    pub(crate) heads_at: Mutex<HashMap<String, f64>>,
+    /// A network's relays or members changed: `Nodes` looks at the
+    /// endpoint's relays again.
+    pub(crate) relays_due: Notify,
+    /// The sessions each peer was shown on link/2.
+    pub(crate) shown: Mutex<HashMap<crate::dial::PeerId, std::collections::BTreeSet<String>>>,
+}
+
+impl Common {
+    pub fn new(identity: Arc<Identity>) -> Arc<Common> {
+        Arc::new(Common {
+            identity,
+            link2: RwLock::new(None),
+            taken: Mutex::new(link2n::Taken::default()),
+            clocks: Mutex::new(link2n::Clocks::default()),
+            nets: RwLock::new(Vec::new()),
+            heads_at: Mutex::new(HashMap::new()),
+            relays_due: Notify::new(),
+            shown: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// The networks this machine is in, in order: each one's node.
+    pub fn shareds(&self) -> Vec<Arc<Shared>> {
+        self.nets.reading().iter().filter_map(Weak::upgrade).filter(|s| s.network().is_some()).collect()
+    }
+
+    /// The node of `network`, when this machine is in it.
+    pub fn shared_of(&self, network: &str) -> Option<Arc<Shared>> {
+        self.shareds().into_iter().find(|s| s.network().is_some_and(|n| n.id == network))
+    }
+
+    pub(crate) fn set_nets(&self, nets: Vec<Weak<Shared>>) {
+        *self.nets.writing() = nets;
+    }
 }
 
 /// How full the outbox is.
@@ -356,6 +410,10 @@ impl Outbox {
 
 /// How many kept entries are read at a time to go to a member again.
 const RESEND: usize = 500;
+
+/// How long after its chain was last synced with a member a network still
+/// counts as in contact (question 3, revision 21).
+pub const IN_CONTACT_MS: i64 = 10 * 60 * 1000;
 
 /// Where a writer stands, as `Persist` keeps it.
 fn writer_at(w: &Writer) -> WriterAt {
@@ -500,23 +558,29 @@ impl Shared {
         self.network().filter(|n| n.id == network)
     }
 
-    /// What the person shares into `network`: what they said, or the
-    /// default, everything for the first network and nothing for the rest.
+    /// What the person shares into `network`: what they said, or
+    /// everything. A network joined or founded after the first is given
+    /// "nothing" when it's adopted, so no row means the first.
     pub fn sharing(&self, network: &str) -> crate::share::Sharing {
-        let first = self.network().is_some_and(|n| n.id == network);
-        self.opts.persist.sharing(network).ok().flatten().unwrap_or_else(|| crate::share::Sharing::default_for(first))
+        self.opts.persist.sharing(network).ok().flatten().unwrap_or(crate::share::Sharing::All)
     }
 
-    /// What each network `host` is in with this machine shares: what it
-    /// may be shown, the union of them.
+    /// What each network `host` (a member of this one) is in with this
+    /// machine shares: what it may be shown, the union of them. A machine
+    /// is the same machine across networks by its signing key, whatever
+    /// its host id in each.
     pub fn sharings_with(&self, host: &str) -> Vec<crate::share::Sharing> {
-        let Some(net) = self.network() else { return Vec::new() };
-        let member = self.roster().view_ref().is_some_and(|v| v.member(host).is_some());
-        if member {
-            vec![self.sharing(&net.id)]
-        } else {
-            Vec::new()
-        }
+        let Some(machine) = self.roster().view_ref().and_then(|v| v.member(host).map(|m| m.machine.id())) else { return Vec::new() };
+        self.common
+            .shareds()
+            .iter()
+            .filter(|s| !s.is_removed())
+            .filter_map(|s| {
+                let net = s.network()?;
+                s.roster().view_ref()?.by_machine(&machine)?;
+                Some(s.sharing(&net.id))
+            })
+            .collect()
     }
 
     pub fn key(&self) -> Option<Arc<HostKey>> {
@@ -532,16 +596,24 @@ impl Shared {
         &self.identity
     }
 
-    /// When governance (the chains) was last synced from another member:
-    /// now on the gateway's host, which every entry passes through; else
-    /// the gateway's last word on the link.
+    /// When governance (this network's chain) was last synced from another
+    /// member, which "in contact" is decided by, for this network alone:
+    /// now on the gateway's host, which every entry passes through, and
+    /// while link/2 holds a connection to a member of it; else the later
+    /// of the gateway's last word on the link and the last hello (chain
+    /// heads exchanged) on link/2.
     pub fn synced_at(&self) -> Option<i64> {
-        self.network()?;
-        if self.is_gateway() {
+        let net = self.network()?;
+        if self.is_gateway() || self.link2().is_some_and(|t| t.links.peers().values().any(|p| p.networks.contains(&net.id))) {
             return Some(self.gateway_now() as i64);
         }
-        let s = self.status.locked();
-        s.last_ok.map(|t| (t + s.offset_ms) as i64)
+        let gateway = {
+            let s = self.status.locked();
+            s.last_ok.map(|t| (t + s.offset_ms) as i64)
+        };
+        let offset = self.status.locked().offset_ms;
+        let hello = self.common.heads_at.locked().get(&net.id).map(|t| (t + offset) as i64);
+        gateway.max(hello)
     }
 
     /// The facts a decision here rests on, as of now.
@@ -604,7 +676,7 @@ impl Shared {
 
     /// Pushes entries of this machine's person's chain to the network's
     /// other machines, as `message` frames to `xenonet:person`.
-    fn push_person(&self, from: u64) {
+    pub(crate) fn push_person(&self, from: u64) {
         let Some(person) = self.identity.person_id() else { return };
         let entries = self.identity.since(&person, from);
         if entries.is_empty() || self.network().is_none() {
@@ -2094,11 +2166,8 @@ impl Net for Shared {
                 To::All => v.members.values().filter(|m| m.id != net.host).map(|m| (m.id.clone(), m.keys)).collect(),
             }
         };
-        // On link/2, what changed, once for every member connected now; a
-        // member that connects later gets the whole of it on connect.
-        if out.kind == Kind::Presence {
-            self.link2_presence(&net, &body);
-        }
+        // On link/2, what changed goes once to each peer, whatever networks
+        // it shares with this machine: `Nodes`' send does that.
         let at = self.gateway_now() as i64;
         let now = self.now() as i64;
         for (to, keys) in targets {
@@ -2106,7 +2175,8 @@ impl Net for Shared {
             // it is in with it.
             let shown;
             let body = if out.kind == Kind::Presence {
-                shown = crate::share::presence_for(&body, &self.sharings_with(&to));
+                let sharings = self.sharings_with(&to);
+                shown = crate::share::presence_for(&body, &sharings, self.shown.locked().entry(to.clone()).or_default());
                 &shown
             } else {
                 &body
@@ -2140,12 +2210,13 @@ pub struct Node {
 }
 
 impl Node {
-    /// The node, as its files leave it; nothing runs until `start`.
-    pub fn open(opts: Options, sink: Arc<SinkSlot>) -> R<Arc<Node>> {
+    /// The node of `net` (None: a node in no network yet, which `create`
+    /// or a join puts in one), as its files leave it, sharing `common`
+    /// with this machine's other networks; nothing runs until `start`.
+    pub fn open_in(opts: Options, sink: Arc<SinkSlot>, common: Arc<Common>, net: Option<NetFile>) -> R<Arc<Node>> {
         let dir = Dir::new(opts.dir.clone(), opts.persist.clone());
-        let identity = Identity::open(dir.identity_dir(), opts.persist.clone(), opts.vault.clone())?;
+        let identity = common.identity.clone();
         let policy = NetworkPolicy::with(identity.clone());
-        let net = dir.read_network()?;
         let (key, roster, cursor) = match &net {
             Some(n) => {
                 let key = HostKey::load(&dir.file(KEY))?.ok_or_else(|| NetError::internal("this host's key is missing"))?;
@@ -2154,7 +2225,7 @@ impl Node {
             }
             None => (None, Roster::with_policy(policy), (None, 0)),
         };
-        let services = Services::open(opts.persist.clone());
+        let services = Services::open(opts.persist.clone(), net.as_ref().map(|n| n.id.clone()));
         let shared = Arc::new_cyclic(|this| Shared {
             this: this.clone(),
             opts,
@@ -2183,17 +2254,9 @@ impl Node {
             signed: Mutex::new(Vec::new()),
             me_you: Mutex::new((false, None)),
             me_agents: Mutex::new(BTreeMap::new()),
-            link2: RwLock::new(None),
-            taken: Mutex::new(link2n::Taken::default()),
-            clocks: Mutex::new(link2n::Clocks::default()),
+            common,
+            shown: Mutex::new(HashMap::new()),
         });
-        // What the person appends here, the network's other machines hear.
-        let weak = Arc::downgrade(&shared);
-        identity.on_append(Box::new(move |e| {
-            if let Some(n) = weak.upgrade() {
-                n.push_person(e.n);
-            }
-        }));
         Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()), invites: join2::Invites::default() }))
     }
 
@@ -2224,7 +2287,7 @@ impl Node {
         }
         let mut tasks = Vec::new();
         let transport = if n.is_gateway() {
-            let g = Gateway::new(Arc::downgrade(n), GwStore::open(&n.dir.file(GATEWAY_DB))?)?;
+            let g = Gateway::new(Arc::downgrade(n), GwStore::open(&n.dir.net_file(&net.id, GATEWAY_DB)?)?)?;
             *n.gateway.writing() = Some(g.clone());
             let weak = Arc::downgrade(&g);
             tasks.push(tokio::spawn(async move {
@@ -2244,19 +2307,18 @@ impl Node {
             link::http(address)?
         };
         tasks.extend(link::spawn(n.clone(), transport));
-        if n.opts.link {
-            tasks.push(tokio::spawn(link2n::run(Arc::downgrade(n))));
-        }
         *self.tasks.locked() = tasks;
+        // link/2 is the machine's, for every network at once (`Nodes`).
+        n.members_changed();
         Ok(())
     }
 
-    /// Stops the link and the gateway: its streams end.
+    /// Stops the link and the gateway: its streams end. link/2 is the
+    /// machine's, and stops with `Nodes`.
     pub fn stop(&self) {
         for t in self.tasks.locked().drain(..) {
             t.abort();
         }
-        link2n::stop(&self.shared);
         if let Some(g) = self.shared.gateway.writing().take() {
             g.stop();
         }
@@ -2281,9 +2343,19 @@ impl Node {
 
     fn adopt(&self, net: NetFile, key: HostKey, roster: Roster) -> R<()> {
         let n = &self.shared;
+        let net_id = net.id.clone();
+        if let Some(had) = n.common.shared_of(&net.id).and_then(|s| s.network()) {
+            return Err(NetError::new(409, "in-network", format!("this machine is in the network {} already, as {}", had.name, had.host)));
+        }
         // The network's row before its roster, which is kept under it.
         n.dir.write_network(&net)?;
         n.dir.write_roster(&net.id, &roster)?;
+        // The first network this machine is in sees all of it; every one
+        // after starts with nothing, until the person shares projects
+        // into it at the window (`share`).
+        if n.common.shareds().iter().any(|s| s.network().is_some_and(|o| o.id != net.id)) && n.opts.persist.sharing(&net.id)?.is_none() {
+            n.opts.persist.put_sharing(&net.id, &crate::share::Sharing::default_for(false))?;
+        }
         *n.outbox.locked() = Outbox::default();
         *n.cursor.locked() = (None, 0);
         *n.writer.locked() = None;
@@ -2292,7 +2364,7 @@ impl Node {
         *n.net.writing() = Some(net);
         *n.status.locked() = Status::default();
         n.peers.locked().clear();
-        n.svc.load();
+        n.svc.load(Some(net_id));
         Ok(())
     }
 
@@ -2305,8 +2377,8 @@ impl Node {
     /// another machine.
     pub fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
-        if let Some(net) = n.network() {
-            return Err(NetError::new(409, "in-network", format!("this machine is in the network {} already: xenonet net leave first", net.name)));
+        if n.network().is_some() {
+            return Err(NetError::internal("a network is made on a node in none (Nodes::create)"));
         }
         let name = name.trim();
         if name.is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
@@ -2350,8 +2422,8 @@ impl Node {
     /// `xenonet net join <address> <ticket>`.
     pub async fn join(&self, address: &str, typed: &str) -> R<Value> {
         let n = &self.shared;
-        if let Some(net) = n.network() {
-            return Err(NetError::new(409, "in-network", format!("this machine is in the network {} already: xenonet net leave first", net.name)));
+        if n.network().is_some() {
+            return Err(NetError::internal("a network is joined on a node in none (Nodes::join)"));
         }
         let address = address.trim().trim_end_matches('/');
         if address.is_empty() || address.len() > 300 || address.chars().any(|c| c.is_whitespace() || c.is_control()) {
@@ -2471,17 +2543,27 @@ impl Node {
         if let Some(g) = gateway {
             g.close();
         }
+        // Nothing of this network on link/2 from now; the connections the
+        // other networks share stay.
+        if let Some(t) = n.link2() {
+            t.mesh.leave(&net.id);
+        }
+        // The key and the other people's chains stay while another network
+        // needs them.
+        let last = !n.common.shareds().iter().any(|s| s.network().is_some_and(|o| o.id != net.id));
         *n.outbox.locked() = Outbox::default();
         *n.cursor.locked() = (None, 0);
         *n.writer.locked() = None;
-        n.dir.forget()?;
+        n.dir.forget(&net.id, last)?;
         *n.key.writing() = None;
         *n.roster.writing() = Roster::with_policy(NetworkPolicy::with(n.identity.clone()));
         *n.net.writing() = None;
         *n.status.locked() = Status::default();
         n.peers.locked().clear();
         n.svc.forget();
-        n.identity.forget_others();
+        if last {
+            n.identity.forget_others();
+        }
         self.invites.close();
         n.log("net.leave", &format!("this machine left the network {}", net.name));
         Ok(json!({ "left": net.name, "removed": asked, "founder": founder }))
@@ -2729,6 +2811,84 @@ impl Node {
         Ok(self.state())
     }
 
+    /// This network as `network/state/v1`'s `networks` lists it: its id
+    /// and name, this machine's host id in it, its members, gateway, link
+    /// and settings, and what the person shares into it.
+    pub fn network_json(&self) -> Value {
+        Node::network_of(&self.state())
+    }
+
+    /// `network_json` from this network's `state`.
+    pub fn network_of(s: &Value) -> Value {
+        let net = s.get("network").cloned().unwrap_or(Value::Null);
+        let mut out = json!({ "id": net["id"], "name": net["name"], "host": s["self"]["id"] });
+        for k in [
+            "self",
+            "gateway",
+            "hosts",
+            "tickets",
+            "invites",
+            "outbox",
+            "rosterHead",
+            "rosterMismatch",
+            "frozen",
+            "titlesOnly",
+            "shareLoad",
+            "start",
+            "wake",
+            "delegated",
+            "relays",
+            "mailboxes",
+            "sharing",
+            "inContact",
+            "proposals",
+            "removed",
+            "lan",
+        ] {
+            if let Some(v) = s.get(k) {
+                out[k] = v.clone();
+            }
+        }
+        out
+    }
+
+    /// The relays the network lists, in place of what it had: `urls` put
+    /// in (`add`) or taken out. Adding widens what reaches the network, so
+    /// it takes the founder with the person's presence, or waits for a
+    /// second admin (the decided table), from the window; taking one out
+    /// is done at once.
+    pub async fn set_relays(&self, urls: &[String], add: bool, at_window: bool) -> R<Value> {
+        let n = &self.shared;
+        let (net, _) = self.me()?;
+        let had = n.roster().view().relays;
+        let mut to = had.clone();
+        if add {
+            for u in urls {
+                if !to.contains(u) {
+                    to.push(u.clone());
+                }
+            }
+        } else {
+            to.retain(|u| !urls.contains(u));
+        }
+        if to == had {
+            return Ok(self.state());
+        }
+        if to.len() > xenonet_log::network::MAX_RELAYS {
+            return Err(NetError::bad(format!("a network lists at most {} relays", xenonet_log::network::MAX_RELAYS)));
+        }
+        let me = n.roster().host_ref(&net.host).ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
+        let mut e = n.draft(Op::Relays, me, None);
+        e.relays = Some(to);
+        let now = n.gateway_now() as i64;
+        let presence = match e.presence_for(&n.roster().view()) {
+            Some(what) => Some(n.identity.prove(at_window, what, &e.digest(), "let your network's machines reach each other through another relay", now)?),
+            None => None,
+        };
+        e.sign_with(&net.host, n.identity.machine_key()?.as_ref(), presence)?;
+        self.decide_entry(e, "this machine asked to add a relay to the network; the founder or another window host approves it").await
+    }
+
     /// `network/state/v1`: the network, this host, its gateway and link,
     /// the hosts, the tickets waiting, the outbox and the queues.
     pub fn state(&self) -> Value {
@@ -2798,7 +2958,7 @@ impl Node {
                 "reach": n.reach_of(id).to_json(),
                 "can": if me { json!(xenonet_model::ops::CAN) } else { json!(p.map(|p| p.can.clone()).unwrap_or_default()) },
                 "path": if me { None } else { on_link.get(&crate::endpoint::peer_id(&m.keys)).and_then(|l| l.path) },
-                "found": if me { None } else { found.get(id).map(|f| f.iter().copied().collect::<Vec<_>>()) },
+                "found": if me { None } else { found.get(&(net.id.clone(), id.clone())).map(|f| f.iter().copied().collect::<Vec<_>>()) },
                 "skewMs": if me { None } else { on_link.get(&crate::endpoint::peer_id(&m.keys)).and_then(|l| l.skew_ms) },
                 // This machine's entries a mailbox holds for it, not
                 // delivered yet.
@@ -2866,18 +3026,8 @@ impl Node {
             "relays": view.relays,
             "mailboxes": view.mailboxes,
         });
-        // Every network this machine is in, each with its own members: one
-        // on the gateway's path (several come with commit 13).
-        out["networks"] = json!([{
-            "id": net.id,
-            "name": net.name,
-            "host": net.host,
-            "hosts": out["hosts"].clone(),
-            "relays": out["relays"].clone(),
-            "mailboxes": out["mailboxes"].clone(),
-            "frozen": out["frozen"].clone(),
-            "sharing": n.sharing(&net.id).to_json(),
-        }]);
+        out["sharing"] = n.sharing(&net.id).to_json();
+        out["inContact"] = json!(n.synced_at().is_some_and(|t| n.gateway_now() as i64 - t <= IN_CONTACT_MS));
         out["invites"] = self.invites.json(now as i64);
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());

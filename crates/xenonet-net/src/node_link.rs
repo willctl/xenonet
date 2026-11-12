@@ -42,8 +42,15 @@
 //! its presence, which the gateway carries sealed, and on each link/2
 //! connection's control stream. mDNS on the LAN joins in when the machine's
 //! setting is on. A relay is used only when the network's chain lists one.
+//!
+//! **Several networks.** The endpoint is the machine's, one for every
+//! network it is in, with one connection per peer: each connection carries
+//! the networks both are in by this machine's chains, and whatever arrives
+//! goes to the node of the network it names, which checks the peer against
+//! its own chain. Its relays are the machine's (`nodes::home`): the ones
+//! every network lists, and the ones it adds of its own.
 
-use super::{json, Arc, Duration, Locked, NetFile, ReadWrite, Shared, Value, Weak, RESEND};
+use super::{json, Arc, Common, Duration, Locked, NetFile, ReadWrite, Shared, Value, Weak, RESEND};
 use crate::dial::{Close, Dial, Mesh, PeerId};
 use crate::endpoint::{peer_id, IrohDial, Relay, Relays, Settings};
 use crate::envelope::{Class as EnvClass, Envelope, Me as Recipient};
@@ -111,11 +118,12 @@ pub struct Transport2 {
     pub dial: Arc<IrohDial>,
     pub mesh: Arc<Mesh>,
     pub links: Arc<Links>,
-    /// The ways each member's address was found, by host id: in its
-    /// presence through the gateway, or in a record on link/2.
-    pub found: std::sync::Mutex<std::collections::BTreeMap<String, std::collections::BTreeSet<&'static str>>>,
-    /// This machine's own address record, and when it was signed.
-    record: std::sync::Mutex<Option<(Value, Instant)>>,
+    /// The ways each member's address was found, by network and host id:
+    /// in its presence through the gateway, or in a record on link/2.
+    pub found: std::sync::Mutex<std::collections::BTreeMap<(String, String), std::collections::BTreeSet<&'static str>>>,
+    /// This machine's own address record in each network, and when it was
+    /// signed.
+    record: std::sync::Mutex<HashMap<String, (Value, Instant)>>,
     /// The feeds with a gap and the holders asked, and the requesters this
     /// machine serves as a holder.
     pub fetching: std::sync::Mutex<Fetching>,
@@ -134,11 +142,11 @@ pub struct Clocks {
     pub hlc: Clock,
 }
 
-struct NodeMachine(Weak<Shared>);
+struct NodeMachine(Weak<Common>);
 
 impl Shared {
     pub fn link2(&self) -> Option<Arc<Transport2>> {
-        self.link2.reading().clone()
+        self.common.link2.reading().clone()
     }
 
     /// The member whose transport key is `peer`'s endpoint id.
@@ -150,33 +158,39 @@ impl Shared {
         self.identity.machine_key().ok().map(|k| k.public().id())
     }
 
-    /// The chain's members on link/2: admitted, and kept connected.
+    /// The chain's members on link/2: admitted, and kept connected. A
+    /// machine removed from the network carries nothing of it from now on,
+    /// on connections its other networks keep.
     pub fn members_changed(&self) {
         let (Some(t), Some(net)) = (self.link2(), self.network()) else { return };
-        let (members, first): (Vec<PeerId>, Vec<(PeerId, bool)>) = self
-            .roster()
-            .view_ref()
-            .map(|v| {
-                let ms: Vec<PeerId> = v.members.values().map(|m| peer_id(&m.keys)).collect();
-                let first = v.members.values().map(|m| (peer_id(&m.keys), v.is_window(&m.id) || v.is_mailbox(&m.id))).collect();
-                (ms, first)
-            })
-            .unwrap_or_default();
-        t.mesh.set_members(&net.id, members.iter().copied());
-        // Every member up to fifty machines: presence holds only while a
-        // connection is up.
-        t.links.keep(live::keep(&first, t.dial.me()));
+        if self.is_removed() {
+            t.mesh.leave(&net.id);
+        } else {
+            let members: Vec<PeerId> = self.roster().view_ref().map(|v| v.members.values().map(|m| peer_id(&m.keys)).collect()).unwrap_or_default();
+            t.mesh.set_members(&net.id, members);
+        }
+        keep_all(&self.common, &t);
+        self.common.relays_due.notify_one();
+    }
+
+    /// The members this network wants kept connected, each with whether it
+    /// goes first (a window host or a mailbox).
+    fn kept_members(&self) -> Vec<(PeerId, bool)> {
+        if self.is_removed() {
+            return Vec::new();
+        }
+        self.roster().view_ref().map(|v| v.members.values().map(|m| (peer_id(&m.keys), v.is_window(&m.id) || v.is_mailbox(&m.id))).collect()).unwrap_or_default()
     }
 
     /// Takes an entry another member's feed sent, which came `via`: once,
     /// whichever way came first. Its time moves this machine's HLC, never
     /// more than five minutes past its own clock.
     pub(super) fn take_entry(&self, host: String, v: Verified, authority: Value, window: bool, via: Via) -> bool {
-        if !self.taken.locked().take(&v.id(), via) {
+        if !self.common.taken.locked().take(&v.id(), via) {
             return false;
         }
         let now = self.now().max(0.0) as u64;
-        self.clocks.locked().hlc.receive(Hlc::new(v.at, 0), now);
+        self.common.clocks.locked().hlc.receive(Hlc::new(v.at, 0), now);
         if v.kind == xenonet_log::feed::Kind::Message && v.body.get("target").and_then(Value::as_str) == Some(super::PERSON_TARGET) {
             return self.decide_member(&host) && self.person_in(&host, &v.body);
         }
@@ -186,13 +200,13 @@ impl Shared {
 
     /// How many copies were dropped for coming second, the other way.
     pub fn second_copies(&self) -> u64 {
-        self.taken.locked().second
+        self.common.taken.locked().second
     }
 
     /// How far this machine's HLC is ahead of its clock, in ms.
     pub fn hlc_ahead_ms(&self) -> i64 {
         let now = self.now().max(0.0) as u64;
-        let last = self.clocks.locked().hlc.last().ms();
+        let last = self.common.clocks.locked().hlc.last().ms();
         i64::try_from(last).unwrap_or(i64::MAX).saturating_sub(i64::try_from(now).unwrap_or(i64::MAX)).max(0)
     }
 
@@ -281,13 +295,17 @@ impl Shared {
         }
     }
 
-    /// The receipts this machine owes as a mailbox, signed and sent.
+    /// The receipts this machine owes as a mailbox, signed and sent, each
+    /// as its network names this machine.
     fn send_receipts(&self) {
-        let (Some(t), Some(net), Ok(key)) = (self.link2(), self.network(), self.identity.machine_key()) else { return };
+        let (Some(t), Ok(key)) = (self.link2(), self.identity.machine_key()) else { return };
         let now = self.now().max(0.0) as u64;
-        let receipts = t.post.locked().batcher.take(&net.host, now);
-        let view = self.roster().view();
+        let receipts = t.post.locked().batcher.take("", now);
         for mut h in receipts {
+            let Some(n) = self.common.shared_of(&h.network) else { continue };
+            let Some(net) = n.network() else { continue };
+            h.mailbox = net.host;
+            let view = n.roster().view();
             let Some(author) = view.by_machine(&h.author).map(|m| peer_id(&m.keys)) else { continue };
             if let Err(e) = h.sign(key.as_ref()) {
                 self.log("net.link2", &format!("a receipt wasn't signed: {}", e.message));
@@ -306,27 +324,14 @@ impl Shared {
         let _ = t.links.send(peer_id(&m.keys), Out::Control(c));
     }
 
-    /// This machine's presence on link/2, as the engine just said it: what
-    /// changed goes to each member connected now, shared down to what this
-    /// machine shares with it; nothing goes when nothing changed. Live:
-    /// never kept or forwarded.
-    pub(super) fn link2_presence(&self, net: &NetFile, body: &Value) {
-        let Some(t) = self.link2() else { return };
-        let peers: Vec<PeerId> = t.links.peers().into_iter().filter(|(_, s)| s.networks.contains(&net.id)).map(|(p, _)| p).collect();
-        let out = t.presence.locked().changed(body, &peers);
-        for (peer, b) in out {
-            if let Some(env) = self.live_for(net, peer, &b) {
-                let _ = t.links.send(peer, Out::Envelope(env));
-            }
-        }
-    }
-
-    /// A presence body as the live envelope for `peer`, shared down to
-    /// what this machine shares with it.
+    /// A presence body as the live envelope for `peer` in this network,
+    /// shared down to what this machine shares with it in every network
+    /// they're both in.
     fn live_for(&self, net: &NetFile, peer: PeerId, body: &Value) -> Option<Envelope> {
         let author = self.machine_id()?;
         let host = self.member_at(peer)?.id;
-        let shown = crate::share::presence_for(body, &self.sharings_with(&host));
+        let sharings = self.sharings_with(&host);
+        let shown = crate::share::presence_for(body, &sharings, self.common.shown.locked().entry(peer).or_default());
         match Envelope::live(&net.id, &author, "presence", self.now().max(0.0) as u64, &shown) {
             Ok(env) => Some(env),
             Err(e) => {
@@ -336,39 +341,31 @@ impl Shared {
         }
     }
 
-    /// The peers whose connection has been gone 30 s: their presence ends
-    /// here. While the gateway's link is up, its path carries presence and
-    /// says who is online, so this is link/2's alone once it goes (phase 5's
-    /// commit 20). When to look again.
-    fn presence_due(&self) -> Option<u64> {
-        let t = self.link2()?;
-        let now = self.now().max(0.0) as u64;
-        let ended = t.presence.locked().theirs.expired(now);
-        let net = self.network();
-        for e in ended {
-            if self.is_live() {
-                continue;
-            }
-            let Some(net) = net.as_ref().filter(|n| n.id == e.network) else { continue };
-            if let Some(p) = self.peers.locked().get_mut(&e.host) {
-                p.online = false;
-            }
-            self.log("net.link2", &format!("{}'s presence ended: its link/2 connection has been gone 30 s", e.host));
-            let window = self.roster().view_ref().is_some_and(|v| v.is_window(&e.host));
-            xenonet_model::ops::Sink::receive(
-                self.sink.as_ref(),
-                xenonet_model::ops::Incoming {
-                    network: net.id.clone(),
-                    from: e.host,
-                    kind: xenonet_model::ops::Kind::Presence,
-                    body: e.body,
-                    at: self.now(),
-                    from_window_host: window,
-                },
-            );
+    /// A peer whose presence this network's node took has had no
+    /// connection for 30 s: its presence ends here. While the gateway's
+    /// link is up, its path carries presence and says who is online, so
+    /// this is link/2's alone once it goes (phase 5's commit 20).
+    fn presence_ended(&self, e: live::Ended) {
+        let Some(net) = self.network() else { return };
+        if self.is_live() {
+            return;
         }
-        let next = t.presence.locked().theirs.next_due();
-        next
+        if let Some(p) = self.peers.locked().get_mut(&e.host) {
+            p.online = false;
+        }
+        self.log("net.link2", &format!("{}'s presence ended: its link/2 connection has been gone 30 s", e.host));
+        let window = self.roster().view_ref().is_some_and(|v| v.is_window(&e.host));
+        xenonet_model::ops::Sink::receive(
+            self.sink.as_ref(),
+            xenonet_model::ops::Incoming {
+                network: net.id.clone(),
+                from: e.host,
+                kind: xenonet_model::ops::Kind::Presence,
+                body: e.body,
+                at: self.now(),
+                from_window_host: window,
+            },
+        );
     }
 
     /// This machine's address record in its network, signed by its machine
@@ -378,7 +375,7 @@ impl Shared {
         let net = self.network()?;
         {
             let had = t.record.locked();
-            if let Some((v, at)) = had.as_ref() {
+            if let Some((v, at)) = had.get(&net.id) {
                 if at.elapsed() < Duration::from_secs(ADDRESS_TTL_S / 2) {
                     return Some(v.clone());
                 }
@@ -391,13 +388,14 @@ impl Shared {
         let mut addrs: Vec<String> = t.dial.direct_addrs().into_iter().filter(|a| a.port() != 0).map(|a| a.to_string()).collect();
         addrs.dedup();
         addrs.truncate(xenonet_log::address::MAX_ADDRS);
+        let network = net.id.clone();
         let mut r = AddressRecord { network: net.id, host: net.host, endpoint: t.dial.me().0, relay, addrs, at: self.now().max(0.0) as u64, ttl: ADDRESS_TTL_S, sig: Vec::new() };
         if let Err(e) = r.sign(key.as_ref()) {
             self.log("net.link2", &format!("this machine's address record wasn't signed: {}", e.message));
             return None;
         }
         let v = r.to_json();
-        *t.record.locked() = Some((v.clone(), Instant::now()));
+        t.record.locked().insert(network, (v.clone(), Instant::now()));
         Some(v)
     }
 
@@ -428,7 +426,7 @@ impl Shared {
         let ttl = Duration::from_millis(r.until().saturating_sub(now));
         let peer = PeerId(r.endpoint);
         if t.dial.addresses().put(peer, &direct, r.relay.as_deref(), ttl).is_ok() {
-            t.found.locked().entry(from.to_string()).or_default().insert(how);
+            t.found.locked().entry((r.network.clone(), from.to_string())).or_default().insert(how);
             t.links.nudge(peer);
         }
     }
@@ -486,24 +484,6 @@ impl Shared {
         }
     }
 
-    /// Moves on the fetches whose holder ran out of time, and the ones
-    /// whose wait is over; says when to look again.
-    fn link2_due(&self) -> Option<u64> {
-        let t = self.link2()?;
-        let now = self.now().max(0.0) as u64;
-        let asks = {
-            let mut f = t.fetching.locked();
-            let holders: Vec<(holder::FeedKey, Vec<PeerId>)> = f.fetches.keys().map(|k| (k.clone(), self.holders_of(&t, &f, &k.0, &k.1))).collect();
-            f.limits.prune(now);
-            f.fetches.due(now, |n, a| holders.iter().find(|(k, _)| k.0 == n && k.1 == a).map(|(_, h)| h.clone()).unwrap_or_default())
-        };
-        for a in asks {
-            self.link2_ask(&t, a);
-        }
-        let next = t.fetching.locked().fetches.next_due();
-        next
-    }
-
     /// The kept entries of this machine's feed in `net` after `after`,
     /// sealed for `m`.
     fn resend_sealed(&self, net: &NetFile, m: &Member, after: Pos) -> Vec<Out> {
@@ -531,18 +511,24 @@ impl Shared {
 }
 
 impl NodeMachine {
-    fn shared(&self) -> Option<Arc<Shared>> {
-        self.0.upgrade()
+    /// The node of `network`, when this machine is in it.
+    fn of(&self, network: &str) -> Option<Arc<Shared>> {
+        self.0.upgrade()?.shared_of(network)
+    }
+
+    /// Any of the machine's nodes: for its clock and its log.
+    fn any(&self) -> Option<Arc<Shared>> {
+        self.0.upgrade()?.shareds().into_iter().next()
     }
 }
 
 impl Machine for NodeMachine {
     fn now_ms(&self) -> u64 {
-        self.shared().map_or(0, |n| n.now().max(0.0) as u64)
+        self.any().map_or_else(|| super::now_ms().max(0.0) as u64, |n| n.now().max(0.0) as u64)
     }
 
     fn hello(&self, _peer: PeerId, network: &str) -> Option<NetHello> {
-        let n = self.shared()?;
+        let n = self.of(network)?;
         let net = n.in_network(network)?;
         let chain = n.roster().head();
         let feeds = n.opts.persist.feed_heads(&net.id).unwrap_or_default();
@@ -550,8 +536,11 @@ impl Machine for NodeMachine {
     }
 
     fn hello_in(&self, peer: PeerId, hello: &NetHello) -> Vec<Out> {
-        let Some(n) = self.shared() else { return Vec::new() };
+        let Some(n) = self.of(&hello.network) else { return Vec::new() };
         let (Some(net), Some(m), Some(me)) = (n.in_network(&hello.network), n.member_at(peer), n.machine_id()) else { return Vec::new() };
+        // Chain heads exchanged with a member: in contact with this
+        // network, whatever the others are.
+        n.common.heads_at.locked().insert(net.id.clone(), n.now());
         // Where the peer stands with this machine's feed: past what it
         // wrote means this machine's store was restored (`ack_in`).
         let at = hello.head_of(&me);
@@ -579,8 +568,10 @@ impl Machine for NodeMachine {
             let mail = t.post.locked().handing.start(n.opts.persist.as_ref(), &net.id, &peer_machine, true);
             out.extend(mail.unwrap_or_default().into_iter().map(Out::Envelope));
         }
-        // This machine's presence, whole, on every new connection.
-        if let Some(snap) = n.link2().and_then(|t| t.presence.locked().connected(peer)) {
+        // This machine's presence, whole, on every new connection: once,
+        // in the first network the connection carries.
+        let presence_here = presence_node(&n.common, peer).is_some_and(|p| Arc::ptr_eq(&p, &n));
+        if let Some(snap) = n.link2().filter(|_| presence_here).and_then(|t| t.presence.locked().connected(peer)) {
             out.extend(n.live_for(&net, peer, &snap).map(Out::Envelope));
         }
         out.extend(n.resend_sealed(&net, &m, at));
@@ -591,7 +582,7 @@ impl Machine for NodeMachine {
     }
 
     fn envelope_in(&self, peer: PeerId, env: Envelope) -> Vec<Out> {
-        let Some(n) = self.shared() else { return Vec::new() };
+        let Some(n) = self.of(&env.network) else { return Vec::new() };
         let (Some(net), Some(m)) = (n.in_network(&env.network), n.member_at(peer)) else { return Vec::new() };
         let Some(key) = n.key() else { return Vec::new() };
         let view = n.roster().view();
@@ -647,7 +638,7 @@ impl Machine for NodeMachine {
     }
 
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out> {
-        let Some(n) = self.shared() else { return Vec::new() };
+        let Some(n) = self.of(network) else { return Vec::new() };
         let (Some(net), Some(m), Some(me)) = (n.in_network(network), n.member_at(peer), n.machine_id()) else { return Vec::new() };
         if author == me {
             return n.resend_sealed(&net, &m, Pos::new(from.inc, from.seq.saturating_sub(1)));
@@ -668,7 +659,7 @@ impl Machine for NodeMachine {
     }
 
     fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos) {
-        let Some(n) = self.shared() else { return };
+        let Some(n) = self.of(network) else { return };
         let (Some(net), Some(m), Some(me)) = (n.in_network(network), n.member_at(peer), n.machine_id()) else { return };
         if author == me {
             n.ack_in(&net, &m.id, at);
@@ -676,7 +667,7 @@ impl Machine for NodeMachine {
     }
 
     fn other_in(&self, peer: PeerId, record: Control) {
-        let Some(n) = self.shared() else { return };
+        let Some(n) = record.network().and_then(|net| self.of(net)) else { return };
         let Some(m) = n.member_at(peer) else { return };
         match record {
             Control::Address { record, .. } => n.address_in(&m.id, &record, "record"),
@@ -710,7 +701,7 @@ impl Machine for NodeMachine {
     }
 
     fn up(&self, peer: PeerId, up: bool) {
-        let Some(n) = self.shared() else { return };
+        let Some(n) = self.any() else { return };
         if let Some(t) = n.link2() {
             if up {
                 t.presence.locked().theirs.up(peer);
@@ -719,29 +710,130 @@ impl Machine for NodeMachine {
                 t.fetch_due.notify_one();
             }
         }
-        let who = n.member_at(peer).map_or_else(|| peer.to_string(), |m| m.id);
+        let who = self.0.upgrade().and_then(|c| c.shareds().into_iter().find_map(|s| s.member_at(peer))).map_or_else(|| peer.to_string(), |m| m.id);
         n.log("net.link2", &format!("link/2 with {who} is {}", if up { "up" } else { "down" }));
     }
 
     fn log(&self, words: &str) {
-        if let Some(n) = self.shared() {
+        if let Some(n) = self.any() {
             n.log("net.link2", words);
         }
     }
 }
 
-/// The endpoint for link/2, with the network's relays and the machine's
-/// LAN setting, its doors open for the chain's members; and the tasks that
-/// take connections and keep them up, until the node stops.
-pub async fn run(n: Weak<Shared>) {
-    let Some(s) = n.upgrade() else { return };
-    let Some(key) = s.key() else { return };
-    let relays: Vec<String> = s.roster().view_ref().map(|v| v.relays.clone()).unwrap_or_default();
-    let settings = Settings {
-        relays: if relays.is_empty() { Relays::None } else { Relays::Listed(relays.into_iter().map(|url| Relay { url, auth_token: None }).collect()) },
-        lan: s.opts.lan,
-        bind: s.opts.bind,
+/// The node whose network a connection to `peer` carries presence in: the
+/// first of this machine's networks the connection carries and the peer is
+/// a member of. Presence goes once a peer, shown what every network they
+/// share shows (`Shared::sharings_with`), so it never says one thing in one
+/// network and another in the next.
+pub(crate) fn presence_node(c: &Common, peer: PeerId) -> Option<Arc<Shared>> {
+    let t = c.link2.reading().clone()?;
+    let carried = t.links.peers().get(&peer).map(|s| s.networks.clone())?;
+    c.shareds().into_iter().find(|s| !s.is_removed() && s.network().is_some_and(|n| carried.contains(&n.id)) && s.member_at(peer).is_some())
+}
+
+/// This machine's presence on link/2, as the engine just said it: what
+/// changed goes once to each peer connected now, in the network
+/// `presence_node` picks, shared down to what this machine shares with it;
+/// nothing goes when nothing changed. Live: never kept or forwarded.
+pub(crate) fn link2_presence(c: &Common, body: &Value) {
+    let Some(t) = c.link2.reading().clone() else { return };
+    let peers: Vec<PeerId> = t.links.peers().into_keys().collect();
+    let out = t.presence.locked().changed(body, &peers);
+    for (peer, b) in out {
+        let Some(n) = presence_node(c, peer) else { continue };
+        let Some(net) = n.network() else { continue };
+        if let Some(env) = n.live_for(&net, peer, &b) {
+            let _ = t.links.send(peer, Out::Envelope(env));
+        }
+    }
+}
+
+/// What a peer may see of this machine changed: each connected peer is
+/// sent its presence whole again, shown what it may see now.
+pub(crate) fn presence_again(c: &Common) {
+    let Some(t) = c.link2.reading().clone() else { return };
+    for peer in t.links.peers().into_keys() {
+        let Some(snap) = t.presence.locked().connected(peer) else { return };
+        let Some(n) = presence_node(c, peer) else { continue };
+        let Some(net) = n.network() else { continue };
+        if let Some(env) = n.live_for(&net, peer, &snap) {
+            let _ = t.links.send(peer, Out::Envelope(env));
+        }
+    }
+}
+
+/// Every network's members kept connected: all of them up to fifty
+/// machines, since presence holds only while a connection is up; past
+/// that, window hosts and mailboxes first.
+fn keep_all(c: &Common, t: &Transport2) {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut all: Vec<(PeerId, bool)> = Vec::new();
+    let nets = c.shareds();
+    for first in [true, false] {
+        for s in &nets {
+            for (p, f) in s.kept_members() {
+                if f == first && seen.insert(p) {
+                    all.push((p, f));
+                }
+            }
+        }
+    }
+    t.links.keep(live::keep(&all, t.dial.me()));
+}
+
+/// Moves on the fetches whose holder ran out of time, and the ones whose
+/// wait is over, in every network; says when to look again.
+fn link2_due(c: &Common, t: &Transport2) -> Option<u64> {
+    let any = c.shareds().into_iter().next()?;
+    let now = any.now().max(0.0) as u64;
+    let asks = {
+        let mut f = t.fetching.locked();
+        let holders: Vec<(holder::FeedKey, Vec<PeerId>)> =
+            f.fetches.keys().map(|k| (k.clone(), c.shared_of(&k.0).map(|s| s.holders_of(t, &f, &k.0, &k.1)).unwrap_or_default())).collect();
+        f.limits.prune(now);
+        f.fetches.due(now, |n, a| holders.iter().find(|(k, _)| k.0 == n && k.1 == a).map(|(_, h)| h.clone()).unwrap_or_default())
     };
+    for a in asks {
+        any.link2_ask(t, a);
+    }
+    let next = t.fetching.locked().fetches.next_due();
+    next
+}
+
+/// The peers whose connection has been gone 30 s: each network's node that
+/// took their presence ends it. When to look again.
+fn presence_due(c: &Common, t: &Transport2) -> Option<u64> {
+    let any = c.shareds().into_iter().next()?;
+    let now = any.now().max(0.0) as u64;
+    let ended = t.presence.locked().theirs.expired(now);
+    for e in ended {
+        if let Some(n) = c.shared_of(&e.network) {
+            n.presence_ended(e);
+        }
+    }
+    let next = t.presence.locked().theirs.next_due();
+    next
+}
+
+/// The relays by URL, as the endpoint takes them: none for an empty list.
+pub fn relays_of(urls: &[String]) -> Relays {
+    if urls.is_empty() {
+        Relays::None
+    } else {
+        Relays::Listed(urls.iter().map(|url| Relay { url: url.clone(), auth_token: None }).collect())
+    }
+}
+
+/// The endpoint for link/2, the machine's for every network it's in, with
+/// `relays` (`Nodes`' choice) and the machine's LAN setting, its doors open
+/// for the chains' members; and the tasks that take connections and keep
+/// them up, until the machine stops.
+pub async fn run(c: Weak<Common>, relays: Vec<String>) {
+    let Some(common) = c.upgrade() else { return };
+    let Some(s) = common.shareds().into_iter().next() else { return };
+    let Some(key) = s.key() else { return };
+    let settings = Settings { relays: relays_of(&relays), lan: s.opts.lan, bind: s.opts.bind };
     let admission = Arc::new(crate::admission::Admission::new());
     let dial = match IrohDial::bind(&key, &settings, admission.clone()).await {
         Ok(d) => Arc::new(d),
@@ -751,36 +843,38 @@ pub async fn run(n: Weak<Shared>) {
         }
     };
     let mesh = Arc::new(Mesh::new(dial.clone(), admission));
-    let links = Links::new(mesh.clone(), Arc::new(NodeMachine(n.clone())));
+    let links = Links::new(mesh.clone(), Arc::new(NodeMachine(c.clone())));
     let t = Arc::new(Transport2 {
         dial,
         mesh,
         links: links.clone(),
         found: std::sync::Mutex::default(),
-        record: std::sync::Mutex::new(None),
+        record: std::sync::Mutex::default(),
         fetching: std::sync::Mutex::default(),
         fetch_due: tokio::sync::Notify::new(),
         post: std::sync::Mutex::default(),
         presence: std::sync::Mutex::default(),
     });
-    *s.link2.writing() = Some(t);
-    s.members_changed();
+    *common.link2.writing() = Some(t);
+    for n in common.shareds() {
+        n.members_changed();
+    }
     s.log("net.link2", "link/2 is listening");
-    drop(s);
-    tokio::join!(links.clone().accept(), links.keep_up(), fetch_clock(n));
+    drop((s, common));
+    tokio::join!(links.clone().accept(), links.keep_up(), fetch_clock(c));
 }
 
 /// Moves fetches on when a holder runs out of time or a wait is over, and
 /// ends the presence of peers gone 30 s; sleeps until the next of those,
 /// or until a fetch begins or a connection goes. Nothing here runs on a
 /// tick.
-async fn fetch_clock(n: Weak<Shared>) {
+async fn fetch_clock(c: Weak<Common>) {
     loop {
         let (wait, t) = {
-            let Some(s) = n.upgrade() else { return };
-            let Some(t) = s.link2() else { return };
-            let next = [s.link2_due(), s.presence_due()].into_iter().flatten().min();
-            let now = s.now().max(0.0) as u64;
+            let Some(c) = c.upgrade() else { return };
+            let Some(t) = c.link2.reading().clone() else { return };
+            let next = [link2_due(&c, &t), presence_due(&c, &t)].into_iter().flatten().min();
+            let now = c.shareds().first().map_or_else(super::now_ms, |s| s.now()).max(0.0) as u64;
             (next.map(|at| Duration::from_millis(at.saturating_sub(now).max(10))), t)
         };
         let woke = t.fetch_due.notified();
@@ -798,8 +892,8 @@ async fn fetch_clock(n: Weak<Shared>) {
 }
 
 /// Stops link/2: every connection closes, and the endpoint.
-pub fn stop(s: &Shared) {
-    let Some(t) = s.link2.writing().take() else { return };
+pub fn stop(c: &Common) {
+    let Some(t) = c.link2.writing().take() else { return };
     for l in t.mesh.links() {
         l.close(Close::Done);
     }

@@ -331,7 +331,7 @@ impl Host {
                     None,
                     "0.0.0-test",
                 );
-                g.set_net(svc.node().clone());
+                g.set_net(svc.nodes().clone());
                 let a2a = A2a::new(A2aParts {
                     cores: A2aCores { engine: c.engine.clone(), actors: c.actors.clone().unwrap() },
                     db: xenonet_service::serve::store_of(&ctx.cores),
@@ -1546,7 +1546,7 @@ fn offer(n: u32) -> Value {
 /// A message frame of `body` from `from` to `to`, signed and sealed as the
 /// link sends it, for `to`'s node to take as the stream hands it on.
 fn hand(from: &Host, to: &Host, body: &Value) -> xenonet_net::frame::Frame {
-    let n = from.svc.node().shared();
+    let n = from.svc.node().shared().clone();
     let net = n.network().unwrap();
     let keys = *to.svc.node().shared().key().unwrap().public();
     let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "message", from: from.name, to: to.name, at: n.gateway_now() as i64 };

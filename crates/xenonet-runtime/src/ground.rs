@@ -272,13 +272,16 @@ pub fn person(w: &Runtime, g: &EngineGround, from: Option<&str>, carried: &Carri
 pub const ACT_TOKEN_MS: i64 = 8 * 24 * 3600 * 1000;
 
 /// A token for this machine's actor `slug` with `rights`, minted from this
-/// start's token root: for `network` alone when it names one, until
-/// `until` or the root's end, narrowed to `door` when it names one.
+/// start's token root: for `network`, or else the network this machine
+/// acts in now (one it's in), until `until` or the root's end, narrowed to
+/// `door` when it names one. Every grant names its network once there is
+/// one, so joining another network never widens it (revision 20).
 pub fn mint(w: &Runtime, slug: &str, rights: Vec<Action>, network: Option<NetworkId>, until: Option<i64>, door: Option<Door>) -> Result<Token, String> {
     let gov = governance(w).ok_or("this machine's governance isn't plugged in, so it mints no tokens")?;
     let facts = gov.facts();
     let root = facts.identity.token_root(&facts.machine, facts.now).map_err(|e| e.message)?;
     let end = root.certificate().until();
+    let network = network.or_else(|| facts.network());
     let grant = ActorGrant { actor: ActorSlug::new(slug).map_err(|e| e.message)?, network, rights, until: until.map_or(end, |u| u.min(end)) };
     let token = root.mint_actor(&grant).map_err(|e| e.message)?;
     match door {
@@ -302,6 +305,9 @@ pub fn actor_authority(w: &Runtime, slug: &str, rights: Vec<Action>) -> Result<s
 /// An actor of the machine `from` as an act's principal, by the token that
 /// machine minted for the act: parsed against the root certificate the act
 /// carried (kept in `g` for the decision), which must be that machine's.
+/// The token names the network the act came in (`g`'s): one naming none
+/// would reach every network its machine is in, one joined later too, so
+/// it's refused (revision 20; "any network" would be a widening).
 pub fn actor(g: &mut EngineGround, from: &MachineId, carried: &Carried) -> Result<(Principal, Token), String> {
     let text = carried.token.as_deref().ok_or("an actor's act from another machine comes with a token its machine minted for it")?;
     if let Some(r) = &carried.root {
@@ -311,6 +317,11 @@ pub fn actor(g: &mut EngineGround, from: &MachineId, carried: &Carried) -> Resul
     let b = token.bearer();
     if &b.machine != from {
         return Err(format!("that token isn't for an actor of {from}"));
+    }
+    match (token.network(), g.facts.network()) {
+        (None, _) => return Err(format!("that token names no network: {from} mints an actor's acts with the network they go in")),
+        (Some(t), Some(here)) if *t != here => return Err(format!("that token acts only in {t}, not {here}")),
+        _ => {}
     }
     Ok((Principal::Actor { slug: b.slug.clone(), machine: b.machine.clone() }, token))
 }
@@ -465,6 +476,27 @@ mod tests {
         let facts = Facts { machine: MachineId::new("laptop").unwrap(), view: Some(view), identity: identity.clone(), synced_at: synced, now: NOW };
         let asks = HashMap::from([("ask_1".to_string(), waiting(None))]);
         (EngineGround { facts, asks, store: None, roots: Vec::new() }, identity, dir)
+    }
+
+    #[test]
+    fn an_actors_token_names_the_network_its_act_came_in() {
+        let (mut g, identity, dir) = ground("grant-network", chain::Settings::default(), Some(NOW));
+        let laptop = MachineId::new("laptop").unwrap();
+        let root = identity.token_root(&laptop, NOW).unwrap();
+        let carried = |network: Option<&str>| {
+            let grant =
+                ActorGrant { actor: ActorSlug::new("muse").unwrap(), network: network.map(|n| NetworkId::new(n).unwrap()), rights: vec![Action::Message], until: NOW + 1000 };
+            let t = root.mint_actor(&grant).unwrap();
+            Carried::parse(&serde_json::json!({ "token": t.encode(ACTOR_PREFIX).unwrap(), "root": t.root().to_json() }))
+        };
+        assert!(actor(&mut g, &laptop, &carried(Some(NET))).is_ok());
+        // A grant that names no network would reach a second network this
+        // machine joins: refused, never taken as "any".
+        let none = actor(&mut g, &laptop, &carried(None)).unwrap_err();
+        assert!(none.contains("names no network"), "{none}");
+        let other = actor(&mut g, &laptop, &carried(Some("net_ffffffffffffffffffffffffffffffff"))).unwrap_err();
+        assert!(other.contains("acts only in"), "{other}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn waiting(delegated_by: Option<&str>) -> Asked {

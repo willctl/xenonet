@@ -135,63 +135,75 @@ impl SvcAnswer {
     }
 }
 
-/// The network across machines (the service's gateway/network.rs and the
-/// node it runs), as `/api/net/…`, `/api/svc/…` and the tray reach it.
+/// The networks across machines (the service's gateway/network.rs and the
+/// nodes it runs), as `/api/net/…`, `/api/svc/…` and the tray reach them.
 /// Every operation answers the network's document, or a refusal whose
-/// status and code the routes answer as they are.
+/// status and code the routes answer as they are. What acts on one network
+/// takes `network`, its id or name: None is the one network this machine
+/// is in, and refused as ambiguous when it's in several.
 #[async_trait]
 pub trait Network: Send + Sync {
-    /// `network/state/v1`.
+    /// `network/state/v1`, every network in `networks`.
     fn state(&self) -> Value;
-    /// The network's name, while this machine is in one.
+    /// The first network's name, while this machine is in one.
     fn network_name(&self) -> Option<String>;
-    /// This machine's id in its network, while it's in one.
-    fn host(&self) -> Option<String>;
-    /// Whether this machine is the network's gateway.
-    fn is_gateway(&self) -> bool;
-    /// The LAN listener, at `addr`.
+    /// This machine's id in `network`, while it's in it.
+    fn host(&self, network: Option<&str>) -> Option<String>;
+    /// Whether this machine is `network`'s gateway.
+    fn is_gateway(&self, network: Option<&str>) -> bool;
+    /// A LAN listener, at `addr`, beside any other.
     async fn listen(&self, addr: SocketAddr) -> Result<(), CoreError>;
+    /// The LAN listeners no network's gateway here uses close.
     fn unlisten(&self);
-    /// The LAN listener's address, while it listens.
-    fn lan(&self) -> Option<SocketAddr>;
-    /// A new network, founded here: `address` is the gateway's public host,
-    /// `lan` its LAN address.
-    fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult;
+    /// The LAN listeners' addresses.
+    fn lans(&self) -> Vec<SocketAddr>;
+    /// A new network, founded here beside any other: `address` is the
+    /// gateway's public host, `lan` its LAN address, `relay` the relay the
+    /// person named (their own iroh-relay's URL, or n0).
+    async fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, relay: Option<&str>, at_window: bool) -> NetResult;
     /// Joins through the gateway's join route with a ticket: the window's
     /// Add a machine, until the gateway goes.
     async fn join(&self, address: &str, ticket: &str) -> NetResult;
     /// Joins over join/2 with an invite and its code, finding the inviter
     /// at `at`, through the invite's relay, or by mDNS (`lan`).
     async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult;
-    async fn leave(&self, force: bool) -> NetResult;
+    async fn leave(&self, network: Option<&str>, force: bool) -> NetResult;
     /// The address a ticket names for the gateway, through its tunnel.
     fn tunnel_address(&self, address: Option<&str>);
     /// A ticket the gateway keeps, for `join`.
-    async fn ticket(&self, host: &str, window: bool, at_window: bool) -> NetResult;
+    async fn ticket(&self, network: Option<&str>, host: &str, window: bool, at_window: bool) -> NetResult;
     /// An invite for `host`, and its code apart, for join/2; `lan` has the
     /// inviter announce itself on the LAN by mDNS while it's open.
-    async fn invite(&self, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult;
-    async fn remove(&self, host: &str) -> NetResult;
-    async fn replace(&self, host: &str, at_window: bool) -> NetResult;
-    async fn approve(&self, id: &str, at_window: bool) -> NetResult;
-    async fn take_gateway(&self, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult;
-    async fn set_gateway(&self, address: &str) -> NetResult;
+    async fn invite(&self, network: Option<&str>, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult;
+    async fn remove(&self, network: Option<&str>, host: &str) -> NetResult;
+    async fn replace(&self, network: Option<&str>, host: &str, at_window: bool) -> NetResult;
+    async fn approve(&self, network: Option<&str>, id: &str, at_window: bool) -> NetResult;
+    async fn take_gateway(&self, network: Option<&str>, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult;
+    async fn set_gateway(&self, network: Option<&str>, address: &str) -> NetResult;
     /// Who may start and wake sessions on another machine.
-    async fn set_reach(&self, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> NetResult;
-    async fn settings(&self, change: NetChange, at_window: bool) -> NetResult;
-    /// The services this machine publishes.
-    fn svc_list(&self) -> Value;
+    async fn set_reach(&self, network: Option<&str>, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> NetResult;
+    async fn settings(&self, network: Option<&str>, change: NetChange, at_window: bool) -> NetResult;
+    /// What the person shares into `network`: "all", or a list of project
+    /// ids. Sharing more publishes, so only from the window.
+    fn share(&self, network: Option<&str>, sharing: &Value, at_window: bool) -> NetResult;
+    /// A relay (`url`, or n0 for n0's public ones) into `network`'s chain
+    /// (`add`) or out of it; with `mine`, into or out of the relays this
+    /// machine adds of its own, for its own dials, in no chain.
+    async fn relay(&self, network: Option<&str>, url: &str, add: bool, mine: bool, at_window: bool) -> NetResult;
+    /// The services this machine publishes into `network`.
+    fn svc_list(&self, network: Option<&str>) -> NetResult;
     /// Publishing asks the person (their presence), so only from the window.
-    fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String], at_window: bool) -> NetResult;
+    fn svc_publish(&self, network: Option<&str>, name: &str, target: &str, paths: &[String], hosts: &[String], at_window: bool) -> NetResult;
     /// Revokes another of the person's devices: a lost machine. Asks them,
     /// so only from the window.
     fn revoke_device(&self, device: &str, at_window: bool) -> NetResult;
     /// Takes a machine's feed again after a fork froze it (it signed two
     /// entries at one place): the person's call, so only from the window.
-    fn unfreeze(&self, author: &str, at_window: bool) -> NetResult;
-    fn svc_unpublish(&self, name: &str) -> NetResult;
+    fn unfreeze(&self, network: Option<&str>, author: &str, at_window: bool) -> NetResult;
+    fn svc_unpublish(&self, network: Option<&str>, name: &str) -> NetResult;
     /// The port a service's target address names, when it's one.
     fn svc_port(&self, target: &str) -> Option<u16>;
-    /// A call to the service `name` that `host` publishes.
+    /// A call to the service `name` that `host` publishes, in the network
+    /// `host` is in.
     async fn svc_call(&self, host: &str, name: &str, call: SvcCall) -> SvcAnswer;
 }

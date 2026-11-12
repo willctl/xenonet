@@ -78,6 +78,12 @@ pub(crate) const TABLES: &[&str] = &[
         n INTEGER PRIMARY KEY,
         certificate TEXT NOT NULL
     ) STRICT",
+    // The relays this machine adds of its own, for its own dials and its
+    // home relay: a setting of this machine, in no network's chain.
+    "CREATE TABLE own_relays (
+        n INTEGER PRIMARY KEY,
+        url TEXT NOT NULL UNIQUE
+    ) STRICT",
 ];
 
 /// A network, as this machine keeps it.
@@ -284,6 +290,26 @@ impl Db {
                  ON CONFLICT (network) DO UPDATE SET sharing = excluded.sharing",
                 params![network, text],
             )?;
+            Ok(())
+        })
+    }
+
+    /// The relays this machine adds of its own, in the order added.
+    pub fn own_relays(&self) -> R<Vec<String>> {
+        self.read(|c| {
+            let mut q = c.prepare("SELECT url FROM own_relays ORDER BY n")?;
+            let rows = q.query_map([], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// The relays this machine adds of its own, in place of what was.
+    pub fn put_own_relays(&self, urls: &[String]) -> R<()> {
+        self.write(|c| {
+            c.execute("DELETE FROM own_relays", [])?;
+            for (n, u) in urls.iter().enumerate() {
+                c.execute("INSERT INTO own_relays (n, url) VALUES (?1, ?2)", params![n as i64, u])?;
+            }
             Ok(())
         })
     }

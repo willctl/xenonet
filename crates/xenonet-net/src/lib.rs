@@ -16,7 +16,11 @@
 //! - `gateway`: the gateway's routes, `/net/v1/…`, over any transport.
 //! - `link`: a host's link to its gateway, with backoff, the clock
 //!   offset, epochs and the long-poll fallback.
-//! - `node`: this machine in its network, behind
+//! - `nodes`: this machine in every network it's in, behind
+//!   `xenonet_model::ops::Net`: a node per network, what names a network
+//!   going to that one's node, link/2 and the relays every network lists
+//!   shared between them.
+//! - `node`: this machine in one network, behind
 //!   `xenonet_model::ops::Net`, calling a `Sink`: its own feed in the
 //!   network as its author (xenonet-log's `feed`), whose entries carry
 //!   messages, receipts and handoffs, and the other members' entries,
@@ -77,6 +81,7 @@ pub mod link;
 pub mod link2;
 pub mod mailbox;
 pub mod node;
+pub mod nodes;
 pub mod persist;
 pub mod presence;
 pub mod request;

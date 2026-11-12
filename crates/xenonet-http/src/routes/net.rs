@@ -10,8 +10,15 @@
 //! that admits or widens, and moving the gateway. Anything else is refused
 //! there, never prompted for.
 //!
-//! - `GET state`: `network/state/v1`.
-//! - `POST create`, `POST join`, `POST leave`: on this machine only. A
+//! A machine may be in several networks. What acts on one takes
+//! `network` (its id or name) in the body, or `?network=` on a GET; with
+//! none, the one network this machine is in, and a 409 `which-network`
+//! when it's in several.
+//!
+//! - `GET state`: `network/state/v1`, every network in `networks`.
+//! - `POST create`, `POST join`, `POST leave`: on this machine only. Each
+//!   create and join adds a network beside the ones there are; `create`
+//!   takes `relay`, the person's own iroh-relay's URL, or n0. A
 //!   join with `invite` and `code` goes over join/2 to the machine that
 //!   made the invite (`at`, its address, or `lan`, mDNS, when the invite
 //!   names no relay); one with `address` and `ticket` goes through the
@@ -35,6 +42,12 @@
 //!   `/api/svc/…` (routes/svc.rs). Publishing widens what the network
 //!   reaches, so it's the window's, with the person's presence; taking a
 //!   service off is yours from your terminal too (`xenonet svc`).
+//! - `PUT sharing`: what the person shares into a network, `sharing`
+//!   "all" or a list of project ids. Sharing more is the window's.
+//! - `POST relays`: a relay (`url`, or n0) put into a network's chain
+//!   (`add`, which widens: the window's, with presence) or taken out; with
+//!   `mine`, into or out of the relays this machine adds of its own, for
+//!   its own dials.
 //! - `POST devices/revoke`: revokes another of the person's devices (a
 //!   lost machine), with their presence: the window's.
 //! - `POST feeds/unfreeze`: takes a machine's feed again after a fork froze
@@ -129,8 +142,9 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
                     | "svc/unpublish"
                     | "devices/revoke"
                     | "feeds/unfreeze"
+                    | "relays"
             )
-            | ("PUT", "settings")
+            | ("PUT", "settings" | "sharing")
     );
     if !known {
         return Reply::error(404, "not found");
@@ -153,6 +167,9 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let on = |k: &str| body.get(k) == Some(&Value::Bool(true));
     let net = &*svc;
+    // The network it acts on, when it names one.
+    let named = if method == "GET" { req.param("network").map(str::to_string) } else { body.get("network").and_then(Value::as_str).map(str::to_string) };
+    let network = named.as_deref().map(str::trim).filter(|n| !n.is_empty());
     // Only a request from the window may ask the person.
     let window = req.by.window;
     let result = match rest {
@@ -164,7 +181,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         }
         "join" => net.join(&text("address"), &text("ticket")).await,
         "leave" => {
-            let r = net.leave(on("force")).await;
+            let r = net.leave(network, on("force")).await;
             if r.is_ok() {
                 net.unlisten();
             }
@@ -172,23 +189,25 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         }
         "ticket" => {
             net.tunnel_address(public_host(ctx).as_deref());
-            net.ticket(&text("host"), on("window"), window).await
+            net.ticket(network, &text("host"), on("window"), window).await
         }
         "invite" => {
             net.tunnel_address(public_host(ctx).as_deref());
-            net.invite(&text("host"), on("window"), on("lan"), window).await
+            net.invite(network, &text("host"), on("window"), on("lan"), window).await
         }
-        "remove" => net.remove(&text("host")).await,
-        "replace" => net.replace(&text("host"), window).await,
-        "settings" => settings(net, &body, window).await,
-        "approve" => net.approve(&text("id"), window).await,
-        "gateway/take" => take(ctx, net, &body, window).await,
-        "svc" => Ok(net.svc_list()),
-        "svc/publish" => publish(ctx, net, &body, window),
+        "remove" => net.remove(network, &text("host")).await,
+        "replace" => net.replace(network, &text("host"), window).await,
+        "settings" => settings(net, network, &body, window).await,
+        "sharing" => net.share(network, body.get("sharing").unwrap_or(&Value::Null), window),
+        "relays" => net.relay(network, &text("url"), body.get("add") != Some(&Value::Bool(false)), on("mine"), window).await,
+        "approve" => net.approve(network, &text("id"), window).await,
+        "gateway/take" => take(ctx, net, network, &body, window).await,
+        "svc" => net.svc_list(network),
+        "svc/publish" => publish(ctx, net, network, &body, window),
         "devices/revoke" => net.revoke_device(&text("device"), window),
-        "feeds/unfreeze" => net.unfreeze(&text("author"), window),
-        "svc/unpublish" => net.svc_unpublish(&text("name")),
-        _ => net.set_gateway(&text("address")).await,
+        "feeds/unfreeze" => net.unfreeze(network, &text("author"), window),
+        "svc/unpublish" => net.svc_unpublish(network, &text("name")),
+        _ => net.set_gateway(network, &text("address")).await,
     };
     match result {
         Ok(v) => Reply::json(200, v),
@@ -201,9 +220,6 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
 }
 
 async fn create(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetResult {
-    if let Some(name) = svc.network_name() {
-        return Err(net_error(409, "in-network", format!("this machine is in the network {name} already: xenonet net leave first")));
-    }
     let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let lan = match body.get("lan").and_then(Value::as_str).filter(|l| !l.trim().is_empty()) {
         Some(l) => Some(lan_of(l)?),
@@ -215,7 +231,8 @@ async fn create(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> Net
         svc.listen(addr).await?;
     }
     let lan_text = lan.map(|a| a.to_string());
-    let made = svc.create(&text("name"), &text("host"), public_host(ctx).as_deref(), lan_text.as_deref(), window);
+    let relay = text("relay");
+    let made = svc.create(&text("name"), &text("host"), public_host(ctx).as_deref(), lan_text.as_deref(), Some(relay.as_str()).filter(|r| !r.trim().is_empty()), window).await;
     if made.is_err() && lan.is_some() {
         svc.unlisten();
     }
@@ -224,7 +241,7 @@ async fn create(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> Net
 
 /// **Make this the network's gateway**: at the LAN address given, which it
 /// listens on first, or at the actor gateway's tunnel.
-async fn take(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetResult {
+async fn take(ctx: &Ctx, svc: &dyn Network, network: Option<&str>, body: &Value, window: bool) -> NetResult {
     let lan = match body.get("lan").and_then(Value::as_str).filter(|l| !l.trim().is_empty()) {
         Some(l) => Some(lan_of(l)?),
         None => None,
@@ -233,8 +250,8 @@ async fn take(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetRe
         svc.listen(addr).await?;
     }
     let lan_text = lan.map(|a| a.to_string());
-    let took = svc.take_gateway(public_host(ctx).as_deref(), lan_text.as_deref(), window).await;
-    if took.is_err() && lan.is_some() && !svc.is_gateway() {
+    let took = svc.take_gateway(network, public_host(ctx).as_deref(), lan_text.as_deref(), window).await;
+    if took.is_err() && lan.is_some() {
         svc.unlisten();
     }
     took
@@ -244,7 +261,7 @@ async fn take(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetRe
 /// other hosts, from the window, with the person's presence. Never
 /// XenoNet's own API or its doors, which would hand what's this machine's
 /// owner's to every allowed host.
-fn publish(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetResult {
+fn publish(ctx: &Ctx, svc: &dyn Network, network: Option<&str>, body: &Value, window: bool) -> NetResult {
     let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let list = |k: &str| -> Result<Vec<String>, CoreError> {
         match body.get(k) {
@@ -260,27 +277,27 @@ fn publish(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetResul
         // and the default it would take, and the network's LAN door.
         let mut own = vec![ctx.config.port, ctx.config.gateway_port.unwrap_or_else(|| crate::config::gateway_port_of(ctx.config.port))];
         own.extend(ctx.gateway.get().map(|g| g.port()));
-        own.extend(svc.lan().map(|a| a.port()));
+        own.extend(svc.lans().iter().map(SocketAddr::port));
         if own.contains(&port) {
             return Err(bad(format!("port {port} is XenoNet's own: publishing it would let other hosts act as this machine's owner")));
         }
     }
-    svc.svc_publish(&text("name"), &target, &list("paths")?, &list("hosts")?, window)
+    svc.svc_publish(network, &text("name"), &target, &list("paths")?, &list("hosts")?, window)
 }
 
-async fn settings(svc: &dyn Network, body: &Value, window: bool) -> NetResult {
+async fn settings(svc: &dyn Network, network: Option<&str>, body: &Value, window: bool) -> NetResult {
     let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
     // An entry that waits for a second admin, approved by its id.
     if let Some(id) = text("approve") {
-        return svc.approve(&id, window).await;
+        return svc.approve(network, &id, window).await;
     }
     // Another machine's: who may start and wake sessions there, an entry
     // this machine signs.
-    if let Some(host) = body.get("host").and_then(Value::as_str).filter(|h| svc.host().is_some_and(|me| me != *h)) {
+    if let Some(host) = body.get("host").and_then(Value::as_str).filter(|h| svc.host(network).is_some_and(|me| me != *h)) {
         if text("start").is_none() && text("wake").is_none() {
             return Err(bad("say what to set: start or wake, or approve a change that waits"));
         }
-        return svc.set_reach(host, text("start").as_deref(), text("wake").as_deref(), window).await;
+        return svc.set_reach(network, host, text("start").as_deref(), text("wake").as_deref(), window).await;
     }
     let titles = body.get("titlesOnly").and_then(Value::as_bool);
     let load = body.get("shareLoad").and_then(Value::as_bool);
@@ -292,14 +309,17 @@ async fn settings(svc: &dyn Network, body: &Value, window: bool) -> NetResult {
         Some(_) => return Err(bad("lan is an address, or null")),
     };
     if let Some(l) = lan {
-        if !svc.is_gateway() {
+        if !svc.is_gateway(network) {
             return Err(net_error(409, "not-gateway", "the LAN address is the gateway's: set it on its host"));
         }
-        match l {
-            Some(addr) => svc.listen(addr).await?,
-            None => svc.unlisten(),
+        if let Some(addr) = l {
+            svc.listen(addr).await?;
         }
     }
     let change = NetChange { titles_only: titles, share_load: load, lan: lan.map(|l| l.map(|a| a.to_string())), start: text("start"), wake: text("wake") };
-    svc.settings(change, window).await
+    let r = svc.settings(network, change, window).await;
+    if lan.is_some() {
+        svc.unlisten();
+    }
+    r
 }
