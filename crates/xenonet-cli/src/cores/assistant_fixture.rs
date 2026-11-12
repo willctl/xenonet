@@ -1,5 +1,5 @@
 //! `xenonet mcp assistant --fixture`'s backend: the assistant's service in
-//! this process, over made-up data (xenonet-assistant's fixtures), through the same checks a
+//! this process, over made-up data (xenonet-actors' assistant fixtures), through the same checks a
 //! real grant's reads go through: the request's shape, the rate and the
 //! four-at-a-time limit, the arguments' schema, and the answer's (the MCP
 //! server's `contract`). No grant, no XenoNet and nothing of this
@@ -8,13 +8,13 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use xenonet_actors::assistant::fixtures;
+use xenonet_actors::assistant::service::{self, Config, Inflight, ReadHost, LIMITS};
 use xenonet_api::limits::Buckets;
-use xenonet_assistant::fixtures;
-use xenonet_assistant::pages::Standalone;
-use xenonet_assistant::service::{self, Config, Inflight, ReadHost, LIMITS};
 use xenonet_mcp::fixture::contract as schema;
 use xenonet_mcp::fixture::Answer;
 use xenonet_os::error::Failure;
+use xenonet_service::compose::assistant::pages::Standalone;
 
 /// The made-up session's grant, actor and connection.
 const GRANT: &str = "gr_000000000000000000000000";

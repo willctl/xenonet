@@ -27,7 +27,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 xenonet-actors = { path = "../crates/xenonet-actors" }
 xenonet-api = { path = "../crates/xenonet-api" }
 xenonet-console = { path = "../crates/xenonet-console" }
-xenonet-assistant = { path = "../crates/xenonet-assistant" }
 xenonet-adapter = { path = "../crates/xenonet-adapter" }
 xenonet-claude-code = { path = "../adapters/claude-code" }
 xenonet-codex = { path = "../adapters/codex" }

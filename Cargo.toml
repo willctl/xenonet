@@ -24,9 +24,8 @@ xenonet-engine = { path = "crates/xenonet-engine" }
 xenonet-schema = { path = "crates/xenonet-schema" }
 xenonet-sources = { path = "crates/xenonet-sources" }
 xenonet-state = { path = "crates/xenonet-state" }
-# The install, assistant and doctor.
+# The install and the doctor.
 xenonet-components = { path = "crates/xenonet-components" }
-xenonet-assistant = { path = "crates/xenonet-assistant" }
 xenonet-doctor = { path = "crates/xenonet-doctor" }
 # The demo's made-up world, and what only the console has.
 xenonet-demo = { path = "crates/xenonet-demo" }

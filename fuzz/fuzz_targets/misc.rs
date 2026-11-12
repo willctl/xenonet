@@ -11,9 +11,9 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use xenonet_api::cores::Grants as _;
-use xenonet_assistant::pages::{Granted, Memory};
-use xenonet_assistant::service::{self, Config, For, Pages};
-use xenonet_assistant::{crypto, tunnel_client};
+use xenonet_service::compose::assistant::pages::{Granted, Memory};
+use xenonet_actors::assistant::service::{self, Config, For, Pages};
+use xenonet_actors::assistant::{crypto, tunnel_client};
 use xenonet_components::rpc::Rpc;
 use xenonet_components::{packages, protocol, tar};
 

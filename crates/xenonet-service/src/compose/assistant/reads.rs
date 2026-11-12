@@ -1,4 +1,4 @@
-//! What a remote actor reads and how (crates/xenonet-assistant): the view
+//! What a remote actor reads and how (xenonet-actors' assistant): the view
 //! of XenoNet's own state, the six read-only operations with their checks,
 //! paging, shape, size and the four-at-a-time limit, the grant's
 //! standing and rate, the audit of every read, and what a read says of its
@@ -7,15 +7,15 @@
 //! token it came in with, narrowed (`pages`).
 
 use super::connections::{EngineRows, Remote};
-use crate::pages::{Granted, Standalone};
-use crate::service::{self, Config, Inflight, Pages, ReadHost, LIMITS};
-use crate::{audit, fixtures, projection, source};
+use crate::compose::assistant::pages::{Granted, Standalone};
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use xenonet_actors::adapters::{ADAPTERS, TRANSPORTS};
+use xenonet_actors::assistant::service::{self, Config, Inflight, Pages, ReadHost, LIMITS};
+use xenonet_actors::assistant::{audit, fixtures, projection, source};
 use xenonet_actors::connections::Store as _;
 use xenonet_actors::remote_presence::{self, RemotePresence};
 use xenonet_api::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, Grants, State, R};

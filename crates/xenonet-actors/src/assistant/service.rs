@@ -12,8 +12,8 @@
 //! the actor, a session's stats, the attention ids' key, the schema's check
 //! and the time. Its page cursors come through `Pages`.
 
-use crate::fixtures;
-use crate::projection::{self as p, Visible};
+use crate::assistant::fixtures;
+use crate::assistant::projection::{self as p, Visible};
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -476,7 +476,7 @@ fn attention(c: &Ctx<'_>, id_key: &[u8]) -> Result<Out, Failure> {
     }
     let filters = json!({ "project": project, "kinds": sorted });
     let after = c.after("attention", &filters)?;
-    let id_of = |parts: &str| format!("att_{}", &crate::crypto::hex(&crate::crypto::hmac_sha256(id_key, parts.as_bytes()))[..24]);
+    let id_of = |parts: &str| format!("att_{}", &crate::assistant::crypto::hex(&crate::assistant::crypto::hmac_sha256(id_key, parts.as_bytes()))[..24]);
     let index = |k: &str| c.cfg.attention_kinds.iter().position(|x| x == k).map_or(-1.0, |i| i as f64);
     let mut items: Vec<(Value, Vec<Value>)> = p::attention_items(c.view, c.policy, c.t, &id_of)
         .into_iter()

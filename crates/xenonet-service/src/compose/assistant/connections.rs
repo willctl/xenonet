@@ -7,12 +7,12 @@
 //! events go to whoever listens (the endpoint, the tunnels).
 
 use super::{connection_error, row_json};
-use crate::credentials as disk;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::mpsc;
 use xenonet_actors::account_links::Links;
 use xenonet_actors::adapters::ADAPTERS;
+use xenonet_actors::assistant::credentials as disk;
 use xenonet_actors::connections::{self as core, Adapter, Connections as Core, Host, Store};
 use xenonet_actors::store::{self, Tx};
 use xenonet_api::cores::assistant::ConnectionEvents;
@@ -558,7 +558,7 @@ mod tests {
         let store = Shared::new(xenonet_store::engine::EngineStore::new(Arc::new(xenonet_store::Db::open(&dir).unwrap()), now_ms()).unwrap());
         let creds = dir.join("assistant").to_string_lossy().into_owned();
         let actors = Arc::new(FakeActors { store: store.clone(), known: Mutex::new(HashMap::new()), hooks: Mutex::new(Vec::new()) });
-        let grants = Arc::new(crate::pages::Memory::new());
+        let grants = Arc::new(crate::compose::assistant::pages::Memory::new());
         let remote = Remote::start(store.clone(), &creds, &dir.to_string_lossy(), 47999, actors.clone(), Arc::new(Pending), Arc::new(Pending), grants).unwrap();
         assert_eq!(actors.hooks.locked().len(), 1, "its connections go before an actor does");
         let c = ConnectionsCore(remote.clone());

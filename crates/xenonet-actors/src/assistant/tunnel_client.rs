@@ -203,7 +203,7 @@ pub fn command_line(argv: &[Value]) -> String {
 /// What tunnel-client runs for a grant: the xenonet binary (installed
 /// XenoNet's launcher) with mcp assistant.
 pub fn adapter_argv(bin: &Value, grant: &Value, port: &Value) -> Result<Vec<Value>, String> {
-    if !crate::credentials::is_grant(&display(grant)) {
+    if !crate::assistant::credentials::is_grant(&display(grant)) {
         return Err("not a grant id".into());
     }
     let mut argv = vec![bin.clone(), json!("mcp"), json!("assistant"), json!("--grant"), grant.clone()];

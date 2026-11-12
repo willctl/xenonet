@@ -1,7 +1,8 @@
 //! Remote actors on this machine (docs/design/cloud-assistants.md): the
 //! connections you pair and their grants (connections.rs), what they read
-//! and how (reads.rs, over `source`, `projection`, `service`, `fixtures`
-//! and `audit`), and the tunnels XenoNet runs for them (tunnels.rs, over
+//! and how (reads.rs, over xenonet-actors' `assistant`: `source`,
+//! `projection`, `service`, `fixtures` and `audit`), their page cursors
+//! (pages.rs), and the tunnels XenoNet runs for them (tunnels.rs, over
 //! `tunnels` and `tunnel_client`): the service's Connections,
 //! AssistantSource, AssistantService, Audit and Tunnels cores.
 //!
@@ -15,6 +16,7 @@
 #![expect(clippy::result_large_err, reason = "a core's error is the routes' own, and rare")]
 
 pub mod connections;
+pub mod pages;
 pub mod reads;
 pub mod tunnels;
 

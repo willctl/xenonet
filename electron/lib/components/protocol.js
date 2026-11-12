@@ -2,7 +2,7 @@
 export const SERVICE_API = { min: 1, max: 1 };
 export const CONSOLE_API = { min: 1, max: 1 };
 // "assistant-1": remote actors' read-only endpoint, at assistant API 1
-// (crates/xenonet-assistant/src/protocol.rs).
+// (crates/xenonet-mcp/src/assistant/client.rs).
 export const CAPABILITIES = ["console", "terminals", "terminal-reattach", "assistant-1"];
 
 export function negotiate(local, remote) {

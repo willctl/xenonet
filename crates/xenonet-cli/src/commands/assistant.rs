@@ -14,8 +14,8 @@ use crate::out::{ago, c, json, json_at, now, print, table, Done, Fail, Layout};
 use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Value};
+use xenonet_actors::assistant::credentials::is_grant;
 use xenonet_api::client::{name_of, Server};
-use xenonet_assistant::credentials::is_grant;
 use xenonet_text::json::number_string;
 
 pub const HELP: &str = include_str!("help/assistant.txt");

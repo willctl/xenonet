@@ -12,7 +12,7 @@
 // shows the command the tunnel client runs, which holds none.
 //
 // For a connection through OpenAI's tunnel, XenoNet can run tunnel-client
-// itself (crates/xenonet-assistant/src/tunnels.rs): the tunnel view takes the tunnel's
+// itself (crates/xenonet-actors/src/assistant/tunnels.rs): the tunnel view takes the tunnel's
 // id, and its runtime key once, which goes to your computer's credential
 // store and never comes back to the page.
 import { escapeHtml as h, timeAgo } from "./format.js";

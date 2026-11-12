@@ -328,27 +328,27 @@ pub fn refusal_signal(app: &str, raw: &Value) -> Res<Option<Value>> {
 
 /// isDisabled(dir)
 pub fn is_disabled(dir: &str) -> Res<bool> {
-    Ok(xenonet_assistant::credentials::is_disabled(dir))
+    Ok(xenonet_actors::assistant::credentials::is_disabled(dir))
 }
 
 /// markedRevoked(dir): the grants revoked.
 pub fn marked_revoked(dir: &str) -> Res<Vec<Value>> {
-    Ok(xenonet_assistant::credentials::marked_revoked(dir).into_iter().map(Value::String).collect())
+    Ok(xenonet_actors::assistant::credentials::marked_revoked(dir).into_iter().map(Value::String).collect())
 }
 
 /// markDisabled(dir)
 pub fn mark_disabled(dir: &str) -> Res<()> {
-    xenonet_assistant::credentials::mark_disabled(dir, native::now()).map_err(fs_fail)
+    xenonet_actors::assistant::credentials::mark_disabled(dir, native::now()).map_err(fs_fail)
 }
 
 /// markRevoked(dir, grant)
 pub fn mark_revoked(dir: &str, grant: &str) -> Res<()> {
-    xenonet_assistant::credentials::mark_revoked(dir, &json!(grant), native::now()).map_err(fs_fail)
+    xenonet_actors::assistant::credentials::mark_revoked(dir, &json!(grant), native::now()).map_err(fs_fail)
 }
 
 /// deleteCredential(dir, grant)
 pub fn delete_credential(dir: &str, grant: &str) -> Res<()> {
-    xenonet_assistant::credentials::delete_credential(dir, &json!(grant)).map_err(fs_fail)
+    xenonet_actors::assistant::credentials::delete_credential(dir, &json!(grant)).map_err(fs_fail)
 }
 
 // ---------- components ----------

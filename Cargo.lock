@@ -5649,13 +5649,16 @@ dependencies = [
 name = "xenonet-actors"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "getrandom 0.3.4",
+ "icu_normalizer",
  "regex",
  "serde_json",
  "sha2 0.10.9",
  "tokio",
  "unicode-normalization",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-authz",
  "xenonet-model",
  "xenonet-os",
@@ -5694,31 +5697,6 @@ dependencies = [
  "xenonet-net",
  "xenonet-os",
  "xenonet-schema",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-assistant"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "getrandom 0.3.4",
- "icu_normalizer",
- "libc",
- "regex",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "xenonet-actors",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-authz",
- "xenonet-components",
- "xenonet-id",
- "xenonet-model",
- "xenonet-os",
- "xenonet-schema",
- "xenonet-store",
  "xenonet-text",
 ]
 
@@ -5771,7 +5749,6 @@ dependencies = [
  "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",
- "xenonet-assistant",
  "xenonet-components",
  "xenonet-console",
  "xenonet-demo",
@@ -6225,7 +6202,6 @@ dependencies = [
  "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",
- "xenonet-assistant",
  "xenonet-authz",
  "xenonet-components",
  "xenonet-console",

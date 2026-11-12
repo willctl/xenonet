@@ -21,7 +21,7 @@ use xenonet_text::text::display;
 
 /// Whether a credential holds an actor's grant's shape (`xenonet_actor_`
 /// and base64url); the service checks the grant itself.
-pub use xenonet_actors::tokens::is_token;
+pub use crate::tokens::is_token;
 
 /// GRANT_ID in core/schema/assistant.js: /^gr_[0-9a-f]{24}$/.
 pub use xenonet_api::credentials::is_grant;

@@ -546,22 +546,4 @@ mod tests {
         assert_eq!(clean_label(&"é".repeat(300)).unwrap().chars().count(), 240);
         assert_eq!(clean_label("e\u{301}").as_deref(), Some("é"));
     }
-
-    // A grant's token and a page cursor are base64url after their prefix,
-    // so a label that holds one loses all of it.
-    #[test]
-    fn labels_lose_a_grants_token_and_its_cursors() {
-        use crate::service::{For, Pages};
-        use xenonet_api::cores::Grants;
-        let grants = crate::pages::Memory::new();
-        let grant = "gr_0123456789abcdef01234567";
-        let (token, _) = grants.mint("dots", &["read".to_string()], None).unwrap();
-        let g = serde_json::json!(grant);
-        let cursor = crate::pages::Granted { grants: &grants, token: &token, slug: "dots" }
-            .make(&For { grant: &g, revision: &Value::from(1), op: "sessions", filters: &Value::Null }, &serde_json::json!([1, "x"]))
-            .unwrap();
-        for secret in [token, cursor] {
-            assert_eq!(clean_label(&format!("paste {secret} here")).as_deref(), Some("paste [withheld] here"));
-        }
-    }
 }

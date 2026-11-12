@@ -7,6 +7,7 @@
 
 mod paths;
 
+use super::assistant;
 use super::integrations::{self, decide};
 use super::open;
 use serde_json::Value;
@@ -15,7 +16,6 @@ use std::sync::Arc;
 use xenonet_actors::secrets::Secrets;
 use xenonet_api::cores::Cores;
 use xenonet_api::wire::WireEnv;
-use xenonet_assistant::runtime as assistant;
 use xenonet_components::runtime::xenonet_bin_here;
 use xenonet_console::cores::system;
 use xenonet_doctor::runtime as doctor;
@@ -74,7 +74,7 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         let native = cores.engine_store.native().and_then(|a| a.downcast_ref::<xenonet_store::engine::Shared>().cloned());
         cores.assistant_source = Some(Arc::new(assistant::reads::SourceCore(reads_of(None, None))));
         if let (Some(store), Some(actors)) = (native, cores.actors.clone()) {
-            let dir = xenonet_assistant::credentials::assistant_dir(&state_dir);
+            let dir = xenonet_actors::assistant::credentials::assistant_dir(&state_dir);
             match assistant::connections::Remote::start(store.clone(), &dir, &state_dir, config.port, actors, cores.engine_store.clone(), cores.state.clone(), cores.grants.clone())
             {
                 Ok(remote) => {

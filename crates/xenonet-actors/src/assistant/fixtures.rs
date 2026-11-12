@@ -6,7 +6,7 @@
 //!
 //! Places here are [id, value] pairs, where the JS had a Map.
 
-use crate::crypto::sha256;
+use crate::assistant::crypto::sha256;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
 

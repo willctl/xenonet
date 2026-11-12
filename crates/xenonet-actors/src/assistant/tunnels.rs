@@ -10,7 +10,7 @@
 //! its log lines are read as JSON and anything that looks like a key is
 //! taken out before XenoNet keeps or shows one.
 
-use crate::tunnel_client::{is_runtime_key, is_tunnel_id, log_line, mask_keys};
+use crate::assistant::tunnel_client::{is_runtime_key, is_tunnel_id, log_line, mask_keys};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use xenonet_text::json::number as num;
@@ -263,7 +263,7 @@ impl Tunnels {
 
     /// What its health check said (None when it didn't answer).
     pub fn health(&mut self, grant: &str, health: Option<&Value>, now: f64) -> bool {
-        let s = crate::tunnel_client::health_of(health);
+        let s = crate::assistant::tunnel_client::health_of(health);
         if let Some(r) = self.runs.get_mut(grant) {
             if let Some(v) = s.get("version").filter(|v| !v.is_null()) {
                 r.version = v.clone();

@@ -8,8 +8,6 @@
 //! (CONTROL_PLANE_API_KEY), never into a file, a command line or a log.
 
 use super::connections::Remote;
-use crate::tunnel_client as client;
-use crate::tunnels::{self as core, Binding};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -18,6 +16,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use xenonet_actors::assistant::tunnel_client as client;
+use xenonet_actors::assistant::tunnels::{self as core, Binding};
 use xenonet_actors::secrets::Secrets;
 use xenonet_api::cores::{CoreError, Kind, Tunnels, R};
 use xenonet_api::wire::Emitter;
@@ -154,7 +154,7 @@ impl Runner {
     }
 
     fn tunneled(&self, grant: &str, active: bool) -> R<Value> {
-        let v = if crate::credentials::is_grant(grant) { self.remote.view(grant)? } else { Value::Null };
+        let v = if xenonet_actors::assistant::credentials::is_grant(grant) { self.remote.view(grant)? } else { Value::Null };
         if v.is_null() || !v.is_object() {
             return Err(fail(404, "not-found", "XenoNet has no such connection"));
         }

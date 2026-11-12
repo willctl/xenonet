@@ -241,7 +241,7 @@ session's; XenoNet reads only the session's own.
 ### Cloud assistants
 
 The assistant protocol counts Grok Build as a source beside Claude Code
-and Codex (`crates/xenonet-assistant`), and its session ids are
+and Codex (`crates/xenonet-actors/src/assistant`), and its session ids are
 `grok:<id>`. With no `~/.grok`, the source is ready with no sessions.
 
 ## Starting a session

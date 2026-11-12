@@ -43,7 +43,6 @@ xenonet-service.workspace = true
 xenonet-api.workspace = true
 xenonet-os.workspace = true
 # The cores the commands call, run natively (src/cores).
-xenonet-assistant.workspace = true
 xenonet-components.workspace = true
 xenonet-engine.workspace = true
 xenonet-sources.workspace = true

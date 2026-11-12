@@ -3,7 +3,8 @@ name = "xenonet-hermes"
 description = "Hermes Agent's adapter: how XenoNet observes Hermes, its plugin for Hermes, and the doctor check on it."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# xenonet-actors, through the api and xenonet-net, needs Rust 1.91.
+rust-version = "1.91"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

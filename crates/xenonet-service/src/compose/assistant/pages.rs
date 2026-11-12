@@ -8,9 +8,9 @@
 //! process alone, for the made-up reads that have no grant (the fixture,
 //! the pairing's preview) and for tests.
 
-use crate::crypto::{b64url, b64url_decode};
-use crate::service::{For, Pages};
 use serde_json::{json, Value};
+use xenonet_actors::assistant::crypto::{b64url, b64url_decode};
+use xenonet_actors::assistant::service::{For, Pages};
 use xenonet_api::cores::Grants;
 use xenonet_authz::{
     decide, Act, Action, ActorGrant, ActorSlug, Consent, Device, Door, Ground, MachineId, NetworkId, PersonId, Principal, ReadScope, Request, Resource, Role, RootCertificate,
@@ -296,5 +296,22 @@ mod tests {
         let (g, r) = (json!(GRANT), json!(1));
         let cursor = Granted { grants: &m, token: &token, slug: SLUG }.make(&For { grant: &g, revision: &r, op: "projects", filters: &json!({}) }, &json!(["a"])).unwrap();
         assert!(m.check(SLUG, &cursor, "read").is_err());
+    }
+
+    // A grant's token and a page cursor are base64url after their prefix,
+    // so a label that holds one loses all of it.
+    #[test]
+    fn labels_lose_a_grants_token_and_its_cursors() {
+        use xenonet_actors::assistant::projection::clean_label;
+        let grants = Memory::new();
+        let grant = "gr_0123456789abcdef01234567";
+        let (token, _) = grants.mint("dots", &["read".to_string()], None).unwrap();
+        let g = json!(grant);
+        let cursor = Granted { grants: &grants, token: &token, slug: "dots" }
+            .make(&For { grant: &g, revision: &json!(1), op: "sessions", filters: &Value::Null }, &json!([1, "x"]))
+            .unwrap();
+        for secret in [token, cursor] {
+            assert_eq!(clean_label(&format!("paste {secret} here")).as_deref(), Some("paste [withheld] here"));
+        }
     }
 }

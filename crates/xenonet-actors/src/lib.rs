@@ -1,7 +1,8 @@
 //! Actors (docs/design/actors/interface.md): the programs you allow in
 //! XenoNet: the registry (`registry`), registering them (`registration`),
 //! what they report (`reports`), waking them (`wake`), their remote
-//! connections (`connections`) and their tokens (`tokens`, whose files are
+//! connections (`connections`), the cloud assistants among them and what
+//! they read (`assistant`), and their tokens (`tokens`, whose files are
 //! xenonet-api's `token_file`); and the secret stores (`secret_store`, and
 //! `secrets`, which runs your credential store's program or keeps them in
 //! memory). Each module asks what it needs of the world
@@ -10,6 +11,7 @@
 
 pub mod account_links;
 pub mod adapters;
+pub mod assistant;
 pub mod connections;
 pub mod demo;
 pub mod detail;

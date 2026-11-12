@@ -61,7 +61,6 @@ const BASE = new Set(["xenonet-text", "xenonet-os", "xenonet-model"]);
 const COMPOSITION = {
   "xenonet-runtime": { ceiling: 10, phase: 5, why: "the engine's drivers go to the engine, the store and the transport" },
   "xenonet-state": { ceiling: 7, phase: 4, why: "the map's state goes into the one store" },
-  "xenonet-assistant": { ceiling: 8, phase: 5, why: "remote actors' connections and tunnels go to the transport" },
   "xenonet-doctor": { ceiling: 7, phase: 5, why: "it runs the checks the crates and adapters expose, through the registry" },
 };
 // The surfaces: xenonet-api and the base crates alone.
@@ -93,9 +92,7 @@ const NOT_AN_APP = [
   { file: "adapters/mcp-catalog/src/info.rs", text: `let cursor = c.state.get("cursor").cloned();`, why: "the MCP status listing's page cursor" },
   { file: "adapters/mcp-catalog/src/info.rs", text: `c.state.insert("cursor".into(), next_cursor`, why: "the MCP status listing's page cursor" },
   { file: "adapters/mcp-catalog/src/catalog.rs", text: `json!({ "cursor": c })`, why: "an MCP list request's page cursor" },
-  { file: "crates/xenonet-assistant/src/service.rs", text: `self.args.get("cursor")`, why: "a read's page cursor argument" },
-  { file: "crates/xenonet-assistant/src/runtime/reads.rs", text: `("cursor", &cursor)`, why: "a read's page cursor argument" },
-  { file: "crates/xenonet-runtime/src/remote/relay.rs", text: `k == "cursor" && chars_ok`, why: "a relayed read's page cursor parameter" },
+  { file: "crates/xenonet-actors/src/assistant/service.rs", text: `self.args.get("cursor")`, why: "a read's page cursor argument" },
   { file: "crates/xenonet-state/src/state.rs", text: `"rules": list, "codex": codex })`, why: "the project detection answer's field for the sorter's picks, a wire name the HTTP goldens pin" },
 ];
 

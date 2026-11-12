@@ -3,6 +3,7 @@
 
 pub mod acp;
 pub mod app;
+pub mod assistant;
 pub mod connect;
 pub mod context;
 pub mod forward;

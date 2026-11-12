@@ -28,8 +28,8 @@ cloud assistant (a dot)
   -> tunnel-client, on the person's machine
   -> xenonet mcp assistant --grant <grant>      crates/xenonet-mcp/src/assistant, stdio
   -> private endpoint, 127.0.0.1               crates/xenonet-service/src/assistant_endpoint.rs
-  -> assistant.read                            crates/xenonet-assistant/src/service.rs
-  -> XenoNet's in-memory state                 crates/xenonet-assistant/src/source.rs
+  -> assistant.read                            crates/xenonet-actors/src/assistant/service.rs
+  -> XenoNet's in-memory state                 crates/xenonet-actors/src/assistant/source.rs
 ```
 
 The local HTTP API, the component service and the other MCP servers are
@@ -48,7 +48,7 @@ unreachable from a connection.
 | Account links | Unverified, or the owner's word for an identity XenoNet already knows; never verified through this route | No transport here provides a provider assertion to validate. The verification path exists (`crates/xenonet-actors/src/account_links.rs`, `adapters.rs`) and is tested with made-up evidence, so a later adapter with a real assertion plugs in without a new table. |
 | Identity in snapshots | `identity` stays null for an owner-asserted link; `remote.accountLink` says how sure XenoNet is | Readers take `identity` as fact, so a link that's only the person's word never goes there. |
 | Presence | A read is working for a 90-second lease, then unknown | A read is evidence of activity at that moment only. The lease ages to unknown, never offline, and the most present instance still wins, so an observer's word about Grok Bot outranks a lapsed lease. |
-| Pagination | A page cursor is the connection's grant narrowed to one read, the hash of its tool and filters and five minutes, holding where the last page ended and the grant's revision (`crates/xenonet-assistant/src/pages.rs`) | No server-side snapshot to keep or expire, and no key of its own: a cursor can't be made up or changed, and it ends with the grant. The view is documented as the current one: an item that changes between pages can move. |
+| Pagination | A page cursor is the connection's grant narrowed to one read, the hash of its tool and filters and five minutes, holding where the last page ended and the grant's revision (`crates/xenonet-service/src/compose/assistant/pages.rs`) | No server-side snapshot to keep or expire, and no key of its own: a cursor can't be made up or changed, and it ends with the grant. The view is documented as the current one: an item that changes between pages can move. |
 | Status of a session | From the tailer's signals: waiting (question or permission), stuck, working (a turn under way), completed (a turn ended and hasn't been looked at), idle, unknown (its source unavailable) | These are the signals the console already shows, so the answer matches what the owner sees. `status_basis` says which signal it came from. |
 
 ## 3. The actor model
@@ -109,7 +109,7 @@ fingerprint of the installation that made its grants, so they're revoked
 ## 5. Data policy
 
 Every answer is made afresh from named fields
-(`crates/xenonet-assistant/src/projection.rs`) and checked against strict
+(`crates/xenonet-actors/src/assistant/projection.rs`) and checked against strict
 schemas (`assistant/result/v1`, `assistant/error/v1` and
 `actor/connection/v1`, typed in `crates/xenonet-model`) before it goes. These are the only strict
 schemas in XenoNet: data that leaves the machine is an allowlist.
@@ -143,16 +143,16 @@ account. `xenonet assistant audit` and `GET /api/assistant/audit` read it.
 | Threat | Control | Tested in |
 | --- | --- | --- |
 | A remote caller with no grant | The tunnel's own access, then the endpoint's hello; a wrong token hears nothing more than an unknown one | `crates/xenonet-service/tests/assistant_endpoint.rs` |
-| A caller asking for an unselected project or session | Authorized view before any filter or count; uniform `NOT_FOUND` | `crates/xenonet-assistant/src/runtime/reads.rs`, `projection.rs` |
+| A caller asking for an unselected project or session | Authorized view before any filter or count; uniform `NOT_FOUND` | `crates/xenonet-service/src/compose/assistant/reads.rs`, `projection.rs` |
 | A compromised adapter asking for more | Fresh method allowlist on the endpoint; every check in the service; the component service refuses the assistant role, and the endpoint refuses Tools tokens | `assistant_endpoint.rs` |
 | Prompt injection or secrets in titles | Labels off by default; cleaning when on; tool descriptions and instructions say labels are data, never instructions | `projection.rs` (canaries) |
 | Stale authorization, replay | Recheck before release; revision-bound cursors and cache; tombstones; the grant's file deleted on revoke; removing a registered actor revokes its connections | `assistant_endpoint.rs`, `pages.rs`, `crates/xenonet-actors/src/connections.rs` |
 | A schema change adding fields | Strict output schemas checked before release | `crates/xenonet-model` (strict types) |
 | Overload | 16 KiB arguments, 256 KiB answers, 60 a minute with bursts of ten, four at a time, ten seconds, 320 KiB lines, refused hellos throttled | `assistant_endpoint.rs` |
 | A copied state folder | Installation fingerprint; grants revoked on mismatch | `crates/xenonet-actors/src/connections.rs` |
-| Cached data after revocation, expiry or a narrower scope | The adapter serves a cached answer only while the grant's files say it stands (its token's file, tombstones, expiry) and only under the revision on disk now | `crates/xenonet-assistant/src/credentials.rs`, `assistant_endpoint.rs` |
+| Cached data after revocation, expiry or a narrower scope | The adapter serves a cached answer only while the grant's files say it stands (its token's file, tombstones, expiry) and only under the revision on disk now | `crates/xenonet-actors/src/assistant/credentials.rs`, `assistant_endpoint.rs` |
 | A stale endpoint file after a crash, naming a port someone else took | The adapter connects only while the process that wrote the file runs as this account | `assistant_endpoint.rs` |
-| Work piling up past the concurrency limit | A read that timed out keeps its slot until its work ends | `crates/xenonet-assistant/src/service.rs` |
+| Work piling up past the concurrency limit | A read that timed out keeps its slot until its work ends | `crates/xenonet-actors/src/assistant/service.rs` |
 
 What this can't stop: code running as the person's account can read the
 grant's file, the store and the transcripts themselves, and change the
