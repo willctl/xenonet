@@ -236,7 +236,7 @@ impl Nodes {
         choose.dedup();
         let has: Vec<String> = every.iter().chain(own.iter()).cloned().collect();
         let direct: Vec<String> = lists.iter().filter(|(_, l)| !l.iter().any(|u| has.contains(u))).map(|(n, _)| n.clone()).collect();
-        let url = self.common.link2.reading().as_ref().and_then(|t| t.dial.endpoint().addr().relay_urls().map(ToString::to_string).find(|u| has.contains(u)));
+        let url = self.common.link2.reading().as_ref().and_then(|t| t.dial.endpoint().addr().relay_urls().find_map(|u| crate::endpoint::as_listed(u, &has)));
         json!({ "url": url, "every": every, "own": own, "choose": choose, "directOnly": direct, "n0": n0_relays() })
     }
 

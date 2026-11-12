@@ -20,7 +20,7 @@ use super::{
 };
 use crate::admission::Admission;
 use crate::dial::{Close, Dial, Mesh, PeerId};
-use crate::endpoint::{IrohDial, LanLookup, Relay, Relays, Settings};
+use crate::endpoint::{added_roots, IrohDial, LanLookup, Relay, Relays, Settings};
 use crate::join::{self, Admit, Admitted, Answer, Burned, Door, Invite, Served, Ticket};
 use std::net::SocketAddr;
 
@@ -193,7 +193,12 @@ impl Node {
                 return Ok((o.door.clone(), ticket(&o.door)?));
             }
         }
-        let settings = Settings { relays: relays_of(relays), lan: if lan { LanLookup::On } else { LanLookup::Off }, bind: self.shared.opts.bind };
+        let settings = Settings {
+            relays: relays_of(relays),
+            lan: if lan { LanLookup::On } else { LanLookup::Off },
+            bind: self.shared.opts.bind,
+            roots: added_roots(&self.shared.opts.dir).unwrap_or_default(),
+        };
         let admission = Arc::new(Admission::new());
         let dial = Arc::new(IrohDial::bind(key, &settings, admission.clone()).await?);
         let door = Arc::new(Door::new(Arc::new(Mesh::new(dial.clone(), admission))));
@@ -255,7 +260,12 @@ impl Node {
             add["device"] = identity::device_json(&d.signer.public(), kind, &n.opts.platform);
         }
         let add = add.to_string();
-        let settings = Settings { relays: relays_of(inv.relay.as_slice()), lan: if lan { LanLookup::On } else { LanLookup::Off }, bind: n.opts.bind };
+        let settings = Settings {
+            relays: relays_of(inv.relay.as_slice()),
+            lan: if lan { LanLookup::On } else { LanLookup::Off },
+            bind: n.opts.bind,
+            roots: added_roots(&n.opts.dir).unwrap_or_default(),
+        };
         let admission = Arc::new(Admission::new());
         let dial = Arc::new(IrohDial::bind(&key, &settings, admission.clone()).await?);
         if at.is_some() || inv.relay.is_some() {

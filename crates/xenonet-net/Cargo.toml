@@ -16,6 +16,8 @@ bytes.workspace = true
 # The transport between machines, and finding members on the LAN.
 iroh.workspace = true
 iroh-mdns-address-lookup.workspace = true
+# The mDNS lookup's answers, as a stream, with unlisted relays taken out.
+futures.workspace = true
 ring.workspace = true
 rusqlite.workspace = true
 reqwest.workspace = true
@@ -37,6 +39,9 @@ xenonet-text.workspace = true
 xenonet-keys.workspace = true
 # The transport's simulated network (src/sim.rs).
 turmoil.workspace = true
+# A real self-hosted relay, with a test CA (src/relay_tests.rs).
+iroh-relay.workspace = true
+rcgen.workspace = true
 
 [lints]
 workspace = true

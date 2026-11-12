@@ -16,13 +16,13 @@ struct Machine {
 }
 
 fn loopback() -> Settings {
-    Settings { relays: Relays::None, lan: LanLookup::Off, bind: Some("127.0.0.1:0".parse().unwrap()) }
+    Settings { relays: Relays::None, lan: LanLookup::Off, bind: Some("127.0.0.1:0".parse().unwrap()), roots: Vec::new() }
 }
 
 async fn machine_with(early_cut: bool) -> Machine {
     let key = HostKey::generate().unwrap();
     let admission = Arc::new(Admission::new());
-    let dial = Arc::new(IrohDial::bind_with(&key, &loopback(), admission.clone(), early_cut).await.unwrap());
+    let dial = Arc::new(IrohDial::bind_with(&key, &loopback(), admission.clone(), Knobs { early_cut, ..Knobs::default() }).await.unwrap());
     let mesh = Arc::new(Mesh::new(dial.clone(), admission));
     assert_eq!(dial.me(), peer_id(key.public()));
     Machine { id: dial.me(), dial, mesh }
@@ -312,7 +312,15 @@ fn addresses_outlive_their_time_to_live_nowhere() {
     a.put(peer, &[at], None, Duration::ZERO).unwrap();
     assert!(a.get(&peer).is_none(), "expired");
     a.put(peer, &[at], Some("https://relay.example.test"), Duration::from_secs(60)).unwrap();
+    assert_eq!(a.get(&peer).unwrap().relay_urls().count(), 0, "a relay the endpoint doesn't list is left out");
+    assert_eq!(a.get(&peer).unwrap().ip_addrs().count(), 1, "the direct address stays");
+    a.list(&Relays::Listed(vec![Relay { url: "https://relay.example.test".into(), auth_token: None }]));
+    assert!(a.lists("https://relay.example.test") && !a.lists("https://other.example.test"));
+    a.put(peer, &[at], Some("https://relay.example.test"), Duration::from_secs(60)).unwrap();
     assert_eq!(a.get(&peer).unwrap().relay_urls().count(), 1);
+    a.list(&Relays::None);
+    assert_eq!(a.get(&peer).unwrap().relay_urls().count(), 0, "a relay taken off the list goes from what was kept");
+    assert_eq!(a.get(&peer).unwrap().ip_addrs().count(), 1);
     a.forget(&peer);
     assert!(a.get(&peer).is_none());
 }

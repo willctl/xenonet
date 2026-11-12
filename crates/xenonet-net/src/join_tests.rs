@@ -318,7 +318,7 @@ fn tickets_expire_close_and_say_when_one_burned() {
 // ---------- real iroh on loopback ----------
 
 fn loopback() -> Settings {
-    Settings { relays: Relays::None, lan: LanLookup::Off, bind: Some("127.0.0.1:0".parse().unwrap()) }
+    Settings { relays: Relays::None, lan: LanLookup::Off, bind: Some("127.0.0.1:0".parse().unwrap()), roots: Vec::new() }
 }
 
 #[test]

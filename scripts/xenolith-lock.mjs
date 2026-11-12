@@ -121,15 +121,20 @@ function compare() {
     const ours = a.get(name);
     const theirs = b.get(name);
     const key = (e) => `${e.version}|${e.source}|${e.checksum}`;
-    if (ours.map(key).join(",") !== theirs.map(key).join(",")) {
+    // Every version Xenolith builds is one the root's lock tests. A version
+    // only the root reaches is fine, as a feature only the root turns on is:
+    // the root's other crates bring it (a dev-dependency's features, which
+    // cargo metadata unifies over the workspace), and Xenolith never builds it.
+    if (theirs.some((t) => !ours.some((o) => key(o) === key(t)))) {
       versions++;
       const same = ours.length === theirs.length && ours.every((e, i) => e.version === theirs[i].version);
       problems.push(`${name}: the root's lock has ${ours.map(show).join(", ")}, Xenolith's ${theirs.map(show).join(", ")}${same ? " (the same versions from another source or with another checksum)" : ""}`);
       continue;
     }
-    for (const [i, o] of ours.entries()) {
+    for (const t of theirs) {
+      const o = ours.find((e) => key(e) === key(t));
       const allowed = ONLY_XENOLITH.find((x) => x.name === name);
-      const added = theirs[i].features.filter((f) => !o.features.includes(f) && !allowed?.features.test(f));
+      const added = t.features.filter((f) => !o.features.includes(f) && !allowed?.features.test(f));
       if (added.length) problems.push(`${name} ${o.version}: only Xenolith's build turns on ${added.join(", ")}`);
     }
   }

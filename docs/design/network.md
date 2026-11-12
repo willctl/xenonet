@@ -239,6 +239,17 @@ carrying the network's traffic, which still goes through the gateway:
   setting, and a door per protocol. `dial` has the `Mesh` every connection
   goes through, and `admission` decides who may hold a connection on which
   protocol, from the chain.
+- Relays: a member is reached only through a relay the endpoint lists
+  (`Addresses` and the mDNS lookup drop any other, since iroh dials
+  whatever relay an address names); a relay's certificate is checked
+  against the public CAs and the person's own, in `relay-ca.pem` beside
+  the network's files (a machine setting, never a chain entry); when the
+  home relay has been gone 5 s and another is listed, the endpoint has
+  iroh pick a home again (`keep_home`), which iroh 1.4 would otherwise
+  leave to its five-minute full report. The doctor asks each relay
+  (`doctor::relays`). `relay_tests.rs` runs iroh's own relay server on
+  loopback, with a test CA; [own-relay.md](../guide/own-relay.md) is the
+  person's side.
 - `envelope`: the `xenonet-net/2` envelope (section 3), with known answers.
   Frames still carry the feeds.
 - Joining over `xenonet/join/2` (section 4), which is how

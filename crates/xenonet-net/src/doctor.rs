@@ -7,10 +7,24 @@
 //!
 //! The link keeps how it stands; these checks read it, so they work
 //! whether the link is running or not.
+//!
+//! The relays are the exception: each one the machine has (every
+//! network's list, and its own) is asked (`relays`), the way the endpoint
+//! would reach it, so a relay that is down, or whose certificate doesn't
+//! check, says so under its own URL.
 
+use crate::endpoint::{added_roots, relay_tls, RELAY_CA};
 use crate::files::{Dir, KEY};
 use crate::keys::HostKey;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{CertificateError, DigitallySignedStruct, SignatureScheme};
 use serde_json::{json, Map, Value};
+use std::io::{Read as _, Write as _};
+use std::net::{TcpStream, ToSocketAddrs as _};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use xenonet_os::sync::Locked;
 
 /// One check: its id, title and verdict ({ status, detail, fix? }).
 pub type Check = (&'static str, &'static str, Value);
@@ -224,7 +238,288 @@ pub fn checks(d: &Dir, now: f64) -> Vec<Check> {
             _ => verdict("ok", format!("through a tunnel, at {address}"), None),
         },
     ));
+    if let Some(ca) = relay_ca(d) {
+        out.push(("network.relay-ca", "The CAs you added for your own relays are in order", ca));
+    }
     out
+}
+
+/// What the CAs the person added for their relays (`relay-ca.pem`) come
+/// to: none when there's no such file.
+fn relay_ca(d: &Dir) -> Option<Value> {
+    if !d.file(RELAY_CA).exists() {
+        return None;
+    }
+    let fix = format!("Put your relay's CA certificate, as PEM, in {RELAY_CA} in XenoNet's state folder, network/, then xenonet service restart");
+    Some(match added_roots(&d.path) {
+        Ok(roots) => verdict(
+            "ok",
+            format!("{} CA{} in {RELAY_CA}, trusted for relays beside the public CAs, on this machine alone", roots.len(), if roots.len() == 1 { "" } else { "s" }),
+            None,
+        ),
+        Err(e) => verdict("fail", format!("{}: relays with a certificate from your own CA can't be reached", e.message), Some(fix.as_str())),
+    })
+}
+
+/// How long the doctor gives a relay to answer: to connect, and then to
+/// shake hands and answer, each.
+const RELAY_WAIT: Duration = Duration::from_secs(3);
+
+/// A relay this machine has, for the doctor to ask: its URL, who lists
+/// it, and the CAs the person added.
+#[derive(Clone, Debug)]
+pub struct RelayProbe {
+    pub url: String,
+    /// The networks that list it, by name, and "this machine" for one of
+    /// its own.
+    pub by: Vec<String>,
+    roots: Vec<CertificateDer<'static>>,
+}
+
+/// The relays this machine has: every network's, and its own, each once,
+/// in the order they're listed.
+pub fn relays(d: &Dir) -> Vec<RelayProbe> {
+    let mut out: Vec<RelayProbe> = Vec::new();
+    let mut add = |url: &str, by: &str| match out.iter_mut().find(|p| p.url == url) {
+        Some(p) => p.by.push(by.to_string()),
+        None => out.push(RelayProbe { url: url.to_string(), by: vec![by.to_string()], roots: Vec::new() }),
+    };
+    for net in d.read_networks().unwrap_or_default() {
+        let Ok(roster) = read_roster(d, &net.id) else { continue };
+        for url in &roster.view().relays {
+            add(url, &net.name);
+        }
+    }
+    for url in d.persist.own_relays().unwrap_or_default() {
+        add(&url, "this machine");
+    }
+    let roots = added_roots(&d.path).unwrap_or_default();
+    for p in &mut out {
+        p.roots.clone_from(&roots);
+    }
+    out
+}
+
+impl RelayProbe {
+    pub fn new(url: impl Into<String>, by: Vec<String>, roots: Vec<CertificateDer<'static>>) -> RelayProbe {
+        RelayProbe { url: url.into(), by, roots }
+    }
+
+    /// The check's id: `network.relay.` and the relay's host (and port,
+    /// when it isn't the scheme's).
+    pub fn id(&self) -> String {
+        let at = self.url.parse::<iroh::RelayUrl>().ok().map_or_else(
+            || self.url.clone(),
+            |u| match (u.host_str(), u.port()) {
+                (Some(h), Some(p)) => format!("{h}:{p}"),
+                (Some(h), None) => h.to_string(),
+                _ => self.url.clone(),
+            },
+        );
+        format!("network.relay.{at}")
+    }
+
+    pub fn title(&self) -> String {
+        format!("The relay {} answers", self.url.trim_end_matches('/'))
+    }
+
+    /// Asks the relay as the endpoint would: TCP, then TLS checked against
+    /// the public CAs and the person's own, then iroh-relay's /healthz.
+    pub async fn check(self) -> Value {
+        tokio::task::spawn_blocking(move || self.ask()).await.unwrap_or_else(|e| verdict("warn", format!("the check failed: {e}"), None))
+    }
+
+    fn listed(&self) -> String {
+        let (own, nets): (Vec<&String>, Vec<&String>) = self.by.iter().partition(|b| *b == "this machine");
+        let mut words = Vec::new();
+        if !nets.is_empty() {
+            words.push(format!("listed by {}", nets.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
+        }
+        if !own.is_empty() {
+            words.push("one of this machine's own".to_string());
+        }
+        words.join("; ")
+    }
+
+    fn ask(&self) -> Value {
+        let name = self.url.trim_end_matches('/');
+        let down_fix = "Check that the relay runs and its ports are open (docs/guide/own-relay.md). Meanwhile XenoNet goes through the network's other relays, or direct paths.";
+        let Ok(url) = self.url.parse::<iroh::RelayUrl>() else {
+            return verdict("fail", format!("{name} isn't a relay's URL"), Some("xenonet net relay remove <url>, then add it again as https://<host>"));
+        };
+        let host = url.host_str().unwrap_or_default().trim_start_matches('[').trim_end_matches(']').to_string();
+        let tls = url.scheme() == "https";
+        let port = url.port_or_known_default().unwrap_or(443);
+        let Ok(Some(at)) = (host.as_str(), port).to_socket_addrs().map(|mut a| a.next()) else {
+            return verdict("warn", format!("{name} doesn't resolve: no address for {host}"), Some(down_fix));
+        };
+        let t0 = Instant::now();
+        let tcp = match TcpStream::connect_timeout(&at, RELAY_WAIT) {
+            Ok(s) => s,
+            Err(e) => return verdict("warn", format!("{name} doesn't answer at {at}: {e}"), Some(down_fix)),
+        };
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let _ = tcp.set_read_timeout(Some(RELAY_WAIT));
+        let _ = tcp.set_write_timeout(Some(RELAY_WAIT));
+        let ask = format!("GET /healthz HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+        let (answer, whose) = if tls {
+            match https(tcp, &host, &self.roots, ask.as_bytes()) {
+                Ok(a) => a,
+                Err(Asked::Cert(e)) => {
+                    let fix = format!("If it's your own relay with your own CA, put that CA's certificate in {RELAY_CA} in XenoNet's state folder, network/, then xenonet service restart. Otherwise the relay needs a valid certificate (ACME, say).");
+                    return verdict("fail", format!("{name}'s certificate doesn't check: {e}"), Some(fix.as_str()));
+                }
+                Err(Asked::Other(e)) => return verdict("warn", format!("{name} took the connection but didn't answer over TLS: {e}"), Some(down_fix)),
+            }
+        } else {
+            match plain(tcp, ask.as_bytes()) {
+                Ok(a) => (a, ""),
+                Err(e) => return verdict("warn", format!("{name} took the connection but didn't answer: {e}"), Some(down_fix)),
+            }
+        };
+        let version = healthz(&answer);
+        let mut words = vec![self.listed(), format!("{} ms away", ms.round())];
+        words.push(match whose {
+            "public" => "TLS valid, a public CA's certificate".to_string(),
+            "added" => format!("TLS valid, a certificate from a CA you added ({RELAY_CA})"),
+            _ => "plain HTTP".to_string(),
+        });
+        match &version {
+            Some(v) => words.push(format!("iroh-relay {v}")),
+            None => words.push("not answering /healthz as iroh-relay does".to_string()),
+        }
+        let detail = words.into_iter().filter(|w| !w.is_empty()).collect::<Vec<_>>().join("; ");
+        if !tls {
+            return verdict(
+                "warn",
+                detail,
+                Some("Serve the relay over HTTPS: whoever is on the path to a plain HTTP relay sees which machines use it, though never what they send."),
+            );
+        }
+        if version.is_none() {
+            return verdict("warn", detail, Some("Check that the URL is the relay's own (https://<host>, no path)."));
+        }
+        verdict("ok", detail, None)
+    }
+}
+
+enum Asked {
+    Cert(String),
+    Other(String),
+}
+
+/// The relay's answer over TLS, and whose CA vouched for it: "public" or
+/// "added".
+fn https(tcp: TcpStream, host: &str, roots: &[CertificateDer<'static>], ask: &[u8]) -> Result<(Vec<u8>, &'static str), Asked> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let other = |e: std::io::Error| Asked::Other(e.to_string());
+    let public = relay_tls(&[]).server_cert_verifier(provider.clone()).map_err(other)?;
+    let added = if roots.is_empty() { None } else { Some(iroh::tls::CaTlsConfig::custom_roots(roots.to_vec()).server_cert_verifier(provider.clone()).map_err(other)?) };
+    let which = Arc::new(Which { public, added, by: Mutex::new(None) });
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| Asked::Other(e.to_string()))?
+        .dangerous()
+        .with_custom_certificate_verifier(which.clone())
+        .with_no_client_auth();
+    let name = ServerName::try_from(host.to_string()).map_err(|e| Asked::Other(e.to_string()))?;
+    let conn = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| Asked::Other(e.to_string()))?;
+    let mut tls = rustls::StreamOwned::new(conn, tcp);
+    let sent = tls.write_all(ask).and_then(|()| tls.flush());
+    let mut answer = Vec::new();
+    let read = sent.and_then(|()| tls.read_to_end(&mut answer));
+    let failed = |e: std::io::Error| match e.get_ref().and_then(|i| i.downcast_ref::<rustls::Error>()) {
+        Some(rustls::Error::InvalidCertificate(c)) => Asked::Cert(cert_words(c)),
+        _ => Asked::Other(e.to_string()),
+    };
+    // A server that closes without TLS's close_notify still answered.
+    match read {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && !answer.is_empty() => {}
+        Err(e) => return Err(failed(e)),
+    }
+    let by = *which.by.locked();
+    Ok((answer, by.unwrap_or("public")))
+}
+
+fn plain(mut tcp: TcpStream, ask: &[u8]) -> std::io::Result<Vec<u8>> {
+    tcp.write_all(ask)?;
+    let mut answer = Vec::new();
+    tcp.read_to_end(&mut answer)?;
+    Ok(answer)
+}
+
+fn cert_words(c: &CertificateError) -> String {
+    match c {
+        CertificateError::UnknownIssuer => "no CA this machine trusts issued it".into(),
+        CertificateError::Expired | CertificateError::ExpiredContext { .. } => "it has expired".into(),
+        CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => "it isn't valid yet (or this computer's clock is behind)".into(),
+        CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => "it's for another name than the relay's".into(),
+        CertificateError::Revoked => "it was revoked".into(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// iroh-relay's version, from its /healthz answer, when it gave one.
+fn healthz(answer: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(answer);
+    let (head, body) = text.split_once("\r\n\r\n")?;
+    if !head.starts_with("HTTP/1.1 200") && !head.starts_with("HTTP/1.0 200") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(body.trim()).ok()?;
+    (v.get("status").and_then(Value::as_str) == Some("ok")).then(|| v.get("version").and_then(Value::as_str).unwrap_or("?").to_string())
+}
+
+/// Checks a relay's certificate against the public CAs, then the person's
+/// own, and keeps which one vouched for it.
+#[derive(Debug)]
+struct Which {
+    public: Arc<dyn ServerCertVerifier>,
+    added: Option<Arc<dyn ServerCertVerifier>>,
+    by: Mutex<Option<&'static str>>,
+}
+
+impl ServerCertVerifier for Which {
+    fn verify_server_cert(
+        &self,
+        end: &CertificateDer<'_>,
+        middle: &[CertificateDer<'_>],
+        name: &ServerName<'_>,
+        ocsp: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let public = match self.public.verify_server_cert(end, middle, name, ocsp, now) {
+            Ok(v) => {
+                *self.by.locked() = Some("public");
+                return Ok(v);
+            }
+            Err(e) => e,
+        };
+        let Some(added) = &self.added else { return Err(public) };
+        match added.verify_server_cert(end, middle, name, ocsp, now) {
+            Ok(v) => {
+                *self.by.locked() = Some("added");
+                Ok(v)
+            }
+            // What the person's CA says is the more telling, unless it
+            // didn't issue the certificate either.
+            Err(e) if matches!(public, rustls::Error::InvalidCertificate(CertificateError::UnknownIssuer)) => Err(e),
+            Err(_) => Err(public),
+        }
+    }
+
+    fn verify_tls12_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.public.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.public.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.public.supported_verify_schemes()
+    }
 }
 
 /// How this machine asks you and keeps your identity's root key, from what
@@ -351,7 +646,7 @@ mod tests {
     use std::path::Path;
 
     fn kept(dir: &Path) -> Dir {
-        Dir::new(dir, std::sync::Arc::new(crate::persist::Memory::default()))
+        Dir::new(dir, Arc::new(crate::persist::Memory::default()))
     }
 
     #[test]

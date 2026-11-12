@@ -534,24 +534,34 @@ async fn one(id: String, facts: Value, m: Arc<Machine>) -> Value {
     }
 }
 
+/// A verdict the network gives at once, or a relay still to be asked.
+enum Ready {
+    Now(Value),
+    Relay(xenonet_net::doctor::RelayProbe),
+}
+
 /// runDoctor(ctx, { only }): every check (or those `only` keeps), each in
 /// 8 seconds at most, and their summary.
 pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: bool) -> Value {
     let started = now_ms();
     // Each check: its id, group, title, and its verdict when it's ready.
-    let mut all: Vec<(String, String, String, Option<Value>)> = checks::all().into_iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
+    let mut all: Vec<(String, String, String, Option<Ready>)> = checks::all().into_iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
     // The network across machines, as this machine keeps it, when it's in
     // one: each verdict is ready. How this machine asks the person and
     // keeps their root key, once an identity was set up here.
     let checks: Vec<_> = parts.network().map_or_else(Vec::new, |d| xenonet_net::doctor::checks(&d, now_ms()).into_iter().chain(xenonet_net::doctor::identity_checks(&d)).collect());
     for (id, title, verdict) in checks {
-        all.push((id.into(), "Network".into(), title.into(), Some(json!({ "network": verdict }))));
+        all.push((id.into(), "Network".into(), title.into(), Some(Ready::Now(verdict))));
+    }
+    // Each relay this machine has, asked as its endpoint would reach it.
+    for probe in parts.network().map_or_else(Vec::new, |d| xenonet_net::doctor::relays(&d)) {
+        all.push((probe.id(), "Network".into(), probe.title(), Some(Ready::Relay(probe))));
     }
     // Where the machine signing key is, once it's made: a key in the TPM
     // or the Secure Enclave that doesn't open is a failure here, since
     // XenoNet never makes a new one in its place.
     if let Some(verdict) = (parts.machine_key)(&std::path::Path::new(&parts.config.state_dir).join("identity")) {
-        all.push(("network.signing".into(), "Network".into(), "This machine's signing key is where it was made".into(), Some(json!({ "network": verdict }))));
+        all.push(("network.signing".into(), "Network".into(), "This machine's signing key is where it was made".into(), Some(Ready::Now(verdict))));
     }
     let picked: Vec<_> = all.into_iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();
     let facts = facts(&parts, by_hand).await;
@@ -561,8 +571,9 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
         async move {
             let t0 = now_ms();
             let check = async {
-                match &ready {
-                    Some(k) => k["network"].clone(),
+                match ready {
+                    Some(Ready::Now(v)) => v,
+                    Some(Ready::Relay(probe)) => probe.check().await,
                     None => one(id.clone(), facts, m).await,
                 }
             };

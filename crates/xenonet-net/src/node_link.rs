@@ -52,7 +52,7 @@
 
 use super::{json, Arc, Common, Duration, Locked, NetFile, ReadWrite, Shared, Value, Weak, RESEND};
 use crate::dial::{Close, Dial, Mesh, PeerId};
-use crate::endpoint::{peer_id, IrohDial, Relay, Relays, Settings};
+use crate::endpoint::{added_roots, peer_id, IrohDial, Relay, Relays, Settings};
 use crate::envelope::{Class as EnvClass, Envelope, Me as Recipient};
 use crate::holder::{self, Ask, Fetching};
 use crate::link2::{Control, Links, Machine, NetHello, Out};
@@ -369,22 +369,22 @@ impl Shared {
     }
 
     /// This machine's address record in its network, signed by its machine
-    /// key, made again once half its time has gone.
+    /// key, made again once half its time has gone or the home relay moved.
     pub(super) fn address_record(&self) -> Option<Value> {
         let t = self.link2()?;
         let net = self.network()?;
+        let relays = self.roster().view_ref().map(|v| v.relays.clone()).unwrap_or_default();
+        // The home relay only when the network lists it (revision 9).
+        let relay = t.dial.endpoint().addr().relay_urls().find_map(|u| crate::endpoint::as_listed(u, &relays));
         {
             let had = t.record.locked();
             if let Some((v, at)) = had.get(&net.id) {
-                if at.elapsed() < Duration::from_secs(ADDRESS_TTL_S / 2) {
+                if at.elapsed() < Duration::from_secs(ADDRESS_TTL_S / 2) && v.get("relay").and_then(Value::as_str) == relay.as_deref() {
                     return Some(v.clone());
                 }
             }
         }
         let key = self.identity.machine_key().ok()?;
-        let relays = self.roster().view_ref().map(|v| v.relays.clone()).unwrap_or_default();
-        // The home relay only when the network lists it (revision 9).
-        let relay = t.dial.endpoint().addr().relay_urls().map(ToString::to_string).find(|u| relays.contains(u));
         let mut addrs: Vec<String> = t.dial.direct_addrs().into_iter().filter(|a| a.port() != 0).map(|a| a.to_string()).collect();
         addrs.dedup();
         addrs.truncate(xenonet_log::address::MAX_ADDRS);
@@ -833,7 +833,7 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
     let Some(common) = c.upgrade() else { return };
     let Some(s) = common.shareds().into_iter().next() else { return };
     let Some(key) = s.key() else { return };
-    let settings = Settings { relays: relays_of(&relays), lan: s.opts.lan, bind: s.opts.bind };
+    let settings = Settings { relays: relays_of(&relays), lan: s.opts.lan, bind: s.opts.bind, roots: added_roots(&s.opts.dir).unwrap_or_default() };
     let admission = Arc::new(crate::admission::Admission::new());
     let dial = match IrohDial::bind(&key, &settings, admission.clone()).await {
         Ok(d) => Arc::new(d),

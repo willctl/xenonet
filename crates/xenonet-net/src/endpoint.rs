@@ -9,6 +9,12 @@
 //! - Relays are the person's choice, `Relays::None` (LAN and direct paths
 //!   only) or a list they name. There is no default relay. `online` never
 //!   waits on a relay when there is none (iroh's own would wait forever).
+//! - iroh dials whatever relay a peer's address names, listed or not, so a
+//!   relay URL that reaches the endpoint any other way (an address record,
+//!   the LAN) is dropped unless the endpoint lists it.
+//! - A relay's certificate is checked against the public CAs iroh carries
+//!   and the CAs the person added for relays of their own (`relay-ca.pem`
+//!   in the network folder: a setting of this machine, never in a chain).
 //! - Addresses come from `Addresses` (iroh's `MemoryLookup`, which keeps
 //!   entries forever, so each gets a time to live here), and from mDNS on
 //!   the LAN only when the machine's setting says so. The setting is asked
@@ -29,17 +35,22 @@ use crate::admission::Admission;
 use crate::dial::{Alpn, Close, Dial, Fut, PeerId, Reader, Side, Wire, Writer};
 use crate::keys::{HostKey, PublicKeys};
 use crate::{NetError, R};
-use iroh::address_lookup::MemoryLookup;
+use iroh::address_lookup::{AddressLookup, AddressLookupBuilder, AddressLookupBuilderError, EndpointData, EndpointInfo, Item, MemoryLookup};
 use iroh::endpoint::{
     AfterHandshakeOutcome, BeforeConnectOutcome, Builder, Connection, ConnectionError, EndpointHooks, PortmapperConfig, RecvStream, SendStream, Side as QuicSide, VarInt,
 };
 use iroh::protocol::{AcceptError, ProtocolHandler, Router};
+use iroh::tls::CaTlsConfig;
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
+use rustls::pki_types::pem::PemObject as _;
+use rustls::pki_types::CertificateDer;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::path::Path;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -111,6 +122,43 @@ pub struct Settings {
     pub lan: LanLookup,
     /// The address to bind, or None for every interface, IPv4 and IPv6.
     pub bind: Option<SocketAddr>,
+    /// The CAs the person added for relays with certificates of their own
+    /// (`added_roots`), trusted beside the public ones.
+    pub roots: Vec<CertificateDer<'static>>,
+}
+
+/// The file in the network folder that holds, as PEM, the CAs the person
+/// trusts for their own relays: a setting of this machine alone.
+pub const RELAY_CA: &str = "relay-ca.pem";
+
+/// The CAs in `dir`'s `relay-ca.pem`; none when there's no such file.
+pub fn added_roots(dir: &Path) -> R<Vec<CertificateDer<'static>>> {
+    match std::fs::read(dir.join(RELAY_CA)) {
+        Ok(pem) => roots_of(&pem),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(NetError::bad(format!("{RELAY_CA} can't be read: {e}"))),
+    }
+}
+
+/// The certificates in `pem`: at least one, each one a trust store takes
+/// as a CA. A bad one is refused here rather than failing every relay's
+/// handshake later.
+pub fn roots_of(pem: &[u8]) -> R<Vec<CertificateDer<'static>>> {
+    let certs = CertificateDer::pem_slice_iter(pem).collect::<Result<Vec<_>, _>>().map_err(|e| NetError::bad(format!("{RELAY_CA} isn't PEM certificates: {e}")))?;
+    if certs.is_empty() {
+        return Err(NetError::bad(format!("{RELAY_CA} has no certificate in it (-----BEGIN CERTIFICATE-----)")));
+    }
+    let mut store = rustls::RootCertStore::empty();
+    for c in &certs {
+        store.add(c.clone()).map_err(|e| NetError::bad(format!("{RELAY_CA} has a certificate that can't be a CA: {e}")))?;
+    }
+    Ok(certs)
+}
+
+/// How the endpoint checks relays' certificates: against the public CAs
+/// iroh carries, and the person's own.
+pub fn relay_tls(roots: &[CertificateDer<'static>]) -> CaTlsConfig {
+    CaTlsConfig::embedded().with_extra_roots(roots.to_vec())
 }
 
 /// iroh's relay mode for the person's relays: disabled when there are
@@ -138,6 +186,69 @@ fn relay_url(url: &str) -> R<RelayUrl> {
     url.parse().map_err(|_| NetError::bad(format!("{url} isn't a relay's URL")))
 }
 
+/// How `list` spells the relay at `url`, if it lists it. iroh writes a
+/// relay's URL with a trailing slash and a chain keeps the person's
+/// spelling, which has none, and chains compare relays as written.
+pub fn as_listed(url: &RelayUrl, list: &[String]) -> Option<String> {
+    let u = url.as_str().trim_end_matches('/');
+    list.iter().find(|r| r.trim_end_matches('/') == u).cloned()
+}
+
+fn urls_of(relays: &Relays) -> Vec<RelayUrl> {
+    match relays {
+        Relays::None => Vec::new(),
+        Relays::Listed(l) => l.iter().filter_map(|r| relay_url(&r.url).ok()).collect(),
+    }
+}
+
+/// The relays the endpoint lists, shared with what feeds it addresses.
+type Listed = Arc<Mutex<Vec<RelayUrl>>>;
+
+/// `info` without the relays the endpoint doesn't list.
+fn only_listed(info: &EndpointInfo, listed: &[RelayUrl]) -> EndpointInfo {
+    let mut out = EndpointInfo::new(info.endpoint_id).with_ip_addrs(info.ip_addrs().copied().collect()).with_user_data(info.user_data().cloned());
+    for r in info.relay_urls().filter(|r| listed.contains(r)) {
+        out = out.with_relay_url(r.clone());
+    }
+    out
+}
+
+/// An address lookup (mDNS) whose answers lose the relays the endpoint
+/// doesn't list: otherwise a machine on the LAN could point a member's
+/// address at a relay no one chose, and iroh would dial it.
+#[derive(Debug)]
+struct ListedOnly<B> {
+    inner: B,
+    listed: Listed,
+}
+
+impl<B: AddressLookupBuilder> AddressLookupBuilder for ListedOnly<B> {
+    fn into_address_lookup(self, endpoint: &Endpoint) -> Result<impl AddressLookup, AddressLookupBuilderError> {
+        Ok(ListedLookup { inner: self.inner.into_address_lookup(endpoint)?, listed: self.listed })
+    }
+}
+
+#[derive(Debug)]
+struct ListedLookup<L> {
+    inner: L,
+    listed: Listed,
+}
+
+type Found = Pin<Box<dyn futures::Stream<Item = Result<Item, iroh::address_lookup::Error>> + Send + 'static>>;
+
+impl<L: AddressLookup> AddressLookup for ListedLookup<L> {
+    fn publish(&self, data: &EndpointData) {
+        self.inner.publish(data);
+    }
+
+    fn resolve(&self, endpoint_id: EndpointId) -> Option<Found> {
+        use futures::StreamExt as _;
+        let listed = self.listed.clone();
+        let found = self.inner.resolve(endpoint_id)?;
+        Some(Box::pin(found.map(move |r| r.map(|item| Item::new(only_listed(item.endpoint_info(), &listed.locked()), item.provenance(), item.last_updated())))))
+    }
+}
+
 /// The address lookups the endpoint has, by name: memory always, mDNS when
 /// the machine's setting is on. Nothing else (no DNS, no pkarr).
 pub fn lookups(lan: LanLookup) -> Vec<&'static str> {
@@ -154,10 +265,14 @@ pub fn lookups(lan: LanLookup) -> Vec<&'static str> {
 pub struct Addresses {
     memory: MemoryLookup,
     until: Arc<Mutex<BTreeMap<PeerId, Instant>>>,
+    // The relays a member may be reached through: the endpoint's own.
+    listed: Listed,
 }
 
 impl Addresses {
-    /// `peer`'s addresses, in place of what was known, for `ttl`.
+    /// `peer`'s addresses, in place of what was known, for `ttl`. A relay
+    /// the endpoint doesn't list is left out (`lists`); the direct
+    /// addresses stay.
     pub fn put(&self, peer: PeerId, direct: &[SocketAddr], relay: Option<&str>, ttl: Duration) -> R<()> {
         let id = endpoint_id(peer)?;
         let mut addr = EndpointAddr::new(id);
@@ -165,11 +280,36 @@ impl Addresses {
             addr = addr.with_ip_addr(*a);
         }
         if let Some(r) = relay {
-            addr = addr.with_relay_url(relay_url(r)?);
+            let url = relay_url(r)?;
+            if self.listed.locked().contains(&url) {
+                addr = addr.with_relay_url(url);
+            }
         }
         self.memory.set_endpoint_info(addr);
         self.until.locked().insert(peer, Instant::now() + ttl);
         Ok(())
+    }
+
+    /// Whether the endpoint lists the relay at `url`, so that a member's
+    /// address may name it.
+    pub fn lists(&self, url: &str) -> bool {
+        relay_url(url).is_ok_and(|u| self.listed.locked().contains(&u))
+    }
+
+    // The relays the endpoint lists from now on. What was kept of members
+    // loses any relay no longer listed.
+    fn list(&self, relays: &Relays) {
+        let listed = urls_of(relays);
+        let peers: Vec<PeerId> = self.until.locked().keys().copied().collect();
+        for p in peers {
+            let Ok(id) = endpoint_id(p) else { continue };
+            if let Some(info) = self.memory.get_endpoint_info(id) {
+                if info.relay_urls().any(|r| !listed.contains(r)) {
+                    self.memory.set_endpoint_info(only_listed(&info, &listed).into_endpoint_addr());
+                }
+            }
+        }
+        *self.listed.locked() = listed;
     }
 
     pub fn forget(&self, peer: &PeerId) {
@@ -383,6 +523,22 @@ impl Wire for IrohWire {
     }
 }
 
+// What the tests change of how an endpoint binds.
+#[derive(Clone, Copy)]
+struct Knobs {
+    // Off: the doors and the mesh refuse what the hooks would have.
+    early_cut: bool,
+    // Off: no IP transport at all, so every path goes through a relay
+    // (iroh's own way to test relay-only paths).
+    direct: bool,
+}
+
+impl Default for Knobs {
+    fn default() -> Knobs {
+        Knobs { early_cut: true, direct: true }
+    }
+}
+
 /// This machine's iroh endpoint, its doors, and what it knows of where
 /// members are.
 pub struct IrohDial {
@@ -390,7 +546,57 @@ pub struct IrohDial {
     router: Router,
     incoming: tokio::sync::Mutex<mpsc::Receiver<Arc<dyn Wire>>>,
     addresses: Addresses,
-    relays: tokio::sync::Mutex<Relays>,
+    relays: Arc<tokio::sync::Mutex<Relays>>,
+}
+
+/// How long the home relay may be gone before the endpoint is told to
+/// look for another, and how long it then waits before telling it again.
+const HOME_GRACE: Duration = Duration::from_secs(5);
+const HOME_AGAIN: Duration = Duration::from_secs(30);
+
+// iroh 1.4 picks a new home relay only in a full report on its relays,
+// five minutes apart, or when its relays change. So when the home relay
+// has gone and another is listed, the home's own entry goes in again:
+// that counts as a change, and the report that follows moves the home to
+// a relay that answers. Ends with the endpoint.
+async fn keep_home(endpoint: Endpoint, relays: Arc<tokio::sync::Mutex<Relays>>) {
+    let mut status = endpoint.home_relay_status();
+    let gone = |s: &[iroh::endpoint::RelayStatus]| (!s.is_empty() && !s.iter().any(iroh::endpoint::RelayStatus::is_connected)).then(|| s[0].url().clone());
+    let wait = |d: Duration| {
+        let closed = endpoint.closed();
+        async move {
+            tokio::select! {
+                () = closed => false,
+                () = tokio::time::sleep(d) => true,
+            }
+        }
+    };
+    loop {
+        let Some(home) = gone(&status.get()) else {
+            tokio::select! {
+                () = endpoint.closed() => return,
+                r = status.updated() => if r.is_err() { return },
+            }
+            continue;
+        };
+        if !wait(HOME_GRACE).await {
+            return;
+        }
+        if gone(&status.get()).as_ref() != Some(&home) {
+            continue;
+        }
+        let list = relays.lock().await.clone();
+        if urls_of(&list).len() > 1 {
+            if let Ok(RelayMode::Custom(map)) = relay_mode(&list) {
+                if let Some(config) = map.get(&home) {
+                    endpoint.insert_relay(home, config).await;
+                }
+            }
+        }
+        if !wait(HOME_AGAIN).await {
+            return;
+        }
+    }
 }
 
 impl fmt::Debug for IrohDial {
@@ -404,31 +610,34 @@ impl IrohDial {
     /// `settings` say, with its doors open for the protocols `admission`
     /// offers.
     pub async fn bind(key: &HostKey, settings: &Settings, admission: Arc<Admission>) -> R<IrohDial> {
-        IrohDial::bind_with(key, settings, admission, true).await
+        IrohDial::bind_with(key, settings, admission, Knobs::default()).await
     }
 
-    // `early_cut` off is for the tests alone: they check that the doors and
-    // the mesh refuse what the hooks would have.
-    async fn bind_with(key: &HostKey, settings: &Settings, admission: Arc<Admission>, early_cut: bool) -> R<IrohDial> {
+    // The knobs are the tests' alone.
+    async fn bind_with(key: &HostKey, settings: &Settings, admission: Arc<Admission>, knobs: Knobs) -> R<IrohDial> {
         let addresses = Addresses::default();
+        addresses.list(&settings.relays);
         let offered: Vec<Vec<u8>> = admission.offered().iter().map(|a| a.bytes().to_vec()).collect();
         let mut b = Builder::empty()
             .crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
             .secret_key(secret_key(key))
             .alpns(offered.clone())
             .relay_mode(relay_mode(&settings.relays)?)
+            .ca_tls_config(relay_tls(&settings.roots))
             .portmapper_config(PortmapperConfig::Disabled)
             // No session tickets, so no 0-RTT: every connection does the
             // whole handshake.
             .max_tls_tickets(0)
             .address_lookup(addresses.memory.clone());
         if settings.lan == LanLookup::On {
-            b = b.address_lookup(MdnsAddressLookup::builder().service_name(MDNS_SERVICE));
+            b = b.address_lookup(ListedOnly { inner: MdnsAddressLookup::builder().service_name(MDNS_SERVICE), listed: addresses.listed.clone() });
         }
-        if let Some(at) = settings.bind {
+        if !knobs.direct {
+            b = b.clear_ip_transports();
+        } else if let Some(at) = settings.bind {
             b = b.clear_ip_transports().bind_addr(at).map_err(|e| NetError::bad(format!("can't bind {at}: {e}")))?;
         }
-        if early_cut {
+        if knobs.early_cut {
             b = b.hooks(EarlyCut { admission: admission.clone() });
         }
         let endpoint = b.bind().await.map_err(|e| NetError::internal(format!("the network's endpoint didn't start: {e}")))?;
@@ -442,7 +651,11 @@ impl IrohDial {
         // offered only while a ticket is open. Its door and the hooks refuse
         // a join with none open in the moment between the two.
         endpoint.set_alpns(offered);
-        Ok(IrohDial { me: PeerId(*endpoint.id().as_bytes()), router, incoming: tokio::sync::Mutex::new(from), addresses, relays: tokio::sync::Mutex::new(settings.relays.clone()) })
+        let relays = Arc::new(tokio::sync::Mutex::new(settings.relays.clone()));
+        if !settings.relays.is_none() {
+            tokio::spawn(keep_home(endpoint.clone(), relays.clone()));
+        }
+        Ok(IrohDial { me: PeerId(*endpoint.id().as_bytes()), router, incoming: tokio::sync::Mutex::new(from), addresses, relays })
     }
 
     pub fn endpoint(&self) -> &Endpoint {
@@ -494,6 +707,7 @@ impl IrohDial {
             Relays::None => Vec::new(),
         };
         let RelayMode::Custom(map) = relay_mode(&relays)? else {
+            self.addresses.list(&relays);
             *had = relays;
             return Ok(());
         };
@@ -510,6 +724,7 @@ impl IrohDial {
                 }
             }
         }
+        self.addresses.list(&relays);
         *had = relays;
         Ok(())
     }
@@ -550,3 +765,7 @@ impl Dial for IrohDial {
 #[cfg(test)]
 #[path = "endpoint_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "relay_tests.rs"]
+mod relay_tests;
