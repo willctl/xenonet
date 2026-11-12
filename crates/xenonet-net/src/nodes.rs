@@ -66,6 +66,13 @@ pub fn relay_urls(given: &str) -> R<Vec<String>> {
     Ok(vec![url])
 }
 
+/// Where a new transport key waits while its `rekey` entries go out.
+const NEXT_KEY: &str = "host.key.next";
+
+/// How long the members connected have to take a `rekey` entry before the
+/// endpoint moves to the new key.
+const REKEY_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub struct Nodes {
     this: Weak<Nodes>,
     opts: Options,
@@ -285,6 +292,65 @@ impl Nodes {
         Ok(state)
     }
 
+    /// A new transport key for this machine (`host.key`), in place of one
+    /// that was copied, without taking it out of its networks: a `rekey`
+    /// entry in every network's chain, under the machine signing key with
+    /// the person's presence, so only from the window. The entries go to
+    /// the members connected on the old key; once they've had `REKEY_GRACE`
+    /// to arrive, the new key takes the old one's place in the file and
+    /// the endpoint starts again on it, and the members refuse the old
+    /// endpoint id from then on. A network with other members needs one of
+    /// them connected, or nothing would tell them of the new key: the
+    /// rest take the entry from any member, as every chain entry goes.
+    pub async fn rekey(&self, at_window: bool) -> R<Value> {
+        let nodes = self.nodes();
+        if nodes.is_empty() {
+            return Err(NetError::new(409, "no-network", "this machine isn't in a XenoNet network"));
+        }
+        if !at_window {
+            return Err(crate::identity::not_at_window("A new network key"));
+        }
+        let t = self.common.link2.reading().clone();
+        for n in &nodes {
+            let s = n.shared();
+            let Some(net) = s.network() else { continue };
+            let others: Vec<crate::dial::PeerId> =
+                s.roster().view_ref().map(|v| v.members.values().filter(|m| m.id != net.host).map(|m| crate::endpoint::peer_id(&m.keys)).collect()).unwrap_or_default();
+            if !others.is_empty() && !others.iter().any(|p| t.as_ref().is_some_and(|t| t.links.is_connected(*p))) {
+                return Err(NetError::new(
+                    409,
+                    "not-connected",
+                    format!("none of {}'s other machines is connected: a new key is given while one is, so it can tell the rest", net.name),
+                ));
+            }
+        }
+        let file = self.opts.dir.join(crate::files::KEY);
+        // Made once and kept beside the key until it takes its place, so a
+        // rekey stopped half way gives the same key when it's done again.
+        let next = self.opts.dir.join(NEXT_KEY);
+        let fresh = Arc::new(crate::keys::HostKey::load_or_create(&next)?);
+        let mut entries = Vec::new();
+        for n in &nodes {
+            entries.push((n.clone(), n.rekey_entry(*fresh.public(), at_window).await?));
+        }
+        for (n, e) in entries {
+            n.submit_rekey(e)?;
+        }
+        tokio::time::sleep(REKEY_GRACE).await;
+        std::fs::rename(&next, &file)?;
+        for s in self.common.shareds() {
+            s.set_key(fresh.clone());
+        }
+        // The window's key is certified for the old endpoint id.
+        *self.common.window.locked() = None;
+        self.common.restart.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.common.relays_due.notify_one();
+        if let Some(s) = self.common.shareds().into_iter().next() {
+            s.log("net.rekey", &format!("this machine has a new network key, {}: its old one is refused from now on", fresh.key_id()));
+        }
+        Ok(self.state())
+    }
+
     /// Whether a window host that takes this machine's load is connected
     /// now, so the service reads its load only then.
     pub fn wants_load(&self) -> bool {
@@ -436,6 +502,9 @@ async fn supervise(nodes: Weak<Nodes>) {
                 task.abort();
                 return;
             };
+            if common.restart.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                break true;
+            }
             let want = n.relays_wanted();
             if want == have {
                 continue;

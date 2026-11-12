@@ -219,6 +219,10 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     if what == "revoke-device" {
         return Err(Fail::new("Revoking a device is XenoNet's window's, since it asks you: Network settings › Your devices, then Revoke on the lost machine's device", 1));
     }
+    // So is a new network key for this machine, which asks the person.
+    if what == "rekey" {
+        return Err(Fail::new("A new network key is XenoNet's window's, since it asks you: Network settings \u{203a} This machine, then New network key", 1));
+    }
     // So is naming a mailbox, which widens the network and asks the
     // person; taking one off narrows, and is done here.
     if what == "mailbox" && args.get(1).map(String::as_str) == Some("add") {

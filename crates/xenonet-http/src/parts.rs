@@ -173,6 +173,10 @@ pub trait Network: Send + Sync {
     /// widens: the window's, with presence) or taken off them (a window
     /// host's, or the mailbox's own).
     async fn mailbox(&self, network: Option<&str>, host: &str, add: bool, at_window: bool) -> NetResult;
+    /// A new transport key for this machine in every network it's in, in
+    /// place of one that was copied: asks the person, so only from the
+    /// window.
+    async fn rekey(&self, at_window: bool) -> NetResult;
     /// The services this machine publishes into `network`.
     fn svc_list(&self, network: Option<&str>) -> NetResult;
     /// Publishing asks the person (their presence), so only from the window.

@@ -72,6 +72,8 @@ struct Sim {
     context: Value,
     /// The other machines share titles only (variant "titles-only").
     titles_only: bool,
+    /// How many new network keys this machine was given.
+    rekeys: u32,
 }
 
 /// A made-up context key's id for the simulated Xenolith.
@@ -272,7 +274,7 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
     let context = made_up_context(variant, ctx.now());
     sims().locked().insert(
         key(ctx),
-        Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new(), context, titles_only: variant == Some("titles-only") },
+        Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new(), context, titles_only: variant == Some("titles-only"), rekeys: 0 },
     );
     for a in &asks {
         ctx.broadcast("ask", a);
@@ -371,7 +373,8 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             | "/api/net/forwards/deny"
             | "/api/net/forwards/revoke"
             | "/api/net/relays"
-            | "/api/net/mailboxes",
+            | "/api/net/mailboxes"
+            | "/api/net/rekey",
         )
         | ("PUT", "/api/net/settings" | "/api/net/sharing") => {
             if !req.by.window {
@@ -999,6 +1002,22 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             Reply::json(200, sim.state.clone())
         }
+        // A new network key for this machine: its row in every network
+        // shows the new key id.
+        "/api/net/rekey" => {
+            if !in_network {
+                return outside();
+            }
+            let n = sim.rekeys + 1;
+            sim.rekeys = n;
+            let id = key_id(&format!("{me}-{n}"));
+            sim.state["self"]["keyId"] = json!(id);
+            let rows = std::iter::once(&mut sim.state).chain(sim.others.iter_mut()).filter_map(|net| net["hosts"].as_array_mut()).flatten();
+            for row in rows.filter(|r| r["id"] == me.as_str()) {
+                row["keyId"] = json!(id);
+            }
+            Reply::json(200, served(sim))
+        }
         "/api/net/devices/revoke" => {
             if !in_network {
                 return outside();
@@ -1604,7 +1623,17 @@ mod tests {
 
     fn sim(kind: &str) -> Sim {
         let (state, agents) = made_up(kind, None, 1.8e12).unwrap();
-        Sim { state, agents, asks: Vec::new(), services: Vec::new(), others: Vec::new(), own: Vec::new(), context: made_up_context(Some("xenolith"), 0.0), titles_only: false }
+        Sim {
+            state,
+            agents,
+            asks: Vec::new(),
+            services: Vec::new(),
+            others: Vec::new(),
+            own: Vec::new(),
+            context: made_up_context(Some("xenolith"), 0.0),
+            titles_only: false,
+            rekeys: 0,
+        }
     }
 
     #[test]
@@ -1684,6 +1713,12 @@ mod tests {
         let st = apply(&mut s, "/api/net/mailboxes", &json!({ "host": "lab", "network": "work", "add": false }), 0.0).body_json();
         assert_eq!(st["networks"][1]["mailboxes"], json!([]));
         assert_eq!(apply(&mut s, "/api/net/mailboxes", &json!({ "host": "nowhere" }), 0.0).status, 404);
+        // A new network key: this machine's rows show it in each network.
+        let had = s.state["self"]["keyId"].clone();
+        let st = apply(&mut s, "/api/net/rekey", &json!({}), 0.0).body_json();
+        assert_ne!(st["self"]["keyId"], had);
+        let mine = |n: &Value| n["hosts"].as_array().unwrap().iter().find(|h| h["id"] == st["self"]["id"]).unwrap()["keyId"].clone();
+        assert_eq!((mine(&st["networks"][0]), mine(&st["networks"][1])), (st["self"]["keyId"].clone(), st["self"]["keyId"].clone()));
     }
 
     #[test]

@@ -182,6 +182,9 @@ impl parts::Network for NetService {
     async fn mailbox(&self, network: Option<&str>, host: &str, add: bool, at_window: bool) -> NetResult {
         answered(self.nodes().mailbox(network, host, add, at_window).await)
     }
+    async fn rekey(&self, at_window: bool) -> NetResult {
+        answered(self.nodes().rekey(at_window).await)
+    }
     fn svc_list(&self, network: Option<&str>) -> NetResult {
         Ok(self.on(network)?.shared().svc_list())
     }

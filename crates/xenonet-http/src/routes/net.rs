@@ -49,6 +49,9 @@
 //! - `POST mailboxes`: a member (`host`) named one of a network's
 //!   mailboxes (`add`, which widens: the window's, with presence) or taken
 //!   off them, by a window host or by the mailbox itself.
+//! - `POST rekey`: a new transport key for this machine in every network
+//!   (a `rekey` entry in each chain), in place of one that was copied:
+//!   the window's, with presence.
 //! - `POST devices/revoke`: revokes another of the person's devices (a
 //!   lost machine), with their presence: the window's.
 //! - `POST feeds/unfreeze`: takes a machine's feed again after a fork froze
@@ -118,6 +121,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
                     | "feeds/unfreeze"
                     | "relays"
                     | "mailboxes"
+                    | "rekey"
             )
             | ("PUT", "settings" | "sharing")
     );
@@ -184,6 +188,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
             r
         }
         "relays" => net.relay(network, &text("url"), body.get("add") != Some(&Value::Bool(false)), on("mine"), window).await,
+        "rekey" => net.rekey(window).await,
         "mailboxes" => net.mailbox(network, &text("host"), body.get("add") != Some(&Value::Bool(false)), window).await,
         "approve" => net.approve(network, &text("id"), window).await,
         "svc" => net.svc_list(network),

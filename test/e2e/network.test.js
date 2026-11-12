@@ -779,6 +779,27 @@ test("a mailbox is named at the window and taken off again", { timeout: limit(60
   await s.driver("network", "close");
 }));
 
+test("a new network key is asked once more, then given", { timeout: limit(60000) }, shoot("network-rekey", async () => {
+  await simulate("net-founder", {}, (n) => n.inNetwork);
+  let { network: n } = await s.driver("network", "open");
+  const had = n.keyId;
+  assert.ok(had, "this machine's key id");
+  const shown = async (selector, key) => {
+    await s.eval(`return (document.querySelector('#modal ${selector}').scrollIntoView({ block: "center" }), true)`);
+    await s.driver("settled");
+    return (await network()).at[key];
+  };
+  await clickAt(await shown("[data-net-rekey]", "rekey"), "New network key…");
+  assert.match((await network()).text, /Give this machine a new network key\?/);
+  await clickAt(await shown("[data-net-rekey-yes]", "rekeyYes"), "New key");
+  n = await until(async () => {
+    const got = await network();
+    return got.keyId && got.keyId !== had ? got : null;
+  });
+  assert.ok(n, "a new key id");
+  await s.driver("network", "close");
+}));
+
 test("clear ends the made-up network, and no page errors along the way", { timeout: limit(30000) }, async () => {
   await s.simulate("clear");
   assert.ok(await until(async () => !(await network()).inNetwork && !(await network()).simulated), "on its own again");

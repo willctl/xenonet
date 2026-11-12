@@ -238,6 +238,10 @@ A machine that was set up again keeps its id with **Replace**, which takes its o
 
 To take a machine out from the machine itself, run `xenonet net leave`. Its XenoNet forgets that network and carries on in any others, or alone. The founder leaves only with `--force`, since the others would lose it.
 
+### A copied network key
+
+Each machine's network key (`host.key` in its state folder) is how the others know it when it connects. If the file may have been copied, give the machine a new one: **Network settings › This machine › New network key**, which asks you. Every network the machine is in takes the new key, and the others refuse the old one from then on, so a copy connects to nothing. The machine stays in its networks, with its id and settings. One of the other machines has to be connected at the time, to hear of it and tell the rest. `xenonet net rekey` in a terminal says to use the window.
+
 ### A lost machine
 
 Each machine you act from holds a device key of yours, which signs what you do there as you. When a machine is lost, revoke its device from another machine's window: **Network settings › Your devices**, then **Revoke** on that machine's device. It asks you once. Every machine in the network then refuses what that device signs, as you or with your presence, from then on. Then remove the machine from the network too, and **Replace** it if you set it up again. A machine can't revoke its own device, and `xenonet net revoke-device` only says to use the window.

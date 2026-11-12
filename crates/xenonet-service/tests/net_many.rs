@@ -372,3 +372,55 @@ async fn a_mailbox_is_named_at_the_window_and_taken_off_by_a_window_host_or_itse
     assert_eq!(s, 200, "{v}");
     assert_eq!(boxes(&v), json!([]));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rekeyed_machine_stays_in_its_network_and_its_old_key_is_refused() {
+    use xenonet_net::admission::Admission;
+    use xenonet_net::dial::{Alpn, Close, Mesh};
+    use xenonet_net::endpoint::{peer_id, IrohDial, LanLookup, Relays, Settings};
+    use xenonet_net::keys::HostKey;
+    let studio = Host::new("rekey", "studio").await;
+    let laptop = Host::new("rekey", "laptop").await;
+    let id = network(&studio, &laptop, "home", "studio", "laptop").await;
+    let row = |st: &Value, of: &str| st["hosts"].as_array().and_then(|h| h.iter().find(|x| x["id"] == of).cloned()).unwrap_or(Value::Null);
+    until("studio reaches laptop", 15, || row(&futures_lite(studio.state()), "laptop")["path"] == "direct").await;
+    let key_file = laptop.dir.join("state").join("network").join("host.key");
+    let old = HostKey::load(&key_file).unwrap().unwrap();
+    let old_id = old.key_id();
+    assert_eq!(row(&studio.state().await, "laptop")["keyId"], json!(old_id));
+
+    // A new key asks you: refused from a terminal, given at the window.
+    let (s, v) = laptop.call_as(false, "POST", "/api/net/rekey", json!({})).await;
+    assert_eq!(s, 403, "{v}");
+    let (s, v) = laptop.call("POST", "/api/net/rekey", json!({})).await;
+    assert_eq!(s, 200, "{v}");
+    let new_id = v["self"]["keyId"].as_str().unwrap().to_string();
+    assert_ne!(new_id, old_id);
+    assert_eq!(HostKey::load(&key_file).unwrap().unwrap().key_id(), new_id, "the file holds the new key");
+    // studio takes the rekey, keeps laptop as a member, and reaches it on
+    // the new key; a message goes as before.
+    until("studio holds laptop's new key and reaches it", 20, || {
+        let r = row(&futures_lite(studio.state()), "laptop");
+        r["keyId"] == json!(new_id) && r["path"] == "direct"
+    })
+    .await;
+    laptop.send(None, To::Host("studio".into()), Kind::Message, message("after the rekey")).unwrap();
+    until("the message on the new key", 15, || studio.heard.texts("message").contains(&"after the rekey".to_string())).await;
+    assert_eq!(studio.state().await["hosts"].as_array().map(Vec::len), Some(2), "still two members");
+
+    // The old key, copied before: studio refuses it.
+    let n = studio.svc.node().shared().clone();
+    let t = n.link2().unwrap();
+    let at = peer_id(n.key().unwrap().public());
+    let admission = Arc::new(Admission::new());
+    let settings = Settings { relays: Relays::None, lan: LanLookup::Off, bind: Some("127.0.0.1:0".parse().unwrap()), roots: Vec::new() };
+    let dial = Arc::new(IrohDial::bind(&old, &settings, admission.clone()).await.unwrap());
+    let mesh = Mesh::new(dial.clone(), admission);
+    mesh.set_members(&id, [at]);
+    dial.addresses().put(at, &t.dial.direct_addrs(), None, Duration::from_secs(60)).unwrap();
+    match tokio::time::timeout(Duration::from_secs(10), mesh.dial(at, Alpn::Link)).await.expect("the dial ends") {
+        Err(_) => {}
+        Ok(l) => assert_eq!(tokio::time::timeout(Duration::from_secs(10), l.closed()).await.expect("closed"), Some(Close::Refused)),
+    }
+    mesh.close().await;
+}

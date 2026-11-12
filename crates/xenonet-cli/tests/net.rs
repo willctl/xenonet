@@ -147,7 +147,10 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, _, err) = s.run(&["net", "revoke-device"]);
     assert_eq!(code, 1);
     assert!(err.contains("XenoNet's window"), "{err}");
-    // So is naming a mailbox, which asks you.
+    // So is a new network key, and naming a mailbox, which ask you.
+    let (code, _, err) = s.run(&["net", "rekey"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("XenoNet's window") && err.contains("New network key"), "{err}");
     let (code, _, err) = s.run(&["net", "mailbox", "add", "laptop"]);
     assert_eq!(code, 1);
     assert!(err.contains("XenoNet's window") && err.contains("Mailboxes"), "{err}");

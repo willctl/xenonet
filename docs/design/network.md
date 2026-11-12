@@ -444,6 +444,28 @@ person, one endpoint with one connection per peer, and the HLC.
 - **Relays across networks:** the home relay is one every network lists
   ([Relays, mDNS and addresses](#relays-mdns-and-addresses)).
 
+## A new transport key
+
+A machine whose `host.key` may have been copied gets a new one without
+leaving its networks (`Nodes::rekey`, Network settings › This machine ›
+New network key, `POST /api/net/rekey`):
+
+- It makes the new key in `host.key.next`, so a rekey stopped half way
+  gives the same key when it's done again, and writes a `rekey` entry in
+  every network's chain: the same machine (device, machine signing key,
+  window flag) with the new transport keys, signed by its machine signing
+  key with the person's presence (`admit`), so only from the window. The
+  policy refuses keys that are another member's or a removed one's.
+- Every network with other members needs one of them connected, or the
+  rekey is refused (`not-connected`): the entries go to the members
+  connected on the old key, and the others take them from any member, as
+  every chain entry goes.
+- After `REKEY_GRACE` (two seconds) the new key takes the old one's place
+  in the file, every network's node holds it, the window's key (certified
+  for the old endpoint id) is made again, and the endpoint starts again on
+  the new key. A member that took the entry admits only the new endpoint
+  id from then on, so the old key's copy connects to nothing.
+
 ## Joining
 
 **Making a network** (`xenonet net create --name <name> --host <id>
@@ -883,7 +905,7 @@ one, or none. Its contract is
 | A hostile relay | It sees QUIC packets, endpoint ids, addresses, timing and size, and can drop them. It can't read or forge anything. Only relays a chain or the person lists are dialled |
 | A mailbox is broken into | It sees envelope heads: network, author and recipient key ids, kind, class, place, time and size. It can drop or delay, which shows as held, not delivered, and as a gap. It can't open, forge or reorder an entry, read or move an authority, or hold an act with presence, and it can't replay past the dedupe window. What rests there has no forward secrecy, for a week at most |
 | A member lies as a holder | Entries are signed by their authors and checked against the receiver's chain; `prev` shows a fork split across holders; a withholding holder is skipped after 10 s; history from before a member's admission isn't served |
-| `host.key` is copied | The copy is the transport key. It can connect as the machine on link/2 and svc/2, send its presence and load, fetch from holders and mailboxes what's sealed to it and open it, and call services published to it. It can't sign a chain entry, feed entry, address record or Held receipt, make a window read (that takes the device's cert), act as the person, or forge a message: those take the machine signing key or the person's device. It lasts until the machine is replaced (a `rekey` entry is the other way, [not built](#not-built-yet)) |
+| `host.key` is copied | The copy is the transport key. It can connect as the machine on link/2 and svc/2, send its presence and load, fetch from holders and mailboxes what's sealed to it and open it, and call services published to it. It can't sign a chain entry, feed entry, address record or Held receipt, make a window read (that takes the device's cert), act as the person, or forge a message: those take the machine signing key or the person's device. It lasts until the machine is rekeyed ([A new transport key](#a-new-transport-key)) or replaced |
 | The machine signing key's file is copied (Linux, or no secure element) | It signs as the machine: chain entries that need no presence (removing ordinary members, narrowing settings), feed entries, address records, token roots. Not admits or widenings, which take the person's presence. On a Mac and on Windows with a TPM it can't be copied, though any program of the account can ask it to sign |
 | A window laptop is stolen | Without the person there (Touch ID on a Mac) it can remove ordinary machines and narrow settings, never admit, widen, remove a window host or found. The founder removes it, and revoking its device stops every act as the person from it |
 | A removed member | Its network's traffic stops on the connection at once; the connection closes when no shared network is left |
@@ -933,6 +955,7 @@ in the local API's rules table ([authorization.md](authorization.md)):
 | `PUT sharing` | the projects shared into a network | yours; sharing more is the window's |
 | `POST relays` | a relay into or out of the chain, or this machine's own (`mine`) | yours; adding to a chain asks, so it's the window's |
 | `POST mailboxes` | a member named a mailbox (`host`, `add`) or taken off | yours; naming one asks, so it's the window's |
+| `POST rekey` | a new transport key for this machine, in every network | the window's |
 | `GET svc`, `POST svc/publish`, `POST svc/unpublish` | services | publishing is the window's |
 | `GET forwards`, `POST forwards/approve`, `forwards/deny`, `forwards/revoke`, `forwards/sign` | actors' forwards and their grants | approving and signing are the window's |
 | `POST devices/revoke`, `POST feeds/unfreeze` | a lost device; a feed a fork froze | the window's |
@@ -953,6 +976,7 @@ xenonet net leave [--force]
 xenonet net share all|none|<prj_…,…>
 xenonet net relay [add|remove] <url|n0> [--mine]
 xenonet net mailbox [remove <id>]               (adding is the window's)
+xenonet net rekey                               (the window's: in a terminal it says so)
 xenonet net set [--titles-only | --no-titles-only] [--share-load | --no-share-load]
                 [--start off|you|network|delegate] [--wake consent|network]
 xenonet net set --on <id> [--start …] [--wake …] [--approve <id>]
@@ -999,7 +1023,9 @@ in several.
   receipts, gaps, a fork, broadcasts, claims, handoffs, the person's acts,
   A2A, removal), `net_map.rs` (cards from presence, window reads, load),
   `net_svc.rs` (services), `net_many.rs` (nothing of N1 reaches an
-  N2-only member, and removal from one network leaves the other flowing)
+  N2-only member, removal from one network leaves the other flowing, a
+  mailbox named at the window and taken off by itself, and a rekeyed
+  machine that stays a member while its old key is refused)
   and `xenolith.rs` (sync/2 over the forward).
 - `formal/delivery.qnt` ([formal/README.md](../../formal/README.md)): at
   most once, per-author order, gaps detected, revoked proofs refused, with
@@ -1011,8 +1037,6 @@ in several.
 
 ## Not built yet
 
-- **Rekey.** The `rekey` op is in the chain's policy; nothing writes one.
-  A machine whose `host.key` was copied is replaced instead.
 - **Compaction on its own.** Nothing writes a compact entry on a schedule
   (`Node::compact_entry` exists, for the tests), and a receiver sets a
   `Compacted` answer aside, so a holder's counts as "don't have" and the

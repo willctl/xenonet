@@ -37,6 +37,11 @@ network needs no --network; one in several is asked which.
   xenonet net revoke-device        revoking a lost machine's device is
                                    XenoNet's window's (Network settings ›
                                    Your devices), since it asks you
+  xenonet net rekey                gives this machine a new network key
+                                   (host.key), in place of one that was
+                                   copied, in every network it's in. It's
+                                   XenoNet's window's (Network settings ›
+                                   This machine), since it asks you
   xenonet net replace <id>         takes a reinstalled machine's old keys out,
                                    and makes an invite for it to join again
   xenonet net leave [--force]      asks to be taken out, then forgets the

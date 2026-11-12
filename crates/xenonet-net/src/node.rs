@@ -199,6 +199,9 @@ pub struct Common {
     /// A network's relays or members changed: `Nodes` looks at the
     /// endpoint's relays again.
     pub(crate) relays_due: Notify,
+    /// The endpoint is started again at the next `relays_due`: its key or
+    /// its LAN setting changed, which iroh takes only at bind.
+    pub(crate) restart: std::sync::atomic::AtomicBool,
     /// The sessions each peer was shown on link/2.
     pub(crate) shown: Mutex<HashMap<crate::dial::PeerId, std::collections::BTreeSet<String>>>,
     /// The window's key for reading other machines' transcripts, made once
@@ -224,6 +227,7 @@ impl Common {
             nets: RwLock::new(Vec::new()),
             heads_at: Mutex::new(HashMap::new()),
             relays_due: Notify::new(),
+            restart: std::sync::atomic::AtomicBool::new(false),
             shown: Mutex::new(HashMap::new()),
             window: Mutex::new(None),
             nonces: Mutex::new(svc2::Nonces::default()),
@@ -350,6 +354,12 @@ impl Shared {
 
     pub fn key(&self) -> Option<Arc<HostKey>> {
         self.key.reading().clone()
+    }
+
+    /// The machine's transport key after a rekey: every network's node
+    /// holds the one key, as the endpoint does.
+    pub(crate) fn set_key(&self, key: Arc<HostKey>) {
+        *self.key.writing() = Some(key);
     }
 
     pub fn roster(&self) -> RwLockReadGuard<'_, Roster> {
@@ -1658,6 +1668,28 @@ impl Node {
         };
         e.sign_with(&net.host, n.identity.machine_key()?.as_ref(), presence)?;
         self.decide_entry(e, "this machine asked to add a relay to the network; the founder or another window host approves it")
+    }
+
+    /// This machine's `rekey` entry, signed and checked but not yet in the
+    /// chain: its new transport keys `to`, under its machine signing key,
+    /// with the person's presence (`admit`), so only from the window.
+    pub(crate) async fn rekey_entry(&self, to: PublicKeys, at_window: bool) -> R<Entry> {
+        let n = &self.shared;
+        let (net, _) = self.me()?;
+        n.sync_chain().await;
+        let mut me = n.roster().host_ref(&net.host).ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
+        me.keys = to;
+        let mut e = n.draft(Op::Rekey, me);
+        let what = e.presence_for(&n.roster().view()).unwrap_or(crate::roster::ADMIT);
+        let presence = n.identity.prove(at_window, what, &e.digest(), "give this machine a new network key", n.now() as i64)?;
+        e.sign_with(&net.host, n.identity.machine_key()?.as_ref(), Some(presence))?;
+        n.roster().would_take(&e)?;
+        Ok(e)
+    }
+
+    /// A `rekey_entry` into the chain, and on to the members connected.
+    pub(crate) fn submit_rekey(&self, e: Entry) -> R<()> {
+        self.submit(e).map(|_| ())
     }
 
     /// The network's mailboxes, in place of what it had: `host`, a member,
