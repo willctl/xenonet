@@ -574,6 +574,9 @@ impl Engine for EngineDriver {
         let Ok(id) = xenonet_model::ids::AgentId::parse(id) else { return Ok(None) };
         self.0.store.with(|s| s.db().session_of(&id)).map_err(|e| CoreError::new(e.message))
     }
+    fn host_of_agent(&self, id: &str) -> Option<String> {
+        crate::network::host_of_agent(&self.0, id)
+    }
     async fn view(&self, me: &str) -> R<Option<Value>> {
         let me = me.to_string();
         self.run(None, move |e, c| e.view(c, &me)).await.map(Some)

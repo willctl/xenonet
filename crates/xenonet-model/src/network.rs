@@ -497,9 +497,12 @@ crate::tag!(pub PresenceTag = "network/presence/v1");
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PresenceAgent {
-    /// The agent's id on its own host (claude:<uuid>, codex:<id>, actor:<slug>): receivers qualify it as @<host>:<id>
-    pub id: Text<1, 200>,
+    /// The agent's agt_, which its machine made: every machine names it so, with the machine it's on beside it
+    pub id: ids::AgentId,
     pub app: Nullable<Text<1, 32>>,
+    /// For an actor, its slug on its machine (actor:<slug>), which a scope's by:<slug> matches
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub actor: Opt<ids::ActorSlug>,
     pub title: Nullable<Text<0, 200>>,
     /// What the live state says: working, waiting, idle…
     pub state: Nullable<Text<0, 32>>,

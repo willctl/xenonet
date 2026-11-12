@@ -56,19 +56,12 @@ pub fn network_host(envelope: &Value) -> Option<String> {
     }
 }
 
-/// Whether an id names an agent on another host (`@<host>:<id>`).
+/// Whether an id names an agent on another machine: an `agt_`, which its
+/// machine made. This machine's own agents reach the engine by their
+/// sessions' and actors' ids, since the edge maps their `agt_` to those,
+/// so an `agt_` the engine sees is another machine's.
 pub fn is_remote(id: &str) -> bool {
-    xenonet_model::ids::parse_qualified(id).is_some_and(|q| q.host.is_some())
-}
-
-/// The host of a qualified id.
-pub fn host_of(id: &str) -> Option<&str> {
-    xenonet_model::ids::parse_qualified(id).and_then(|q| q.host)
-}
-
-/// An id on its own host, without the `@<host>:` before it.
-pub fn local_of(id: &str) -> &str {
-    xenonet_model::ids::parse_qualified(id).map_or(id, |q| q.local)
+    xenonet_model::ids::AgentId::parse(id).is_ok()
 }
 
 /// A fresh id across the network: `<prefix>_<uuid v4>` (msg_, hof_).
@@ -87,11 +80,10 @@ mod tests {
 
     #[test]
     fn ids_on_other_hosts() {
-        assert!(is_remote("@laptop:claude:abcdefgh"));
+        assert!(is_remote("agt_abcdefghijklmnopqrstuvwxyz234567"));
         assert!(!is_remote("claude:abcdefgh"));
-        assert_eq!(host_of("@laptop:claude:abcdefgh"), Some("laptop"));
-        assert_eq!(local_of("@laptop:claude:abcdefgh"), "claude:abcdefgh");
-        assert_eq!(local_of("claude:abcdefgh"), "claude:abcdefgh");
+        assert!(!is_remote("actor:kite"));
+        assert!(!is_remote("@laptop:claude:abcdefgh"), "no machine names an agent so");
         let env = serde_json::json!({ "transport": "network", "host": "laptop" });
         assert_eq!(network_host(&env).as_deref(), Some("laptop"));
         assert_eq!(network_host(&Value::Null), None);

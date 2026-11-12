@@ -12,8 +12,8 @@
     },
     "id": {
       "type": "string",
-      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
-      "description": "actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you"
+      "pattern": "^actor:[a-z0-9][a-z0-9-]{0,31}$",
+      "description": "actor:<slug>; the person at the console is actor:you"
     },
     "kind": {
       "anyOf": [
@@ -86,7 +86,7 @@
           "type": "null"
         }
       ],
-      "description": "Null on this machine, else the host id, and the id is then qualified"
+      "description": "Null: a console lists its own machine's actors (another machine's show from its presence, by their agt_)"
     },
     "via": {
       "type": "array",

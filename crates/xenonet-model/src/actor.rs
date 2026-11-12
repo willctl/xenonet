@@ -363,7 +363,7 @@ crate::tag!(pub CredentialsTag = "actor/credentials/v2");
 #[serde(rename_all = "camelCase")]
 pub struct Credentials {
     pub schema: CredentialsTag,
-    /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
+    /// actor:<slug>; the person at the console is actor:you
     pub id: ActorId,
     /// Shown once: a Biscuit minted at this machine, of which XenoNet keeps only its revocation id
     pub token: ActorTokenValue,
@@ -403,7 +403,7 @@ pub struct Event {
     pub schema: EventTag,
     /// Unique for the actor, such as wren:41
     pub id: String,
-    /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
+    /// actor:<slug>; the person at the console is actor:you
     pub actor: ActorId,
     pub at: Ms,
     pub kind: EventKind,
@@ -454,7 +454,7 @@ crate::tag!(pub WaitingState = "waiting");
 #[serde(rename_all = "camelCase")]
 pub struct GatewayAsk {
     pub schema: GatewayAskTag,
-    /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
+    /// actor:<slug>; the person at the console is actor:you
     pub id: ActorId,
     pub state: WaitingState,
     /// The ask's id, which the window answers with POST /api/actors/requests/<id>
@@ -479,7 +479,7 @@ crate::tag!(pub GatewayCredentialsTag = "actor/gateway-credentials/v2");
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GatewayCredentials {
     pub schema: GatewayCredentialsTag,
-    /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
+    /// actor:<slug>; the person at the console is actor:you
     pub id: ActorId,
     /// Shown once: a Biscuit minted at this machine and narrowed to the gateway, of which XenoNet keeps only its revocation id. It works only at XenoNet's actor gateway, as Authorization: Bearer
     pub token: GatewayTokenValue,
@@ -528,7 +528,7 @@ pub struct Dropped {
 #[serde(rename_all = "camelCase")]
 pub struct Me {
     pub schema: MeTag,
-    /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
+    /// actor:<slug>; the person at the console is actor:you
     pub id: ActorId,
     pub state: ActorState,
     pub presence: Presence,
@@ -902,13 +902,13 @@ pub struct Remote {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub schema: SnapshotTag,
-    /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
+    /// actor:<slug>; the person at the console is actor:you
     pub id: ActorId,
     pub kind: ActorKind,
     pub name: Text<1, { usize::MAX }>,
     /// What it is; null for a custom actor
     pub product: Nullable<Product>,
-    /// Null on this machine, else the host id, and the id is then qualified
+    /// Null: a console lists its own machine's actors (another machine's show from its presence, by their agt_)
     pub host: Nullable<String>,
     /// How XenoNet knows of it
     pub via: Vec<Via>,
@@ -1046,9 +1046,9 @@ mod tests {
 
     #[test]
     fn a_snapshot_round_trips_with_words_it_does_not_know() {
-        let text = r#"{"schema":"actor/snapshot/v1","id":"@vm1:actor:kite","kind":"agent","name":"Kite","product":null,"host":"vm1","via":["observed","telepathy"],"presence":"working","presenceSince":1.0,"lastSeen":null,"heartbeatMs":30000,"status":null,"capabilities":["browse"],"targets":[],"recent":[],"counts":{"events24h":1,"spawned24h":0,"messages24h":0},"identity":null}"#;
+        let text = r#"{"schema":"actor/snapshot/v1","id":"actor:kite","kind":"agent","name":"Kite","product":null,"host":null,"via":["observed","telepathy"],"presence":"working","presenceSince":1.0,"lastSeen":null,"heartbeatMs":30000,"status":null,"capabilities":["browse"],"targets":[],"recent":[],"counts":{"events24h":1,"spawned24h":0,"messages24h":0},"identity":null}"#;
         let s: Snapshot = serde_json::from_str(text).unwrap();
-        assert_eq!(s.id.to_string(), "@vm1:actor:kite");
+        assert_eq!(s.id.to_string(), "actor:kite");
         assert_eq!(s.kind, ActorKind::Known(KnownActorKind::Agent));
         assert_eq!(s.via, vec![Via::Known(KnownVia::Observed), Via::Other("telepathy".into())]);
         assert_eq!((s.presence_since.0, s.last_seen.0, s.heartbeat_ms.0), (Some(Ms(1.0)), None, Some(PosInt(30000))));

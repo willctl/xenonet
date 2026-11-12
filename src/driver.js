@@ -265,8 +265,9 @@ export function createDriver(app) {
     // page), core, host (another machine's XenoNet, in your network) or
     // actor (actors beside the map, by id, name and
     // product, after the nodes when not narrowed, so words that found a node
-    // still find it first). A node from another machine has an id that
-    // starts with @<host>: and says which host it's on.
+    // still find it first). A node from another machine says which host
+    // it's on: a session there by its agent's agt_, its projects and host
+    // node by ids that start with @<host>:.
     find({ query = "", kind = null, limit = 20 } = {}) {
       const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
       const when = (n) => n.updatedAt ?? n.lastActivity ?? n.snapshot?.lastSeen ?? 0;
@@ -605,13 +606,13 @@ export function createDriver(app) {
       return { ...st, network: n.driverState() };
     },
     // The box that messages a session as you (one of this machine's, or
-    // @<host>:<id> on another in the network) or an actor, opened with
+    // another machine's by its agt_) or an actor, opened with
     // `text` in it. Send is yours: a click at the answer's message.sendAt,
     // which only the demo and test instances let the control channel make.
     // message() reads how the box and the last message stand, never their
     // words.
     async messageAs(to, text = "", opts) {
-      if (typeof to !== "string" || !to) throw new Error("say who to message: a session's id, or @<host>:<id> for another machine's");
+      if (typeof to !== "string" || !to) throw new Error("say who to message: a session's id, or its agt_ for another machine's");
       const st = await act(() => app.messageTo(to, { text: String(text ?? "") }), opts);
       return { ...st, message: app.message() };
     },

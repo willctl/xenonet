@@ -4,12 +4,12 @@
 //!
 //! - A host id is a name a person chooses for a machine when hosts are
 //!   first connected (`studio`, `vm1`): `^[a-z][a-z0-9-]{1,31}$`.
-//! - An id from another host is qualified, `@<host>:<local id>`; an
-//!   unqualified id is this XenoNet's own host's.
-//! - An agent is a harness session, `<app>:<the run's id>`. Which apps
-//!   there are is the adapter registry's to say; here an app is any
-//!   lowercase name, and the run's id a letter or digit then six or more
-//!   letters, digits and dashes.
+//! - An agent is a harness session, `<app>:<the run's id>`, on its own
+//!   machine. Which apps there are is the adapter registry's to say; here
+//!   an app is any lowercase name, and the run's id a letter or digit then
+//!   six or more letters, digits and dashes. Another machine's agent (or
+//!   actor) is named by its `agt_`, which its machine made, with the
+//!   machine it's on beside it where a person needs to see which.
 //! - An actor is `actor:<slug>`; the person at the console is `actor:you`.
 //! - A repo is a project merged across hosts by its git remote,
 //!   `repo:<host>/<path>`.
@@ -148,131 +148,68 @@ string_id! {
     AppId, "^[a-z][a-z0-9-]*$", is_app_id
 }
 
-/// A local id and the host it's from: `@<host>:<local>`, or the local id
-/// alone for this XenoNet's own host.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Qualified<'a> {
-    pub host: Option<&'a str>,
-    pub local: &'a str,
-}
-
-/// `@vm1:claude:4f1c…` → host vm1, local `claude:4f1c…`; an unqualified id
-/// → no host. None for what isn't an id: empty, or an `@` without a valid
-/// host and a local id after it.
-pub fn parse_qualified(id: &str) -> Option<Qualified<'_>> {
-    if id.is_empty() {
-        return None;
-    }
-    let Some(rest) = id.strip_prefix('@') else { return Some(Qualified { host: None, local: id }) };
-    let (host, local) = rest.split_once(':').unwrap_or(("", ""));
-    (is_host_id(host) && !local.is_empty() && !local.starts_with('@')).then_some(Qualified { host: Some(host), local })
-}
-
-/// An id as one XenoNet writes it: a local id from `host` gets the host's
-/// prefix, unless `host` is None or this XenoNet's own (`self_host`), whose
-/// ids stay as they are. An id that's already qualified keeps its host,
-/// except that this XenoNet's own comes off.
-pub fn qualify(id: &str, host: Option<&str>, self_host: Option<&str>) -> Result<String, QualifyError> {
-    let q = parse_qualified(id).ok_or(QualifyError::NotAnId)?;
-    if host.is_some_and(|h| !is_host_id(h)) {
-        return Err(QualifyError::NotAHost);
-    }
-    Ok(match q.host.or(host) {
-        None => q.local.to_string(),
-        Some(f) if Some(f) == self_host => q.local.to_string(),
-        Some(f) => format!("@{f}:{}", q.local),
-    })
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QualifyError {
-    NotAnId,
-    NotAHost,
-}
-
-/// `actor:<slug>` or `@<host>:actor:<slug>` → (host, slug); None for any other id.
-pub fn parse_actor_id(id: &str) -> Option<(Option<&str>, &str)> {
-    let q = parse_qualified(id)?;
-    let slug = q.local.strip_prefix("actor:")?;
-    is_actor_slug(slug).then_some((q.host, slug))
+/// `actor:<slug>` → its slug; None for any other id.
+pub fn parse_actor_id(id: &str) -> Option<&str> {
+    id.strip_prefix("actor:").filter(|slug| is_actor_slug(slug))
 }
 
 /// An actor of this machine, never you.
 pub fn is_actor_agent(id: &str) -> bool {
-    parse_actor_id(id).is_some_and(|(host, _)| host.is_none()) && id != YOU
+    parse_actor_id(id).is_some() && id != YOU
 }
 
-/// A harness session as its app names it: `<app>:<run>`, on this host or
-/// another. The store's own id for it is an `AgentId`.
+/// A harness session as its app names it on its machine: `<app>:<run>`.
+/// The store's own id for it is an `AgentId`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId {
-    pub host: Option<HostId>,
     pub app: AppId,
     pub run: String,
 }
 
 impl SessionId {
-    /// `claude:4f1c…` or `@vm1:claude:4f1c…`.
+    /// `claude:4f1c…`.
     pub fn parse(id: &str) -> Result<Self, NotAnId> {
         let bad = || NotAnId(id.to_string());
-        let q = parse_qualified(id).ok_or_else(bad)?;
-        let (app, run) = q.local.split_once(':').ok_or_else(bad)?;
+        let (app, run) = id.split_once(':').ok_or_else(bad)?;
         if app == "actor" || !is_app_id(app) || !is_run_id(run) {
             return Err(bad());
         }
-        Ok(SessionId { host: q.host.map(|h| HostId(h.to_string())), app: AppId(app.to_string()), run: run.to_string() })
-    }
-
-    /// The id without its host.
-    pub fn local(&self) -> String {
-        format!("{}:{}", self.app, self.run)
+        Ok(SessionId { app: AppId(app.to_string()), run: run.to_string() })
     }
 }
 
 impl fmt::Display for SessionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.host {
-            Some(h) => write!(f, "@{h}:{}:{}", self.app, self.run),
-            None => write!(f, "{}:{}", self.app, self.run),
-        }
+        write!(f, "{}:{}", self.app, self.run)
     }
 }
 
-/// An actor: `actor:<slug>`, on this host or another.
+/// An actor of this machine: `actor:<slug>`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActorId {
-    pub host: Option<HostId>,
     pub slug: ActorSlug,
 }
 
 impl ActorId {
     pub fn parse(id: &str) -> Result<Self, NotAnId> {
         let bad = || NotAnId(id.to_string());
-        let q = parse_qualified(id).ok_or_else(bad)?;
-        let slug = q.local.strip_prefix("actor:").ok_or_else(bad)?;
-        Ok(ActorId { host: q.host.map(|h| HostId(h.to_string())), slug: ActorSlug::parse(slug)? })
+        let slug = id.strip_prefix("actor:").ok_or_else(bad)?;
+        Ok(ActorId { slug: ActorSlug::parse(slug)? })
     }
 
-    /// The person at the console, who is never on another host.
+    /// The person at the console.
     pub fn you() -> Self {
-        ActorId { host: None, slug: ActorSlug("you".into()) }
+        ActorId { slug: ActorSlug("you".into()) }
     }
 
     pub fn is_you(&self) -> bool {
-        self.host.is_none() && self.slug.as_str() == "you"
-    }
-
-    pub fn local(&self) -> String {
-        format!("actor:{}", self.slug)
+        self.slug.as_str() == "you"
     }
 }
 
 impl fmt::Display for ActorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.host {
-            Some(h) => write!(f, "@{h}:actor:{}", self.slug),
-            None => write!(f, "actor:{}", self.slug),
-        }
+        write!(f, "actor:{}", self.slug)
     }
 }
 
@@ -286,13 +223,6 @@ pub enum Principal {
 impl Principal {
     pub fn parse(id: &str) -> Result<Self, NotAnId> {
         ActorId::parse(id).map(Principal::Actor).or_else(|_| SessionId::parse(id).map(Principal::Agent))
-    }
-
-    pub fn host(&self) -> Option<&HostId> {
-        match self {
-            Principal::Agent(a) => a.host.as_ref(),
-            Principal::Actor(a) => a.host.as_ref(),
-        }
     }
 
     pub fn is_you(&self) -> bool {
@@ -342,9 +272,9 @@ macro_rules! text_serde {
     };
 }
 
-text_serde!(SessionId, "^(@[a-z][a-z0-9-]{1,31}:)?[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]{6,}$");
-text_serde!(ActorId, "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$");
-text_serde!(Principal, "^(@[a-z][a-z0-9-]{1,31}:)?[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]{0,}$");
+text_serde!(SessionId, "^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]{6,}$");
+text_serde!(ActorId, "^actor:[a-z0-9][a-z0-9-]{0,31}$");
+text_serde!(Principal, "^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]{0,}$");
 
 // ---------- repos ----------
 
@@ -961,40 +891,32 @@ mod tests {
     }
 
     #[test]
-    fn hosts_and_qualified_ids() {
+    fn hosts() {
         assert!(is_host_id("vm1") && is_host_id("studio-2") && !is_host_id("x") && !is_host_id("Vm1") && !is_host_id("1vm"));
-        assert_eq!(parse_qualified("@vm1:claude:x"), Some(Qualified { host: Some("vm1"), local: "claude:x" }));
-        assert_eq!(parse_qualified("claude:x"), Some(Qualified { host: None, local: "claude:x" }));
-        assert_eq!(parse_qualified("@vm1:@vm2:x"), None);
-        assert_eq!(parse_qualified("@x:y"), None, "a host needs two characters");
-        assert_eq!(qualify("claude:x", Some("vm1"), None).unwrap(), "@vm1:claude:x");
-        assert_eq!(qualify("@vm1:claude:x", None, Some("vm1")).unwrap(), "claude:x");
-        assert_eq!(qualify("claude:x", Some("VM"), None), Err(QualifyError::NotAHost));
-        assert_eq!(qualify("", None, None), Err(QualifyError::NotAnId));
     }
 
     #[test]
     fn agents_and_actors() {
         let a = SessionId::parse("claude:4f1c2a3b-1").unwrap();
-        assert_eq!((a.app.as_str(), a.run.as_str(), a.host.is_none()), ("claude", "4f1c2a3b-1", true));
+        assert_eq!((a.app.as_str(), a.run.as_str()), ("claude", "4f1c2a3b-1"));
         assert_eq!(a.to_string(), "claude:4f1c2a3b-1");
-        let r = SessionId::parse("@vm1:codex:0199abcdef").unwrap();
-        assert_eq!(r.host.as_ref().map(HostId::as_str), Some("vm1"));
-        assert_eq!(r.to_string(), "@vm1:codex:0199abcdef");
-        assert_eq!(r.local(), "codex:0199abcdef");
+        assert!(SessionId::parse("@vm1:codex:0199abcdef").is_err(), "another machine's agent is its agt_");
         assert!(SessionId::parse("claude:short").is_err(), "a run's id has seven characters or more");
         assert!(SessionId::parse("actor:kite-bot").is_err(), "an actor isn't an agent");
         assert!(SessionId::parse("Claude:abcdefgh").is_err());
         let k = ActorId::parse("actor:kite").unwrap();
         assert_eq!((k.slug.as_str(), k.to_string().as_str()), ("kite", "actor:kite"));
         assert!(ActorId::parse("actor:you").unwrap().is_you());
-        assert!(!ActorId::parse("@vm1:actor:you").unwrap().is_you(), "you are only ever here");
+        assert!(ActorId::parse("@vm1:actor:kite").is_err(), "another machine's actor is its agt_");
+        assert_eq!(parse_actor_id("actor:kite"), Some("kite"));
+        assert_eq!(parse_actor_id("actor:Kite"), None);
+        assert!(is_actor_agent("actor:kite") && !is_actor_agent(YOU));
         assert!(ActorId::parse("actor:Kite").is_err() && ActorId::parse("actor:").is_err());
         assert!(matches!(Principal::parse("actor:kite").unwrap(), Principal::Actor(_)));
         assert!(matches!(Principal::parse("grok:abcdefg").unwrap(), Principal::Agent(_)));
         assert!(Principal::parse("project:/x").is_err());
-        let json = serde_json::to_string(&Principal::parse("@vm1:actor:kite").unwrap()).unwrap();
-        assert_eq!(json, "\"@vm1:actor:kite\"");
+        let json = serde_json::to_string(&Principal::parse("actor:kite").unwrap()).unwrap();
+        assert_eq!(json, "\"actor:kite\"");
         assert!(serde_json::from_str::<SessionId>("\"nope\"").is_err());
     }
 
@@ -1027,8 +949,8 @@ mod tests {
 
     #[test]
     fn actors_and_remotes() {
-        assert_eq!(parse_actor_id("@vm1:actor:grok-bot"), Some((Some("vm1"), "grok-bot")));
-        assert_eq!(parse_actor_id("actor:you"), Some((None, "you")));
+        assert_eq!(parse_actor_id("@vm1:actor:grok-bot"), None, "another machine's actor is its agt_");
+        assert_eq!(parse_actor_id("actor:you"), Some("you"));
         assert_eq!(parse_actor_id("claude:4f1c-000"), None);
         assert_eq!(remote_parts("ssh://git@github.com:22/willctl/xenonet.git"), Some(("github.com".into(), "willctl/xenonet".into())));
         assert_eq!(remote_parts("git@gh-work:willctl/xenonet"), Some(("gh-work".into(), "willctl/xenonet".into())));

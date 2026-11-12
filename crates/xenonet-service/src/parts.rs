@@ -225,4 +225,7 @@ impl parts::Network for NetService {
     fn loads(&self) -> Vec<Value> {
         self.nodes().loads()
     }
+    fn host_of_agent(&self, id: &str) -> Option<String> {
+        self.nodes().host_of_agent(id)
+    }
 }

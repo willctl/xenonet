@@ -125,7 +125,7 @@ pub fn place(db: &Db, path: &str) -> Result<Option<xenonet_engine::host::Place>,
 /// agent here may; an actor only in the projects its grant names, with
 /// the token it called with.
 pub fn may_claim(w: &crate::runtime::Runtime, me: &str, project: &str, token: Option<&str>) -> Result<(), String> {
-    let Some((None, slug)) = xenonet_model::ids::parse_actor_id(me) else { return Ok(()) };
+    let Some(slug) = xenonet_model::ids::parse_actor_id(me) else { return Ok(()) };
     let token = token.ok_or("an actor claims with its own token")?;
     let g = crate::ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     let token = xenonet_authz::Token::parse(token, xenonet_authz::ACTOR_PREFIX, &g, g.facts.now).map_err(|e| e.message)?;

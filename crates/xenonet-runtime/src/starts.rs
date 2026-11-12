@@ -798,6 +798,8 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         "mid": mid,
         "sender": sender,
         "senderKind": sender_kind(&sender),
+        // Who asks, by its agt_, which the other machine names it by.
+        "agent": (sender != YOU).then(|| crate::network::wire_id(w, &sender)),
         "target": TARGET,
         "body": text,
         "replyTo": null,
@@ -826,7 +828,7 @@ fn start_receipt(w: &Runtime, to: &str, mid: &str, state: &str, extra: &Value) {
 /// with, `at` when it was sent, by this clock. Decided here, on this
 /// machine's own facts.
 #[expect(clippy::too_many_arguments, reason = "the frame's parts")]
-pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, body: Information<String>, authority: &Value, at: f64) {
+pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, agent: &str, body: Information<String>, authority: &Value, at: f64) {
     let refuse = |why: &str| start_receipt(w, from, mid, "refused", &json!({ "reason": why }));
     let now = now_ms();
     {
@@ -855,7 +857,8 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, bo
         w.log("info", "start", &format!("a start from {from} was refused: {why}"));
         return refuse(&why);
     }
-    let qualified = if k == Kind::You { YOU.to_string() } else { format!("@{from}:{sender}") };
+    // Who asked, by its agt_ (its machine's), or you.
+    let qualified = if k == Kind::You { YOU.to_string() } else { agent.to_string() };
     let by = json!({ "kind": k.as_str(), "id": qualified, "title": v.get("by").and_then(|b| b.get("title")).and_then(Value::as_str) });
     let (to, m) = (from.to_string(), mid.to_string());
     let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| start_receipt(w, &to, &m, state, &a));

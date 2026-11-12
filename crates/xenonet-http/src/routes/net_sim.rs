@@ -38,7 +38,7 @@ use crate::http::{Body, Reply, Req};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_model::ids::{is_host_id, parse_qualified};
+use xenonet_model::ids::is_host_id;
 use xenonet_os::sync::Locked;
 
 /// The simulations, for the console tools' list.
@@ -218,7 +218,7 @@ pub fn simulated_net_state(ctx: &Ctx) -> Option<Value> {
 }
 
 /// The simulated hosts' agents, as the engine lists other hosts' agents
-/// (`@<host>:<id>`, with host, seen and waitsOnYou), while a simulation
+/// (by their agt_, with host, seen and waitsOnYou), while a simulation
 /// runs.
 pub fn simulated_remote_agents(ctx: &Ctx) -> Option<Vec<Value>> {
     sims().locked().get(&key(ctx)).map(|s| s.agents.clone())
@@ -252,7 +252,10 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
     };
     let others = if variant == Some("networks") && state["network"].is_object() { vec![other_network(&state)] } else { Vec::new() };
     let context = made_up_context(variant, ctx.now());
-    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new(), context, titles_only: variant == Some("titles-only") });
+    sims().locked().insert(
+        key(ctx),
+        Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new(), context, titles_only: variant == Some("titles-only") },
+    );
     for a in &asks {
         ctx.broadcast("ask", a);
     }
@@ -476,7 +479,7 @@ fn agents_of(host: &str, now: f64, seen: f64) -> Vec<Value> {
     let agent = |a: A<'_>| {
         let cwd = if a.repo { format!("~/src/{}", a.project) } else { format!("~/jobs/{}", a.project) };
         json!({
-            "id": format!("@{host}:{}", a.local),
+            "id": made_up_agent(host, a.local),
             "host": host,
             "machine": host,
             "app": a.app,
@@ -553,6 +556,21 @@ fn agents_of(host: &str, now: f64, seen: f64) -> Vec<Value> {
         })],
         _ => vec![],
     }
+}
+
+/// A made-up machine's agent by the agt_ that machine would have made for
+/// it: the same for the same machine and session, every run.
+pub fn made_up_agent(host: &str, local: &str) -> String {
+    const BASE32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut out = String::from("agt_");
+    for i in 0..32u64 {
+        for b in host.bytes().chain([0]).chain(local.bytes()).chain(i.to_le_bytes()) {
+            h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+        }
+        out.push(char::from(BASE32[(h % 32) as usize]));
+    }
+    out
 }
 
 fn host_row(m: &Machine, online: bool, seen: Option<f64>, agents: usize, you: bool) -> Value {
@@ -1368,9 +1386,8 @@ async fn message(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> {
     let bytes = req.bytes(16 << 10).await?;
     let body = xenonet_text::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
     let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
-    let host = parse_qualified(&to).and_then(|q| q.host).map(str::to_string);
-    let known = simulated_remote_agents(ctx).is_some_and(|l| l.iter().any(|a| a["id"] == to.as_str()));
-    let Some(host) = host.filter(|_| known) else {
+    let host = simulated_remote_agents(ctx).and_then(|l| l.into_iter().find(|a| a["id"] == to.as_str())).and_then(|a| a["host"].as_str().map(str::to_string));
+    let Some(host) = host else {
         req.body = Body::Bytes(bytes);
         return Ok(None);
     };
@@ -1450,11 +1467,13 @@ mod tests {
             well_formed(&s);
             let me = s["self"]["id"].as_str().unwrap_or("");
             for a in &agents {
-                let xenonet_model::ids::Qualified { host, local } = parse_qualified(a["id"].as_str().unwrap()).unwrap();
-                assert_eq!(host, a["host"].as_str());
-                assert!(host != Some(me) && has_host(&s, host.unwrap()), "{kind}: {a}");
-                assert!(local.starts_with("claude:") || local.starts_with("codex:"));
+                assert!(xenonet_model::ids::AgentId::parse(a["id"].as_str().unwrap()).is_ok(), "{kind}: {a}");
+                let host = a["host"].as_str().unwrap();
+                assert!(host != me && has_host(&s, host), "{kind}: {a}");
+                assert!(a["app"] == "claude" || a["app"] == "codex");
             }
+            let ids: std::collections::BTreeSet<&str> = agents.iter().filter_map(|a| a["id"].as_str()).collect();
+            assert_eq!(ids.len(), agents.len(), "each its own agt_");
         }
         assert!(made_up("net-nope", None, 0.0).is_none());
     }
@@ -1477,7 +1496,7 @@ mod tests {
         let (w, agents) = made_up("net-remote-waiting", Some("laptop"), now).unwrap();
         let waiting: Vec<&Value> = agents.iter().filter(|a| a["waitsOnYou"] == true).collect();
         assert_eq!(waiting.len(), 1);
-        assert!(waiting[0]["id"].as_str().unwrap().starts_with("@laptop:claude:") && waiting[0]["question"].is_string());
+        assert!(waiting[0]["host"] == "laptop" && waiting[0]["app"] == "claude" && waiting[0]["question"].is_string());
         assert_eq!((row(&w, "laptop")["waitsOnYou"].clone(), row(&w, "laptop")["you"].clone(), row(&w, "studio")["you"].clone()), (json!(1), json!(true), json!(false)));
         assert!(row(&w, "laptop")["youAt"].as_f64().unwrap() > row(&w, "studio")["youAt"].as_f64().unwrap(), "you worked at laptop last");
         // Repo keys for the map's projects, and a folder that isn't a repo.

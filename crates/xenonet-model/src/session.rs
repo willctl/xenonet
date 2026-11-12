@@ -94,9 +94,9 @@ pub struct Usage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
-    /// <app>:<the app's own id>, the id the rest of XenoNet uses; another host's carry @<host>:
+    /// <app>:<the app's own id>, the id the rest of XenoNet uses on this machine
     #[schemars(regex(
-        pattern = r"^(@[a-z][a-z0-9-]{1,31}:)?(antigravity|gemini-cli|devin-cli|kimi-code|qwen-code|openhands|opencode|openclaw|windsurf|copilot|factory|claude|cursor|vscode|auggie|cowork|codex|cline|goose|crush|junie|grok|kiro|kilo|amp|pi):."
+        pattern = r"^(antigravity|gemini-cli|devin-cli|kimi-code|qwen-code|openhands|opencode|openclaw|windsurf|copilot|factory|claude|cursor|vscode|auggie|cowork|codex|cline|goose|crush|junie|grok|kiro|kilo|amp|pi):."
     ))]
     pub id: String,
     pub app: App,

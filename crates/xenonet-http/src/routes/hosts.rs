@@ -1,19 +1,19 @@
 //! Reads of another machine of the network (docs/design/network.md,
-//! section 7): a remote session's transcript and stats, over svc/2 under
-//! the window's key, only by XenoNet's own window (rules.rs: those rows
-//! are the window's when they name another machine), so a session here
-//! can't read another machine's transcripts.
+//! section 7): a remote session's transcript and stats, by its agent's
+//! `agt_`, over svc/2 under the window's key, only by XenoNet's own window
+//! (rules.rs: those rows are the window's when they name another
+//! machine), so a session here can't read another machine's transcripts.
 //! Every other route that takes an id refuses remote ones, since other
 //! machines' maps are read-only here. `route` is None when it isn't one of
-//! these.
+//! these: this machine's own agent by its `agt_` is the local route's.
 
-use crate::cores::CoreError;
+use crate::cores::{CoreError, Engine};
 use crate::ctx::pending_reply;
 use crate::http::{decode_uri_component, Reply, Req};
 use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::sync::Arc;
-use xenonet_model::ids::{parse_qualified, Qualified};
+use xenonet_model::ids::AgentId;
 
 /// The refusal of another machine's transcript, stats or collision to
 /// anything but the window.
@@ -23,19 +23,8 @@ pub fn window_only_reply() -> Reply {
 
 pub struct HostRoutes {
     pub net: Option<Arc<dyn crate::parts::Network>>,
-}
-
-// ^(?:claude|codex):[0-9A-Za-z][0-9A-Za-z._-]{0,127}$
-fn is_session(local: &str) -> bool {
-    let Some(rest) = local.strip_prefix("claude:").or_else(|| local.strip_prefix("codex:")) else { return false };
-    let b = rest.as_bytes();
-    (1..=128).contains(&b.len()) && b[0].is_ascii_alphanumeric() && b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
-}
-
-fn remote_session(id: Option<&str>) -> Option<(String, String)> {
-    let Qualified { host, local } = parse_qualified(id?)?;
-    let host = host?;
-    is_session(local).then(|| (host.to_string(), local.to_string()))
+    /// Which machine an agent is on, by its agt_.
+    pub engine: Arc<dyn Engine>,
 }
 
 fn limit_ok(v: &str) -> bool {
@@ -80,10 +69,10 @@ impl HostRoutes {
             if let Some((raw, what)) = rest.split_once('/') {
                 if !raw.is_empty() && (what == "transcript" || what == "stats") && req.method == "GET" {
                     let Some(id) = decode_uri_component(raw) else { return Ok(None) };
-                    if !id.starts_with('@') {
+                    if AgentId::parse(&id).is_err() || self.engine.session_of_agent(&id).ok().flatten().is_some() {
                         return Ok(None);
                     }
-                    let Some((host, local)) = remote_session(Some(&id)) else {
+                    let Some(host) = self.engine.host_of_agent(&id).or_else(|| self.net.as_ref().and_then(|n| n.host_of_agent(&id))) else {
                         return Ok(Some(Reply::error(404, "XenoNet doesn't know that session")));
                     };
                     let mut params: Vec<(&str, String)> = Vec::new();
@@ -99,7 +88,7 @@ impl HostRoutes {
                     }
                     let pairs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
                     let q = if pairs.is_empty() { String::new() } else { format!("?{}", search(&pairs)) };
-                    let path = format!("/api/session/{local}/{what}{q}");
+                    let path = format!("/api/session/{id}/{what}{q}");
                     let read = match &self.net {
                         Some(net) => net.window_read(&host, &path).await,
                         None => None,

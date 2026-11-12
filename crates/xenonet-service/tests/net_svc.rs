@@ -43,6 +43,9 @@ use xenonet_service::gateway::control::{ControlParts, GatewayControl};
 use xenonet_service::gateway::network::NetService;
 use xenonet_service::gateway::reach::SystemNetwork;
 use xenonet_service::gateway::tunnel::SystemHost;
+
+/// studio's session, by the agt_ its store names it by.
+const ABC: &str = "agt_studiosabcsessionaaaaaaaaaaaaaaa";
 use xenonet_service::http::{Peer, Req};
 use xenonet_service::routes::api;
 
@@ -438,16 +441,23 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let (s, h, _) = gw.call("GET", "/api/svc/studio/private/sync/v1/x", None, &[]).await;
     assert_eq!((s, header(&h, "x-xenonet-refused")), (404, Some("not-published")));
 
-    // The window's reads of studio's transcripts, on svc/2.
+    // The window's reads of studio's transcripts, on svc/2, by the agt_
+    // studio's presence names its session by.
     let reads = Arc::new(Reads::default());
     a.svc.nodes().common().set_reads(reads.clone());
-    let transcript = "/api/session/%40studio%3Aclaude%3Aabc/transcript?limit=120";
+    let presence = json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [{ "id": ABC, "app": "claude", "title": "abc", "waitsOnYou": false }], "removed": [], "you": false, "roster": "" });
+    a.svc.net().send(xenonet_model::ops::Outgoing::new(xenonet_model::ops::To::All, xenonet_model::ops::Kind::Presence, presence)).unwrap();
+    until("studio's agent at the gateway's host and laptop", 10, || async {
+        gw.svc.nodes().host_of_agent(ABC).as_deref() == Some("studio") && b.svc.nodes().host_of_agent(ABC).as_deref() == Some("studio")
+    })
+    .await;
+    let transcript = &format!("/api/session/{ABC}/transcript?limit=120");
     let (s, v) = gw.window("GET", transcript, Value::Null).await;
     assert_eq!(s, 200, "{v}");
-    assert_eq!((v["host"].clone(), v["id"].clone(), v["entries"][0]["text"].clone()), (json!("studio"), json!("@studio:claude:abc"), json!("hello")));
-    assert_eq!(reads.0.lock().unwrap().as_slice(), ["/api/session/claude:abc/transcript?limit=120"]);
+    assert_eq!((v["host"].clone(), v["id"].clone(), v["entries"][0]["text"].clone()), (json!("studio"), json!(ABC), json!("hello")));
+    assert_eq!(reads.0.lock().unwrap().as_slice(), [format!("/api/session/{ABC}/transcript?limit=120")], "studio maps its agt_ to its session itself");
     // Another page of it, under the same window key.
-    let (s, _) = gw.window("GET", "/api/session/%40studio%3Aclaude%3Aabc/stats", Value::Null).await;
+    let (s, _) = gw.window("GET", &format!("/api/session/{ABC}/stats"), Value::Null).await;
     assert_eq!(s, 200);
     // An agent's read of another machine's transcript: refused here, with
     // or without the window's key.
@@ -458,14 +468,14 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let (s, _, _) = gw.call("GET", transcript, None, &[]).await;
     assert_eq!(s, 403);
     // laptop is no window host: studio refuses its window.
-    let (s, v) = b.window("GET", "/api/session/%40studio%3Aclaude%3Aabc/transcript", Value::Null).await;
+    let (s, v) = b.window("GET", &format!("/api/session/{ABC}/transcript"), Value::Null).await;
     assert_eq!((s, v["code"].clone()), (403, json!("not-window")), "{v}");
     // studio shares titles only: its transcripts stay on it, its stats go.
     let (s, v) = a.window("PUT", "/api/net/settings", json!({ "titlesOnly": true })).await;
     assert_eq!(s, 200, "{v}");
     let (s, v) = gw.window("GET", transcript, Value::Null).await;
     assert_eq!((s, v["code"].clone()), (403, json!("titles-only")), "{v}");
-    let (s, _) = gw.window("GET", "/api/session/%40studio%3Aclaude%3Aabc/stats", Value::Null).await;
+    let (s, _) = gw.window("GET", &format!("/api/session/{ABC}/stats"), Value::Null).await;
     assert_eq!(s, 200);
     assert_eq!(reads.0.lock().unwrap().len(), 3, "none of the refused reads reached studio's API");
 

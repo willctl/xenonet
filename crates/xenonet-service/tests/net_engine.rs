@@ -378,6 +378,12 @@ impl Host {
         self.call("POST", &format!("/api/engine/{op}"), body, &[("x-xenonet-agent", me)]).await
     }
 
+    /// The agt_ this machine names its session or actor `local` by, as
+    /// the other machines do.
+    fn agt(&self, local: &str) -> String {
+        xenonet_service::serve::store_of(&self.ctx.cores).unwrap().agent_of(local, None, 0).unwrap().as_str().to_string()
+    }
+
     async fn state(&self) -> Value {
         self.window("GET", "/api/net/state", Value::Null).await.1
     }
@@ -520,9 +526,9 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     // Presence: every host's peers list the others' agents, after its own,
     // and so does the console's engine state.
     for (h, me, want) in [
-        (&a, S1, vec![format!("@laptop:{L1}"), format!("@laptop:{L2}"), format!("@desk:{D1}"), format!("@desk:{D2}")]),
-        (&b, L1, vec![L2.to_string(), format!("@studio:{S1}"), format!("@desk:{D1}"), format!("@desk:{D2}")]),
-        (&c, D1, vec![D2.to_string(), format!("@studio:{S1}"), format!("@laptop:{L1}"), format!("@laptop:{L2}")]),
+        (&a, S1, vec![b.agt(L1), b.agt(L2), c.agt(D1), c.agt(D2)]),
+        (&b, L1, vec![L2.to_string(), a.agt(S1), c.agt(D1), c.agt(D2)]),
+        (&c, D1, vec![D2.to_string(), a.agt(S1), b.agt(L1), b.agt(L2)]),
     ] {
         until(&format!("{}'s peers", h.name), 20, || async {
             let mut got = h.peers(me).await;
@@ -543,7 +549,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     // What waits on you on laptop shows in studio's console with its text,
     // the home folder as ~; never in an agent's peers.
     let asks = "Keep the old query string in ~/notes/redirect.md?";
-    let far = |st: &Value| st["agents"].as_array().unwrap().iter().find(|x| x["id"] == format!("@laptop:{L2}")).cloned().unwrap_or(Value::Null);
+    let far = |st: &Value| st["agents"].as_array().unwrap().iter().find(|x| x["id"] == b.agt(L2)).cloned().unwrap_or(Value::Null);
     until("laptop's question at studio", 10, || async { far(&a.engine_state().await)["question"] == asks }).await;
     let shown = far(&a.engine_state().await);
     assert_eq!((shown["waitsOnYou"].clone(), shown["lastMessage"].clone()), (json!(true), json!("The redirect works; one choice is left.")), "{shown}");
@@ -583,24 +589,24 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
 
     // laptop's agent messages desk's: framed as another machine's, with the
     // network's envelope; stored, then seen once desk's session reads it.
-    let sent = b.agent(L1, "send", json!({ "to": format!("@desk:{D1}"), "text": "Are the ledger fixtures stable?" })).await;
+    let sent = b.agent(L1, "send", json!({ "to": c.agt(D1), "text": "Are the ledger fixtures stable?" })).await;
     assert_eq!(sent["to"][0]["host"], "desk", "{sent}");
-    until("the stored receipt at laptop", 10, || async { b.receipts() == [(format!("@desk:{D1}"), Some("stored".to_string()))] }).await;
+    until("the stored receipt at laptop", 10, || async { b.receipts() == [(c.agt(D1), Some("stored".to_string()))] }).await;
     let got = c.agent(D1, "inbox", json!({})).await;
     assert_eq!(texts(&got), ["Are the ledger fixtures stable?"], "{got}");
     let m = &got[0];
     assert_eq!(
         (m["from"]["id"].clone(), m["envelope"]["transport"].clone(), m["envelope"]["auth"]["method"].clone(), m["envelope"]["host"].clone()),
-        (json!(format!("@laptop:{L1}")), json!("network"), json!("host"), json!("laptop")),
+        (json!(b.agt(L1)), json!("network"), json!("host"), json!("laptop")),
         "{m}"
     );
     assert!(m["envelope"]["mid"].as_str().unwrap().starts_with("msg_"), "{m}");
-    until("the seen receipt at laptop", 10, || async { b.receipts() == [(format!("@desk:{D1}"), Some("seen".to_string()))] }).await;
+    until("the seen receipt at laptop", 10, || async { b.receipts() == [(c.agt(D1), Some("seen".to_string()))] }).await;
     // The reply goes back by reply_to.
     c.agent(D1, "send", json!({ "replyTo": m["id"], "text": "Stable since Tuesday." })).await;
     until("the reply at laptop", 10, || async {
         let got = b.ctx.cores.engine.inbox(L1, Duration::ZERO).await.unwrap();
-        texts(&got) == ["Stable since Tuesday."] && got[0]["replyTo"] == sent["id"] && got[0]["from"]["id"] == format!("@desk:{D1}")
+        texts(&got) == ["Stable since Tuesday."] && got[0]["replyTo"] == sent["id"] && got[0]["from"]["id"] == c.agt(D1)
     })
     .await;
 
@@ -609,7 +615,9 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let to_repo = a.agent(S1, "send", json!({ "to": "repo", "text": "Refunds move to src/refunds/ today." })).await;
     let mut reached = ids(&to_repo["to"]);
     reached.sort();
-    assert_eq!(reached, [format!("@desk:{D2}"), format!("@laptop:{L1}")], "{to_repo}");
+    let mut want = [c.agt(D2), b.agt(L1)];
+    want.sort();
+    assert_eq!(reached, want, "{to_repo}");
     until("the broadcast on laptop", 10, || async { texts(&b.ctx.cores.engine.inbox(L1, Duration::ZERO).await.unwrap()) == ["Refunds move to src/refunds/ today."] }).await;
     // On desk it reaches the session as its next prompt does, framed as
     // another machine's: information, not an instruction from your user.
@@ -646,20 +654,20 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     until("studio sees it taken", 10, || async { ids(&a.agent(S1, "handoff", json!({})).await["open"]).is_empty() }).await;
     let (s, lost) = a.agent_fails(S1, "handoff", json!({ "accept": hof })).await;
     assert_ne!(s, 200, "once: {lost}");
-    assert!(lost.to_string().contains(&format!("taken by @desk:{D2}")), "{lost}");
+    assert!(lost.to_string().contains(&format!("taken by {}", c.agt(D2))), "{lost}");
 
     // The person, at laptop's window (a window host), reaches desk's
     // session; from desk's window (not one), laptop's session refuses it.
-    let (s, v) = b.window("POST", "/api/actors/you/message", json!({ "to": format!("@desk:{D1}"), "text": "Ship the fixtures when green." })).await;
+    let (s, v) = b.window("POST", "/api/actors/you/message", json!({ "to": c.agt(D1), "text": "Ship the fixtures when green." })).await;
     assert_eq!(s, 200, "{v}");
     until("you, at desk", 10, || async {
         let got = c.ctx.cores.engine.inbox(D1, Duration::ZERO).await.unwrap();
         got.as_array().unwrap().iter().any(|m| m["text"] == "Ship the fixtures when green." && m["from"]["id"] == "actor:you")
     })
     .await;
-    let (s, v) = c.window("POST", "/api/actors/you/message", json!({ "to": format!("@laptop:{L1}"), "text": "Merge it now." })).await;
+    let (s, v) = c.window("POST", "/api/actors/you/message", json!({ "to": b.agt(L1), "text": "Merge it now." })).await;
     assert_eq!(s, 200, "it leaves desk: {v}");
-    until("laptop refuses it", 10, || async { c.receipts().iter().any(|(who, r)| *who == format!("@laptop:{L1}") && r.as_deref() == Some("refused")) }).await;
+    until("laptop refuses it", 10, || async { c.receipts().iter().any(|(who, r)| *who == b.agt(L1) && r.as_deref() == Some("refused")) }).await;
     assert!(!texts(&b.ctx.cores.engine.inbox(L1, Duration::ZERO).await.unwrap()).contains(&"Merge it now.".to_string()));
 
     // An A2A agent, an actor on studio allowed to reach laptop, sends
@@ -681,7 +689,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
         tokio::task::spawn_blocking(move || http_post(port, &host, &bearer, &body.to_string()))
     };
     let send = json!({ "jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {
-        "message": { "role": "ROLE_USER", "parts": [{ "text": "Is the login fix ready to review?" }], "messageId": "wren-1", "metadata": { "target": format!("@laptop:{L1}") } },
+        "message": { "role": "ROLE_USER", "parts": [{ "text": "Is the login fix ready to review?" }], "messageId": "wren-1", "metadata": { "target": b.agt(L1) } },
         "configuration": { "returnImmediately": true } } });
     let (s, v) = rpc(send).await.unwrap();
     assert_eq!(s, 200, "{v}");
@@ -692,7 +700,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
         got.as_array().unwrap().iter().find(|m| m["text"] == "Is the login fix ready to review?").cloned()
     })
     .await;
-    assert_eq!(asked["from"]["id"], "@studio:actor:wren", "{asked}");
+    assert_eq!(asked["from"]["id"], a.agt("actor:wren"), "{asked}");
     b.agent(L1, "send", json!({ "replyTo": asked["id"], "text": "Yes, it's ready." })).await;
     let done = until_value("the task completed", 20, || async {
         let get = json!({ "jsonrpc": "2.0", "id": 2, "method": "GetTask", "params": { "id": task["id"] } });
@@ -703,7 +711,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     assert_eq!(done["status"]["message"]["parts"][0]["text"], "Yes, it's ready.", "{done}");
     // Out of its scope: desk's sessions aren't wren's to reach.
     let other = json!({ "jsonrpc": "2.0", "id": 3, "method": "SendMessage", "params": {
-        "message": { "role": "ROLE_USER", "parts": [{ "text": "And the ledger?" }], "messageId": "wren-2", "metadata": { "target": format!("@desk:{D1}") } },
+        "message": { "role": "ROLE_USER", "parts": [{ "text": "And the ledger?" }], "messageId": "wren-2", "metadata": { "target": c.agt(D1) } },
         "configuration": { "returnImmediately": true } } });
     let (_, v) = rpc(other).await.unwrap();
     assert_eq!(v["result"]["task"]["status"]["state"], "TASK_STATE_REJECTED", "{v}");
@@ -713,8 +721,8 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let c = {
         c.svc.stop();
         until("desk offline at laptop", 15, || async { row_of(&b.state().await, "desk")["online"] == false }).await;
-        b.agent(L1, "send", json!({ "to": format!("@desk:{D1}"), "text": "m2 while desk was away" })).await;
-        b.agent(L1, "send", json!({ "to": format!("@desk:{D1}"), "text": "m3 while desk was away" })).await;
+        b.agent(L1, "send", json!({ "to": c.agt(D1), "text": "m2 while desk was away" })).await;
+        b.agent(L1, "send", json!({ "to": c.agt(D1), "text": "m3 while desk was away" })).await;
         c.restart().await
     };
     let mut heard = Vec::new();
@@ -730,7 +738,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     // laptop sent desk's ledger session four: the question, you, m2 and m3,
     // each seen there now.
     until("their receipts at laptop", 10, || async {
-        let to_d1: Vec<Option<String>> = b.receipts().into_iter().filter(|(who, _)| *who == format!("@desk:{D1}")).map(|(_, r)| r).collect();
+        let to_d1: Vec<Option<String>> = b.receipts().into_iter().filter(|(who, _)| *who == c.agt(D1)).map(|(_, r)| r).collect();
         to_d1.len() == 4 && to_d1.iter().all(|r| r.as_deref() == Some("seen"))
     })
     .await;
@@ -742,7 +750,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let (s, v) = a.window("POST", "/api/net/remove", json!({ "host": "desk" })).await;
     assert_eq!(s, 200, "{v}");
     for (h, me) in [(&a, S1), (&b, L1)] {
-        until(&format!("desk's agents gone from {}'s peers", h.name), 10, || async { !h.peers(me).await.iter().any(|p| p.starts_with("@desk:")) }).await;
+        until(&format!("desk's agents gone from {}'s peers", h.name), 10, || async { !h.peers(me).await.iter().any(|p| *p == c.agt(D1) || *p == c.agt(D2)) }).await;
     }
     until("desk knows it was removed", 10, || async { c.state().await["link"]["state"] == "removed" }).await;
 
@@ -811,39 +819,43 @@ async fn actors_reach_actors_on_other_machines() {
         async move { engine.send(&me, body, None).await }
     };
 
+    // laptop's presence lists its actors by their agt_, which every
+    // machine names them by.
+    for id in [b.agt("actor:kite"), b.agt("actor:grok")] {
+        until("laptop's actors in its presence at studio", 10, || async { a.svc.nodes().host_of_agent(&id).as_deref() == Some("laptop") }).await;
+    }
     // An actor reaches another machine's actor only with a grant that
     // names it: by:kite is kite on laptop.
-    let refused = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Is the mix done?" })).await.unwrap_err();
-    assert!(refused.to_string().contains("no session or actor you can reach is @laptop:actor:kite"), "{refused}");
+    let refused = send(&a, &wren, json!({ "to": b.agt("actor:kite"), "text": "Is the mix done?" })).await.unwrap_err();
+    assert!(refused.to_string().contains(&format!("no session or actor you can reach is {}", b.agt("actor:kite"))), "{refused}");
     a.ctx.cores.policy.grant(&wren, "by:kite by:grok", 3600e3, true).unwrap();
-    let sent = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Is the mix done?" })).await.unwrap();
+    let sent = send(&a, &wren, json!({ "to": b.agt("actor:kite"), "text": "Is the mix done?" })).await.unwrap();
     assert_eq!(sent["to"][0]["host"], "laptop", "{sent}");
-    // The answer says laptop is online, though kite isn't among the agents
-    // laptop's presence lists.
+    // The answer says laptop is online.
     assert_eq!(sent["to"][0]["delivery"], "through your XenoNet network, as soon as laptop has it; then as a session there gets messages", "{sent}");
     let got = until_value("wren's message at kite", 10, || async {
         let got = b.ctx.cores.engine.inbox(&kite, Duration::ZERO).await.unwrap();
         got.as_array().unwrap().first().cloned()
     })
     .await;
-    assert_eq!((got["text"].clone(), got["from"]["id"].clone()), (json!("Is the mix done?"), json!("@studio:actor:wren")), "{got}");
-    until("the stored receipt at studio", 10, || async { a.receipts().iter().any(|(who, r)| who == "@laptop:actor:kite" && r.is_some()) }).await;
+    assert_eq!((got["text"].clone(), got["from"]["id"].clone()), (json!("Is the mix done?"), json!(a.agt("actor:wren"))), "{got}");
+    until("the stored receipt at studio", 10, || async { a.receipts().iter().any(|(who, r)| *who == b.agt("actor:kite") && r.is_some()) }).await;
     // kite answers with a grant of its own; a machine: term names the host.
     b.ctx.cores.policy.grant(&kite, "by:wren machine:desk", 3600e3, true).unwrap();
     let refused = send(&b, &kite, json!({ "replyTo": got["id"], "text": "Mixed." })).await.unwrap_err();
-    assert!(refused.to_string().contains("no session or actor you can reach is @studio:actor:wren"), "{refused}");
+    assert!(refused.to_string().contains(&format!("no session or actor you can reach is {}", a.agt("actor:wren"))), "{refused}");
     b.ctx.cores.policy.grant(&kite, "by:wren machine:studio", 3600e3, true).unwrap();
     send(&b, &kite, json!({ "replyTo": got["id"], "text": "Mixed." })).await.unwrap();
     until("kite's answer at wren", 10, || async { texts(&a.ctx.cores.engine.inbox(&wren, Duration::ZERO).await.unwrap()) == ["Mixed."] }).await;
 
     // Grok Bot on laptop reads no messages: laptop refuses one, as it
     // refuses one sent there, rather than storing it for no one.
-    send(&a, &wren, json!({ "to": "@laptop:actor:grok", "text": "Anything new?" })).await.unwrap();
-    until("grok's refusal at studio", 10, || async { a.receipts().iter().any(|(who, r)| who == "@laptop:actor:grok" && r.as_deref() == Some("refused")) }).await;
+    send(&a, &wren, json!({ "to": b.agt("actor:grok"), "text": "Anything new?" })).await.unwrap();
+    until("grok's refusal at studio", 10, || async { a.receipts().iter().any(|(who, r)| *who == b.agt("actor:grok") && r.as_deref() == Some("refused")) }).await;
 
     // A message laptop stored that nobody there reads by the end of the
     // outbox's week shows as unread at studio, until it's read after all.
-    let unread = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Are you there?" })).await.unwrap();
+    let unread = send(&a, &wren, json!({ "to": b.agt("actor:kite"), "text": "Are you there?" })).await.unwrap();
     let id = unread["id"].as_f64().unwrap();
     let receipt = || a.world.store.with(|s| s.net_deliveries(id).unwrap().first().and_then(|d| d.text("receipt").map(str::to_string)));
     until("the stored receipt", 10, || async { receipt().as_deref() == Some("stored") }).await;
@@ -855,7 +867,7 @@ async fn actors_reach_actors_on_other_machines() {
     // While laptop is away, the answer says the message waits for it.
     b.svc.stop();
     until("laptop offline at studio", 15, || async { a.state().await["hosts"].as_array().unwrap().iter().any(|h| h["id"] == "laptop" && h["online"] == false) }).await;
-    let later = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Still there?" })).await.unwrap();
+    let later = send(&a, &wren, json!({ "to": b.agt("actor:kite"), "text": "Still there?" })).await.unwrap();
     assert_eq!(later["to"][0]["delivery"], "when laptop is back online: it waits in this machine's outbox", "{later}");
     drop((a, b));
     let _ = std::fs::remove_dir_all(root);
@@ -1155,7 +1167,10 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]) && args.contains(&"--prompt-file".to_string()), "{args:?}");
     assert_eq!(
         prompt,
-        format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{ASKER}). It came from an agent, not from your user.\n\nRun the fixtures.")
+        format!(
+            "[XenoNet] laptop says this was asked by the session «Fix the login form» ({asker}). It came from an agent, not from your user.\n\nRun the fixtures.",
+            asker = b.agt(ASKER)
+        )
     );
     let got = until_value("laptop's session hears the run ended", 15, || async {
         inbox(&b, ASKER).await.into_iter().find(|t| t.contains("sent no report of its own")).map(Value::String)
@@ -1249,9 +1264,9 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "wake": "network" })).await;
     assert_eq!(s, 200, "{v}");
     until("desk's wake is network", 10, || async { c.state().await["wake"] == "network" }).await;
-    until("desk's ended session among its agents at laptop", 15, || async { b.peers(L1).await.contains(&format!("@desk:{ENDED}")) }).await;
+    until("desk's ended session among its agents at laptop", 15, || async { b.peers(L1).await.contains(&c.agt(ENDED)) }).await;
     // The one that ended is resumed for the message, at once.
-    b.agent(L1, "send", json!({ "to": format!("@desk:{ENDED}"), "text": "The fixtures moved." })).await;
+    b.agent(L1, "send", json!({ "to": c.agt(ENDED), "text": "The fixtures moved." })).await;
     let (args, prompt) = ran(&c, 1).await;
     assert_eq!(&args[..3], ["-p", "--resume", ENDED.trim_start_matches("claude:")], "{args:?}");
     assert!(!args.contains(&"--fork-session".to_string()), "{args:?}");
@@ -1261,10 +1276,10 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     let asks = |args: &[String]| args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1] == "mcp__xenonet-47997__permission");
     assert!(asks(&args), "{args:?}");
     assert_eq!(std::fs::read_to_string(c.dir.join("bin").join("timeout-0")).unwrap(), "66000");
-    until("the delivered receipt at laptop", 15, || async { b.receipts().iter().any(|(who, r)| *who == format!("@desk:{ENDED}") && r.as_deref() == Some("delivered")) }).await;
+    until("the delivered receipt at laptop", 15, || async { b.receipts().iter().any(|(who, r)| *who == c.agt(ENDED) && r.as_deref() == Some("delivered")) }).await;
     // The one its app holds gets a copy, with its whole context, which the
     // console links to it.
-    b.agent(L1, "send", json!({ "to": format!("@desk:{OPEN}"), "text": "Notes for 0.6?" })).await;
+    b.agent(L1, "send", json!({ "to": c.agt(OPEN), "text": "Notes for 0.6?" })).await;
     let (args, prompt) = ran(&c, 2).await;
     assert_eq!(&args[..4], ["-p", "--resume", OPEN.trim_start_matches("claude:"), "--fork-session"], "{args:?}");
     assert!(prompt.contains("Notes for 0.6?"), "{prompt}");
@@ -1427,8 +1442,9 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     assert_eq!(
         prompt,
         format!(
-            "[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{ASKER}). Your user delegated it: they put this machine on standing delegation at studio's console on {day}, which XenoNet here checked; the asker can't claim it.\n\n{}\n\nhold-on: update XenoNet",
-            xenonet_engine::delivery::starts::DELEGATED_RULES
+            "[XenoNet] laptop says this was asked by the session «Fix the login form» ({asker}). Your user delegated it: they put this machine on standing delegation at studio's console on {day}, which XenoNet here checked; the asker can't claim it.\n\n{}\n\nhold-on: update XenoNet",
+            xenonet_engine::delivery::starts::DELEGATED_RULES,
+            asker = b.agt(ASKER)
         )
     );
     let run = format!("claude:{}", args[2]);
@@ -1509,13 +1525,13 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
 }
 
 /// A handoff offer from laptop's session to the repo, as its engine writes
-/// it into laptop's feed.
+/// it into laptop's feed: its maker by the agt_ laptop names it by.
 fn offer(n: u32) -> Value {
     json!({
         "schema": "network/handoff/v1",
         "id": format!("hof_00000000-0000-4000-8000-{n:012}"),
         "op": "offer",
-        "from": L1,
+        "from": "agt_laptopsloginsessionaaaaaaaaaaaaa",
         "to": { "agent": null, "repoKey": "github.com/acme/atlas", "host": null },
         "goal": format!("goal {n}"),
         "done": null,

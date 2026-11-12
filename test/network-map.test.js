@@ -7,6 +7,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { networkPart, withNetwork, partKey } from "../src/network-map.js";
+
+// A made-up agent of another machine, by an agt_ of its own.
+const agt = (s) => `agt_${[...s].map((c) => "abcdefghijklmnopqrstuvwxyz234567"[c.charCodeAt(0) % 32]).join("")}`.padEnd(36, "a").slice(0, 36);
 import { remoteAgents, ALONE } from "../src/network-model.js";
 import { capHosts, HOST_CAP, hostLayout } from "../src/hosts.js";
 
@@ -17,10 +20,10 @@ const local = () => ({ nodes: [{ id: "core", kind: "core", name: "~/Projects", p
 
 const agents = () =>
   remoteAgents([
-    { id: "@laptop:claude:6f1c", host: "laptop", app: "claude", title: "Fix the login redirect", status: "waiting", waitsOnYou: true, needsYou: "question", question: "Keep the <b>query</b> string?", projectKey: "prj_atlasweb", cwd: "~/src/atlas-web", lastActive: NOW - 20e3, lastMessage: "Moved it.", injected: "<img src=x>" },
-    { id: "@laptop:codex:019a", host: "laptop", app: "codex", title: "Tidy the billing tests", status: "working", stuck: ["ran cargo test 3 times in a row"], projectKey: "prj_ledger", cwd: "~/src/ledger", lastActive: NOW - 40e3 },
-    { id: "@laptop:claude:77aa", host: "laptop", app: "claude", title: "Second clone", status: "idle", projectKey: "prj_atlasweb", cwd: "~/work/atlas-web", lastActive: NOW - 3 * 3600e3 },
-    { id: "@rack:claude:8d0f", host: "rack", app: "claude", title: "Nightly import", status: "idle", projectKey: null, cwd: "~/jobs/importer", lastActive: NOW - 2 * 3600e3 },
+    { id: "agt_2z5cmyhopzc7kun5l2cdipyru6bnl6wz", host: "laptop", app: "claude", title: "Fix the login redirect", status: "waiting", waitsOnYou: true, needsYou: "question", question: "Keep the <b>query</b> string?", projectKey: "prj_atlasweb", cwd: "~/src/atlas-web", lastActive: NOW - 20e3, lastMessage: "Moved it.", injected: "<img src=x>" },
+    { id: "agt_3nu76ckavudykgow3yvoe6kpzsbf6rd3", host: "laptop", app: "codex", title: "Tidy the billing tests", status: "working", stuck: ["ran cargo test 3 times in a row"], projectKey: "prj_ledger", cwd: "~/src/ledger", lastActive: NOW - 40e3 },
+    { id: "agt_afcdn5lhfgbic4pg4dxe72mzku4yfbg7", host: "laptop", app: "claude", title: "Second clone", status: "idle", projectKey: "prj_atlasweb", cwd: "~/work/atlas-web", lastActive: NOW - 3 * 3600e3 },
+    { id: "agt_4b3wd55knckpoq4rj6ak7q35s3iezva7", host: "rack", app: "claude", title: "Nightly import", status: "idle", projectKey: null, cwd: "~/jobs/importer", lastActive: NOW - 2 * 3600e3 },
     // Not its host's own: dropped.
     { id: "@laptop:@studio:claude:x", host: "laptop", title: "posing" },
   ]);
@@ -37,8 +40,8 @@ test("each other machine is a constellation: its host node, a project per repo o
   const part = networkPart(s, agents(), NOW);
   assert.deepEqual(part.hosts.map((x) => [x.id, x.state, x.network, x.sessions]), [["laptop", "live", true, 3], ["rack", "offline", true, 1]], "this machine isn't one of them");
   const byId = new Map(part.nodes.map((n) => [n.id, n]));
-  // Every id is qualified with its machine.
-  assert.ok(part.nodes.every((n) => n.id.startsWith(`@${n.host}:`)));
+  // A session by its agt_, the rest by ids that start with its machine.
+  assert.ok(part.nodes.every((n) => (n.kind === "session" ? /^agt_[a-z2-7]{32}$/.test(n.id) : n.id.startsWith(`@${n.host}:`))));
   assert.ok(!byId.has("@laptop:@studio:claude:x"));
   // Host nodes, as the hosts drawing has them; one that's away is stale.
   assert.deepEqual([byId.get("@laptop:core").kind, byId.get("@laptop:core").state, byId.get("@rack:core").state, byId.get("@rack:core").stale], ["host", "live", "offline", true]);
@@ -52,15 +55,15 @@ test("each other machine is a constellation: its host node, a project per repo o
   ]);
   // Sessions with their app, title, state and what waits, from presence;
   // only the fields the map reads.
-  const fix = byId.get("@laptop:claude:6f1c");
-  assert.deepEqual([fix.kind, fix.app, fix.title, fix.rawId, fix.activity, fix.network], ["session", "claude", "Fix the login redirect", "claude:6f1c", "active", true]);
+  const fix = byId.get("agt_2z5cmyhopzc7kun5l2cdipyru6bnl6wz");
+  assert.deepEqual([fix.kind, fix.app, fix.title, fix.rawId, fix.activity, fix.network], ["session", "claude", "Fix the login redirect", "agt_2z5cmyhopzc7kun5l2cdipyru6bnl6wz", "active", true]);
   assert.deepEqual(fix.presence, { state: "waiting", focus: null, waits: true, kind: "question", question: "Keep the <b>query</b> string?", since: NOW - 20e3, lastMessage: "Moved it.", stuck: null });
   assert.ok(!("injected" in fix) && !JSON.stringify(part).includes("<img"), "nothing it sent is passed on as it came");
-  assert.deepEqual(byId.get("@laptop:codex:019a").presence.stuck, ["ran cargo test 3 times in a row"]);
-  assert.equal(byId.get("@rack:claude:8d0f").activity, "idle", "a machine that's away has nothing active");
+  assert.deepEqual(byId.get("agt_3nu76ckavudykgow3yvoe6kpzsbf6rd3").presence.stuck, ["ran cargo test 3 times in a row"]);
+  assert.equal(byId.get("agt_4b3wd55knckpoq4rj6ak7q35s3iezva7").activity, "idle", "a machine that's away has nothing active");
   // The tree: core → host → project → session.
   const parent = new Map(part.links.map((l) => [l.target, l.source]));
-  assert.deepEqual([parent.get("@laptop:core"), parent.get("@laptop:project:prj:prj_ledger"), parent.get("@laptop:codex:019a")], ["core", "@laptop:core", "@laptop:project:prj:prj_ledger"]);
+  assert.deepEqual([parent.get("@laptop:core"), parent.get("@laptop:project:prj:prj_ledger"), parent.get("agt_3nu76ckavudykgow3yvoe6kpzsbf6rd3")], ["core", "@laptop:core", "@laptop:project:prj:prj_ledger"]);
   assert.equal(part.links.find((l) => l.target === "@laptop:core").kind, "host");
 });
 
@@ -87,7 +90,7 @@ test("the part's key changes with what the map shows of it, and not with a machi
   const a = agents();
   const key = partKey(networkPart(s, a, NOW));
   assert.equal(partKey(networkPart(state([row("studio"), row("laptop", { seen: NOW + 5000 })]), a, NOW)), key, "a live machine heard again draws nothing new");
-  const quiet = a.map((x) => (x.id === "@laptop:claude:6f1c" ? { ...x, waits: false, text: null } : x));
+  const quiet = a.map((x) => (x.id === "agt_2z5cmyhopzc7kun5l2cdipyru6bnl6wz" ? { ...x, waits: false, text: null } : x));
   assert.notEqual(partKey(networkPart(s, quiet, NOW)), key, "a wait that ends does");
   assert.notEqual(partKey(networkPart(state([row("studio"), row("laptop", { online: false })]), a, NOW)), key, "a machine that goes away does");
 });
@@ -95,7 +98,7 @@ test("the part's key changes with what the map shows of it, and not with a machi
 test("what's drawn of machines you're not looking at is capped, waits first", () => {
   const many = [];
   for (const host of ["laptop", "desk", "rack"])
-    for (let i = 0; i < 40; i++) many.push({ id: `@${host}:claude:${String(i).padStart(4, "0")}`, host, app: "claude", title: `s${i}`, status: "idle", projectKey: `prj_r${i % 4}`, cwd: `~/src/r${i % 4}`, lastActive: NOW - i * 60e3, waitsOnYou: host === "rack" && i === 39 });
+    for (let i = 0; i < 40; i++) many.push({ id: agt(`${host}${i}`), host, app: "claude", title: `s${i}`, status: "idle", projectKey: `prj_r${i % 4}`, cwd: `~/src/r${i % 4}`, lastActive: NOW - i * 60e3, waitsOnYou: host === "rack" && i === 39 });
   const s = state([row("studio"), row("laptop"), row("desk"), row("rack")]);
   const part = networkPart(s, remoteAgents(many), NOW);
   const parentOf = new Map(part.links.map((l) => [l.target, l.source]));
@@ -103,5 +106,5 @@ test("what's drawn of machines you're not looking at is capped, waits first", ()
   const { hidden } = capHosts(part.nodes, { parentOf, attention });
   const drawn = part.nodes.filter((n) => n.kind !== "host" && !hidden.has(n.id));
   assert.ok(drawn.length <= HOST_CAP + 2, `${drawn.length} drawn`);
-  assert.ok(drawn.some((n) => n.id === "@rack:claude:0039"), "what waits on you is drawn");
+  assert.ok(drawn.some((n) => n.id === agt("rack39")), "what waits on you is drawn");
 });

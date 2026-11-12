@@ -136,7 +136,7 @@
                     }
                   },
                   "host": {
-                    "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                    "description": "Null: this machine's map holds its own nodes (the page draws other machines' from their presence)",
                     "type": "string"
                   },
                   "stale": {
@@ -168,7 +168,7 @@
                 "properties": {
                   "id": {
                     "type": "string",
-                    "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?project:"
+                    "pattern": "^project:"
                   },
                   "kind": {
                     "type": "string",
@@ -402,7 +402,7 @@
                     "type": "boolean"
                   },
                   "host": {
-                    "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                    "description": "Null: this machine's map holds its own nodes (the page draws other machines' from their presence)",
                     "type": "string"
                   },
                   "stale": {
@@ -584,7 +584,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?native:codex:"
+                "pattern": "^native:codex:"
               },
               "kind": {
                 "type": "string",
@@ -706,7 +706,7 @@
                 "type": "boolean"
               },
               "host": {
-                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "description": "Null: this machine's map holds its own nodes (the page draws other machines' from their presence)",
                 "type": "string"
               },
               "stale": {
@@ -739,7 +739,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?zone:"
+                "pattern": "^zone:"
               },
               "kind": {
                 "type": "string",
@@ -879,7 +879,7 @@
                 "type": "boolean"
               },
               "host": {
-                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "description": "Null: this machine's map holds its own nodes (the page draws other machines' from their presence)",
                 "type": "string"
               },
               "stale": {
@@ -913,7 +913,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+                "pattern": "^resource:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
               },
               "kind": {
                 "type": "string",
@@ -1069,7 +1069,7 @@
                 ]
               },
               "host": {
-                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "description": "Null: this machine's map holds its own nodes (the page draws other machines' from their presence)",
                 "type": "string"
               },
               "stale": {
@@ -1102,7 +1102,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?wiki:"
+                "pattern": "^wiki:"
               },
               "kind": {
                 "type": "string",
@@ -1327,7 +1327,7 @@
                 ]
               },
               "host": {
-                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "description": "Null: this machine's map holds its own nodes (the page draws other machines' from their presence)",
                 "type": "string"
               },
               "stale": {
@@ -1365,7 +1365,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:"
+                "pattern": "^resource:"
               },
               "kind": {
                 "type": "string",
@@ -1488,7 +1488,7 @@
                 ]
               },
               "host": {
-                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "description": "Null: this machine's map holds its own nodes (the page draws other machines' from their presence)",
                 "type": "string"
               },
               "stale": {

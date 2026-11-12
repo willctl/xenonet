@@ -203,10 +203,10 @@ fn events(ctx: &Arc<Ctx>) -> mpsc::UnboundedReceiver<Bytes> {
     rx
 }
 
-/// A session's or an actor's id, here or on another machine of the network.
+/// A session's or an actor's id, here, or an agent's agt_, here or on
+/// another machine of the network.
 fn selectable(apps: &dyn Apps, id: &str) -> bool {
-    let local = |id: &str| apps.is_session_id(id) || is_actor_agent(id);
-    id.len() <= 300 && (local(id) || xenonet_model::ids::parse_qualified(id).is_some_and(|q| q.host.is_some() && local(q.local)))
+    id.len() <= 300 && (apps.is_session_id(id) || is_actor_agent(id) || xenonet_model::ids::AgentId::parse(id).is_ok())
 }
 
 /// The tray's routes, once rules.rs took the tray's key from your own
@@ -257,7 +257,7 @@ mod tests {
         let q = needs_you::queue_of_summary(Some(&json!({
             "needsYou": [
                 { "id": "claude:0190d3e0-0000-7000-8000-000000000001", "app": "claude", "title": "x".repeat(400), "kind": "question", "text": "Per key?", "since": 2000 },
-                { "id": "@studio:codex:a", "app": "codex", "title": "Move", "kind": "permission", "since": 1000, "host": "studio", "stale": true },
+                { "id": "agt_studioscodexaaaaaaaaaaaaaaaaaaaa", "app": "codex", "title": "Move", "kind": "permission", "since": 1000, "host": "studio", "stale": true },
             ],
             "actorsNeedYou": [{ "id": "actor:wren", "name": "Wren", "kind": "review", "text": "", "since": 500 }],
             "requests": 2,
@@ -295,8 +295,8 @@ mod tests {
         let apps = xenonet_platforms::Registry;
         assert!(selectable(&apps, "claude:0190d3e0-0000-7000-8000-000000000001"));
         assert!(selectable(&apps, "actor:wren"));
-        assert!(selectable(&apps, "@studio:actor:wren"));
-        for bad in ["", "project:/x", "https://example.com", "@studio:", "javascript:alert(1)"] {
+        assert!(selectable(&apps, "agt_abcdefghijklmnopqrstuvwxyz234567"));
+        for bad in ["", "project:/x", "https://example.com", "@studio:", "@studio:actor:wren", "javascript:alert(1)"] {
             assert!(!selectable(&apps, bad), "{bad}");
         }
     }

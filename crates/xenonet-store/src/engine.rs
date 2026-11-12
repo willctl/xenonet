@@ -1232,37 +1232,41 @@ mod tests {
         s.set_net_presence("laptop", 5.0, 1000.0, true, "", "[]").unwrap();
         s.set_net_presence("laptop", 6.0, 1001.0, false, "", "[{\"id\":\"claude:x\"}]").unwrap();
         assert_eq!(s.net_presence("laptop").unwrap().unwrap().num("counter"), Some(6.0));
-        let id = s.send(&json!({ "sender": "claude:a", "target": "@laptop:claude:x", "body": "hi", "recipients": ["@laptop:claude:x"] }), 1000.0).unwrap();
+        let id = s
+            .send(&json!({ "sender": "claude:a", "target": "agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa", "body": "hi", "recipients": ["agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa"] }), 1000.0)
+            .unwrap();
         s.set_message_net(id, None, "msg_1").unwrap();
-        s.set_delivery_net(id, "@laptop:claude:x", "laptop", "{}").unwrap();
+        s.set_delivery_net(id, "agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa", "laptop", "{}").unwrap();
         assert_eq!(s.outbox(0.0).unwrap().len(), 1, "it waits for its receipt");
-        assert!(s.set_receipt(id, "@laptop:claude:x", "seen", 1002.0).unwrap());
-        assert!(!s.set_receipt(id, "@laptop:claude:x", "stored", 1003.0).unwrap(), "never back to an earlier state");
+        assert!(s.set_receipt(id, "agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa", "seen", 1002.0).unwrap());
+        assert!(!s.set_receipt(id, "agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa", "stored", 1003.0).unwrap(), "never back to an earlier state");
         assert_eq!(s.outbox(0.0).unwrap().len(), 0);
         // Stored there and not read in the outbox's week: unread here, until
         // it's read after all.
-        let later = s.send(&json!({ "sender": "claude:a", "target": "@laptop:claude:y", "body": "hi", "recipients": ["@laptop:claude:y"] }), 1000.0).unwrap();
-        s.set_delivery_net(later, "@laptop:claude:y", "laptop", "{}").unwrap();
-        assert!(s.set_receipt(later, "@laptop:claude:y", "stored", 1001.0).unwrap());
+        let later = s
+            .send(&json!({ "sender": "claude:a", "target": "agt_laptopsyaaaaaaaaaaaaaaaaaaaaaaaa", "body": "hi", "recipients": ["agt_laptopsyaaaaaaaaaaaaaaaaaaaaaaaa"] }), 1000.0)
+            .unwrap();
+        s.set_delivery_net(later, "agt_laptopsyaaaaaaaaaaaaaaaaaaaaaaaa", "laptop", "{}").unwrap();
+        assert!(s.set_receipt(later, "agt_laptopsyaaaaaaaaaaaaaaaaaaaaaaaa", "stored", 1001.0).unwrap());
         assert_eq!(s.unread_since(1000.0, 5000.0).unwrap().len(), 0, "not a week yet");
         let gone = s.unread_since(1001.0, 5000.0).unwrap();
-        assert_eq!(gone.iter().map(|r| r.text("agent").unwrap().to_string()).collect::<Vec<_>>(), ["@laptop:claude:y"], "the seen one stays seen");
-        assert_eq!(s.delivery(later, "@laptop:claude:y").unwrap().unwrap().text("receipt"), Some("unread"));
+        assert_eq!(gone.iter().map(|r| r.text("agent").unwrap().to_string()).collect::<Vec<_>>(), ["agt_laptopsyaaaaaaaaaaaaaaaaaaaaaaaa"], "the seen one stays seen");
+        assert_eq!(s.delivery(later, "agt_laptopsyaaaaaaaaaaaaaaaaaaaaaaaa").unwrap().unwrap().text("receipt"), Some("unread"));
         assert_eq!(s.unread_since(1001.0, 5001.0).unwrap().len(), 0, "once");
-        assert!(s.set_receipt(later, "@laptop:claude:y", "seen", 5002.0).unwrap(), "read after all");
+        assert!(s.set_receipt(later, "agt_laptopsyaaaaaaaaaaaaaaaaaaaaaaaa", "seen", 5002.0).unwrap(), "read after all");
         assert_eq!(s.message_by_mid("msg_1", None).unwrap().unwrap().num("id"), Some(id));
         assert!(s.message_by_mid("msg_1", Some("laptop")).unwrap().is_none());
-        let theirs = json!({ "project": "prj_a", "path": "src/a.rs", "agent": "@laptop:claude:x", "author": "xns1_laptop", "host": "laptop", "branch": "main", "created_at": 900.0, "expires_at": 2000.0 });
+        let theirs = json!({ "project": "prj_a", "path": "src/a.rs", "agent": "agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa", "author": "xns1_laptop", "host": "laptop", "branch": "main", "created_at": 900.0, "expires_at": 2000.0 });
         s.claim(&theirs).unwrap();
         let mine = json!({ "project": "prj_a", "path": "src/", "agent": "claude:a", "author": "xns1_here", "pattern": "/w/a/src/", "created_at": 950.0, "expires_at": 2000.0 });
         s.claim(&mine).unwrap();
         let held: Vec<String> = s.claims_in("prj_a", 1000.0).unwrap().iter().map(|r| r.text("agent").unwrap().to_string()).collect();
-        assert_eq!(held, ["@laptop:claude:x", "claude:a"], "the earliest first");
+        assert_eq!(held, ["agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa", "claude:a"], "the earliest first");
         assert_eq!(s.remote_claim_count("laptop").unwrap(), 1.0);
         assert_eq!(s.release("claude:a", Some(&["/w/a/other".into()])).unwrap().len(), 0, "a pattern it doesn't hold");
         assert_eq!(s.release("claude:a", None).unwrap()[0].text("path"), Some("src/"), "what went, for the network");
         s.claim(&mine).unwrap();
-        assert_eq!(s.release_remote("laptop", "@laptop:claude:x", "prj_a", Some("src/b.rs")).unwrap(), 0.0);
+        assert_eq!(s.release_remote("laptop", "agt_laptopsxaaaaaaaaaaaaaaaaaaaaaaaa", "prj_a", Some("src/b.rs")).unwrap(), 0.0);
         s.set_grant_projects("t1", &["prj_a".into(), "prj_b".into()]).unwrap();
         assert_eq!(s.grant_projects("t1").unwrap(), Some(vec!["prj_a".to_string(), "prj_b".to_string()]));
         s.set_grant_projects("t1", &[]).unwrap();

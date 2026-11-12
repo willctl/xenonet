@@ -33,7 +33,19 @@ use xenonet_service::http::{Peer, Req};
 use xenonet_service::routes::api;
 
 const L1: &str = "claude:bbbbbbbb-0001";
+/// L1's agent, as laptop's store names it, and every machine with it.
+const L1_AGT: &str = "agt_laptopsfixtheloginformaaaaaaaaaa";
 const S1: &str = "claude:aaaaaaaa-0001";
+
+/// laptop's engine as far as the edge goes: its agt_ is its session.
+struct Agents;
+
+#[async_trait]
+impl cores::Engine for Agents {
+    fn session_of_agent(&self, id: &str) -> R<Option<String>> {
+        Ok((id == L1_AGT).then(|| L1.to_string()))
+    }
+}
 
 /// The person at the window and their terminal, until `agent` says the
 /// peer is a session's process: an agent then, as process checks find one.
@@ -182,6 +194,9 @@ impl Host {
         let mut cores = Cores::pending(false, false);
         xenonet_service::serve::wire_root(&mut cores);
         cores.state = Arc::new(Map { home, sessions });
+        if name == "laptop" {
+            cores.engine = Arc::new(Agents);
+        }
         let peers = Arc::new(Peers::default());
         cores.verify = peers.clone();
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
@@ -267,7 +282,7 @@ async fn other_machines_show_from_presence_and_their_transcripts_open_through_th
 
     // laptop's presence says what sessions it has: studio and desk count
     // them on its row, which is what the page draws its cards from.
-    let presence = json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [{ "id": L1, "title": "Fix the login form", "waitsOnYou": true }], "removed": [], "you": false, "roster": "" });
+    let presence = json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [{ "id": L1_AGT, "app": "claude", "title": "Fix the login form", "waitsOnYou": true }], "removed": [], "you": false, "roster": "" });
     b.svc.net().send(Outgoing::new(To::All, Kind::Presence, presence)).unwrap();
     for h in [&a, &c] {
         until(&format!("laptop's session at {}", h.name), 10, || async {
@@ -279,7 +294,7 @@ async fn other_machines_show_from_presence_and_their_transcripts_open_through_th
 
     // The transcript and stats, through the window, on svc/2: laptop reads
     // its own API as a local client does.
-    let remote = format!("@laptop:{L1}");
+    let remote = L1_AGT.to_string();
     let path = format!("/api/session/{}/transcript", enc(&remote));
     let (s, t) = a.window("GET", &path, Value::Null).await;
     assert_eq!(s, 200, "{t}");
@@ -288,7 +303,7 @@ async fn other_machines_show_from_presence_and_their_transcripts_open_through_th
     let (s, st) = a.window("GET", &format!("/api/session/{}/stats", enc(&remote)), Value::Null).await;
     assert_eq!((s, st["calls"].clone()), (200, json!(3)), "{st}");
     let read = b.own.read.lock().unwrap().clone();
-    assert!(read.iter().any(|p| p.starts_with(&format!("/api/session/{L1}/transcript"))), "laptop read it as a local client: {read:?}");
+    assert!(read.iter().any(|p| p.starts_with(&format!("/api/session/{L1_AGT}/transcript"))), "laptop read it as a local client, by its agt_: {read:?}");
     // From an agent on studio, never: without the window's key, or with an
     // actor's token beside it.
     a.peers.agent.store(true, Ordering::SeqCst);

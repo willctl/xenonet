@@ -823,7 +823,9 @@ async fn from_your_terminal_the_folder_changes_and_goes_back() {
 #[tokio::test]
 async fn another_machines_reads_are_the_windows_and_go_over_svc2() {
     let (ctx, _) = service();
-    let id = format!("@vm1:{S}");
+    // Another machine's session, by its agent's agt_, which this machine
+    // doesn't have.
+    let id = "agt_abcdefghijklmnopqrstuvwxyz234567".to_string();
     // Only XenoNet's own window reads another machine's: never an agent
     // here, an actor, or a page without the window's key.
     let key = ctx.window_key.reveal().to_string();
@@ -833,22 +835,17 @@ async fn another_machines_reads_are_the_windows_and_go_over_svc2() {
         for path in [
             format!("/api/session/{}/transcript", urlencode(&id)),
             format!("/api/session/{}/stats", urlencode(&id)),
-            format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")),
+            format!("/api/collision?a={}&b={}", urlencode("@vm1:claude:1"), urlencode("@vm1:claude:2")),
             "/api/mcp?server=agent-wiki&host=vm1".to_string(),
         ] {
             let r = go(&ctx, "GET", &path, headers, None).await;
             assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("window")), "{who}: {path}");
         }
     }
-    // From the window, with no endpoint running here, nothing reads it.
+    // From the window, an agent on no machine this one knows of: none.
     let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&id)), &w, None).await;
-    assert_eq!(r.status, 503, "{}", r.body_json());
-    for bad in [format!("/api/session/{}/transcript?limit=all", urlencode(&id)), format!("/api/session/{}/transcript?cursor={}", urlencode(&id), urlencode("a b"))] {
-        assert_eq!(go(&ctx, "GET", &bad, &w, None).await.status, 400, "{bad}");
-    }
-    for unknown in ["@vm1:project:x", "@vm1:@vm2:claude:x", "@vm1:claude:..%2Fx"] {
-        assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(unknown)), &w, None).await.status, 404, "{unknown}");
-    }
+    assert_eq!(r.status, 404, "{}", r.body_json());
+    assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(&id)), &w, None).await.status, 404);
     // Another machine's MCP servers stay on it.
     assert_eq!(go(&ctx, "GET", "/api/mcp?server=agent-wiki&host=vm1", &w, None).await.status, 404);
     assert_eq!(go(&ctx, "GET", "/api/hosts", &[], None).await.status, 404, "hosts over SSH are gone");
@@ -979,7 +976,7 @@ async fn the_windows_message_needs_its_key_and_a_session_or_an_actor() {
     assert_eq!(f.was("send")[0][0], json!("actor:you"));
     assert_eq!(f.was("send")[0][2], json!({ "method": "window", "process": "n/a", "attestation": "n/a" }));
     // A session here, or one on another machine of the network, as you.
-    for to in [ME.to_string(), format!("@laptop:{ME}")] {
+    for to in [ME.to_string(), "agt_abcdefghijklmnopqrstuvwxyz234567".to_string()] {
         let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": to, "text": "hi" }))).await;
         assert_eq!(r.status, 200, "{to}");
     }

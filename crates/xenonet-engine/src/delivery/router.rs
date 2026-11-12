@@ -545,7 +545,7 @@ impl Router {
                 // waiting on its user.
                 if idle && !ended && !view.as_ref().is_some_and(|v| truthy(v.get("needsYou"))) {
                     // Only you, or an actor this machine checked by its token.
-                    let sender = is_you(&from) || actor_of(&from).is_some_and(|(host, _)| host.is_none());
+                    let sender = is_you(&from) || actor_of(&from).is_some();
                     let pid = h.contact_pid(&agent).filter(|p| *p != 0.0 && !p.is_nan());
                     if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
                         tried.push(format!("tmux: {why}"));

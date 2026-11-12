@@ -655,13 +655,10 @@ impl Actors {
     /// enabled, at). Only you are human.
     pub fn upsert(&mut self, def: &Value, host: &mut dyn Host) -> Result<()> {
         let id_given = def.get("id");
-        let parsed = id_given.and_then(Value::as_str).and_then(|id| parse_actor_id(id).map(|(h, s)| (id.to_string(), h.is_some(), s.to_string())));
-        let Some((id, elsewhere, slug)) = parsed else {
+        let parsed = id_given.and_then(Value::as_str).and_then(|id| parse_actor_id(id).map(|s| (id.to_string(), s.to_string())));
+        let Some((id, slug)) = parsed else {
             return err(format!("not an actor id of this machine: {}", template(id_given)));
         };
-        if elsewhere {
-            return err(format!("not an actor id of this machine: {id}"));
-        }
         let kind = def.get("kind").map_or_else(|| "agent".to_string(), display);
         if (kind == "human") != (id == YOU) {
             return err(format!("only {YOU} is human"));

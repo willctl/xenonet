@@ -15,7 +15,7 @@
         },
         "from": {
           "type": "string",
-          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made"
         },
         "target": {
           "type": "string"
@@ -58,7 +58,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>",
+                "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made",
                 "type": "string"
               },
               "seen": {
@@ -111,7 +111,7 @@
           "properties": {
             "id": {
               "type": "string",
-              "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+              "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made"
             },
             "title": {
               "type": "string"
@@ -416,12 +416,12 @@
         },
         "from": {
           "type": "string",
-          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made"
         },
         "to": {
           "type": "array",
           "items": {
-            "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>",
+            "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made",
             "type": "string"
           }
         },
@@ -477,7 +477,7 @@
         },
         "sender": {
           "type": "string",
-          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made"
         },
         "target": {
           "type": "string"

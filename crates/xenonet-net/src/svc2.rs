@@ -215,7 +215,8 @@ pub fn window_path(path: &str, titles_only: bool) -> Result<String, Answer> {
     let (route, query) = path.split_once('?').unwrap_or((path, ""));
     let rest = route.strip_prefix("/api/session/").ok_or_else(|| refused("a window reads a session's transcript or stats, and nothing else"))?;
     let (session, what) = rest.split_once('/').ok_or_else(|| refused("a window reads a session's transcript or stats, and nothing else"))?;
-    if !is_session(session) {
+    // A session by its agent's agt_, which this machine maps to its own.
+    if !(is_session(session) || xenonet_model::ids::AgentId::parse(session).is_ok()) {
         return Err(Answer::refused(400, "bad-path", "that isn't a session's id"));
     }
     match what {

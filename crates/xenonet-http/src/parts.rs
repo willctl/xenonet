@@ -198,4 +198,9 @@ pub trait Network: Send + Sync {
     fn loads(&self) -> Vec<Value> {
         Vec::new()
     }
+    /// The machine another machine's agent is on, by the agt_ its presence
+    /// lists it by.
+    fn host_of_agent(&self, _id: &str) -> Option<String> {
+        None
+    }
 }

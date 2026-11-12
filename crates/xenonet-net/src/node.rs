@@ -1008,6 +1008,12 @@ impl Shared {
     /// A presence, kept for the hosts' list: false when it's older than one
     /// already had. Address records travel on link/2's control stream, never
     /// in presence.
+    /// The member another machine's agent is on, by the agt_ its
+    /// presence lists it by.
+    pub fn host_of_agent(&self, id: &str) -> Option<String> {
+        self.peers.locked().iter().find(|(_, p)| p.agents.contains_key(id)).map(|(h, _)| h.clone())
+    }
+
     fn note_presence(&self, from: &str, body: &mut Value) -> bool {
         if let Some(o) = body.as_object_mut() {
             o.remove("address");

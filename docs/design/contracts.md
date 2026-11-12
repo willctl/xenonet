@@ -134,12 +134,14 @@ reason in the commit.
   recognizes ([network.md](network.md)).
 - An unqualified id means this XenoNet's own machine. One machine on its
   own works with unqualified ids throughout.
-- A node from another machine is `@<host>:<local id>`:
-  `@vm1:claude:4f1c0000-0000-4000-8000-000000000001`,
-  `@vm1:project:~/projects/atlas`. To parse one: it starts with `@`, and
-  the host runs to the first `:`. A machine turns its path keys into `~`
-  before they leave it, so no home folder (a user name) crosses machines
-  or lands in the console's layout keys.
+- An agent of another machine (a session or an actor) is named by its
+  `agt_…` id, which its machine made, on every machine, with the machine
+  it's on beside it (`host`) where a person needs to see which. The page
+  draws another machine's projects and host node under ids that start
+  with `@<host>:` (`@vm1:project:prj:prj_…`, `@vm1:core`), which name no
+  agent. A machine turns its paths into `~` before they leave it, so no
+  home folder (a user name) crosses machines or lands in the console's
+  layout keys.
 - A repo merged across machines by its git remote is `repo:<repoKey>`,
   for example `repo:github.com/willctl/xenonet`. The `repoKey` is computed
   on the machine that has the checkout: SSH aliases resolved, `ssh://`,
@@ -149,15 +151,15 @@ reason in the commit.
   account signed in on two machines is one identity. The exception is
   `openai:api-key`, which belongs to its machine and is qualified. Plan
   limits in the live snapshot name the identity they belong to.
-- Actors are `actor:<slug>` (`^[a-z0-9][a-z0-9-]{0,31}$`), or
-  `@<host>:actor:<slug>` from another machine. The person at the console
-  is `actor:you`.
-- Another machine's map reaches a console only through the network
-  (`crates/xenonet-runtime/src/remote/`). It sends titles, states and
-  counts unless the network allows more, and transcripts, stats and
-  diffs cross only when one is opened. A console keeps what a machine
-  sends only as the schemas declare it (`remote/declared.rs`), so no
-  field of a machine's own reaches the page. A demo console shows demo
+- Actors are `actor:<slug>` (`^[a-z0-9][a-z0-9-]{0,31}$`) on their own
+  machine, and named by their `agt_…` on others, whose presence says the
+  slug. The person at the console is `actor:you`, on every machine.
+- Another machine reaches a console only through its presence
+  (`network/presence/v1`: its agents, their states and what waits on you,
+  and detail unless it shares titles only) and its load, and a
+  transcript or stats cross only when the window opens one (svc/2). A
+  console keeps what a machine sends only as the schemas declare it, so
+  no field of a machine's own reaches the page. A demo console shows demo
   machines only.
 
 ### Stored ids
@@ -482,8 +484,8 @@ One network across machines ([network.md](network.md); what's next is in
 - Ids: a network is `net_<32 hex>`, a frame `frm_<uuid>`, a message
   `msg_<uuid>`, a handoff `hof_<uuid>`, a machine's transport key id
   `xnk1_<32 base32>` and its signing key `xns1_<32 base32>`, a person
-  `prs_<32 base32>` and a delegation `dlg_<hex>`. Remote agents keep the
-  `@<host>:<id>` form, and are targets and senders, never callers.
+  `prs_<32 base32>` and a delegation `dlg_<hex>`. Remote agents are named
+  by their `agt_<32 base32>`, as targets and senders, never callers.
 - The engine reaches the network through `xenonet_model::ops` (`Net` and
   `Sink`). With no network nothing is behind it.
 

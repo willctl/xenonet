@@ -6,7 +6,7 @@ use crate::schema::{Document, Nullable, Opt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>
+/// An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct AgentId(pub String);
@@ -125,7 +125,7 @@ pub struct Agent {
     /// From send: when it will see the message
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub delivery: Opt<String>,
-    /// In a XenoNet network, the host an agent on another machine is on; its id is @<host>:<id>
+    /// In a XenoNet network, the machine an agent on another machine is on; its id is its agt_
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// For an agent on another host: when that host was last heard from

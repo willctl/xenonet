@@ -82,23 +82,15 @@ pub fn is_you(id: &str) -> bool {
     matches!(id, "you" | YOU)
 }
 
-/// An actor's id as its host and slug: `actor:<slug>` is one on this
-/// machine (no host), `@<host>:actor:<slug>` one on another machine in the
-/// network. None for anything else, and for you, who is never an actor
-/// here.
-pub fn actor_of(id: &str) -> Option<(Option<String>, String)> {
+/// The slug of an actor of this machine's, `actor:<slug>`. None for
+/// anything else: you, who is never an actor here, and another machine's
+/// actor, which is named by its `agt_` (its view says its slug as
+/// `actor`).
+pub fn actor_of(id: &str) -> Option<String> {
     if is_you(id) {
         return None;
     }
-    if let Some(slug) = id.strip_prefix("actor:") {
-        return Some((None, slug.to_string()));
-    }
-    if !id.starts_with('@') {
-        return None;
-    }
-    let (host, slug) = xenonet_model::ids::parse_actor_id(id)?;
-    let host = host?;
-    (slug != "you").then(|| (Some(host.to_string()), slug.to_string()))
+    id.strip_prefix("actor:").filter(|s| !s.is_empty()).map(str::to_string)
 }
 
 fn is_actor(id: &str) -> bool {
@@ -397,7 +389,7 @@ impl Policy {
 
     /// The scope: { selector, at, expiresAt }, kept with the actor's grant.
     pub fn grant(&mut self, h: &mut dyn Host, actor: &str, selector: &str, ttl_ms: Option<f64>, by: &str) -> Result<Value> {
-        if actor_of(actor).is_none_or(|(host, _)| host.is_some()) {
+        if actor_of(actor).is_none() {
             return Err(Fail::Error("scopes are granted to actors (actor:<slug>)".into()));
         }
         let Some(sel) = Selector::parse(selector) else {
@@ -446,7 +438,7 @@ impl Policy {
     /// gave it, which that machine checked before the message left: here
     /// it's open, and what this machine lets it do is decided on its token.
     pub fn scope_of(&self, h: &mut dyn Host, id: &str) -> Scope {
-        if actor_of(id).is_none_or(|(host, _)| host.is_some()) {
+        if actor_of(id).is_none() {
             return Scope::Free;
         }
         let g = h.sessions_of(id);
@@ -472,13 +464,15 @@ impl Policy {
             Scope::Within(s) => s,
         };
         if facts.get("app").and_then(Value::as_str) == Some("actor") {
-            let Some((_, slug)) = actor_of(&text_of(facts.get("id"))) else { return false };
+            // Another machine's actor says its slug in its view.
+            let slug = facts.get("actor").and_then(Value::as_str).map(str::to_string).or_else(|| actor_of(&text_of(facts.get("id"))));
+            let Some(slug) = slug else { return false };
             let on = Selector { terms: scope.terms.iter().filter(|t| t.key == "machine").cloned().collect() };
             return scope.terms.iter().any(|t| t.key == "by" && t.value == slug) && on.matches(facts);
         }
         // An actor's own reports of what it works on can't widen its own
         // scope.
-        let me = actor_of(caller).map(|(_, slug)| slug).unwrap_or_default();
+        let me = actor_of(caller).unwrap_or_default();
         if scope.terms.iter().any(|t| t.key == "by" && t.value == me) {
             return false;
         }
@@ -718,7 +712,8 @@ fn same_identity(a: &Value, b: &Value) -> bool {
 /// The text as one recipient gets it: secrets redacted when it crosses
 /// identities or involves an actor. (text, redacted).
 pub fn text_for(text: &str, sender: &str, sender_facts: &Value, recipient_facts: &Value) -> (String, usize) {
-    let crosses = is_actor(sender) || recipient_facts.get("app").and_then(Value::as_str) == Some("actor") || !same_identity(sender_facts, recipient_facts);
+    let actor = |facts: &Value| facts.get("app").and_then(Value::as_str) == Some("actor");
+    let crosses = is_actor(sender) || actor(sender_facts) || actor(recipient_facts) || !same_identity(sender_facts, recipient_facts);
     if !crosses {
         return (text.to_string(), 0);
     }
@@ -728,6 +723,9 @@ pub fn text_for(text: &str, sender: &str, sender_facts: &Value, recipient_facts:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Another machine's agent, by the agt_ its machine made.
+    const AGT: &str = "agt_abcdefghijklmnopqrstuvwxyz234567";
 
     #[test]
     fn secrets_are_redacted_as_the_js_redacts_them() {
@@ -866,31 +864,30 @@ mod tests {
     }
 
     #[test]
-    fn an_actor_on_another_machine_is_its_host_and_slug() {
-        assert_eq!(actor_of("@studio:actor:muse"), Some((Some("studio".into()), "muse".into())));
-        assert_eq!(actor_of("actor:muse"), Some((None, "muse".into())));
-        for not in ["you", "actor:you", "@studio:actor:you", "@studio:claude:aaaaaaaa-0001", "claude:aaaaaaaa-0001", "@Studio:actor:muse", "@studio:actor:", ""] {
+    fn an_actor_on_another_machine_is_its_agt_and_its_views_slug() {
+        assert_eq!(actor_of("actor:muse"), Some("muse".into()));
+        for not in ["you", "actor:you", "actor:", AGT, "claude:aaaaaaaa-0001", "@studio:actor:muse", ""] {
             assert_eq!(actor_of(not), None, "{not}");
         }
         let mut c = clock(1_000_000.0);
         let mut p = Policy::load(None);
         let (wren, you) = ("actor:wren", "you");
-        let muse = |machine: &str| json!({ "id": format!("@{machine}:actor:muse"), "app": "actor", "machine": machine });
+        let muse = |machine: &str| json!({ "id": AGT, "app": "actor", "actor": "muse", "machine": machine });
         assert!(!p.visible(&mut c, wren, &muse("studio")), "default deny");
         p.grant(&mut c, wren, "by:muse", None, you).unwrap();
         assert!(p.visible(&mut c, wren, &muse("studio")), "muse on studio is muse");
         assert!(p.visible(&mut c, wren, &muse("laptop")), "on any machine, with no machine: term");
-        let kite = json!({ "id": "@studio:actor:kite", "app": "actor", "machine": "studio" });
+        let kite = json!({ "id": AGT, "app": "actor", "actor": "kite", "machine": "studio" });
         assert!(!p.visible(&mut c, wren, &kite));
         p.grant(&mut c, wren, "by:muse machine:studio", None, you).unwrap();
         assert!(p.visible(&mut c, wren, &muse("studio")));
         assert!(!p.visible(&mut c, wren, &muse("laptop")), "only on studio");
         // Another machine's actor isn't scoped by this machine's grants,
         // and can't be granted one; its secrets are redacted as an actor's.
-        let far = "@studio:actor:wren";
+        let far = AGT;
         assert!(matches!(p.scope_of(&mut c, far), Scope::Free));
         assert_eq!(error(p.grant(&mut c, far, "all", None, you)), "scopes are granted to actors (actor:<slug>)");
-        assert_eq!(text_for("DEPLOY_TOKEN=abc", far, &json!({}), &json!({})).1, 1);
+        assert_eq!(text_for("DEPLOY_TOKEN=abc", far, &json!({ "app": "actor", "actor": "wren" }), &json!({})).1, 1);
     }
 
     fn refusal(r: Result<()>) -> (&'static str, String) {

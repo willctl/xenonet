@@ -187,7 +187,7 @@ test("net-remote-waiting: another machine's agent waiting on you shows in the st
   const card = await until(async () => (await s.driver("state")).alerts.find((a) => a.kind === "remote-need"));
   assert.ok(card, "a card in the strip");
   assert.deepEqual([card.host, card.waits, card.chime], ["laptop", "is waiting for you", true]);
-  assert.match(card.agent, /^@laptop:claude:/);
+  assert.match(card.agent, /^agt_[a-z2-7]{32}$/);
   assert.match(card.text, /query string/);
   const html = await s.eval(`return document.querySelector('#alerts [data-al-remote]')?.textContent.replace(/\\s+/g, " ").trim() ?? null`);
   assert.match(html, /Fix the login redirect is waiting for you\s*on laptop/);
@@ -266,7 +266,7 @@ test("net-founder: the other machines on the map from their presence, one dimmed
   assert.equal((await s.driver("find", { kind: "project", query: "importer" })).nodes[0]?.id, "@rack:project:folder:~/jobs/importer");
   // A session there, found by its title.
   const found = await s.driver("find", { kind: "session", query: "login redirect" });
-  const far = found.nodes.find((n) => n.id.startsWith("@laptop:"));
+  const far = found.nodes.find((n) => n.host === "laptop");
   assert.ok(far, JSON.stringify(found));
   assert.deepEqual([far.host, far.network, far.waits], ["laptop", true, true]);
   // Selected, it shows what its presence says, escaped, with Message.
@@ -359,14 +359,18 @@ test("network mode: the load panel is Machines, the network's sums with each mac
   assert.match(await s.eval(`return document.querySelector("#sysmon [data-local]").textContent`), /studio/);
   await s.screenshot({ name: "e2e-network-machines-panel", inline: false });
 
-  // This machine's sessions carry its id with here, as laptop's carry laptop.
+  // This machine's sessions carry its id with here, as laptop's carry
+  // laptop on the map. The feed has this machine's activity: presence
+  // carries no other machine's events.
   const local = (await s.driver("find", { kind: "session", query: "claude:", limit: 80 })).nodes.find((x) => !x.host);
   assert.deepEqual(local?.machine, { id: "studio", here: true });
+  const far = (await s.driver("find", { kind: "session", query: "login redirect" })).nodes.find((x) => x.host === "laptop");
+  assert.equal(far?.host, "laptop", "and laptop's, the machine beside its agt_");
   const tags = await until(async () => {
     const t = await s.eval(`return [...document.querySelectorAll("#agents .host-tag")].map((e) => e.textContent)`);
-    return t.some((x) => /^studio\s*here$/.test(x)) && t.includes("laptop") ? t : null;
+    return t.some((x) => /^studio\s*here$/.test(x)) ? t : null;
   });
-  assert.ok(tags, "the active sessions say which machine each is on, this one's too");
+  assert.ok(tags, "the feed says which machine each session is on, this one's too");
 
   // The Machines view, from the panel's title: its machine chips are the
   // Filters chips.

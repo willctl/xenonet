@@ -95,15 +95,14 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
 
     // You, writing from XenoNet's own window to an actor that reads its
     // inbox, or to a session, here or on another machine of your network
-    // (`@<host>:<id>`): the window's alone (rules.rs).
+    // (by its agt_): the window's alone (rules.rs).
     if m == "POST" && route == "/api/actors/you/message" {
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
-        // Another host's session or actor, by its qualified id.
+        // Any agent by its agt_, this machine's or another's.
         let local_id = |id: &str| ctx.cores.apps.is_session_id(id) || is_actor_agent(id);
-        let remote = xenonet_model::ids::parse_qualified(&to).is_some_and(|q| q.host.is_some() && local_id(q.local));
-        if !(local_id(&to) || remote) {
-            return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or @<host>:<id> on another machine)"));
+        if !(local_id(&to) || xenonet_model::ids::AgentId::parse(&to).is_ok()) {
+            return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or its agt_)"));
         }
         let envelope = attest(Sender { id: YOU, kind: "you", name: Some("you".into()), product: None }, "window", &Value::Null, &ctx.config.home, ctx.now(), platform());
         return Ok(match cores.engine.send(YOU, json!({ "to": to, "text": body.get("text") }), Some(json!({ "envelope": envelope }))).await {
@@ -165,7 +164,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return a;
         }
     }
-    if let Some(r) = (hosts::HostRoutes { net: ctx.net.get().cloned() }).route(req).await {
+    if let Some(r) = (hosts::HostRoutes { net: ctx.net.get().cloned(), engine: cores.engine.clone() }).route(req).await {
         return Ok(r);
     }
 
@@ -601,6 +600,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if let Some(raw) = route.strip_prefix("/api/session/").and_then(|r| r.strip_suffix("/stats")).filter(|r| !r.is_empty() && !r.contains('/')) {
         if m == "GET" {
             let Some(id) = decode_uri_component(raw) else { return Err(CoreError::new("URI malformed")) };
+            let id = session_of(ctx, id);
             let Some(node) = cores.state.node(&id)?.filter(|n| n["kind"] == "session") else {
                 return Ok(Reply::error(404, "XenoNet doesn't know that session"));
             };
@@ -623,6 +623,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if let Some(raw) = route.strip_prefix("/api/session/").and_then(|r| r.strip_suffix("/transcript")).filter(|r| !r.is_empty() && !r.contains('/')) {
         if m == "GET" {
             let Some(id) = decode_uri_component(raw) else { return Err(CoreError::new("URI malformed")) };
+            let id = session_of(ctx, id);
             let Some(node) = cores.state.node(&id)?.filter(|n| n["kind"] == "session") else {
                 return Ok(Reply::error(404, "XenoNet doesn't know that session"));
             };
@@ -904,6 +905,15 @@ fn base64_decode(s: &str) -> Vec<u8> {
 /// The theme in use, or the default.
 pub(crate) fn current_theme(ctx: &Ctx) -> Result<Value, CoreError> {
     ctx.cores.themes.current(&ctx.themes_dir, &*ctx.cores.store)
+}
+
+/// A session by its id, or by its agent's agt_ when it's this machine's
+/// (as another machine's window read names it).
+fn session_of(ctx: &Ctx, id: String) -> String {
+    if xenonet_model::ids::AgentId::parse(&id).is_err() {
+        return id;
+    }
+    ctx.cores.engine.session_of_agent(&id).ok().flatten().unwrap_or(id)
 }
 
 /// What /api/summary answers: the map's summary, the actors waiting on

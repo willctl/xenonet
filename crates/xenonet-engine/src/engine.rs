@@ -612,21 +612,14 @@ impl Engine {
         net.project_key(&text(cwd))
     }
 
-    /// An agent on another host as the engine sees it, from that host's
-    /// presence; a stand-in when the network part isn't there.
+    /// An agent on another host as the engine sees it, by its `agt_`: from
+    /// that host's presence, or a stand-in, with the machine it's on as
+    /// `host`; with no network part, a stand-in on no machine.
     fn remote_view(c: &Collaborators<'_>, id: &str) -> Result<Value> {
         if let Some(net) = c.net {
             return net.view(id);
         }
-        let local = network::local_of(id).to_string();
-        Ok(obj(vec![
-            ("id", string(id)),
-            ("app", string(local.split(':').next().unwrap_or(""))),
-            ("title", string(short(&local))),
-            ("project", Value::Null),
-            ("branch", Value::Null),
-            ("host", network::host_of(id).map_or(Value::Null, string)),
-        ]))
+        Ok(obj(vec![("id", string(id)), ("app", Value::Null), ("title", string(id)), ("project", Value::Null), ("branch", Value::Null), ("host", Value::Null)]))
     }
 
     // ---------- agents ----------
@@ -1414,10 +1407,12 @@ impl Engine {
 
     fn resolve(&self, c: &Collaborators<'_>, me: &str, to: &Value, answered: &Value) -> Result<Value> {
         let mut to_text = text(Some(to));
-        // An agent named by its own id is the session it is here.
+        // An agent named by its own id is the session it is here; one this
+        // machine doesn't have is another machine's, in a network.
         if let Ok(agent) = AgentId::parse(&to_text) {
             match c.store.session_of(&agent)? {
                 Some(session) => to_text = session,
+                None if self.networked() => {}
                 None => return err(format!("no agent here is {to_text}; peers lists them")),
             }
         }
@@ -1440,20 +1435,20 @@ impl Engine {
             }
             return Ok(one);
         }
-        // Another host's session or actor, by its qualified id, on a host in
-        // the network: as that host's presence shows it, or a stand-in for
-        // one presence doesn't list, such as an actor there, which a reply
-        // goes back to by reply_to.
+        // Another machine's session or actor, by its agt_, on a machine in
+        // the network: as that machine's presence shows it, or a stand-in
+        // for one presence doesn't list, such as an actor there, which a
+        // reply goes back to by reply_to.
         if network::is_remote(&to_text) && self.networked() {
-            let local = network::local_of(&to_text);
-            let known = network::host_of(&to_text).is_some_and(|h| self.net.get().hosts().iter().any(|x| x.id == h));
-            if known && (is_agent_id(local) || is_actor_agent(local)) {
-                let one = Self::remote_view(c, &to_text)?;
+            let one = Self::remote_view(c, &to_text)?;
+            let known = as_str(get(&one, "host")).is_some_and(|h| self.net.get().hosts().iter().any(|x| x.id == h));
+            if known {
                 if !self.visible_to(c, me, &one)? {
                     return err(format!("no session or actor you can reach is {to_text}"));
                 }
                 return Ok(one);
             }
+            return err(format!("no agent here or on a machine of your network is {to_text}; peers lists them"));
         }
         let mut all = Vec::new();
         for a in self.agents(c, 7.0 * 24.0 * 3600e3)? {
@@ -1471,7 +1466,7 @@ impl Engine {
                 .filter(|a| {
                     let id = text(get(a, "id"));
                     let prefixed = |id: &str| id.starts_with(&to_text) || id.split(':').nth(1).is_some_and(|rest| rest.starts_with(&to_text));
-                    prefixed(&id) || (network::is_remote(&id) && prefixed(network::local_of(&id)))
+                    prefixed(&id)
                 })
                 .cloned()
                 .collect();
@@ -1879,6 +1874,8 @@ impl Engine {
         Ok(obj_some(vec![
             ("id", get(a, "id").cloned()),
             ("app", get(a, "app").cloned()),
+            // Another machine's actor, by its slug there.
+            ("actor", get(a, "actor").filter(|v| v.is_string()).cloned()),
             ("projectNames", Some(Value::Array(names))),
             ("identities", Some(Value::Array(identities.into_iter().map(string).collect()))),
             ("machine", Some(string(machine))),

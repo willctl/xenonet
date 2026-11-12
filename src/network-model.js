@@ -5,7 +5,6 @@
 // whether what waits sounds here. No DOM here: the Network panel
 // (network.js), the attention strip (alerts.js), the map (network-map.js)
 // and the tests share it.
-import { hostOfId } from "./hosts.js";
 
 // A machine's id in a network, which the person picks.
 export const HOST_ID = /^[a-z][a-z0-9-]{1,31}$/;
@@ -159,16 +158,20 @@ export function frozenWords(f) {
 // agent.
 const words = (v, max) => (typeof v === "string" && v.trim() ? v.slice(0, max) : null);
 
+// An agent of another machine, by the agt_ its machine made.
+export const AGENT_ID = /^agt_[a-z2-7]{32}$/;
+
 // Other machines' agents from the engine's list (GET /api/engine/agents):
-// those with an @<host>: id, each with what waits on you, however the
+// those with an agt_ id and the machine they're on (`host`), each with
+// what waits on you, however the
 // engine words it (needsYou as a kind or as { kind, text, since }), and
 // the detail their machine shares unless it shares titles only: the
 // question's text, the last message and why it seems stuck.
 export function remoteAgents(raw) {
   const out = [];
   for (const a of list(raw)) {
-    const host = typeof a?.host === "string" && a.host ? a.host : hostOfId(a?.id);
-    if (!HOST_ID.test(host ?? "") || typeof a.id !== "string" || !a.id.startsWith(`@${host}:`) || a.id.length > 300) continue;
+    const host = typeof a?.host === "string" ? a.host : null;
+    if (!HOST_ID.test(host ?? "") || !AGENT_ID.test(a?.id ?? "")) continue;
     const need = a.needsYou && typeof a.needsYou === "object" ? a.needsYou : null;
     const kind = need?.kind ?? (typeof a.needsYou === "string" ? a.needsYou : null);
     const waits = a.waitsOnYou === true || !!kind;

@@ -284,6 +284,12 @@ impl Nodes {
         link2n::link2_load(&self.common, reading);
     }
 
+    /// The machine another machine's agent is on, by the agt_ its
+    /// presence lists it by.
+    pub fn host_of_agent(&self, id: &str) -> Option<String> {
+        self.common.shareds().iter().find_map(|s| s.host_of_agent(id))
+    }
+
     /// The latest load each other machine of this one's networks sent.
     pub fn loads(&self) -> Vec<Value> {
         link2n::loads(&self.common)

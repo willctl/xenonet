@@ -68,6 +68,12 @@ pub trait Engine: Send + Sync {
     fn session_of_agent(&self, _id: &str) -> R<Option<String>> {
         pending(ENGINE)
     }
+    /// The machine (its host id) another machine's agent is on, by its
+    /// `agt_`: as its presence lists it, else the machine whose feed first
+    /// named it. None for this machine's own or an unknown one.
+    fn host_of_agent(&self, _id: &str) -> Option<String> {
+        None
+    }
     /// `engine.view(me)`, the agent as the engine sees it (its title).
     async fn view(&self, _me: &str) -> R<Option<Value>> {
         pending(ENGINE)

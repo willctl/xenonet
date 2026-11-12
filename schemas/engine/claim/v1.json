@@ -45,7 +45,7 @@
         },
         "agent": {
           "type": "string",
-          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made"
         },
         "pattern": {
           "type": "string"

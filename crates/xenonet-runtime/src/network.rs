@@ -14,7 +14,7 @@
 //!   sent, with its id across the network (its envelope's mid), and goes
 //!   as an entry of this machine's feed, again each time the link comes
 //!   back, until a stored receipt comes back. One from another host is
-//!   stored with its sender qualified (`@laptop:claude:…`) and an envelope
+//!   stored with its sender named by its agt_ and an envelope
 //!   that says how it came, then delivered as local mail. Receipts go
 //!   back: stored at once, then delivered, seen or held. One stored there
 //!   that no one read in a week is unread here.
@@ -55,8 +55,8 @@ use xenonet_authz::Information;
 use xenonet_engine::delivery::policy::Guard;
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Engine, Fail, Result, ACTIVE_MS};
 use xenonet_engine::host::Collaborators;
-use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
-use xenonet_model::ids::{parse_actor_id, qualify, YOU};
+use xenonet_engine::network::{is_remote, new_id};
+use xenonet_model::ids::{parse_actor_id, AgentId, YOU};
 use xenonet_model::ops::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
 use xenonet_net::feed::{Feed, Kind as EntryKind, Offer};
 use xenonet_net::sink::{Arrived, Feeds};
@@ -524,7 +524,7 @@ fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &
 /// no machine speaks as another's agent.
 fn agent_in(w: &Runtime, author: &str, b: &Value) -> Result<()> {
     let Some(named) = b.get("agent").filter(|a| !a.is_null()) else { return Ok(()) };
-    let id = named.as_str().and_then(|a| xenonet_model::ids::AgentId::parse(a).ok()).ok_or_else(|| fail("its agent isn't an agent's id"))?;
+    let id = named.as_str().and_then(|a| AgentId::parse(a).ok()).ok_or_else(|| fail("its agent isn't an agent's id"))?;
     let session = s(b, "sender");
     match w.store.with(|s| s.db().remote_agent(&id, author, session.as_deref(), now_ms() as i64)) {
         Ok(true) => Ok(()),
@@ -578,7 +578,19 @@ fn tilde(w: &Runtime, p: &str) -> String {
 /// This host's agents as presence lists them: with their detail, unless
 /// the host shares titles only.
 fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>> {
-    let agents = engine(w, |e, c| e.agents(c, ACTIVE_MS))?;
+    let mut agents = engine(w, |e, c| e.agents(c, ACTIVE_MS))?;
+    // Every actor of this machine's, at work or not: another machine names
+    // one by its agt_, which only presence tells it.
+    if let Some(a) = &w.actors {
+        let listed: Vec<String> = agents.iter().filter_map(|v| s(v, "id")).collect();
+        for id in a.read(xenonet_actors::registry::Actors::ids) {
+            if id != YOU && !listed.contains(&id) {
+                if let Ok(v) = engine(w, |e, c| e.view(c, &id)) {
+                    agents.push(v);
+                }
+            }
+        }
+    }
     // The rule for text that leaves the machine: the home folder,
     // and any other folder named for a person that the agents work in, as ~.
     let scrub = (!titles_only).then(|| {
@@ -616,11 +628,18 @@ fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>>
         };
         let waits = a.get("needsYou").is_some_and(|v| xenonet_text::text::truthy(Some(v)));
         let state = if waits { "waiting".to_string() } else { a.get("status").and_then(Value::as_str).unwrap_or("idle").to_string() };
+        // Another machine names it by its agt_ alone; an actor says its
+        // slug too, which scopes there match.
+        let agent = wire_id(w, &id);
+        if AgentId::parse(&agent).is_err() {
+            continue;
+        }
         out.insert(
-            id.clone(),
+            agent.clone(),
             json!({
-                "id": clip(&id, 200),
+                "id": agent,
                 "app": opt(s(&a, "app"), 32),
+                "actor": parse_actor_id(&id),
                 "title": opt(s(&a, "title"), 200),
                 "state": clip(&state, 32),
                 "doing": opt(s(&a, "focus"), 280),
@@ -634,7 +653,10 @@ fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>>
                 "waitsOnYou": waits,
             }),
         );
-        if let (Some(scrub), Some(v)) = (&scrub, out.get_mut(&id)) {
+        if let Some(o) = out.get_mut(&agent).and_then(Value::as_object_mut).filter(|o| o["actor"].is_null()) {
+            o.remove("actor");
+        }
+        if let (Some(scrub), Some(v)) = (&scrub, out.get_mut(&agent)) {
             let live = match w.state().live_info(&id, now) {
                 Ok(Some(l)) => l,
                 _ => Value::Null,
@@ -672,6 +694,7 @@ fn declared(a: &Value) -> Option<Value> {
     let mut out = json!({
         "id": id,
         "app": text("app", 32),
+        "actor": s(a, "actor").filter(|slug| xenonet_model::ids::is_actor_slug(slug)),
         "title": text("title", 200),
         "state": text("state", 32),
         "doing": text("doing", 280),
@@ -753,10 +776,18 @@ pub fn presence(w: &Runtime, full: bool) -> Option<Value> {
     Some(body)
 }
 
-/// Whether an id another host lists is one of its own agents: never one
-/// it qualified itself, nor you.
+/// Whether an id another machine names is an agent's: an `agt_`, which
+/// its machine made. Never you.
 fn own_id(id: &str) -> bool {
-    !id.starts_with('@') && id != YOU && (is_session_id(id) || parse_actor_id(id).is_some_and(|(h, _)| h.is_none()))
+    AgentId::parse(id).is_ok()
+}
+
+/// The machine signing key id of `host`, a member of this machine's
+/// network, as the roster has it.
+fn machine_of(w: &Runtime, host: &str) -> Option<String> {
+    let g = crate::ground::governance(w)?;
+    let view = g.facts().view?;
+    view.members.values().find(|m| m.id == host).map(|m| m.machine.id().clone())
 }
 
 fn presence_in(w: &Runtime, from: &str, body: &Value) -> Result<()> {
@@ -772,9 +803,20 @@ fn presence_in(w: &Runtime, from: &str, body: &Value) -> Result<()> {
         if full { Vec::new() } else { had.as_ref().and_then(|h| h.text("agents")).and_then(|t| serde_json::from_str::<Vec<Value>>(t).ok()).unwrap_or_default() };
     let removed: Vec<String> = body.get("removed").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     agents.retain(|a| s(a, "id").is_some_and(|id| !removed.contains(&id)));
+    // An agt_ is its machine's alone: one the store has as another
+    // machine's (this one's included) is left out.
+    let machine = machine_of(w, from);
     for a in body.get("agents").and_then(Value::as_array).into_iter().flatten() {
         let Some(kept) = declared(a) else { continue };
         let id = s(&kept, "id").unwrap_or_default();
+        let session = s(&kept, "actor").map(|slug| format!("actor:{slug}"));
+        let theirs = match (&machine, AgentId::parse(&id)) {
+            (Some(m), Ok(agt)) => w.store.with(|st| st.db().remote_agent(&agt, m, session.as_deref(), now_ms() as i64)).unwrap_or(false),
+            _ => false,
+        };
+        if !theirs {
+            continue;
+        }
         agents.retain(|x| s(x, "id").as_deref() != Some(&id));
         agents.push(kept);
     }
@@ -800,8 +842,9 @@ fn view_of(host: &Host, a: &Value, detail: bool) -> Value {
     };
     let title = s(a, "title").unwrap_or_else(|| local.clone());
     let mut v = json!({
-        "id": format!("@{}:{local}", host.id),
-        "app": s(a, "app").unwrap_or_else(|| local.split(':').next().unwrap_or("").to_string()),
+        "id": local,
+        "app": s(a, "app"),
+        "actor": a.get("actor").cloned().unwrap_or(Value::Null),
         "title": clip(&title, 90),
         "project": project,
         "projectId": null,
@@ -858,10 +901,10 @@ pub fn remote_views(w: &Runtime, detail: bool) -> Vec<Value> {
 
 // ---------- the engine's calls ----------
 
-/// An agent on another host by its qualified id, as its host's presence
-/// shows it, or a stand-in when the presence doesn't list it (any more).
+/// An agent on another host by its agt_, as its host's presence shows
+/// it, or a stand-in when the presence doesn't list it (any more).
 pub(crate) fn remote_view(w: &Runtime, id: &str) -> Value {
-    remote_views(w, false).into_iter().find(|v| v["id"] == id).unwrap_or_else(|| stub(id))
+    remote_views(w, false).into_iter().find(|v| v["id"] == id).unwrap_or_else(|| stub(w, id))
 }
 
 /// What another host last said of a delivery: { host, receipt }, or None.
@@ -870,10 +913,53 @@ pub(crate) fn receipt_of(w: &Runtime, message_id: f64, agent: &str) -> Result<Op
     Ok(d.map(|d| json!({ "host": d.get("host").to_json(), "receipt": d.get("receipt").to_json() })))
 }
 
-/// An agent on a host whose presence doesn't list it (any more).
-fn stub(id: &str) -> Value {
-    let local = local_of(id);
-    json!({ "id": id, "app": local.split(':').next().unwrap_or(""), "title": clip(local, 90), "project": null, "branch": null, "host": host_of(id) })
+/// An agent on a host whose presence doesn't list it (any more), on the
+/// machine whose feed first named it.
+fn stub(w: &Runtime, id: &str) -> Value {
+    let row = AgentId::parse(id).ok().and_then(|a| w.store.with(|s| s.db().agent(&a)).ok().flatten());
+    let app = row.as_ref().map(|r| r.app.clone()).filter(|a| !a.is_empty());
+    let actor = row.as_ref().filter(|r| r.app == "actor").and_then(|r| r.vendor_id.clone());
+    json!({ "id": id, "app": app, "actor": actor, "title": id, "project": null, "branch": null, "host": host_of_agent(w, id) })
+}
+
+// ---------- agents across machines ----------
+
+/// An agent as it's named to another machine: this machine's session or
+/// actor by its `agt_` (made the first time it's named), you as you, and
+/// another machine's `agt_` as it is.
+pub(crate) fn wire_id(w: &Runtime, id: &str) -> String {
+    if id == YOU || AgentId::parse(id).is_ok() {
+        return id.to_string();
+    }
+    match w.store.with(|s| s.db().agent_of(id, None, now_ms() as i64)) {
+        Ok(a) => a.as_str().to_string(),
+        Err(_) => id.to_string(),
+    }
+}
+
+/// An agent another machine named, as this one writes it: one of this
+/// machine's own `agt_` as its session or actor, anything else as it came.
+pub(crate) fn here_id(w: &Runtime, id: &str) -> String {
+    let Ok(a) = AgentId::parse(id) else { return id.to_string() };
+    w.store.with(|s| s.db().session_of(&a)).ok().flatten().unwrap_or_else(|| id.to_string())
+}
+
+/// The machine (its host id) another machine's agent is on, by its
+/// `agt_`: as presence lists it, else the machine whose feed first named
+/// it, as the roster calls that machine. None for this machine's own or an
+/// unknown one.
+pub(crate) fn host_of_agent(w: &Runtime, id: &str) -> Option<String> {
+    let a = AgentId::parse(id).ok()?;
+    if let Some(v) = remote_views(w, false).into_iter().find(|v| v["id"] == id) {
+        return s(&v, "host");
+    }
+    let row = w.store.with(|s| s.db().agent(&a)).ok().flatten()?;
+    if row.machine == xenonet_store::projects::LOCAL {
+        return None;
+    }
+    let g = crate::ground::governance(w)?;
+    let view = g.facts().view?;
+    view.members.values().find(|m| m.machine.id() == row.machine).map(|m| m.id.clone())
 }
 
 // ---------- messages out ----------
@@ -911,20 +997,23 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
     };
     let text = s(a, "text").unwrap_or_default();
     let scope = a.get("scope").map_or(Value::Null, |v| Value::String(xenonet_text::text::display(v)));
-    // A session's own id, the store's, which the receiver keeps as this
-    // machine's agent.
-    let agent = w.store.with(|s| s.db().agent_known(&me)).ok().flatten().map(|a| a.as_str().to_string());
+    // Who sent it, by its agt_ (made the first time it's named), which the
+    // receiver keeps as this machine's agent and names it by.
+    let agent = (me != YOU).then(|| wire_id(w, &me)).filter(|a| AgentId::parse(a).is_ok());
     let mut signed: BTreeMap<String, Value> = BTreeMap::new();
     // An actor's message carries a token minted for it here, once, whatever
     // machines it goes to: its own token was decided when it sent it.
     let mut minted: Option<Value> = None;
     for r in items(a, "recipients") {
         let rid = s(&r, "id").unwrap_or_default();
-        let Some(host) = host_of(&rid).map(str::to_string) else { continue };
+        if !is_remote(&rid) {
+            continue;
+        }
+        let Some(host) = host_of_agent(w, &rid) else { continue };
         let authority = match parse_actor_id(&me) {
             _ if me == YOU => signed.entry(host.clone()).or_insert_with(|| person_authority(w, &host, at_window)).clone(),
-            Some((None, slug)) => minted.get_or_insert_with(|| actor_authority(w, slug)).clone(),
-            _ => json!({}),
+            Some(slug) => minted.get_or_insert_with(|| actor_authority(w, slug)).clone(),
+            None => json!({}),
         };
         let body = json!({
             "schema": "network/send/v1",
@@ -932,7 +1021,7 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             "sender": me,
             "senderKind": sender_kind(&me),
             "agent": agent,
-            "target": local_of(&rid),
+            "target": rid,
             "body": text,
             "replyTo": reply_mid,
             "scope": scope,
@@ -1076,7 +1165,7 @@ pub(crate) fn principal_of(
         "person" => crate::ground::person(w, g, Some(from.host), &carried, resource, act).map(|p| (p, None)),
         "actor" => {
             let (p, token) = crate::ground::actor(g, &machine, &carried)?;
-            let named = parse_actor_id(from.sender).map(|(_, slug)| slug.to_string());
+            let named = parse_actor_id(from.sender).map(str::to_string);
             match &p {
                 xenonet_authz::Principal::Actor { slug, .. } if named.as_deref() == Some(slug.as_str()) => Ok((p, Some(token))),
                 _ => Err(format!("that token isn't {}'s", from.sender)),
@@ -1105,9 +1194,14 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
     // What it says is information from here on: the decisions below read
     // the frame's sender and the act's authority, never the text.
     let body = Information::new(body);
+    // An agent or actor is named by its agt_ (`agent`), which agent_in
+    // checked is the sending machine's; `sender` is its name there, which
+    // an actor's token is checked against.
+    let agent = s(b, "agent");
     let sender_ok = match kind.as_str() {
         "person" => sender == YOU,
-        "agent" | "actor" => own_id(&sender),
+        "agent" => agent.as_deref().is_some_and(own_id) && is_session_id(&sender),
+        "actor" => agent.as_deref().is_some_and(own_id) && parse_actor_id(&sender).is_some(),
         _ => false,
     };
     if !mid.starts_with("msg_") || !sender_ok || body.read().is_empty() || body.read().chars().count() > 16000 {
@@ -1117,7 +1211,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
     // A start request: the starts' own (starts.rs), answered by receipts
     // keyed by its mid. An older XenoNet refuses the target below.
     if target == xenonet_engine::delivery::starts::TARGET {
-        crate::starts::start_in(w, from, &mid, &kind, &sender, body, &authority, at);
+        crate::starts::start_in(w, from, &mid, &kind, &sender, agent.as_deref().unwrap_or(YOU), body, &authority, at);
         return Ok(());
     }
     let Some(mut g) = crate::ground::ground(w, None) else {
@@ -1134,7 +1228,9 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         }
         return Ok(());
     }
-    if !(is_agent_id(&target) || is_actor_agent(&target)) {
+    // The target by its agt_: one of this machine's sessions or actors.
+    let local = here_id(w, &target);
+    if !(is_agent_id(&local) || is_actor_agent(&local)) {
         receipt(w, from, &mid, &target, "refused", Some("no session or actor here has that id"));
         return Ok(());
     }
@@ -1146,13 +1242,13 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());
     }
-    // `@laptop:actor:you` is `actor:you`: the person is one person.
-    let sender_id = if kind == "person" { YOU.to_string() } else { format!("@{from}:{sender}") };
+    // The person is one person, on every machine.
+    let sender_id = if kind == "person" { YOU.to_string() } else { agent.clone().unwrap_or_default() };
     // A repeat (the sender didn't hear the stored receipt): say so again.
     let had = store(w, |s| s.message_by_mid(&mid, Some(from)))?;
     if let Some(m) = &had {
         let id = m.num("id").unwrap_or(f64::NAN);
-        if store(w, |s| s.delivery(id, &target))?.is_some() {
+        if store(w, |s| s.delivery(id, &local))?.is_some() {
             receipt(w, from, &mid, &target, "stored", None);
             return Ok(());
         }
@@ -1169,7 +1265,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         receipt(w, from, &mid, &target, "refused", Some("this thread has gone back and forth too many times; XenoNet stops agent-to-agent threads at 6 messages"));
         return Ok(());
     }
-    let view = engine(w, |e, c| e.view(c, &target))?;
+    let view = engine(w, |e, c| e.view(c, &local))?;
     // An actor XenoNet only observes reads nothing: refused, as a message
     // sent on this machine is, rather than stored for no one.
     let unreached = engine(w, |_, c| Engine::unreached(c, &view))?;
@@ -1188,27 +1284,27 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
     let id = match &had {
         Some(m) => {
             let id = m.num("id").unwrap_or(f64::NAN);
-            store(w, |s| s.deliver(id, target.as_str()))?;
+            store(w, |s| s.deliver(id, local.as_str()))?;
             id
         }
         None => {
-            let stored = stored_message(&sender_id, &target, &body, reply_to, &env);
+            let stored = stored_message(&sender_id, &local, &body, reply_to, &env);
             let id = store(w, |s| s.send(&stored, now))?;
             store(w, |s| s.set_message_net(id, Some(from), &mid))?;
             id
         }
     };
     // A session that bypasses its permission checks holds it until it asks.
-    let held = w.engine.bypassed(&target);
+    let held = w.engine.bypassed(&local);
     receipt(w, from, &mid, &target, if held { "held" } else { "stored" }, None);
-    w.mail.wake(&target);
+    w.mail.wake(&local);
     // How it reads when it's pushed into the session: its framing first.
     let framing = if kind == "person" { xenonet_engine::network::from_you_line(from) } else { xenonet_engine::network::from_host_line(from) };
     let mut event_body = obj(vec![
         ("id", number(id)),
         ("from", json!(sender_id)),
-        ("to", json!([target])),
-        ("target", json!(target)),
+        ("to", json!([local])),
+        ("target", json!(local)),
         ("text", json!(format!("{framing}\n{}", body.read()))),
         ("ts", number(now)),
         ("verified", env["line"].clone()),
@@ -1252,7 +1348,8 @@ fn receipt_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
     }
     let Some(m) = store(w, |s| s.message_by_mid(&mid, None))? else { return Ok(()) };
     let id = m.num("id").unwrap_or(f64::NAN);
-    let who = format!("@{from}:{agent}");
+    // The recipient by its agt_, as the delivery here names it.
+    let who = agent;
     let changed = store(w, |s| s.set_receipt(id, &who, &state, now_ms()))?;
     if changed {
         w.emit(From::Engine, "receipt", json!({ "id": id, "agent": who, "host": from, "state": state, "reason": b.get("reason").cloned().unwrap_or(Value::Null) }));
@@ -1268,7 +1365,7 @@ pub fn seen(w: &Runtime, agent: &str, ids: &[Value]) {
     for id in ids {
         let Ok(Some(m)) = store(w, |s| s.message(xenonet_text::text::to_number(Some(id)))) else { continue };
         if let (Some(host), Some(mid)) = (m.text("host"), m.text("mid")) {
-            receipt(w, host, mid, agent, "seen", None);
+            receipt(w, host, mid, &wire_id(w, agent), "seen", None);
         }
     }
 }
@@ -1282,7 +1379,7 @@ pub fn delivered(w: &Runtime, m: &Value) {
         let Some(agent) = agent.as_str() else { continue };
         let live = w.router.core.list(200).iter().any(|r| r.get("message").and_then(Value::as_f64) == id && r["agent"] == agent && r["state"] == "live");
         if live {
-            receipt(w, &host, &mid, agent, "delivered", None);
+            receipt(w, &host, &mid, &wire_id(w, agent), "delivered", None);
         }
     }
 }
@@ -1291,8 +1388,12 @@ pub fn delivered(w: &Runtime, m: &Value) {
 
 /// A claim or a release this machine made (`network/claim/v1`), to every
 /// other member as a kept entry of its feed.
-pub(crate) fn claimed(w: &Runtime, body: Value) {
+pub(crate) fn claimed(w: &Runtime, mut body: Value) {
     if net(w).me().is_some() {
+        // Its agent by its agt_.
+        if let Some(a) = s(&body, "agent") {
+            body["agent"] = json!(wire_id(w, &a));
+        }
         send(w, To::All, Kind::Claims, body);
     }
 }
@@ -1324,7 +1425,12 @@ fn claim_in(w: &Runtime, from: &str, author: &str, b: &Value) -> Result<()> {
     let p = xenonet_authz::ProjectId::new(&project).map_err(|e| fail(e.message))?;
     let request = crate::ground::remote(&g, xenonet_authz::Principal::Machine { id }, xenonet_authz::Resource::Project(p.clone()), xenonet_authz::Act::Claim { project: p });
     crate::ground::judge(&g, &request, None).map_err(fail)?;
-    let shown = format!("@{from}:{agent}");
+    // An agt_ is its machine's alone: the feed's author's.
+    let ours = AgentId::parse(&agent).is_ok_and(|a| w.store.with(|st| st.db().remote_agent(&a, author, None, now_ms() as i64)).unwrap_or(false));
+    if !ours {
+        return Err(fail(format!("{agent} isn't {from}'s agent")));
+    }
+    let shown = agent.clone();
     if c.op == xenonet_model::network::ClaimOp::Release {
         store(w, |s| s.release_remote(from, &shown, &project, (!path.is_empty()).then_some(path.as_str())))?;
         return Ok(());
@@ -1384,7 +1490,7 @@ pub(crate) fn claim_hits(w: &Runtime, me: &str, files: &[String]) -> Result<Vec<
                 if a.get("edits").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).any(|e| e == at.rel) {
                     out.push(obj(vec![
                         ("host", json!(host)),
-                        ("agent", json!(format!("@{host}:{}", s(a, "id").unwrap_or_default()))),
+                        ("agent", json!(s(a, "id").unwrap_or_default())),
                         ("branch", a.get("branch").cloned().unwrap_or(Value::Null)),
                         ("kind", json!("edit")),
                         ("file", json!(file)),
@@ -1402,11 +1508,8 @@ pub(crate) fn claim_hits(w: &Runtime, me: &str, files: &[String]) -> Result<Vec<
 /// A handoff as a session reads it.
 fn shown(r: &Row, me_host: Option<&str>) -> Value {
     let host = r.text("host");
-    let maker = r.text("maker").unwrap_or("");
-    let from = match host {
-        Some(h) if Some(h) != me_host => format!("@{h}:{maker}"),
-        _ => maker.to_string(),
-    };
+    // Another machine's maker by its agt_, its machine beside it.
+    let from = r.text("maker").unwrap_or("").to_string();
     json!({
         "id": r.text("id"),
         "from": from,
@@ -1555,7 +1658,8 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
         // Named as send names it; a message tells it now.
         let sent = send_from(w, me, &to, &words, envelope)?;
         let first = items(&sent, "to").first().and_then(|t| s(t, "id")).unwrap_or(to);
-        (Some(first.clone()), host_of(&first).map(str::to_string), Some(sent))
+        let host = if is_remote(&first) { host_of_agent(w, &first) } else { None };
+        (Some(first.clone()), host, Some(sent))
     };
     if to_agent.is_none() && key.is_none() && !xenonet_text::text::truthy(Some(&scope)) {
         return Err(Fail::Bad("a handoff to the repo needs a repo: this session isn't in one".into()));
@@ -1597,7 +1701,7 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
     if let (Some(m), Some(row)) = (&me_net, store(w, |s| s.handoff(&id))?) {
         let body = body_of(&row, "offer", None);
         let dest = match (&to_agent, &to_host) {
-            (Some(a), _) => host_of(a).map(|h| Some(h.to_string())),
+            (Some(a), _) => is_remote(a).then(|| host_of_agent(w, a)).flatten().map(Some),
             (None, Some(h)) if *h != m.host => Some(Some(h.clone())),
             (None, Some(_)) => None,
             (None, None) => key.as_ref().map(|_| None),
@@ -1616,6 +1720,14 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
 fn send_handoff(w: &Runtime, for_host: Option<&str>, mut body: Value) {
     if let Some(h) = for_host {
         body["for"] = json!(h);
+    }
+    // Its agents by their agt_.
+    for at in ["/from", "/by", "/to/agent"] {
+        if let Some(v) = body.pointer_mut(at) {
+            if let Some(id) = v.as_str().map(str::to_string) {
+                *v = json!(wire_id(w, &id));
+            }
+        }
     }
     send(w, To::All, Kind::Handoff, body);
 }
@@ -1733,9 +1845,8 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
                 // The maker may have gone; the handoff is taken all the same.
                 let _ = send_from(w, me, &maker, &format!("I took your handoff {id}."), envelope);
             }
-            if let Some(m) = &me_net {
-                let by = format!("@{}:{me}", m.host);
-                send_handoff(w, None, body_of(&r, "taken", Some(&by)));
+            if me_net.is_some() {
+                send_handoff(w, None, body_of(&r, "taken", Some(me)));
             }
             Ok(json!({ "taken": true, "handoff": shown(&r, me_net.as_ref().map(|m| m.host.as_str())), "words": details(&r) }))
         }
@@ -1745,8 +1856,7 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
                 return Err(fail(format!("{id} was made on {h}, and this machine isn't in a XenoNet network now")));
             };
             store(w, |s| s.ask_handoff(id, me))?;
-            let by = format!("@{}:{me}", m.host);
-            send_handoff(w, Some(h), body_of(&r, "accept", Some(&by)));
+            send_handoff(w, Some(h), body_of(&r, "accept", Some(me)));
             let away = !net(w).hosts().iter().any(|x| x.id == h && x.online);
             Ok(json!({
                 "taken": false,
@@ -1775,9 +1885,9 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
         return Ok(());
     }
     let now = now_ms();
-    // Ids as this host writes them: its own unqualified, others' with
-    // their host.
-    let here = |id: &str| qualify(id, Some(from), Some(&me.host)).unwrap_or_else(|_| id.to_string());
+    // Ids as this host writes them: its own by their sessions' and actors'
+    // ids, others' by their agt_.
+    let here = |id: &str| here_id(w, id);
     match op.as_str() {
         "offer" => {
             let maker = s(b, "from").unwrap_or_default();
@@ -1825,7 +1935,7 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
                 return Ok(());
             }
             let by = here(&s(b, "by").unwrap_or_default());
-            if !is_remote(&by) || host_of(&by) != Some(from) {
+            if !is_remote(&by) || host_of_agent(w, &by).as_deref() != Some(from) {
                 return Err(fail("an accept from a session that isn't on the host that sent it"));
             }
             if r.text("to_agent").is_some_and(|a| a != by) {
@@ -1834,14 +1944,12 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
             if store(w, |s| s.take_handoff(&id, &by, now))? {
                 let maker = r.text("maker").unwrap_or("");
                 note(w, &by, maker, &format!("I took your handoff {id}."), Some(from));
-                let qualified = format!("@{from}:{}", local_of(&by));
-                send_handoff(w, None, body_of(&r, "taken", Some(&qualified)));
+                send_handoff(w, None, body_of(&r, "taken", Some(&by)));
             } else if let Some(now_row) = store(w, |s| s.handoff(&id))? {
                 // Taken already: the asking host hears by whom.
                 let taker = now_row.text("taken_by").unwrap_or("");
-                let qualified = if is_remote(taker) { taker.to_string() } else { format!("@{}:{taker}", me.host) };
                 let state = now_row.text("state").unwrap_or("taken").to_string();
-                send_handoff(w, Some(from), body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(&qualified)));
+                send_handoff(w, Some(from), body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(taker)));
             }
         }
         // The making host decided.
@@ -1855,7 +1963,7 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
             // The session that asked hears once, when it's decided.
             let was_open = r.text("state") == Some("open");
             if let Some(asker) = r.text("asked_by").filter(|_| was_open) {
-                let maker = format!("@{from}:{}", r.text("maker").unwrap_or(""));
+                let maker = r.text("maker").unwrap_or("").to_string();
                 let words = if op == "lapsed" {
                     format!("Handoff {id} lapsed before your accept was decided.")
                 } else if by.as_deref() == Some(asker) {
@@ -1910,7 +2018,7 @@ mod tests {
 
     #[test]
     fn an_envelope_says_what_this_machine_decided_it_rests_on() {
-        let env = envelope("laptop", "msg_1", 1.0, "@laptop:claude:abcdefgh", "agent", Some("Docs"), 2.0);
+        let env = envelope("laptop", "msg_1", 1.0, "agt_abcdefghijklmnopqrstuvwxyz234567", "agent", Some("Docs"), 2.0);
         assert_eq!(env["auth"], json!({ "method": "host", "process": "n/a", "attestation": "process-checked" }));
         assert_eq!(env["original"], json!({ "kind": "agent", "authority": "machine" }));
         assert_eq!(env["transport"], "network");
@@ -1918,6 +2026,6 @@ mod tests {
         let you = envelope("laptop", "msg_2", 1.0, YOU, "person", None, 0.0);
         assert_eq!((you["sender"]["kind"].clone(), you["original"]["authority"].clone()), (json!("you"), json!("person")));
         assert!(you["line"].as_str().unwrap().starts_with("verified: you, by your device's signature"));
-        assert!(own_id("claude:abcdefgh") && !own_id("@vm1:claude:abcdefgh") && !own_id(YOU) && !own_id("hello"));
+        assert!(own_id("agt_abcdefghijklmnopqrstuvwxyz234567") && !own_id("claude:abcdefgh") && !own_id("@vm1:claude:abcdefgh") && !own_id(YOU) && !own_id("hello"));
     }
 }

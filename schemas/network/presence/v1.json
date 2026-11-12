@@ -26,10 +26,9 @@
         "type": "object",
         "properties": {
           "id": {
-            "description": "The agent's id on its own host (claude:<uuid>, codex:<id>, actor:<slug>): receivers qualify it as @<host>:<id>",
+            "description": "The agent's agt_, which its machine made: every machine names it so, with the machine it's on beside it",
             "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "pattern": "^agt_[a-z2-7]{32}$"
           },
           "app": {
             "anyOf": [
@@ -42,6 +41,11 @@
                 "type": "null"
               }
             ]
+          },
+          "actor": {
+            "description": "For an actor, its slug on its machine (actor:<slug>), which a scope's by:<slug> matches",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
           },
           "title": {
             "anyOf": [

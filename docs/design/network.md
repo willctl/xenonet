@@ -654,18 +654,18 @@ Rules:
 
 ### 5. Ids across the network
 
-- **Remote things are named `@<host>:<id>`,** so `@laptop:claude:6f1…`.
-  This is the display and addressing form; an agent's stored id is its
-  `agt_` id, minted by its own machine, and an entry from another machine
-  that names this machine's agent, or another machine's, is refused.
-- **Qualified ids are targets and senders, never callers.**
-  - `is_agent_id` stays as it is for who may call a local route.
-  - A new `is_network_agent` admits `@<host>:` ids for routing, and only
-    for hosts in the roster.
+- **Agents are named by their `agt_` ids** on every machine, minted by
+  their own machine: presence, messages, receipts, claims and handoffs
+  name them so, and the console shows the machine beside the id. The
+  receiver keeps an `agt_` as the machine's that first named it, and
+  refuses an entry or presence from another machine that names it.
+- **Another machine's `agt_` is a target and a sender, never a caller.**
+  `is_agent_id` stays as it is for who may call a local route; the edge
+  maps this machine's own `agt_` to its session or actor.
 - **`machine` is real.** An agent's `machine` fact becomes its host id. It
   stays `"local"` on a machine that isn't in a network. So the selector
   `machine:laptop` works for delivery rules and actor scopes.
-- **`actor:you` is one person.** `@laptop:actor:you` is `actor:you`.
+- **`actor:you` is one person,** on every machine.
 - **Checkouts are matched by project.** A repo's project id (`prj_…`) is
   its owner's HMAC of the normalized `origin`, so one person's checkouts of
   a repo get the same id on every machine. A folder, or a repo before the
@@ -697,14 +697,14 @@ comes up or another host asks after a `gap`.
 "offline since 14:02". The tool's text says which agents are on other
 machines.
 
-**Sending.** `send` to `@laptop:claude:…`, or to a title match or selector
+**Sending.** `send` to another machine's `agt_…`, or to a title match or selector
 that includes remote agents:
 
 1. The local engine stores the message, with its `mid`, as sent.
 2. A loose entry of this machine's feed, in a `message` frame for
    `laptop`, goes into the outbox.
 3. `laptop` decides it (section 8), then its engine stores it with the
-   sender qualified (`@studio:codex:…`) and an envelope saying:
+   sender named by its `agt_` and an envelope saying:
    - transport `network`, auth method `host`;
    - the host it came from;
    - the original sender's kind and attestation, as its own host vouched
@@ -985,7 +985,7 @@ off", including on another machine.
     start briefing offers it.
 - **Who takes it:** the first session to `accept` gets it. The making
   host decides, so it's taken once even when two hosts race. The others
-  see "taken by @laptop:claude:…".
+  see "taken by agt_…".
   - While the making host is away, an accept waits, and the tool says so.
   - A handoff no one takes lapses after a week, and its maker is told.
 

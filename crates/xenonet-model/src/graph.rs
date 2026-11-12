@@ -98,7 +98,7 @@ pub struct SessionPlace {
     pub ran_as: Option<RanAs>,
     #[serde(flatten)]
     pub place: Place,
-    /// The host it's from, for a node from another machine; its id is then @<host>:…
+    /// Null: this machine's map holds its own nodes (the page draws other machines' from their presence)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// Its host isn't live, so it shows what was true when the host last was
@@ -173,7 +173,7 @@ crate::tag!(pub ProjectKind = "project");
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPlace {
-    #[schemars(regex(pattern = r"^(?:@[a-z][a-z0-9-]{1,31}:)?project:"))]
+    #[schemars(regex(pattern = r"^project:"))]
     pub id: String,
     pub kind: ProjectKind,
     pub group: bool,
@@ -191,7 +191,7 @@ pub struct ProjectPlace {
     #[serde(flatten)]
     pub tally: Tally,
     pub active: bool,
-    /// The host it's from, for a node from another machine; its id is then @<host>:…
+    /// Null: this machine's map holds its own nodes (the page draws other machines' from their presence)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// Its host isn't live, so it shows what was true when the host last was
@@ -244,7 +244,7 @@ crate::tag!(pub CodexApp = "codex");
 /// A Codex desktop project.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NativeNode {
-    #[schemars(regex(pattern = r"^(?:@[a-z][a-z0-9-]{1,31}:)?native:codex:"))]
+    #[schemars(regex(pattern = r"^native:codex:"))]
     pub id: String,
     pub kind: NativeKind,
     pub app: CodexApp,
@@ -255,7 +255,7 @@ pub struct NativeNode {
     #[serde(flatten)]
     pub tally: Tally,
     pub active: bool,
-    /// The host it's from, for a node from another machine; its id is then @<host>:…
+    /// Null: this machine's map holds its own nodes (the page draws other machines' from their presence)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// Its host isn't live, so it shows what was true when the host last was
@@ -276,7 +276,7 @@ crate::tag!(pub ZoneKind = "zone");
 /// A folder outside the projects folder where sessions ran.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ZoneNode {
-    #[schemars(regex(pattern = r"^(?:@[a-z][a-z0-9-]{1,31}:)?zone:"))]
+    #[schemars(regex(pattern = r"^zone:"))]
     pub id: String,
     pub kind: ZoneKind,
     pub name: String,
@@ -288,7 +288,7 @@ pub struct ZoneNode {
     #[serde(flatten)]
     pub tally: Tally,
     pub active: bool,
-    /// The host it's from, for a node from another machine; its id is then @<host>:…
+    /// Null: this machine's map holds its own nodes (the page draws other machines' from their presence)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// Its host isn't live, so it shows what was true when the host last was
@@ -310,7 +310,7 @@ crate::tag!(pub WikiKind = "wiki");
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WikiNode {
-    #[schemars(regex(pattern = r"^(?:@[a-z][a-z0-9-]{1,31}:)?resource:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))]
+    #[schemars(regex(pattern = r"^resource:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))]
     pub id: String,
     pub kind: WikiKind,
     pub name: String,
@@ -328,7 +328,7 @@ pub struct WikiNode {
     pub place: Place,
     #[serde(flatten)]
     pub tally: Tally,
-    /// The host it's from, for a node from another machine; its id is then @<host>:…
+    /// Null: this machine's map holds its own nodes (the page draws other machines' from their presence)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// Its host isn't live, so it shows what was true when the host last was
@@ -359,7 +359,7 @@ crate::tag!(pub PageKind = "page");
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PageNode {
-    #[schemars(regex(pattern = r"^(?:@[a-z][a-z0-9-]{1,31}:)?wiki:"))]
+    #[schemars(regex(pattern = r"^wiki:"))]
     pub id: String,
     pub kind: PageKind,
     pub name: FrontMatter,
@@ -383,7 +383,7 @@ pub struct PageNode {
     pub place: Place,
     #[serde(flatten)]
     pub tally: Tally,
-    /// The host it's from, for a node from another machine; its id is then @<host>:…
+    /// Null: this machine's map holds its own nodes (the page draws other machines' from their presence)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// Its host isn't live, so it shows what was true when the host last was
@@ -397,7 +397,7 @@ crate::tag!(pub ResourceKind = "resource");
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceNode {
-    #[schemars(regex(pattern = r"^(?:@[a-z][a-z0-9-]{1,31}:)?resource:"))]
+    #[schemars(regex(pattern = r"^resource:"))]
     pub id: String,
     pub kind: ResourceKind,
     /// What the shared system is called: the MCP server, or for a server whose id is a uuid the name it says it is, or "Connector" and the start of the id
@@ -412,7 +412,7 @@ pub struct ResourceNode {
     pub place: Place,
     #[serde(flatten)]
     pub tally: Tally,
-    /// The host it's from, for a node from another machine; its id is then @<host>:…
+    /// Null: this machine's map holds its own nodes (the page draws other machines' from their presence)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub host: Opt<String>,
     /// Its host isn't live, so it shows what was true when the host last was

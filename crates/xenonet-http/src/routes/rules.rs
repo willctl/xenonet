@@ -514,9 +514,14 @@ impl Creds {
 
 /// Whether a request names another machine: `?host=`, or an id (in the
 /// path, or `?a=` / `?b=`) that starts with `@`.
-fn names_elsewhere(req: &Req) -> bool {
-    let at = |s: &str| decode_uri_component(s).is_some_and(|d| d.starts_with('@'));
-    req.param("host").is_some_and(|h| !h.is_empty()) || ["a", "b"].iter().any(|k| req.param(k).is_some_and(at)) || req.path.split('/').any(at)
+fn names_elsewhere(ctx: &Ctx, req: &Req) -> bool {
+    // An agent by an agt_ that isn't this machine's is another machine's;
+    // an id that starts with @ is another machine's node.
+    let far = |s: &str| {
+        decode_uri_component(s)
+            .is_some_and(|d| d.starts_with('@') || (xenonet_model::ids::AgentId::parse(&d).is_ok() && ctx.cores.engine.session_of_agent(&d).ok().flatten().is_none()))
+    };
+    req.param("host").is_some_and(|h| !h.is_empty()) || ["a", "b"].iter().any(|k| req.param(k).is_some_and(far)) || req.path.split('/').any(far)
 }
 
 /// Decides `act` for `caller` at this machine's local door (the
@@ -584,7 +589,7 @@ pub async fn admit(ctx: &Ctx, req: &mut Req) -> Result<(), Reply> {
             }
         }
     }
-    if row.elsewhere && !by.window && names_elsewhere(req) {
+    if row.elsewhere && !by.window && names_elsewhere(ctx, req) {
         return Err(crate::routes::hosts::window_only_reply());
     }
     let caller = who(ctx, req, row, &creds, &mut by).await?;
@@ -744,8 +749,10 @@ mod tests {
     }
 
     #[test]
-    fn another_machine_is_named_by_host_or_an_at_id() {
-        let named = |target: &str| names_elsewhere(&Req::fake("GET", target, &[], None));
+    fn another_machine_is_named_by_host_an_agt_not_its_own_or_an_at_id() {
+        let ctx = Ctx::for_tests(crate::cores::Cores::pending(true, true));
+        let named = |target: &str| names_elsewhere(&ctx, &Req::fake("GET", target, &[], None));
+        assert!(named("/api/session/agt_abcdefghijklmnopqrstuvwxyz234567/transcript"), "an agt_ this machine doesn't have");
         assert!(named("/api/mcp?server=x&host=desk"));
         assert!(!named("/api/mcp?server=x&host="));
         assert!(named("/api/session/%40desk%3Aclaude%3Aabc/transcript"));

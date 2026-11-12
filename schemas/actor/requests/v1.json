@@ -27,7 +27,7 @@
           "actor": {
             "description": "The actor it would be",
             "type": "string",
-            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$"
+            "pattern": "^actor:[a-z0-9][a-z0-9-]{0,31}$"
           },
           "name": {
             "type": "string",
@@ -210,7 +210,7 @@
           "actor": {
             "description": "The actor whose app would get the token",
             "type": "string",
-            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$"
+            "pattern": "^actor:[a-z0-9][a-z0-9-]{0,31}$"
           },
           "name": {
             "type": "string",

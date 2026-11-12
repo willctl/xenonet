@@ -8,7 +8,7 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+      "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>; another machine's, by the agt_ its machine made"
     },
     "app": {
       "type": "string",
@@ -210,7 +210,7 @@
     },
     "host": {
       "type": "string",
-      "description": "In a XenoNet network, the host an agent on another machine is on; its id is @<host>:<id>"
+      "description": "In a XenoNet network, the machine an agent on another machine is on; its id is its agt_"
     },
     "seen": {
       "anyOf": [

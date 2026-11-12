@@ -23,7 +23,7 @@
 // The state comes from GET /api/net/state, read again every few seconds in
 // a network, rarely out of one, and whenever the event stream says it
 // changed (net). Other machines' agents come from the engine's list (GET
-// /api/engine/agents), with @<host>: ids. Starting, joining, invites,
+// /api/engine/agents), by their agt_ and machine. Starting, joining, invites,
 // removing, replacing and the setting go through the window's own calls,
 // with its key: they're yours, and marked so (data-yours). A machine on its
 // own never sees any of this outside this panel and Add a machine.
@@ -116,7 +116,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   async function engineAgents() {
     const state = await getJson("/api/engine/state").catch(() => null);
     const list = Array.isArray(state?.agents) ? state.agents : [];
-    if (list.some((a) => typeof a?.id === "string" && a.id.startsWith("@"))) return list;
+    if (list.some((a) => typeof a?.host === "string" && a.host)) return list;
     const at = await getJson("/api/engine/agents").catch(() => null);
     return Array.isArray(at) ? at : list;
   }
@@ -1059,7 +1059,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       answers.length = Math.min(answers.length, 10);
     },
     close: () => isOpen() && modals.close(),
-    // One of another machine's agents, by its @<host>: id.
+    // One of another machine's agents, by its agt_.
     agent: (id) => agents.find((a) => a.id === id) ?? null,
     get state() {
       return state;

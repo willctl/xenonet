@@ -73,14 +73,10 @@ fn limit_of(req: &Req) -> f64 {
     }
 }
 
-/// An actor's slug from the path: None for one that isn't, or another
-/// host's.
+/// An actor's slug from the path: None for one that isn't.
 fn slug_of(raw: &str) -> Option<String> {
     let id = format!("actor:{}", decode_uri_component(raw)?);
-    match parse_actor_id(&id) {
-        Some((None, slug)) => Some(slug.to_string()),
-        _ => None,
-    }
+    parse_actor_id(&id).map(str::to_string)
 }
 
 fn issue(e: &str) -> String {

@@ -7,13 +7,14 @@
 // through the window, which reads them from its machine over svc/2. A
 // machine that's away dims, as a host that isn't live does.
 //
-// Every id is qualified @<host>:… as the hosts merge qualifies a host's,
-// and every node is made here field by field from the network panel's
+// A session there is named by its agent's agt_, which its machine made;
+// its host node and projects by ids that start with @<host>:. Every node
+// is made here field by field from the network panel's
 // agents (network-model.js's remoteAgents): nothing another machine sent
 // is put on the map as it came. Its text is shown escaped where the map
 // shows text, and never reaches an agent. No DOM here; main.js merges the
 // part into the map before it's drawn.
-import { HOST_ID } from "./network-model.js";
+import { HOST_ID, AGENT_ID } from "./network-model.js";
 import { hostNodeId } from "./hosts.js";
 
 // As the map counts a session active or recent (crates/xenonet-state/src/graph.rs's windows).
@@ -58,7 +59,7 @@ export function networkPart(state, agents, now = Date.now()) {
     const online = h.online !== false;
     const stale = !online;
     const hostId = hostNodeId(host);
-    const theirs = list(agents).filter((a) => a.host === host && typeof a.id === "string" && a.id.startsWith(`@${host}:`) && !a.id.slice(host.length + 2).startsWith("@"));
+    const theirs = list(agents).filter((a) => a.host === host && AGENT_ID.test(a.id ?? ""));
     const projects = new Map();
     const sessions = [];
     for (const a of theirs) {
@@ -79,14 +80,13 @@ export function networkPart(state, agents, now = Date.now()) {
       const at = a.lastActive ?? null;
       const working = a.status === "working" || a.waits || !!a.stuck;
       const activity = online ? activityOf(at, working, now) : "idle";
-      const local = a.id.slice(host.length + 2);
       sessions.push({
         id: a.id,
         kind: "session",
         host,
-        app: a.app ?? local.split(":")[0],
+        app: a.app ?? null,
         title: a.title,
-        rawId: local,
+        rawId: a.id,
         cwd: a.cwd,
         branch: a.branch,
         createdAt: null,

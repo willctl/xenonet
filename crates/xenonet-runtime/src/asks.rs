@@ -250,6 +250,7 @@ fn to_windows(w: &Runtime, me: &str, body: &Value) {
             "mid": mid,
             "sender": me,
             "senderKind": "agent",
+            "agent": crate::network::wire_id(w, me),
             "target": TARGET,
             "body": text,
             "replyTo": null,
