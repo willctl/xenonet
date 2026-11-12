@@ -169,6 +169,10 @@ pub trait Network: Send + Sync {
     /// (`add`) or out of it; with `mine`, into or out of the relays this
     /// machine adds of its own, for its own dials, in no chain.
     async fn relay(&self, network: Option<&str>, url: &str, add: bool, mine: bool, at_window: bool) -> NetResult;
+    /// A member of `network` named one of its mailboxes (`add`, which
+    /// widens: the window's, with presence) or taken off them (a window
+    /// host's, or the mailbox's own).
+    async fn mailbox(&self, network: Option<&str>, host: &str, add: bool, at_window: bool) -> NetResult;
     /// The services this machine publishes into `network`.
     fn svc_list(&self, network: Option<&str>) -> NetResult;
     /// Publishing asks the person (their presence), so only from the window.

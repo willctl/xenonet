@@ -89,7 +89,9 @@ A project counts once you've confirmed its checkout on this machine ([Projects](
 
 A mailbox is a machine in the network that keeps what's sent to a machine that's away, sealed, and hands it over when that machine is back. It can't read what it keeps. It keeps a week at most, and up to 10,000 items or 50 MB for each machine, and it tells the sender what it took: the sender's `xenonet net status` and doctor show what's held, not delivered yet. A message that carries your presence (an Allow, say) never waits at a mailbox: it goes only to a machine that's connected.
 
-Without a mailbox, a machine keeps what it has for a machine that's away and sends it when they're both connected again, for up to a week. Naming a mailbox isn't in the window or the command yet.
+Name one in **Network settings › Mailboxes**: choose **Make a mailbox** beside the machine. A mailbox sees which machine sends what to which, so naming one widens the network: it asks you, takes a window host, and is done in the window; `xenonet net mailbox add` in a terminal says so. Taking one off is done at once, by a window host or by the mailbox itself (**Take off** or **Step down** there, or `xenonet net mailbox remove <id>`). `xenonet net mailbox` lists them. A network names up to eight.
+
+Without a mailbox, a machine keeps what it has for a machine that's away and sends it when they're both connected again, for up to a week.
 
 ## What agents can do across machines
 

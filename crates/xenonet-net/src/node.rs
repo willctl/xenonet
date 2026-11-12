@@ -1660,6 +1660,49 @@ impl Node {
         self.decide_entry(e, "this machine asked to add a relay to the network; the founder or another window host approves it")
     }
 
+    /// The network's mailboxes, in place of what it had: `host`, a member,
+    /// named one (`add`) or taken off. Naming one widens what a member
+    /// sees of the others' traffic, so it takes a window host with the
+    /// person's presence, from the window (the decided table); taking one
+    /// off narrows, and is a window host's or the mailbox's own, from
+    /// anywhere.
+    pub async fn set_mailboxes(&self, host: &str, add: bool, at_window: bool) -> R<Value> {
+        let n = &self.shared;
+        let (net, _) = self.me()?;
+        n.sync_chain().await;
+        let view = n.roster().view();
+        if view.member(host).is_none() {
+            return Err(NetError::new(404, "no-host", format!("{host} isn't in the network")));
+        }
+        let had = view.mailboxes.clone();
+        let mut to = had.clone();
+        if add {
+            if !to.iter().any(|m| m == host) {
+                to.push(host.to_string());
+            }
+        } else {
+            to.retain(|m| m != host);
+        }
+        if to == had {
+            return Ok(self.state());
+        }
+        if to.len() > xenonet_log::network::MAX_MAILBOXES {
+            return Err(NetError::bad(format!("a network names at most {} mailboxes", xenonet_log::network::MAX_MAILBOXES)));
+        }
+        if !view.is_window(&net.host) && (host != net.host || add) {
+            return Err(NetError::new(403, "not-window", "a network's mailboxes are named from a window host; a mailbox may step down itself"));
+        }
+        let me = n.roster().host_ref(&net.host).ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
+        let mut e = n.draft(Op::Mailboxes, me);
+        e.mailboxes = Some(to);
+        let presence = match e.presence_for(&view) {
+            Some(what) => Some(n.identity.prove(at_window, what, &e.digest(), &format!("let {host} keep your network's mail for machines that are away"), n.now() as i64)?),
+            None => None,
+        };
+        e.sign_with(&net.host, n.identity.machine_key()?.as_ref(), presence)?;
+        self.decide_entry(e, "this machine asked to name a mailbox; another window host approves it")
+    }
+
     /// `network/state/v1`: the network, this host and how it stands in it,
     /// the hosts, and the invites open.
     pub fn state(&self) -> Value {

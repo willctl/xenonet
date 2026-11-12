@@ -147,6 +147,10 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, _, err) = s.run(&["net", "revoke-device"]);
     assert_eq!(code, 1);
     assert!(err.contains("XenoNet's window"), "{err}");
+    // So is naming a mailbox, which asks you.
+    let (code, _, err) = s.run(&["net", "mailbox", "add", "laptop"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("XenoNet's window") && err.contains("Mailboxes"), "{err}");
     let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--json"]);
     if code != 0 {
         // Under an agent, or (with no identity here yet, which making the

@@ -399,6 +399,7 @@ pub const RULES: &[Rule] = &[
     r("PUT",    "/api/net/settings", YOU, Nothing),
     r("PUT",    "/api/net/sharing", YOU, Nothing),
     r("POST",   "/api/net/relays", YOU, Nothing),
+    r("POST",   "/api/net/mailboxes", YOU, Nothing),
     r("*",      "/api/svc/**", &[Program], Nothing),
 
     // ---- XenoNet Dev (each answers only in a development instance) ----

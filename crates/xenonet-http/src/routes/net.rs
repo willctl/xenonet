@@ -46,6 +46,9 @@
 //!   (`add`, which widens: the window's, with presence) or taken out; with
 //!   `mine`, into or out of the relays this machine adds of its own, for
 //!   its own dials.
+//! - `POST mailboxes`: a member (`host`) named one of a network's
+//!   mailboxes (`add`, which widens: the window's, with presence) or taken
+//!   off them, by a window host or by the mailbox itself.
 //! - `POST devices/revoke`: revokes another of the person's devices (a
 //!   lost machine), with their presence: the window's.
 //! - `POST feeds/unfreeze`: takes a machine's feed again after a fork froze
@@ -114,6 +117,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
                     | "devices/revoke"
                     | "feeds/unfreeze"
                     | "relays"
+                    | "mailboxes"
             )
             | ("PUT", "settings" | "sharing")
     );
@@ -180,6 +184,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
             r
         }
         "relays" => net.relay(network, &text("url"), body.get("add") != Some(&Value::Bool(false)), on("mine"), window).await,
+        "mailboxes" => net.mailbox(network, &text("host"), body.get("add") != Some(&Value::Bool(false)), window).await,
         "approve" => net.approve(network, &text("id"), window).await,
         "svc" => net.svc_list(network),
         "svc/publish" => publish(ctx, net, network, &body, window),

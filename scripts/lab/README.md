@@ -242,8 +242,10 @@ VMs' state and say which is missing.
    copies built before the relay checks lack tcpdump: build them again, or
    install it in vm1 (`sudo apt-get install -y tcpdump`), and
    `relay-sealed` says so until then.
-3. **The mailbox** (for `mailbox`). Name the Mac as a mailbox of the
-   network in its window (Network settings).
+3. **The mailbox** (for `mailbox`). In the Mac's XenoNet window, Network
+   settings › Mailboxes, choose Make a mailbox beside the Mac, and answer
+   Touch ID. `xenonet net mailbox` lists the mailboxes from a terminal;
+   naming one there is refused, since it asks you.
 4. **A second network** (for `networks`). Make N1 of the Mac and vm1 only,
    and share `atlas-web` into N1 and no other network. The first network
    stays N2, with vm2 and `atlas-api`.

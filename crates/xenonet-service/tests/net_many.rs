@@ -121,8 +121,13 @@ impl Host {
     }
 
     async fn call(&self, method: &str, path: &str, body: Value) -> (u16, Value) {
+        self.call_as(true, method, path, body).await
+    }
+
+    /// From the window (`window`), or from the person's own terminal.
+    async fn call_as(&self, window: bool, method: &str, path: &str, body: Value) -> (u16, Value) {
         let key = self.ctx.window_key.reveal().to_string();
-        let headers: Vec<(&str, &str)> = vec![("x-xenonet-window", key.as_str())];
+        let headers: Vec<(&str, &str)> = if window { vec![("x-xenonet-window", key.as_str())] } else { Vec::new() };
         let text = body.to_string();
         let req = Req::fake(method, path, &headers, if method == "GET" { None } else { Some(text.as_str()) });
         let r = api(&self.ctx, common::local(&self.ctx, req)).await.unwrap();
@@ -334,4 +339,36 @@ async fn a_self_hosted_relay_goes_into_the_chain_and_one_of_this_machines_own_in
     // Kept: a second start reads it again.
     let kept = common::kept(&studio.dir.join("state"));
     assert_eq!(kept.own_relays().unwrap(), ["https://mine.example.net"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_mailbox_is_named_at_the_window_and_taken_off_by_a_window_host_or_itself() {
+    let studio = Host::new("mailbox", "studio").await;
+    let laptop = Host::new("mailbox", "laptop").await;
+    network(&studio, &laptop, "home", "studio", "laptop").await;
+    let boxes = |v: &Value| v["networks"][0]["mailboxes"].clone();
+    // Naming one asks you: refused from a terminal, done at the window.
+    let (s, v) = studio.call_as(false, "POST", "/api/net/mailboxes", json!({ "host": "laptop" })).await;
+    assert_eq!((s, v["code"].as_str()), (403, Some("window")), "{v}");
+    let (s, v) = studio.call("POST", "/api/net/mailboxes", json!({ "host": "laptop" })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(boxes(&v), json!(["laptop"]));
+    let (s, v) = studio.call("POST", "/api/net/mailboxes", json!({ "host": "studio" })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(boxes(&v), json!(["laptop", "studio"]));
+    let (s, v) = studio.call("POST", "/api/net/mailboxes", json!({ "host": "nowhere" })).await;
+    assert_eq!((s, v["code"].as_str()), (404, Some("no-host")), "{v}");
+    until("laptop holds both mailboxes", 15, || boxes(&futures_lite(laptop.state())) == json!(["laptop", "studio"])).await;
+    // laptop isn't a window host: it can't take studio off.
+    let (s, v) = laptop.call_as(false, "POST", "/api/net/mailboxes", json!({ "host": "studio", "add": false })).await;
+    assert_eq!((s, v["code"].as_str()), (403, Some("not-window")), "{v}");
+    // It steps down itself, from its terminal: that narrows.
+    let (s, v) = laptop.call_as(false, "POST", "/api/net/mailboxes", json!({ "host": "laptop", "add": false })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(boxes(&v), json!(["studio"]));
+    until("studio heard laptop step down", 15, || boxes(&futures_lite(studio.state())) == json!(["studio"])).await;
+    // A window host takes one off from its terminal.
+    let (s, v) = studio.call_as(false, "POST", "/api/net/mailboxes", json!({ "host": "studio", "add": false })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(boxes(&v), json!([]));
 }

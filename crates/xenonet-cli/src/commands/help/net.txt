@@ -61,6 +61,16 @@ network needs no --network; one in several is asked which.
                                    network it's in lists; with none such,
                                    one of its own. With no word, the
                                    relays as they stand
+  xenonet net mailbox [add|remove <id>]
+                                   the network's mailboxes: members that keep
+                                   what's sealed for a machine that's away,
+                                   and hand it over when it's back. Naming
+                                   one is XenoNet's window's (Network
+                                   settings › Mailboxes), since it asks
+                                   you; taking one off is done at once,
+                                   from a window host or the mailbox
+                                   itself. With no word, the mailboxes as
+                                   they stand
   xenonet net set [--titles-only | --no-titles-only]
                   [--share-load | --no-share-load]
                   [--start off|you|network|delegate] [--wake consent|network]

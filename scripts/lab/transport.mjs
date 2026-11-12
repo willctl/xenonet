@@ -37,7 +37,7 @@ export const OWNER = {
   relays: (urls) =>
     `add ${urls.join(" and ")} (the lab's own iroh-relays in vm1, with TLS from the lab's CA, which the checks start) as relays of the lab's network in the Mac's XenoNet window, Network settings, then run npm run lab -- check --only ${RELAY_CHECKS.join(",")} again`,
   tcpdump: "install tcpdump in vm1 (limactl shell xenonet-vm1, then sudo apt-get install -y tcpdump), or build the golden copies again, which have it",
-  mailbox: "name this Mac as a mailbox of the lab's network in its XenoNet window, Network settings",
+  mailbox: "name this Mac as a mailbox of the lab's network in its XenoNet window: Network settings, Mailboxes, Make a mailbox beside the Mac",
   networks: "make a second network, N1, of this Mac and vm1 only, and share atlas-web into it and no other network; the lab's network (N2) keeps vm2 and atlas-api",
 };
 

@@ -179,6 +179,9 @@ impl parts::Network for NetService {
     async fn relay(&self, network: Option<&str>, url: &str, add: bool, mine: bool, at_window: bool) -> NetResult {
         answered(self.nodes().relay(network, url, add, mine, at_window).await)
     }
+    async fn mailbox(&self, network: Option<&str>, host: &str, add: bool, at_window: bool) -> NetResult {
+        answered(self.nodes().mailbox(network, host, add, at_window).await)
+    }
     fn svc_list(&self, network: Option<&str>) -> NetResult {
         Ok(self.on(network)?.shared().svc_list())
     }

@@ -123,8 +123,25 @@ fn served(sim: &Sim) -> Value {
     let s = &sim.state;
     let mut nets = Vec::new();
     if s["network"].is_object() {
-        let mut first = json!({ "id": s["network"]["id"], "name": s["network"]["name"], "host": s["self"]["id"], "relays": [], "sharing": "all", "inContact": true });
-        for k in ["self", "link", "hosts", "invites", "rosterHead", "rosterMismatch", "frozen", "titlesOnly", "shareLoad", "start", "wake", "proposals", "relays", "sharing"] {
+        let mut first =
+            json!({ "id": s["network"]["id"], "name": s["network"]["name"], "host": s["self"]["id"], "relays": [], "mailboxes": [], "sharing": "all", "inContact": true });
+        for k in [
+            "self",
+            "link",
+            "hosts",
+            "invites",
+            "rosterHead",
+            "rosterMismatch",
+            "frozen",
+            "titlesOnly",
+            "shareLoad",
+            "start",
+            "wake",
+            "proposals",
+            "relays",
+            "mailboxes",
+            "sharing",
+        ] {
             if let Some(v) = s.get(k) {
                 first[k] = v.clone();
             }
@@ -175,6 +192,7 @@ fn other_network(state: &Value) -> Value {
         "start": "you",
         "wake": "consent",
         "relays": [],
+        "mailboxes": [],
         "sharing": [],
         "inContact": true,
     })
@@ -352,7 +370,8 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             | "/api/net/forwards/sign"
             | "/api/net/forwards/deny"
             | "/api/net/forwards/revoke"
-            | "/api/net/relays",
+            | "/api/net/relays"
+            | "/api/net/mailboxes",
         )
         | ("PUT", "/api/net/settings" | "/api/net/sharing") => {
             if !req.by.window {
@@ -1156,6 +1175,33 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             Reply::json(200, served(sim))
         }
+        // A member named a mailbox, or taken off: the network's chain, as
+        // the service writes it from the window.
+        "/api/net/mailboxes" => {
+            if !in_network {
+                return outside();
+            }
+            let named = body.get("network").and_then(Value::as_str).unwrap_or("");
+            let first = named.is_empty() || sim.state["network"]["id"] == named || sim.state["network"]["name"] == named;
+            let at = sim.others.iter().position(|n| n["id"] == named || n["name"] == named);
+            if !first && at.is_none() {
+                return fail(404, "no-network", format!("this machine isn't in a network named {named}"));
+            }
+            let net = match at.filter(|_| !first) {
+                Some(i) => &mut sim.others[i],
+                None => &mut sim.state,
+            };
+            if !has_host(net, &host) {
+                return fail(404, "no-host", format!("{host} isn't in the network"));
+            }
+            let mut list = net["mailboxes"].as_array().cloned().unwrap_or_default();
+            list.retain(|m| m.as_str() != Some(host.as_str()));
+            if body.get("add") != Some(&Value::Bool(false)) {
+                list.push(json!(host));
+            }
+            net["mailboxes"] = Value::Array(list);
+            Reply::json(200, served(sim))
+        }
         "/api/net/settings" => {
             if !in_network {
                 return outside();
@@ -1632,6 +1678,12 @@ mod tests {
         let st = apply(&mut s, "/api/net/relays", &json!({ "url": "https://mine.example.net", "mine": true }), 0.0).body_json();
         assert_eq!((st["relaysHere"]["own"].clone(), st["networks"][0]["relays"].as_array().map(Vec::len)), (json!(["https://mine.example.net"]), Some(1)));
         assert_eq!(apply(&mut s, "/api/net/relays", &json!({ "url": "relay.example.net" }), 0.0).status, 400);
+        // A mailbox named in work, then taken off.
+        let st = apply(&mut s, "/api/net/mailboxes", &json!({ "host": "lab", "network": "work" }), 0.0).body_json();
+        assert_eq!((st["networks"][0]["mailboxes"].clone(), st["networks"][1]["mailboxes"].clone()), (json!([]), json!(["lab"])));
+        let st = apply(&mut s, "/api/net/mailboxes", &json!({ "host": "lab", "network": "work", "add": false }), 0.0).body_json();
+        assert_eq!(st["networks"][1]["mailboxes"], json!([]));
+        assert_eq!(apply(&mut s, "/api/net/mailboxes", &json!({ "host": "nowhere" }), 0.0).status, 404);
     }
 
     #[test]

@@ -36,7 +36,7 @@ const list = (v) => (Array.isArray(v) ? v : []);
 export function networksOf(raw) {
   return list(raw?.networks)
     .filter((n) => n && typeof n.id === "string")
-    .map((n) => ({ ...n, name: typeof n.name === "string" ? n.name : n.id, host: typeof n.host === "string" ? n.host : null, relays: list(n.relays).filter((r) => typeof r === "string"), sharing: n.sharing === "all" ? "all" : list(n.sharing).filter((p) => typeof p === "string") }));
+    .map((n) => ({ ...n, name: typeof n.name === "string" ? n.name : n.id, host: typeof n.host === "string" ? n.host : null, relays: list(n.relays).filter((r) => typeof r === "string"), mailboxes: list(n.mailboxes).filter((m) => typeof m === "string"), sharing: n.sharing === "all" ? "all" : list(n.sharing).filter((p) => typeof p === "string") }));
 }
 
 // The state as the page uses it: a network/state/v1 answer, or a machine on
@@ -57,6 +57,7 @@ export function stateOf(raw, chosen = null) {
     proposals: list(raw.proposals).filter((p) => p && typeof p.id === "string" && typeof p.host === "string"),
     frozen: list(raw.frozen).filter((f) => f && typeof f.author === "string"),
     rosterMismatch: list(raw.rosterMismatch).filter((x) => typeof x === "string"),
+    mailboxes: list(raw.mailboxes).filter((m) => typeof m === "string"),
     link: raw.link && typeof raw.link === "object" ? raw.link : null,
   };
 }

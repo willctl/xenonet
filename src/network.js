@@ -335,7 +335,26 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <div class="ac-form"><label class="ac-field"><span class="ac-k">Add a relay</span><input class="ac-input" data-net-relay-url placeholder="https://relay.example.net, or n0" spellcheck="false" autocomplete="off"></label></div>
       <p class="net-relay-actions"><button class="act" data-net-relay-add data-yours>Add to ${h(state.network?.name ?? "the network")}</button><button class="act" data-net-own-add data-yours>Add as this machine's own</button></p>
       ${own ? `<p class="pj-note">This machine's own relays, for its own dials, in no network's list:</p><ul class="net-tickets" data-net-own-relays>${own}</ul>` : ""}
-      <p class="pj-note" data-net-home>A relay is your own iroh-relay, or n0's public ones (rate-limited, run by n0). Adding one to a network asks you, and takes the founder or a second window host. ${h(home)}${direct.length > 1 || (direct.length && nets.length > 1) ? ` ${h(direct.join(", "))} list${direct.length === 1 ? "s" : ""} no relay this machine has.` : ""}</p>`;
+      <p class="pj-note" data-net-home>A relay is your own iroh-relay, or n0's public ones (rate-limited, run by n0). Adding one to a network asks you, and takes the founder or a second window host. ${h(home)}${direct.length > 1 || (direct.length && nets.length > 1) ? ` ${h(direct.join(", "))} list${direct.length === 1 ? "s" : ""} no relay this machine has.` : ""}</p>
+      ${mailboxesHtml()}`;
+  }
+
+  // The shown network's mailboxes: members that keep what's sealed for a
+  // machine that's away. A window host names one (it asks you) or takes
+  // one off; a mailbox may step down itself.
+  function mailboxesHtml() {
+    const boxes = state.mailboxes ?? [];
+    const me = state.self?.id ?? null;
+    const admin = !!state.self?.window;
+    const listed = boxes
+      .map((id) => `<li data-net-mailbox="${h(id)}"><b>${h(id)}</b>${admin || id === me ? ` <button class="act" data-net-mailbox-remove="${h(id)}" data-yours>${id === me && !admin ? "Step down" : "Take off"}</button>` : ""}</li>`)
+      .join("");
+    const others = admin ? state.hosts.filter((x) => !boxes.includes(x.id)) : [];
+    const add = others.map((x) => `<li data-net-mailbox-can="${h(x.id)}">${h(x.id)} <button class="act" data-net-mailbox-add="${h(x.id)}" data-yours>Make a mailbox</button></li>`).join("");
+    return `<div class="panel-title sub"><span>Mailboxes</span><span class="tick">${boxes.length}</span></div>
+      <ul class="net-tickets" data-net-mailboxes>${listed || `<li class="dim">None: what a machine that's away misses waits on the machine that wrote it.</li>`}</ul>
+      ${add ? `<ul class="net-tickets" data-net-mailbox-candidates>${add}</ul>` : ""}
+      <p class="pj-note" data-net-mailbox-note>A mailbox is one of the network's machines that keeps what's sealed for a machine that's away, a week at most, and hands it over when it's back. It can't read it. Naming one asks you; taking one off is done at once. In a terminal: <code>xenonet net mailbox remove &lt;id&gt;</code>.</p>`;
   }
 
   function startHtml() {
@@ -797,6 +816,18 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     });
   }
 
+  // A member of the shown network named one of its mailboxes, or taken off.
+  async function mailbox(host, add) {
+    return busyWith(async () => {
+      const r = await netCall("POST", "/api/net/mailboxes", { host, add });
+      if (!r.ok) return failed(r, add ? null : `xenonet net mailbox remove ${host} --network ${state.network?.id ?? ""}`);
+      sfx("success");
+      toast(r.data?.proposed ? "Asked: another window host approves the mailbox." : add ? `${host} keeps ${state.network?.name}'s mail for machines that are away now.` : `${host} isn't a mailbox now.`);
+      await refresh();
+      return { ok: true };
+    });
+  }
+
   // The panel shows another of this machine's networks.
   async function pickNetwork(id) {
     if (!state.networks.some((x) => x.id === id)) throw new Error(`This machine isn't in ${id}.`);
@@ -847,6 +878,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (t.closest("[data-net-own-add]")) return relay(body().querySelector("[data-net-relay-url]")?.value.trim(), true, true);
     if (d.netRelayRemove) return relay(d.netRelayRemove, false, false);
     if (d.netOwnRemove) return relay(d.netOwnRemove, false, true);
+    if (d.netMailboxAdd) return mailbox(d.netMailboxAdd, true);
+    if (d.netMailboxRemove) return mailbox(d.netMailboxRemove, false);
     if (t.closest("[data-net-join]")) return join();
     if (d.netMessage) return message(d.netMessage);
     if (d.netRemove) return go({ name: "main", confirm: d.netRemove });
@@ -969,7 +1002,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       self: state.self?.id ?? null,
       // Every network this machine is in, each with its host id here, what
       // it sees of this machine and its relays; the one shown is `current`.
-      networks: state.networks.map((x) => ({ id: x.id, name: x.name, host: x.host, current: x.id === state.network?.id, hosts: (x.hosts ?? []).length, sharing: x.sharing, relays: x.relays, inContact: x.inContact ?? null })),
+      networks: state.networks.map((x) => ({ id: x.id, name: x.name, host: x.host, current: x.id === state.network?.id, hosts: (x.hosts ?? []).length, sharing: x.sharing, relays: x.relays, mailboxes: x.mailboxes ?? [], inContact: x.inContact ?? null })),
+      mailboxes: state.mailboxes ?? [],
       relaysHere: state.relaysHere ?? null,
       shareable,
       link: l ? { state: l.state ?? "off", words: linkWords(l).word, since: l.since ?? null, reason: l.reason ?? null } : null,
@@ -1029,7 +1063,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]"), ctxAllow: centres("data-net-ctx-allow"), ctxDeny: centres("data-net-ctx-deny"), ctxRevoke: centres("data-net-ctx-revoke"), ctxSign: centres("data-net-ctx-sign"), ctxNet: centres("data-net-ctx-net") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]"), mailboxAdd: centres("data-net-mailbox-add"), mailboxRemove: centres("data-net-mailbox-remove"), ctxAllow: centres("data-net-ctx-allow"), ctxDeny: centres("data-net-ctx-deny"), ctxRevoke: centres("data-net-ctx-revoke"), ctxSign: centres("data-net-ctx-sign"), ctxNet: centres("data-net-ctx-net") } : null,
     };
   }
 

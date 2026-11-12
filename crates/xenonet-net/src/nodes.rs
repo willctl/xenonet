@@ -272,6 +272,19 @@ impl Nodes {
         Ok(out)
     }
 
+    /// A member of the network `which` names as one of its mailboxes
+    /// (`add`, which widens: with the person's presence, so from the
+    /// window) or off them.
+    pub async fn mailbox(&self, which: Option<&str>, host: &str, add: bool, at_window: bool) -> R<Value> {
+        let node = self.pick(which)?;
+        let out = node.set_mailboxes(host.trim(), add, at_window).await?;
+        let mut state = self.state();
+        if out.get("proposed") == Some(&json!(true)) {
+            state["proposed"] = json!(true);
+        }
+        Ok(state)
+    }
+
     /// Whether a window host that takes this machine's load is connected
     /// now, so the service reads its load only then.
     pub fn wants_load(&self) -> bool {

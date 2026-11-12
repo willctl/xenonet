@@ -755,6 +755,30 @@ test("Start a network names its relay: none, the person's own iroh-relay, or n0'
   await s.driver("network", "close");
 }));
 
+test("a mailbox is named at the window and taken off again", { timeout: limit(60000) }, shoot("network-mailbox", async () => {
+  await simulate("net-founder", {}, (n) => n.inNetwork && n.hosts.length > 1);
+  let { network: n } = await s.driver("network", "open");
+  assert.deepEqual(n.mailboxes, [], "none to begin with");
+  assert.match(n.text, /Mailboxes\s*0\s*None: what a machine that.s away misses waits on the machine that wrote it/i);
+  const host = n.hosts.find((x) => !x.here).id;
+  // Each control scrolled into view, where a click reaches it.
+  const shown = async (selector, key, of) => {
+    await s.eval(`return (document.querySelector('#modal ${selector}').scrollIntoView({ block: "center" }), true)`);
+    await s.driver("settled");
+    return (await network()).at[key][of];
+  };
+  await clickAt(await shown(`[data-net-mailbox-add="${host}"]`, "mailboxAdd", host), "Make a mailbox");
+  n = await until(async () => {
+    const got = await network();
+    return got.mailboxes.includes(host) ? got : null;
+  });
+  assert.ok(n, `${host} is a mailbox`);
+  assert.deepEqual(n.networks[0].mailboxes, [host]);
+  await clickAt(await shown(`[data-net-mailbox-remove="${host}"]`, "mailboxRemove", host), "Take off");
+  assert.ok(await until(async () => (await network()).mailboxes.length === 0), "taken off");
+  await s.driver("network", "close");
+}));
+
 test("clear ends the made-up network, and no page errors along the way", { timeout: limit(30000) }, async () => {
   await s.simulate("clear");
   assert.ok(await until(async () => !(await network()).inNetwork && !(await network()).simulated), "on its own again");

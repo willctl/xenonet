@@ -348,6 +348,15 @@ stale incarnation, or serve a subset that hides a fork. So:
 
 A mailbox is a member the chain's `mailboxes` op names (`mailbox.rs`).
 
+- **Naming one.** `Node::set_mailboxes` writes the `mailboxes` entry with
+  the whole list from then on, signed by this machine, as the chain's
+  table says: a window host names one with the person's presence
+  (`widen`), so only from the window (Network settings › Mailboxes,
+  `POST /api/net/mailboxes`); `xenonet net mailbox add` refuses in the
+  terminal and names the control. Taking one off needs no presence: a
+  window host does it, or the mailbox steps down itself, from the window
+  or with `xenonet net mailbox remove <id>`. A removed member leaves the
+  list with its `remove` entry.
 - **What it keeps.** An envelope the author hands it on the author's own
   connection, only when by the mailbox's chain the author and the
   recipient are members of the envelope's network and that network lists
@@ -923,6 +932,7 @@ in the local API's rules table ([authorization.md](authorization.md)):
 | `PUT settings` | titles only, share load, start and wake (`host` for another machine's) | yours; widening asks, so it's the window's |
 | `PUT sharing` | the projects shared into a network | yours; sharing more is the window's |
 | `POST relays` | a relay into or out of the chain, or this machine's own (`mine`) | yours; adding to a chain asks, so it's the window's |
+| `POST mailboxes` | a member named a mailbox (`host`, `add`) or taken off | yours; naming one asks, so it's the window's |
 | `GET svc`, `POST svc/publish`, `POST svc/unpublish` | services | publishing is the window's |
 | `GET forwards`, `POST forwards/approve`, `forwards/deny`, `forwards/revoke`, `forwards/sign` | actors' forwards and their grants | approving and signing are the window's |
 | `POST devices/revoke`, `POST feeds/unfreeze` | a lost device; a feed a fork froze | the window's |
@@ -942,6 +952,7 @@ xenonet net replace <id>
 xenonet net leave [--force]
 xenonet net share all|none|<prj_…,…>
 xenonet net relay [add|remove] <url|n0> [--mine]
+xenonet net mailbox [remove <id>]               (adding is the window's)
 xenonet net set [--titles-only | --no-titles-only] [--share-load | --no-share-load]
                 [--start off|you|network|delegate] [--wake consent|network]
 xenonet net set --on <id> [--start …] [--wake …] [--approve <id>]
@@ -1000,9 +1011,6 @@ in several.
 
 ## Not built yet
 
-- **Naming a mailbox.** The chain's `mailboxes` op, its policy, the queues
-  and Held receipts are built, but no command or window control writes the
-  op, so a network has no mailbox yet.
 - **Rekey.** The `rekey` op is in the chain's policy; nothing writes one.
   A machine whose `host.key` was copied is replaced instead.
 - **Compaction on its own.** Nothing writes a compact entry on a schedule

@@ -177,6 +177,17 @@ fn show_relays(st: &Value) {
     }
 }
 
+fn show_mailboxes(st: &Value) {
+    for n in list(st, "networks") {
+        let boxes: Vec<&str> = list(n, "mailboxes").iter().filter_map(Value::as_str).collect();
+        print(format!(
+            "{}  {}",
+            c::bold(t(n, "name")),
+            if boxes.is_empty() { c::dim("no mailbox: what a machine that's away misses waits on its author") } else { boxes.join(", ") }
+        ));
+    }
+}
+
 /// An invite's answer (`invite`, `replace`): the invite, its code apart,
 /// and how the new machine finds this one when the invite names no relay.
 fn show_invite(r: &Value) {
@@ -207,6 +218,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     // So is revoking a device, which takes the person's presence.
     if what == "revoke-device" {
         return Err(Fail::new("Revoking a device is XenoNet's window's, since it asks you: Network settings › Your devices, then Revoke on the lost machine's device", 1));
+    }
+    // So is naming a mailbox, which widens the network and asks the
+    // person; taking one off narrows, and is done here.
+    if what == "mailbox" && args.get(1).map(String::as_str) == Some("add") {
+        return Err(Fail::new("Naming a mailbox is XenoNet's window's, since it asks you: Network settings › Mailboxes, then Make a mailbox beside the machine", 1));
     }
     let s = need(flags)?;
     let network = flags.text("network");
@@ -303,6 +319,18 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 return Ok(0);
             }
             out(&st, &show_relays)
+        }
+        "mailbox" => {
+            let verb = args.get(1).map(String::as_str);
+            if verb.is_none() {
+                return out(&call(&s, "GET", "/api/net/state", None)?, &show_mailboxes);
+            }
+            if verb != Some("remove") {
+                return Err(Fail::new("xenonet net mailbox remove <id>; naming one is XenoNet's window's", 2));
+            }
+            let host = arg(args, 2, "the machine: its id in the network")?;
+            let st = call(&s, "POST", "/api/net/mailboxes", Some(&within(json!({ "host": host, "add": false }))))?;
+            out(&st, &show_mailboxes)
         }
         "create" => {
             let name = flags.text("name").ok_or_else(|| Fail::new("say the network's name: xenonet net create --name <name> --host <id>", 2))?;
