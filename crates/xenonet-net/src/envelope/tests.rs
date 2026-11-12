@@ -275,3 +275,36 @@ fn envelopes_are_checked_for_their_shape() {
     assert!(Envelope::decode(&vec![b' '; MAX_ENVELOPE + 1]).is_err());
     assert!(Envelope::seal_entry(&claim, "*", n.laptop.transport.public(), None).is_err(), "sealed for everyone");
 }
+
+#[test]
+fn a_spaces_entry_goes_unsealed_with_its_text_beside_it_and_a_networks_never_does() {
+    const SPACE: &str = "spc_abcdefghijklmnopqrstuvwxyz234567";
+    let n = net();
+    let mut w = Writer::start(n.studio.key_id(), SPACE, T);
+    let page = w.write(&n.studio.signer, Kind::CtxPage, T + 1, json!({ "slug": "db" })).unwrap();
+    let env = Envelope::plain_entry(&page, &n.laptop.key_id(), Some(b"# db")).unwrap();
+    assert!(!env.sealed);
+    let back = Envelope::decode(&env.encode()).unwrap();
+    assert_eq!(back, env, "through its JSON");
+    let (v, text) = back.open_plain_by(&n.laptop.key_id(), &n.studio.signer.public()).unwrap();
+    assert_eq!((v.entry(), text.as_deref()), (&page, Some(&b"# db"[..])));
+    assert!(back.open_plain_by(&n.studio.key_id(), &n.studio.signer.public()).is_err(), "for another machine");
+    assert!(back.open_plain_by(&n.laptop.key_id(), &n.laptop.signer.public()).is_err(), "not its author's key");
+    let mut lying = back.clone();
+    lying.at += 1;
+    assert!(lying.open_plain_by(&n.laptop.key_id(), &n.studio.signer.public()).is_err(), "a head that disagrees");
+    // Without a text, as a holder serves an entry whose text was forgotten.
+    let bare = Envelope::plain_entry(&page, &n.laptop.key_id(), None).unwrap();
+    assert!(!bare.to_json().as_object().unwrap().contains_key("attach"));
+    assert_eq!(bare.id, env.id, "the same entry");
+    // A network's entries are never plain, and a sealed one carries no text.
+    let (claim, _) = entries(&n.studio);
+    assert!(Envelope::plain_entry(&claim, &n.laptop.key_id(), None).is_err());
+    let mut v = sealed_for(&claim, &n.laptop).to_json();
+    v["sealed"] = json!(false);
+    assert!(Envelope::parse(&v).is_err(), "a network's envelope unsealed");
+    let mut v = sealed_for(&claim, &n.laptop).to_json();
+    v["attach"] = json!("YQ");
+    assert!(Envelope::parse(&v).is_err(), "a sealed envelope with a text beside it");
+    assert!(sealed_for(&claim, &n.laptop).open_plain_by(&n.laptop.key_id(), &n.studio.signer.public()).is_err());
+}

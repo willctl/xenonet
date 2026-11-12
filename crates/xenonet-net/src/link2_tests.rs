@@ -450,11 +450,11 @@ impl Machine for Party {
 
     // On another protocol, the hello says which machine it is beside its
     // groups, as Xenolith's says its context key.
-    fn hello_ext(&self, _peer: PeerId) -> Option<Value> {
+    fn hello_ext(&self, _link: &Link) -> Option<Value> {
         (self.protocol != LINK2).then(|| json!({ "n": self.n }))
     }
 
-    fn hello_ext_in(&self, _peer: PeerId, ext: Option<&Value>) -> R<()> {
+    fn hello_ext_in(&self, _link: &Link, ext: Option<&Value>) -> R<()> {
         if self.protocol == LINK2 {
             return Ok(());
         }
@@ -1173,6 +1173,11 @@ fn records_name_only_their_protocols_kind_of_group_and_a_hellos_addition_reads_b
     let plain = Control::Hello { at: T, networks: Vec::new(), ext: None };
     assert_eq!(plain.to_json(), json!({ "t": "hello", "v": 2, "at": T, "networks": [] }));
     assert!(Control::decode(br#"{"t":"hello","v":2,"at":1,"networks":[],"ext":"x"}"#).is_err(), "an addition is an object");
+    // Another program's own records about its groups, which link/2 never takes.
+    let group = Control::Group { network: S1.into(), body: json!({ "chain": null }) };
+    assert_eq!(Control::decode_in(&SYNC, &group.encode()).unwrap(), group);
+    let on_link = Control::Group { network: N1.into(), body: json!({}) };
+    assert!(Control::decode(&on_link.encode()).is_err(), "link/2 has no group records");
 }
 
 #[test]

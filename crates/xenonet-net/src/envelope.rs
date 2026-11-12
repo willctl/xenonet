@@ -35,6 +35,14 @@
 //! around the same signed entry, which is why the head carries no
 //! signature of its own.
 //!
+//! **A space's entries** (a group that is a space, `spc_…`: Xenolith's
+//! sync/2) go unsealed: a space has no mailboxes, and its entries travel
+//! only over authenticated QUIC between members its chain admits. Such an
+//! envelope may carry, beside the entry, the text the entry's body names by
+//! hash (`attach`), so a holder can drop the text (a forget) and still
+//! serve the entry. A network's envelopes are always sealed and never
+//! carry one.
+//!
 //! **Live** envelopes carry a presence delta, unsealed. They're never
 //! kept or forwarded: a receiver takes one only from a connection whose
 //! peer is the author's transport key, which the connection (QUIC)
@@ -136,8 +144,12 @@ pub struct Envelope {
     pub at: u64,
     pub class: Class,
     pub sealed: bool,
-    /// The sealed entry, or a live envelope's JSON body.
+    /// The sealed entry, a space's unsealed entry, or a live envelope's
+    /// JSON body.
     pub body: Vec<u8>,
+    /// The text a space's unsealed entry names by hash, carried beside it;
+    /// None on everything else.
+    pub attach: Option<Vec<u8>>,
 }
 
 /// This machine as a recipient: its machine signing key's id and its
@@ -204,12 +216,39 @@ impl Envelope {
             class: Class::of(entry.class()),
             sealed: true,
             body: Vec::new(),
+            attach: None,
         };
         let head = env.sealing_head();
         let plain = entry.encode();
         env.body = match eph {
             Some(e) => seal_with(e, to_keys, &head, &plain)?,
             None => seal(to_keys, &head, &plain)?,
+        };
+        env.well_formed()?;
+        Ok(env)
+    }
+
+    /// A space's feed entry (its group is a `spc_`), signed by its author,
+    /// unsealed, for `to` (the recipient's key id), with the text its body
+    /// names beside it, if any.
+    pub fn plain_entry(entry: &FeedEntry, to: &str, attach: Option<&[u8]>) -> R<Envelope> {
+        entry.well_formed().map_err(|e| NetError::bad(e.message))?;
+        if feed::Group::of(&entry.group) != Some(feed::Group::Space) {
+            return Err(bad("seal"));
+        }
+        let to = To::parse(to).filter(|t| *t != To::All).ok_or_else(|| bad("recipient"))?;
+        let env = Envelope {
+            network: entry.group.clone(),
+            id: entry.id(),
+            kind: entry.kind.as_str().into(),
+            author: entry.author.clone(),
+            to,
+            pos: Some(entry.pos()),
+            at: entry.at,
+            class: Class::of(entry.class()),
+            sealed: false,
+            body: entry.encode(),
+            attach: attach.map(<[u8]>::to_vec),
         };
         env.well_formed()?;
         Ok(env)
@@ -230,6 +269,7 @@ impl Envelope {
             class: Class::Live,
             sealed: false,
             body: bytes,
+            attach: None,
         };
         env.well_formed()?;
         Ok(env)
@@ -254,7 +294,7 @@ impl Envelope {
                 if !LIVE_KINDS.contains(&self.kind.as_str()) {
                     return Err(bad("kind"));
                 }
-                if self.sealed || self.pos.is_some() {
+                if self.sealed || self.pos.is_some() || self.attach.is_some() {
                     return Err(bad("class"));
                 }
                 // Not forwarded, so the id is the body's, checked here.
@@ -267,8 +307,13 @@ impl Envelope {
                 if Class::of(kind.class()) != self.class {
                     return Err(bad("class"));
                 }
-                if !self.sealed || self.to == To::All {
+                // Sealed, or a space's (which go unsealed); for one machine.
+                let space = feed::Group::of(&self.network) == Some(feed::Group::Space);
+                if (!self.sealed && !space) || self.to == To::All {
                     return Err(bad("seal"));
+                }
+                if self.sealed && self.attach.is_some() {
+                    return Err(bad("attach"));
                 }
                 if self.pos.is_none_or(|p| p.inc == 0 || p.seq == 0) {
                     return Err(bad("pos"));
@@ -294,6 +339,9 @@ impl Envelope {
         m.insert("class".into(), json!(self.class.as_str()));
         m.insert("sealed".into(), json!(self.sealed));
         m.insert("body".into(), json!(b64(&self.body)));
+        if let Some(a) = &self.attach {
+            m.insert("attach".into(), json!(b64(a)));
+        }
         Value::Object(m)
     }
 
@@ -327,6 +375,10 @@ impl Envelope {
             class: Class::parse(text("class")?).ok_or_else(|| bad("class"))?,
             sealed: v.get("sealed").and_then(Value::as_bool).ok_or_else(|| bad("sealed"))?,
             body: unb64(text("body")?).ok_or_else(|| bad("body"))?,
+            attach: match v.get("attach") {
+                None => None,
+                Some(a) => Some(a.as_str().and_then(unb64).ok_or_else(|| bad("attach"))?),
+            },
         };
         env.well_formed()?;
         Ok(env)
@@ -372,6 +424,30 @@ impl Envelope {
         }
         let plain = open(me.key, &self.sealing_head(), &self.body).map_err(|_| NetError::new(400, "unsealed", "that envelope wasn't sealed for this machine, or was changed"))?;
         let entry = FeedEntry::decode(&plain).map_err(|e| NetError::bad(e.message))?;
+        self.matches(&entry)?;
+        entry.verify(author).map_err(|e| NetError::new(403, "refused", e.message))
+    }
+
+    /// The entry a space's unsealed envelope carries, for `me` (the
+    /// recipient's key id), once it says what its head says and is signed
+    /// by `author`, the key the caller's own copy of the space's chain lists
+    /// for the envelope's author; and the text beside it, if any, which the
+    /// caller checks against the hash the entry's body names.
+    pub fn open_plain_by(&self, me: &str, author: &VerifyingKey) -> R<(Verified, Option<Vec<u8>>)> {
+        if self.class == Class::Live || self.sealed {
+            return Err(NetError::bad("only a space's unsealed envelope carries a plain entry"));
+        }
+        if self.to != To::Machine(me.into()) {
+            return Err(NetError::new(403, "wrong-recipient", "that envelope is for another machine"));
+        }
+        let entry = FeedEntry::decode(&self.body).map_err(|e| NetError::bad(e.message))?;
+        self.matches(&entry)?;
+        let v = entry.verify(author).map_err(|e| NetError::new(403, "refused", e.message))?;
+        Ok((v, self.attach.clone()))
+    }
+
+    // What the head says, against the entry it carries.
+    fn matches(&self, entry: &FeedEntry) -> R<()> {
         let checks: [(&str, bool); 7] = [
             ("network", entry.group == self.network),
             ("id", entry.id() == self.id),
@@ -381,10 +457,10 @@ impl Envelope {
             ("time", entry.at == self.at),
             ("class", Class::of(entry.class()) == self.class),
         ];
-        if let Some((what, _)) = checks.iter().find(|(_, ok)| !ok) {
-            return Err(mismatch(what));
+        match checks.iter().find(|(_, ok)| !ok) {
+            Some((what, _)) => Err(mismatch(what)),
+            None => Ok(()),
         }
-        entry.verify(author).map_err(|e| NetError::new(403, "refused", e.message))
     }
 
     /// A live envelope's body, taken only from a connection whose peer

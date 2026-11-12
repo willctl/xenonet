@@ -213,6 +213,10 @@ pub enum Control {
     /// The sender's address record in `network` (xenonet-log's
     /// `AddressRecord`).
     Address { network: String, record: Value },
+    /// Another program's own record about one of its groups (Xenolith's
+    /// space chains), for its `Machine::other_in`. Never on XenoNet's own
+    /// protocols, which refuse it as it's read.
+    Group { network: String, body: Value },
 }
 
 fn network_of(p: &Protocol, v: &Value) -> R<String> {
@@ -242,7 +246,8 @@ impl Control {
             | Control::Compacted { network, .. }
             | Control::Held { network, .. }
             | Control::Took { network, .. }
-            | Control::Address { network, .. } => Some(network),
+            | Control::Address { network, .. }
+            | Control::Group { network, .. } => Some(network),
         }
     }
 
@@ -264,6 +269,7 @@ impl Control {
             Control::Held { network, body } => json!({ "t": "held", "network": network, "body": body }),
             Control::Took { network, ids } => json!({ "t": "took", "network": network, "ids": ids }),
             Control::Address { network, record } => json!({ "t": "address", "network": network, "record": record }),
+            Control::Group { network, body } => json!({ "t": "group", "network": network, "body": body }),
         }
     }
 
@@ -315,6 +321,7 @@ impl Control {
                 Ok(Control::Took { network: network()?, ids: ids.iter().map(|i| i.as_str().map(str::to_string).ok_or_else(|| p.bad("ids"))).collect::<R<_>>()? })
             }
             Some("address") => Ok(Control::Address { network: network()?, record: body("record")? }),
+            Some("group") if !p.alpn.is_xenonet() => Ok(Control::Group { network: network()?, body: body("body")? }),
             _ => Err(p.bad("kind")),
         }
     }
@@ -378,20 +385,22 @@ pub trait Machine: Send + Sync {
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out>;
     /// The peer holds `author`'s feed in `network` up to `at`.
     fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos);
-    /// A DontHave, Compacted, Held, Took or Address record.
+    /// A DontHave, Compacted, Held, Took, Address or Group record.
     fn other_in(&self, _peer: PeerId, _record: Control) {}
     /// A connection to the peer came up, or went.
     fn up(&self, _peer: PeerId, _up: bool) {}
     /// Something the log should say.
     fn log(&self, _words: &str) {}
-    /// What this machine's hello adds for `peer` beyond its groups: another
-    /// program's own part (Xenolith's signed Hello). None on link/2.
-    fn hello_ext(&self, _peer: PeerId) -> Option<Value> {
+    /// What this machine's hello adds on `link` beyond its groups: another
+    /// program's own part (Xenolith's signed Hello, bound to the connection
+    /// by `Link::exporter`). None on link/2.
+    fn hello_ext(&self, _link: &Link) -> Option<Value> {
         None
     }
-    /// The peer's hello's addition (None when it has none), checked before
-    /// anything of the hello's groups is read: an error ends the connection.
-    fn hello_ext_in(&self, _peer: PeerId, _ext: Option<&Value>) -> R<()> {
+    /// The peer's hello's addition on `link` (None when it has none),
+    /// checked before anything of the hello's groups is read: an error ends
+    /// the connection.
+    fn hello_ext_in(&self, _link: &Link, _ext: Option<&Value>) -> R<()> {
         Ok(())
     }
 }
@@ -657,7 +666,7 @@ impl Links {
 
     fn hello_for(&self, link: &Link) -> Control {
         let networks = link.networks().iter().filter_map(|n| self.machine.hello(link.peer(), n)).collect();
-        Control::Hello { at: self.machine.now_ms(), networks, ext: self.machine.hello_ext(link.peer()) }
+        Control::Hello { at: self.machine.now_ms(), networks, ext: self.machine.hello_ext(link) }
     }
 
     async fn serve(self: Arc<Self>, conn: Arc<Conn>, rx: mpsc::UnboundedReceiver<Out>) {
@@ -709,7 +718,7 @@ impl Links {
             let Control::Hello { at, networks, ext } = Control::decode_in(&p, &first)? else {
                 return Err(p.bad("hello"));
             };
-            self.machine.hello_ext_in(peer, ext.as_ref())?;
+            self.machine.hello_ext_in(&conn.link, ext.as_ref())?;
             Ok((at, networks))
         };
         let (at, networks) = match hello.await {

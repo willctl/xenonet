@@ -510,6 +510,11 @@ impl Wire for IrohWire {
         self.conn.close_reason().is_some()
     }
 
+    fn exporter(&self, label: &[u8]) -> Option<[u8; 32]> {
+        let mut out = [0u8; 32];
+        self.conn.export_keying_material(&mut out, label, b"").ok().map(|()| out)
+    }
+
     fn path(&self) -> Option<&'static str> {
         let paths = self.conn.paths();
         let selected = paths.iter().find(iroh::endpoint::Path::is_selected)?;

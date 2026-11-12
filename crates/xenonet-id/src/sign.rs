@@ -45,6 +45,9 @@ impl Purpose {
     /// (`xenonet-log`'s `space`): who reads, appends, writes and curates
     /// one layer of shared context.
     pub const SPACE: Purpose = Purpose("xenolith-space/1");
+    /// A Xenolith's hello on `xenolith/sync/2`: its context key speaking
+    /// for its endpoint on one connection.
+    pub const SYNC_HELLO: Purpose = Purpose("xenolith-sync-hello/1");
     /// A signature nothing verifies, which the doctor times a key with:
     /// its own tag, so it can't be taken for any other.
     pub const PROBE: Purpose = Purpose("xenonet-probe/1");

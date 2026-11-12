@@ -172,6 +172,12 @@ pub trait Wire: Send + Sync + fmt::Debug {
     fn path(&self) -> Option<&'static str> {
         None
     }
+    /// 32 bytes both ends derive from this connection's TLS secrets under
+    /// `label` (RFC 5705), when the transport has them: what binds a
+    /// signature to one connection, so it can't be replayed on another.
+    fn exporter(&self, _label: &[u8]) -> Option<[u8; 32]> {
+        None
+    }
 }
 
 /// A transport: dials machines by endpoint id and hands over the
@@ -270,6 +276,12 @@ impl Link {
     /// "direct" or "relay", when the transport says.
     pub fn path(&self) -> Option<&'static str> {
         self.wire.path()
+    }
+
+    /// The connection's keying material under `label`, when the transport
+    /// has it (`Wire::exporter`).
+    pub fn exporter(&self, label: &[u8]) -> Option<[u8; 32]> {
+        self.wire.exporter(label)
     }
 }
 
