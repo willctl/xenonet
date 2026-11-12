@@ -23,7 +23,7 @@ use std::borrow::Cow;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use xenonet_components::instances::INSTANCES;
+use xenonet_api::instances::INSTANCES;
 use xenonet_text::text::truthy;
 
 const NAME: &str = "xenonet-console";

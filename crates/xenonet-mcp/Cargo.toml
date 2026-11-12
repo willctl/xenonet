@@ -11,14 +11,9 @@ authors.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-# `xenonet mcp` runs it; the binary of its own is for its stdio tests.
-[[bin]]
-name = "xenonet-mcp"
-path = "src/main.rs"
-test = false
-
+# `xenonet mcp` serves it, and xenonet-cli's tests replay its contract
+# (tests/golden/) against that binary.
 [dependencies]
-async-trait.workspace = true
 # The assistant's request ids (r_<uuid v4>) and its client's jitter.
 getrandom.workspace = true
 # The patterns the JS servers match with: the channel flags, tokens to
@@ -27,24 +22,13 @@ regex.workspace = true
 rmcp.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-# The adapters the binary runs with (adapters/*), put in place at start.
-xenonet-platforms.workspace = true
-xenonet-adapter.workspace = true
-xenonet-actors.workspace = true
+# The client of a running XenoNet, the instances XenoNet Dev runs as, and
+# the shapes of tokens and grants; the base crates, and the assistant's
+# ids from the model.
 xenonet-api.workspace = true
+xenonet-model.workspace = true
 xenonet-os.workspace = true
 xenonet-text.workspace = true
-# The doctor's checks, run here when no XenoNet answers, and what they read
-# of this machine: the xenonet command, the launcher, drift.json, git and
-# the process lookups' self-test.
-xenonet-components.workspace = true
-xenonet-doctor.workspace = true
-xenonet-engine.workspace = true
-xenonet-schema.workspace = true
-xenonet-sources.workspace = true
-xenonet-state.workspace = true
-# The assistant's service, over made-up data for --fixture.
-xenonet-assistant.workspace = true
 
 # Whether a pid still runs (kill with signal 0), as process.kill(pid, 0).
 

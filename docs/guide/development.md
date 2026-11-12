@@ -299,7 +299,7 @@ Golden files hold its contract with the outside, and the Rust tests replay them.
 
 | Golden files | What they pin | Test |
 | --- | --- | --- |
-| `crates/xenonet-mcp/tests/golden/` | The MCP servers' answers (`xenonet mcp`, `mcp assistant`, `mcp console`): the probe, the handshake, `tools/list` with every schema key for key, and refused calls | `crates/xenonet-mcp/tests/contract.rs` |
+| `crates/xenonet-mcp/tests/golden/` | The MCP servers' answers (`xenonet mcp`, `mcp assistant`, `mcp console`): the probe, the handshake, `tools/list` with every schema key for key, and refused calls | `crates/xenonet-cli/tests/mcp_contract.rs`, against the `xenonet` binary |
 | `crates/xenonet-cli/tests/golden/` | The HTTP API's reads and the command's output, over the made-up home in `tests/fixtures/home/` | `crates/xenonet-cli/tests/golden.rs` |
 | `crates/xenonet-state/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search, the map's refresh (`state.json`: the map, identities, projects, repos and the saved state, through `MapState` with its clock and ids fixed and git answered from the fixture) and the projects scan | `crates/xenonet-state/tests/golden.rs` |
 | `crates/xenonet-service/tests/fixtures/gateway.json` | The actor gateway's answers to 69 requests, byte for byte: the status, the headers that matter and the body | `crates/xenonet-service/tests/gateway.rs` |

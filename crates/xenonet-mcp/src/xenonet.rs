@@ -51,9 +51,9 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use xenonet_actors::token_file::{run_token_command, token_from_env};
-use xenonet_actors::tokens::TOKEN_GREP;
 use xenonet_api::client::{NAMED_HEALTH_MS, XENONET_PORT};
+use xenonet_api::credentials::TOKEN_GREP;
+use xenonet_api::token_file::{run_token_command, token_from_env};
 use xenonet_text::json::{self as js, number_string};
 use xenonet_text::text::{display, to_number, truthy};
 
@@ -193,16 +193,24 @@ pub fn calling(app: &str) -> Option<Calling> {
     }
 }
 
+/// What the composition root tells this server of the app registry, which
+/// it doesn't read itself.
+#[derive(Clone, Debug, Default)]
+pub struct Registry {
+    /// The apps whose sessions say they're calling (those with `caller`),
+    /// in the registry's order.
+    pub callers: Vec<String>,
+}
+
 /// The apps whose sessions say they're calling, in the registry's order:
 /// those with `caller` that have a way.
-pub fn calling_apps() -> &'static [(&'static str, Calling)] {
-    static A: std::sync::OnceLock<Vec<(&'static str, Calling)>> = std::sync::OnceLock::new();
-    A.get_or_init(|| xenonet_adapter::apps::with("caller").filter_map(|a| Some((a.id.as_str(), calling(&a.id)?))).collect())
+pub fn calling_apps(registry: &Registry) -> Vec<(String, Calling)> {
+    registry.callers.iter().filter_map(|id| Some((id.clone(), calling(id)?))).collect()
 }
 
 /// The session calling, as `<app>:<its id>`, from the first of these apps
 /// that says one is.
-pub fn calling_session(env: Env<'_>, meta: &Value, apps: &[(&str, Calling)]) -> Option<String> {
+pub fn calling_session(env: Env<'_>, meta: &Value, apps: &[(String, Calling)]) -> Option<String> {
     apps.iter().find_map(|(app, c)| (c.session)(env, meta).map(|id| format!("{app}:{id}")))
 }
 
@@ -224,6 +232,7 @@ struct Token {
 struct Context {
     port: f64,
     actor: bool,
+    apps: Vec<(String, Calling)>,
     token: Mutex<Token>,
 }
 
@@ -269,7 +278,7 @@ impl Context {
     // Who's calling: Claude Code's session, then Codex's thread
     // (calling_session), then the actor whose token this server has.
     fn caller(&self, meta: &Value) -> Option<Caller> {
-        if let Some(id) = calling_session(&process::var, meta, calling_apps()) {
+        if let Some(id) = calling_session(&process::var, meta, &self.apps) {
             return Some(Caller::Agent(id));
         }
         self.actor.then_some(Caller::Actor)
@@ -320,12 +329,8 @@ impl Context {
     // XenoNet, which knows its own sources and connections).
     async fn doctor(&self) -> Result<String, String> {
         let Some(s) = engine::find(&[self.port], Duration::from_millis(NAMED_HEALTH_MS)).await else {
-            // None answers: the checks run here, on the folders of the
-            // XenoNet asked about (XenoNet Dev's for its port).
-            let name = (self.port == f64::from(xenonet_api::client::DEV_PORT)).then_some("XenoNet Dev");
-            let paths = crate::doctor::paths_for(name);
-            let r = tokio::task::spawn_blocking(move || crate::doctor::checkup_here(&paths, None)).await.map_err(|e| e.to_string())?;
-            return Ok(doctor_text(&r));
+            // None answers: the checks run on this machine.
+            return Ok(doctor_text(&doctor_here(self.port).await?));
         };
         let name = s.health.get("name").filter(|n| !n.is_null()).map_or_else(|| "XenoNet".to_string(), |n| n.as_str().map_or_else(|| display(n), str::to_string));
         let mut r = engine::request(f64::from(s.port), &name, "POST", "/api/doctor", Some(&json!({})), &[]).await.map_err(|e| e.message)?;
@@ -374,6 +379,26 @@ impl Context {
             Err(e) if e.status.is_some() => Err(e.message),
             Err(_) => Err("XenoNet isn't running, so it can't show your user the ask. Your user can open it, and the doctor tool says what else is wrong.".into()),
         }
+    }
+}
+
+// How long `xenonet doctor` may take: each check has 8 seconds, side by
+// side, and the binary has to start.
+const DOCTOR_MS: u64 = 30_000;
+
+/// The doctor with no XenoNet to ask: `xenonet doctor --json` for the
+/// XenoNet on `port`, run by the xenonet binary this server is (`xenonet
+/// mcp`). It runs the checks on this machine, on that XenoNet's folders
+/// (XenoNet Dev's for its port), and those that need XenoNet running say
+/// so.
+async fn doctor_here(port: f64) -> Result<Value, String> {
+    let bin = std::env::current_exe().map_err(|e| format!("XenoNet isn't running, and this server can't find the xenonet binary to run the doctor with: {e}"))?;
+    let args = ["doctor".to_string(), "--json".into(), "--port".into(), number_string(port)];
+    let ran = xenonet_os::fx::exec_file(&bin.to_string_lossy(), &args, DOCTOR_MS, xenonet_os::fx::RunOptions::default()).await;
+    match js::parse(ran.stdout.trim()) {
+        Ok(r) if r.is_object() => Ok(r),
+        _ if ran.timed_out => Err(format!("XenoNet isn't running, and xenonet doctor didn't finish in {} seconds", DOCTOR_MS / 1000)),
+        _ => Err(format!("XenoNet isn't running, and xenonet doctor didn't answer: {}", xenonet_text::text::trim(&ran.stderr))),
     }
 }
 
@@ -780,14 +805,15 @@ where
 
 /// Serves the sessions' server on stdio until the client goes; `xenonet
 /// mcp` runs it.
-pub async fn serve() {
+pub async fn serve(registry: Registry) {
     let port = port();
     // The session a Claude Code channel listens for.
     let session = process::set("CLAUDE_CODE_SESSION_ID");
     // An actor, unless an app started this server for one of its sessions.
-    let started = calling_apps().iter().any(|(_, c)| (c.started)(&process::var));
+    let apps = calling_apps(&registry);
+    let started = apps.iter().any(|(_, c)| (c.started)(&process::var));
     let actor = !started && (process::set("XENONET_ACTOR_TOKEN_FILE").is_some() || process::set("XENONET_ACTOR_TOKEN").is_some());
-    let ctx = Arc::new(Context { port, actor, token: Mutex::new(Token::default()) });
+    let ctx = Arc::new(Context { port, actor, apps, token: Mutex::new(Token::default()) });
     // For an actor, who it is first (briefly: XenoNet may not be running),
     // so its instructions can name it.
     let mut instructions = INSTRUCTIONS.to_string();
@@ -918,11 +944,13 @@ mod tests {
     // test/app-capabilities.test.js's cases of callingSession.
     #[test]
     fn the_calling_session_is_the_first_apps_that_says_one_is() {
-        let apps = calling_apps();
-        assert_eq!(apps.iter().map(|(a, _)| *a).collect::<Vec<_>>(), ["claude", "codex", "grok"]);
+        // The registry's callers, and one with no way here, left out.
+        let registry = Registry { callers: ["claude", "codex", "opencode", "grok"].map(String::from).to_vec() };
+        let apps = calling_apps(&registry);
+        assert_eq!(apps.iter().map(|(a, _)| a.as_str()).collect::<Vec<_>>(), ["claude", "codex", "grok"]);
         let ask = |vars: &[(&str, &str)], meta: Value| {
             let vars: HashMap<String, String> = vars.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
-            calling_session(&|k| vars.get(k).cloned(), &meta, apps)
+            calling_session(&|k| vars.get(k).cloned(), &meta, &apps)
         };
         assert_eq!(ask(&[], json!({})), None);
         assert_eq!(ask(&[("CLAUDE_CODE_SESSION_ID", "abc"), ("CODEX_THREAD_ID", "t")], json!({ "threadId": "u" })), Some("claude:abc".into()));
@@ -939,7 +967,7 @@ mod tests {
         assert!((apps[2].1.started)(&|k| (k == "GROK_SESSION_ID").then(|| "g".to_string())), "a server Grok started for a session serves no actor");
         // A made-up app's own way, in a registry of its own.
         let wren = Calling { session: |env, _| env("WREN_SESSION"), started: |env| env("WREN_SESSION").is_some() };
-        let mine = [("wren", wren), apps[1]];
+        let mine = [("wren".to_string(), wren), apps[1].clone()];
         assert_eq!(calling_session(&|k| (k == "WREN_SESSION").then(|| "s1".to_string()), &json!({ "threadId": "u" }), &mine), Some("wren:s1".into()));
         assert_eq!(calling_session(&|_| None, &json!({ "threadId": "u" }), &mine), Some("codex:u".into()));
     }

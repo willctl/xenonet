@@ -97,11 +97,11 @@ Each crate has one job. "Depends on" lists the XenoNet crates it uses
 | `xenonet-sources` | What XenoNet reads: transcript lines and their events, the records readers make, live telemetry, Codex's archived rollouts, the shared context, plan usage, and the refusals XenoNet keeps (with the Refusals core) | adapter, model, os, text, schema, api |
 | `xenonet-state` | The map's data: the graph, search, stats and digests, projects and identities, the decision model's checks; and the map's runtime | adapter, api, blocks, components, demo, model, os, schema, text, sources |
 | `xenonet-engine` | Which process sent a request (`procs`, `verify`), messages, claims and views, the index of the agents it knows, live delivery, and the network's side of them; what it keeps goes through the `Store` trait it defines (`store`), and it depends on no store: the runtime implements it over the store's tables | adapter, model, os, text |
-| `xenonet-actors` | The programs you allow in XenoNet: their registry, registration, reports, wakes, remote connections, tokens and token files; and the secret stores | adapter, model, os, text |
+| `xenonet-actors` | The programs you allow in XenoNet: their registry, registration, reports, wakes, remote connections and tokens; and the secret stores | adapter, model, os, text |
 | `xenonet-store` | The one store, `<state>/xenonet.sqlite`: one writer in WAL mode, the schema's hash as its `user_version` (another version, or an `engine.sqlite` from before it, is left on disk and refused: set the machine up again), one store order (`meta.stored`) every chain and feed entry is numbered in, and the chains' entries; the domains' tables come as each moves in (`engine`: messages, claims, actors, grants, the network's presence and handoffs; `net`: the networks by id, their links' status and published services, the people this machine holds, presence blocks taken and token roots, with rosters and person chains as chain entries; `state`: what XenoNet saves for you, the layout, acks, marks, your settings and each app's, the projects folder's rules and what you said of identities, which the runtime's Store core serves; `delivery`: the policy's settings and consent, the wake budget, the bounded audit log, the runs and the sessions started under a delegation; `a2a`: A2A's tasks; `projects`: projects and their checkouts on each machine, minted ids found from session folders and the roots the person names, a candidate joining its project only when the person confirms it, or, for a linked worktree, when its main checkout is confirmed and shares its git common dir; `agents`: each session's `agt_` id with the app's own id, pending rows for the sessions XenoNet starts, and other machines' agents by the machine that first named them; `feed`: where this machine writes its feed in each network, the kept entries it wrote and each member's ack, and what it applied and holds of the other members' feeds, a `FeedStore` whose calls join the transaction the engine applies an entry in). The file is the owner's alone. SQLite's types stay inside it | id, log, model, os, text |
 | `xenonet-net` | One network across machines ([network.md](network.md)): a host's keys, signed and sealed frames, the roster chain, tickets, the gateway's routes and queues, a host's link to its gateway, services through the network, and what a machine keeps of its network and person, through its `Persist` trait (the composition root's, in `compose::net`, is the store); beside the gateway, the iroh endpoint with admission, the `xenonet-net/2` envelope and joining over `xenonet/join/2` | id, log, authz, keys, model, os, text |
 | `xenonet-assistant` | What remote actors may read ([cloud-assistants.md](cloud-assistants.md)): grant credentials, page tokens, the projection a grant sees, the six reads, the tunnels; and their runtime | os, text, components, api, store, actors, adapter, model, schema |
-| `xenonet-components` | XenoNet's install: the command on PATH, the service's settings, XenoNet Dev's instances, the version, the Service and Tools packages (checked, unpacked, switched, rolled back), starting the service at login, and the launcher | os, text |
+| `xenonet-components` | XenoNet's install: the command on PATH, the service's settings, the version, the Service and Tools packages (checked, unpacked, switched, rolled back), starting the service at login, and the launcher | os, text |
 | `xenonet-integrations` | Routing suggestions, OpenShell sandboxes and their reviews, Pi sessions, MCP servers' catalogs, the decision model and OpenRouter's spend; and their cores | os, adapter, text, api, actors, sources, state |
 | `xenonet-doctor` | Each check's verdict and wording, the summary, new problems, the diagnostics bundle; and the Doctor and Diagnostics cores | components, adapter, os, text, schema, api, engine, net, sources |
 
@@ -120,15 +120,15 @@ timers, child processes, files and the waits between them. Most of it is a
 
 | Crate | Its job | Depends on |
 | --- | --- | --- |
-| `xenonet-api` | The local protocol between the service and the drivers of its cores, and the only XenoNet crate the HTTP surface imports besides the base crates: the core traits the routes call (`cores/`, JSON in and out), the local door (`LocalDoor`) and the app registry (`Apps`) as the routes ask them, what every driver is given (`wire.rs`: settings, the `Emitter` and `EventSink` that carry events to the service, the drift log), a message's envelope (`attest`), how a request carries a token (`bearer`), rates (`limits`), the Needs you queue, the event stream a relay follows, who sent a request, and the HTTP client of a running XenoNet that the command, the hook and the MCP servers use | model, os, text, net, schema |
+| `xenonet-api` | The local protocol between the service and the drivers of its cores, and the only XenoNet crate the HTTP surface imports besides the base crates: the core traits the routes call (`cores/`, JSON in and out), the local door (`LocalDoor`) and the app registry (`Apps`) as the routes ask them, what every driver is given (`wire.rs`: settings, the `Emitter` and `EventSink` that carry events to the service, the drift log), a message's envelope (`attest`), how a request carries a token (`bearer`), rates (`limits`), the Needs you queue, the event stream a relay follows, who sent a request, and the HTTP client of a running XenoNet that the command, the hook and the MCP servers use, with the instances XenoNet Dev runs as (`instances`), an actor's token file (`token_file`) and the shapes of tokens and grants (`credentials`) | model, os, text, net, schema |
 
 **The surfaces.**
 
 | Crate | Its job | Depends on |
 | --- | --- | --- |
 | `xenonet-http` | The local HTTP API on 127.0.0.1: the routes, the rules table each is checked by before its handler runs (`routes/rules.rs`), the requests and answers, the event stream, the cores' events on their way to the pages, the page's files, and the traits of the service's parts it reaches (`parts.rs`: the actor gateway, the component service, the assistant's endpoint, A2A, the network) | api, model, os, text |
-| `xenonet-mcp` | The MCP servers, on `rmcp` | most of the core, and platforms |
-| `xenonet-console` | What only the console has: themes, the Spotify remote, the system panel, opening things, the control channel's client and the steps scripts run; and those cores | api, components, os, text, actors, adapter |
+| `xenonet-mcp` | The MCP servers, on `rmcp`. The root gives them the registry's apps, the console's control and the assistant's made-up data; with no XenoNet answering, the doctor tool runs `xenonet doctor --json` | api, model, os, text |
+| `xenonet-console` | What only the console has: themes, the Spotify remote, the system panel, the control channel's client and the steps scripts run; and those cores, Spotify's keeping its token in the vault the root gives it | api, os, text |
 
 **The composition root.**
 
@@ -193,9 +193,10 @@ The rules, from goal 6. Every crate in `crates/` is in one class:
   count when the ceilings were set, with the phase of
   [direction.md](direction.md#order-of-work) it dissolves in (state in
   phase 4, integrations in phase 6, the rest in phase 5).
-- **Surfaces**: `xenonet-http` imports `xenonet-api` and the base crates
-  and nothing else. `xenonet-mcp` and `xenonet-console` have a ceiling like
-  the composition crates', until they reach `xenonet-api` alone in phase 5.
+- **Surfaces**: `xenonet-http`, `xenonet-mcp` and `xenonet-console`
+  import `xenonet-api` and the base crates and nothing else. What else a
+  surface needs the root gives it, as a trait or the data it reads, or it
+  asks the `xenonet` binary.
 - **The composition root**: `xenonet-service` and `xenonet-cli`, with no
   limit. No other crate depends on either.
 
@@ -351,8 +352,8 @@ All three are in `crates/xenonet-mcp`, on `rmcp`, over stdio:
 console` (the console operator, through the command's driver of
 `xenonet-console`'s control client) and `xenonet mcp assistant --grant
 <id>` (a remote actor's read-only tools). Their contract is the golden
-files in `crates/xenonet-mcp/tests/golden/`, replayed by
-`tests/contract.rs`: the probe, the handshake, `tools/list` with every
+files in `crates/xenonet-mcp/tests/golden/`, replayed against the
+`xenonet` binary by `crates/xenonet-cli/tests/mcp_contract.rs`: the probe, the handshake, `tools/list` with every
 schema key for key, and refused calls, in each kind of session.
 
 - **Both protocol eras.** The 2025 handshake (`initialize`, answered with
@@ -429,8 +430,8 @@ through XenoNet's extension:
   second ends at once with the final result), and the stream ends with
   the final result when XenoNet says channels are off. A session that
   isn't a channel answers `subscriptions/listen` with method-not-found.
-- **Checked** by `crates/xenonet-mcp/tests/handshake.rs`, which drives the
-  server over stdio as Claude Code does, and as a 2026-07-28 client that
+- **Checked** by `crates/xenonet-cli/tests/mcp_handshake.rs`, which drives
+  `xenonet mcp` over stdio as Claude Code does, and as a 2026-07-28 client that
   names the extension, with a fake XenoNet's long poll, and by the channel
   session's golden file.
 - **If a later `rmcp` can't be held to the 2025 handshake**, the server

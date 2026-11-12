@@ -24,9 +24,7 @@ use xenonet_text::text::display;
 pub use xenonet_actors::tokens::is_token;
 
 /// GRANT_ID in core/schema/assistant.js: /^gr_[0-9a-f]{24}$/.
-pub fn is_grant(s: &str) -> bool {
-    s.strip_prefix("gr_").is_some_and(|h| h.len() == 24 && h.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')))
-}
+pub use xenonet_api::credentials::is_grant;
 
 pub fn assistant_dir(state_dir: &str) -> String {
     NATIVE.join(&[state_dir, "assistant"])

@@ -11,7 +11,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
-use xenonet_components::instances::{instance, INSTANCES};
+use xenonet_api::instances::{instance, INSTANCES};
 use xenonet_os::error::Failure;
 use xenonet_os::files;
 use xenonet_os::nodepath::NATIVE;

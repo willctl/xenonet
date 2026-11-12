@@ -1,10 +1,12 @@
-// The xenonet MCP server over stdio, as Claude Code meets it: the
-// 2026-07-28 probe (server/discover) first, then the 2025 handshake. A
+// The xenonet MCP server over stdio (`xenonet mcp`), as Claude Code meets
+// it: the 2026-07-28 probe (server/discover) first, then the 2025
+// handshake. A
 // channel session gets method-not-found for the probe, the 2025-11-25
 // handshake with experimental["claude/channel"], and each message its long
 // poll brings as notifications/claude/channel. A client of the 2026-07-28
 // revision that names XenoNet's channel extension gets the revision, and
 // the messages on a subscriptions/listen stream. A fake XenoNet stands in.
+// With none at all, the doctor tool still answers, through `xenonet doctor`.
 
 #![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap")]
 
@@ -69,7 +71,14 @@ struct Server {
 
 impl Server {
     fn start(port: u16, channel: bool) -> Server {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_xenonet-mcp"))
+        Server::with(port, channel, &[])
+    }
+
+    // `xenonet mcp` for a session, with these variables besides.
+    fn with(port: u16, channel: bool, env: &[(&str, String)]) -> Server {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_xenonet"))
+            .arg("mcp")
+            .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
             .env("XENONET_PORT", port.to_string())
             .env("CLAUDE_CODE_SESSION_ID", SESSION)
             .env("XENONET_CHANNEL", if channel { "1" } else { "0" })
@@ -282,8 +291,34 @@ fn another_session_gets_both_eras_and_no_channel() {
     assert!(r["result"]["capabilities"].get("experimental").is_none(), "{r}");
 }
 
+// With the service stopped (nothing on its port), the doctor tool, the
+// escape hatch when the others fail, still answers: the server runs
+// `xenonet doctor --json`, whose checks run on this machine, on the
+// folders given here, and say what's wrong.
+#[test]
+fn with_the_service_stopped_the_doctor_still_answers() {
+    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let dir = std::env::temp_dir().join(format!("xenonet-mcp-doctor-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for d in ["home", "state", "cache", "code"] {
+        std::fs::create_dir_all(dir.join(d)).unwrap();
+    }
+    let at = |d: &str| dir.join(d).to_string_lossy().into_owned();
+    let env = [("HOME", at("home")), ("USERPROFILE", at("home")), ("XENONET_STATE_DIR", at("state")), ("XENONET_CACHE_DIR", at("cache")), ("XENONET_PROJECTS_DIR", at("code"))];
+    let mut s = Server::with(port, false, &env);
+    init(&mut s);
+    let r = s.ask(2, "tools/call", json!({ "name": "doctor", "arguments": {} }));
+    assert!(r["result"].get("isError").is_none(), "an answer: {r}");
+    let said: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(said["by"], json!("this MCP server (XenoNet isn't running)"), "{said}");
+    let notes = said["notes"].as_array().unwrap();
+    assert!(notes.iter().any(|n| n["title"].is_string() && n["status"] == json!("warn")), "XenoNet not running is one of them: {said}");
+    assert!(said["summary"]["ok"].as_u64().unwrap() > 0, "the checks ran here: {said}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // The tools a session gets, each declared as the JS server declares it
-// (tests/contract.rs compares them with the JS server's own).
+// (mcp_contract.rs compares them with the JS server's own).
 #[test]
 fn the_tools_are_the_js_servers() {
     let (port, _heard) = xenonet(vec![]);

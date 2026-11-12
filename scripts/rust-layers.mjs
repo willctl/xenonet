@@ -14,10 +14,10 @@
 //   ceiling at its count when the ceilings were set: the check fails when
 //   it goes over, and when it drops below without its ceiling being
 //   lowered here, so a ceiling only ever comes down.
-// - Surfaces (SURFACES): xenonet-http imports xenonet-api and the base
-//   crates and nothing else. xenonet-mcp and xenonet-console have a
-//   ceiling like the composition crates', until they reach xenonet-api
-//   alone in the phase their entry names.
+// - Surfaces (SURFACES): xenonet-http, xenonet-mcp and xenonet-console
+//   import xenonet-api and the base crates and nothing else. What else a
+//   surface needs, the root gives it (a trait or the data it reads), or it
+//   asks the xenonet binary.
 // - The composition root (ROOT): xenonet-service (compose/, serve.rs, the
 //   gateway, A2A and the other servers) and xenonet-cli (the binary, whose
 //   `serve()` composes). No limit, and no other crate depends on either.
@@ -65,12 +65,11 @@ const COMPOSITION = {
   "xenonet-doctor": { ceiling: 7, phase: 5, why: "it runs the checks the crates and adapters expose, through the registry" },
   "xenonet-integrations": { ceiling: 5, phase: 6, why: "the edges: ACP, A2A outbound and MCP's catalog become adapters" },
 };
-// The surfaces: xenonet-api and the base crates alone, or a ceiling until
-// the phase they reach that in.
+// The surfaces: xenonet-api and the base crates alone.
 const SURFACES = {
   "xenonet-http": { only: ["xenonet-api"] },
-  "xenonet-mcp": { ceiling: 11, phase: 5, why: "once the composition crates it reaches into have dissolved" },
-  "xenonet-console": { ceiling: 4, phase: 5, why: "once the composition crates it reaches into have dissolved" },
+  "xenonet-mcp": { only: ["xenonet-api"] },
+  "xenonet-console": { only: ["xenonet-api"] },
 };
 const ROOT = new Set(["xenonet-service", "xenonet-cli"]);
 // What may depend on the demo besides the surfaces and the root: the map's

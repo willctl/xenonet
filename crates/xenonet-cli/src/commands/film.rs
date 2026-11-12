@@ -11,7 +11,7 @@ use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Map, Value};
 use std::time::Duration;
-use xenonet_components::instances::instance;
+use xenonet_api::instances::instance;
 use xenonet_text::units::{round, to_fixed};
 
 pub const HELP: &str = include_str!("help/film.txt");

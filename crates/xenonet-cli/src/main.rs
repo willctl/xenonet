@@ -210,7 +210,7 @@ fn serve(args: &[String]) -> i32 {
                 world: config.world.clone(),
             };
             xenonet_service::compose::app::wire(&mut cores, &app, env);
-            xenonet_console::wire(&mut cores, config.demo, config.port, &config.state_dir, env);
+            xenonet_console::wire(&mut cores, config.demo, config.port, &config.state_dir, env, xenonet_service::compose::app::vault(config.demo));
             // The terminal drawer's shells live in the service.
             cores.terminals = std::sync::Arc::new(xenonet_service::terminals::Shells::new());
             cores

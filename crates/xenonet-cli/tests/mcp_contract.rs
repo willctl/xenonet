@@ -1,5 +1,8 @@
-// The contract (docs/design/rust-core.md, "The MCP servers"): the Rust
-// servers answer as the JS ones did. Each file in tests/golden/ holds one
+// The MCP servers' contract (docs/design/rust-core.md, "The MCP
+// servers"): the Rust servers answer as the JS ones did. The servers are
+// xenonet-mcp's, and the xenonet binary serves them (`xenonet mcp`), with
+// what they know of the registry, so this replays the contract against
+// that binary. Each file in crates/xenonet-mcp/tests/golden/ holds one
 // case, recorded from the JS servers (node mcp/xenonet.js, mcp/assistant.js
 // and mcp/console.js) on 2026-11-08: the arguments and environment the
 // server starts with, the messages said to it (the 2026-07-28 probe, the
@@ -30,12 +33,18 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-// Says each message to the Rust server, in turn, waiting for the answer to
-// each request; the answers.
+// The servers' contract, beside their crate.
+fn goldens() -> PathBuf {
+    root().join("crates").join("xenonet-mcp").join("tests").join("golden")
+}
+
+// Says each message to the Rust server (`xenonet mcp` and the golden's
+// arguments), in turn, waiting for the answer to each request; the
+// answers.
 fn talk(args: &[String], env: &[(String, String)], messages: &[Value]) -> Vec<Value> {
-    let program = env!("CARGO_BIN_EXE_xenonet-mcp");
+    let program = env!("CARGO_BIN_EXE_xenonet");
     let mut cmd = Command::new(program);
-    cmd.args(args).current_dir(root()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.arg("mcp").args(args).current_dir(root()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     for v in [
         "CLAUDE_CODE_SESSION_ID",
         "CLAUDE_PID",
@@ -129,7 +138,7 @@ fn placeheld(v: &mut Value, subs: &[(&str, String)]) {
 // Starts the Rust server as the golden says, with each placeholder in its
 // environment filled in from subs, and compares its answers to the JS ones.
 fn replay(file: &str, subs: &[(&str, String)]) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(format!("{file}.json"));
+    let path = goldens().join(format!("{file}.json"));
     let golden: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap();
     let case = golden["case"].as_str().unwrap();
     let args: Vec<String> = golden["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_owned()).collect();

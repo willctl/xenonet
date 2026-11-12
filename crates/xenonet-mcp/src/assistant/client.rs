@@ -27,7 +27,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
-use xenonet_assistant::credentials::{is_grant, is_token};
+use xenonet_api::credentials::{is_grant, is_token};
 use xenonet_os::paths::join_all;
 use xenonet_text::json as js;
 use xenonet_text::text::{display, to_number, trim, truthy};

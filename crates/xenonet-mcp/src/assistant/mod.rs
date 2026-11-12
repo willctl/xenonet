@@ -20,12 +20,44 @@
 //! or a new revision, empties it; so does a restart.
 //!
 //! With --fixture it needs no XenoNet, no grant and nothing of this
-//! computer's: it serves made-up data through the same checks (`fixture`),
-//! for trying a client or a tunnel first.
+//! computer's: it serves made-up data through the same checks, for trying
+//! a client or a tunnel first. The composition root serves that data (a
+//! `Fixture`, the assistant's service over made-up data in this process),
+//! held to the contract this server's schemas say (`contract`).
 
 mod client;
-mod fixture;
 mod schema;
+
+/// What the made-up data of --fixture is held to: the operations and
+/// their tools, the attention kinds, the envelopes' schemas, and each
+/// tool's arguments and answer as its schemas read them.
+pub mod contract {
+    pub use super::schema::{ATTENTION_KINDS, ERROR_SCHEMA, OPERATIONS, RESULT_SCHEMA};
+    use serde_json::Value;
+
+    /// A tool's arguments as its input schema reads them, or None when
+    /// they don't fit.
+    pub fn arguments(tool: &str, args: &Value) -> Option<Value> {
+        super::schema::input(tool).parse(args).ok()
+    }
+
+    /// Whether an answer fits the tool's result schema.
+    pub fn answers(tool: &str, envelope: &Value) -> bool {
+        super::schema::result(tool).parse(envelope).is_ok()
+    }
+}
+
+/// What a read came to: its result envelope, or an error one.
+pub struct Answer {
+    pub ok: bool,
+    pub envelope: Value,
+}
+
+/// The made-up data `xenonet mcp assistant --fixture` serves, read by
+/// operation, with the request's id.
+pub trait Fixture: Send + Sync {
+    fn read(&self, operation: &str, args: &Value, request_id: &str) -> Answer;
+}
 
 use crate::tools::{self, Def};
 use client::{Client, Standing};
@@ -293,7 +325,7 @@ fn say(line: &str) {
 /// data of --fixture.
 enum Backend {
     Client(Arc<Client>),
-    Fixture(Arc<fixture::Fixture>),
+    Fixture(Arc<dyn Fixture>),
 }
 
 struct Assistant {
@@ -394,10 +426,10 @@ impl ServerHandler for Assistant {
 }
 
 /// Serves the assistant's server on stdio until the client goes.
-pub async fn serve(grant: Option<String>, fixture: bool, port: Option<u16>) -> Result<(), String> {
-    let backend = if fixture {
+pub async fn serve(grant: Option<String>, fixture: Option<Arc<dyn Fixture>>, port: Option<u16>) -> Result<(), String> {
+    let backend = if let Some(fixture) = fixture {
         say("serving made-up data (--fixture): nothing of this computer's");
-        Backend::Fixture(Arc::new(fixture::Fixture::new(tools::VERSION)))
+        Backend::Fixture(fixture)
     } else {
         let Some(grant) = grant else {
             return Err("xenonet mcp assistant needs --grant <grant>, as XenoNet's window shows it, or --fixture for made-up data".into());

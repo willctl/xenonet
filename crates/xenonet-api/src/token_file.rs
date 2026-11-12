@@ -13,7 +13,7 @@
 //! The doctor's look for tokens left in repos (findTokenFiles) moves with
 //! the doctor.
 
-use crate::tokens::TOKEN_PREFIX;
+use crate::credentials::TOKEN_PREFIX;
 use std::path::Path;
 use xenonet_os::fs::FsError;
 use xenonet_os::paths::{is_under, path_key, resolve};

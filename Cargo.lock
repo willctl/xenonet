@@ -5689,6 +5689,7 @@ dependencies = [
  "bytes",
  "serde_json",
  "tokio",
+ "xenonet-actors",
  "xenonet-authz",
  "xenonet-model",
  "xenonet-net",
@@ -5833,12 +5834,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
- "xenonet-actors",
- "xenonet-adapter",
  "xenonet-api",
- "xenonet-components",
  "xenonet-os",
- "xenonet-platforms",
  "xenonet-text",
 ]
 
@@ -6055,25 +6052,15 @@ dependencies = [
 name = "xenonet-mcp"
 version = "0.2.0"
 dependencies = [
- "async-trait",
  "getrandom 0.3.4",
  "libc",
  "regex",
  "rmcp",
  "serde_json",
  "tokio",
- "xenonet-actors",
- "xenonet-adapter",
  "xenonet-api",
- "xenonet-assistant",
- "xenonet-components",
- "xenonet-doctor",
- "xenonet-engine",
+ "xenonet-model",
  "xenonet-os",
- "xenonet-platforms",
- "xenonet-schema",
- "xenonet-sources",
- "xenonet-state",
  "xenonet-text",
 ]
 

@@ -3,6 +3,10 @@
 //! start it once they're connected. xenonet mcp console is the console
 //! operator (mcp/console.js), and xenonet mcp assistant the read-only
 //! server for a remote actor you paired (mcp/assistant.js).
+//!
+//! The servers import xenonet-api alone: what they know of the rest is
+//! given here, the registry's apps, the console's control and the
+//! assistant's made-up data.
 
 use crate::args::Flags;
 use crate::out::{Done, Fail};
@@ -37,13 +41,31 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 None => None,
             };
             let grant = flags.str("grant").map(str::to_string);
-            let fixture = flags.is_true("fixture");
+            let fixture = flags
+                .is_true("fixture")
+                .then(|| std::sync::Arc::new(crate::cores::assistant_fixture::Fixture::new(crate::VERSION)) as std::sync::Arc<dyn xenonet_mcp::fixture::Fixture>);
             serve(move || xenonet_mcp::serve_assistant(grant, fixture, port))
         }
         Some(_) => Err(Fail::error("Use xenonet mcp, xenonet mcp console or xenonet mcp assistant.")),
         None => serve(|| async {
-            xenonet_mcp::serve().await;
+            xenonet_mcp::serve(registry()).await;
             Ok(())
         }),
+    }
+}
+
+/// What the sessions' server knows of the registry: the apps whose
+/// sessions say they're calling, in its order.
+pub fn registry() -> xenonet_mcp::Registry {
+    xenonet_mcp::Registry { callers: xenonet_adapter::apps::with("caller").map(|a| a.id.clone()).collect() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_callers_are_the_registrys() {
+        assert_eq!(registry().callers, ["claude", "codex", "grok"]);
     }
 }

@@ -21,9 +21,9 @@ use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
-use xenonet_actors::token_file::{run_token_command, token_file_refusal, token_from_env, write_token_file};
 use xenonet_adapter::products::product_of;
 use xenonet_api::client::{name_of, Server};
+use xenonet_api::token_file::{run_token_command, token_file_refusal, token_from_env, write_token_file};
 use xenonet_text::json::{number, stringify};
 
 pub const HELP: &str = include_str!("help/actor.txt");

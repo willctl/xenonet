@@ -6,7 +6,10 @@
 //! relay follows (events.rs); who sent a request (peer.rs); and the client
 //! that reaches a running XenoNet over its HTTP API (client.rs, over the
 //! HTTP/1.1 of http.rs), which the command, the hook and the MCP servers
-//! use. The surfaces import it; it depends on none of them.
+//! use, with the instances XenoNet Dev runs as (instances.rs) and what a
+//! client holds as its credential: an actor's token file (token_file.rs)
+//! and the shapes of tokens and grants (credentials.rs). The surfaces
+//! import it; it depends on none of them.
 
 #![expect(
     clippy::result_large_err,
@@ -17,11 +20,14 @@ pub mod attest;
 pub mod bearer;
 pub mod client;
 pub mod cores;
+pub mod credentials;
 pub mod events;
 pub mod http;
+pub mod instances;
 pub mod limits;
 pub mod needs_you;
 pub mod peer;
+pub mod token_file;
 pub mod wire;
 
 pub use wire::From;

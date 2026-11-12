@@ -28,8 +28,10 @@ xenonet-net.workspace = true
 xenonet-schema.workspace = true
 
 [dev-dependencies]
-# The token prefixes bearer.rs looks for are authz's (a test holds them so).
+# The token prefixes bearer.rs looks for are authz's, and the shapes
+# credentials.rs tells are the actors' (tests hold them so).
 xenonet-authz.workspace = true
+xenonet-actors.workspace = true
 
 [lints]
 workspace = true

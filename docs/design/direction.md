@@ -589,11 +589,13 @@ Will's step on inix and NEO-REX.
    actors (`adapters/a2a`); spaces (`SpaceId`, `EntityRef`, the
    `xenolith-space/1` policy, its Quint model, `Resource::Space`);
    Xenolith built from path dependencies on the libraries, held to them by
-   the layering check, with keys of its own. Left: the network's generic
+   the layering check, with keys of its own; the MCP and console surfaces
+   on `xenonet-api` alone (the root gives them what else they need, and
+   the doctor tool runs `xenonet doctor --json` when the service is down).
+   Left: the network's generic
    `link/2` and `forward`; Xenolith's chain per space, Biscuit grants,
    `xenolith/sync/2`, joining, fetching from a holder, shared mode and
-   deleting its old code; the MCP and console surfaces on `xenonet-api`;
-   dissolving the runtime, assistant and integrations crates; the lab and
+   deleting its old code; dissolving the runtime, assistant and integrations crates; the lab and
    the docs.
 
 ## Verification plan

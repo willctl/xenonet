@@ -33,11 +33,13 @@
     reason = "each core function answers as a Result, as its JS throws, so a command calls them all alike, whether or not this port of one can fail"
 )]
 
+pub mod assistant_fixture;
 mod command;
 mod components;
 mod connect;
 mod control;
 mod demo;
+mod doctor_here;
 mod native;
 mod net;
 mod secrets;
@@ -142,12 +144,12 @@ pub fn checkup_here(flags: &crate::args::Flags, only: Option<&[String]>) -> Res<
         "stateDir": state_dir,
         "cacheDir": cache_dir,
     });
-    Ok(xenonet_mcp::doctor::checkup_here(&paths, only))
+    Ok(doctor_here::checkup_here(&paths, only))
 }
 
 /// machine().launcher()
 pub fn machine_launcher() -> Res<Value> {
-    xenonet_mcp::doctor::launcher().map(|l| l.unwrap_or(Value::Null)).map_err(Fail::error)
+    doctor_here::launcher().map(|l| l.unwrap_or(Value::Null)).map_err(Fail::error)
 }
 
 /// writeListenSettings({ dir, port }): the file's path.

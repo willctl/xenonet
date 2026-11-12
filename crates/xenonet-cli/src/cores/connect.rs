@@ -71,7 +71,7 @@ fn core(opts: &Value) -> Connect {
         grok_home: std::env::var("GROK_HOME").ok(),
         console_mcp: sys::var("XENONET_LAUNCHER_BIN").or_else(|| sys::var("XENONET_LAUNCHER_EXEC")).is_some(),
         platform: sys::platform().into(),
-        instances: xenonet_components::instances::INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: f64::from(i.port) }).collect(),
+        instances: xenonet_api::instances::INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: f64::from(i.port) }).collect(),
     })
 }
 

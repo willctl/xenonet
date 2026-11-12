@@ -7,6 +7,7 @@
 
 mod paths;
 
+use super::open;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,7 +16,7 @@ use xenonet_api::cores::Cores;
 use xenonet_api::wire::WireEnv;
 use xenonet_assistant::runtime as assistant;
 use xenonet_components::runtime::xenonet_bin_here;
-use xenonet_console::cores::{open, system};
+use xenonet_console::cores::system;
 use xenonet_doctor::runtime as doctor;
 use xenonet_integrations::runtime::{self as integrations, decide, mcp};
 use xenonet_runtime::remote::runtime as remote;
@@ -157,6 +158,31 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
     let service = doctor::DoctorService::new(parts.clone());
     cores.doctor = Arc::new(doctor::DoctorCore(service.clone()));
     cores.diagnostics = Arc::new(doctor::Diagnose { parts, doctor: service });
+}
+
+/// The credential store the console's Spotify remote keeps its token in:
+/// your computer's, or memory for the demo.
+pub struct Vault(Secrets);
+
+/// The vault for the console's cores (`xenonet_console::wire`).
+pub fn vault(demo: bool) -> Arc<dyn xenonet_console::cores::spotify::Vault> {
+    Arc::new(Vault(if demo { Secrets::memory() } else { Secrets::real() }))
+}
+
+#[async_trait::async_trait]
+impl xenonet_console::cores::spotify::Vault for Vault {
+    async fn has(&self, target: &str) -> Result<bool, String> {
+        self.0.has(target).await
+    }
+    async fn get(&self, target: &str) -> Result<Option<String>, String> {
+        self.0.get(target).await
+    }
+    async fn set(&self, target: &str, secret: &str, comment: &str) -> Result<bool, String> {
+        self.0.set(target, secret, comment).await
+    }
+    async fn remove(&self, target: &str) -> Result<bool, String> {
+        self.0.remove(target).await
+    }
 }
 
 /// Why the store in a state folder can't be used, if it can't: data from

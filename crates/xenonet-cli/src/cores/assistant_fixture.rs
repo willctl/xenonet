@@ -1,10 +1,10 @@
 //! `xenonet mcp assistant --fixture`'s backend: the assistant's service in
 //! this process, over made-up data (xenonet-assistant's fixtures), through the same checks a
 //! real grant's reads go through: the request's shape, the rate and the
-//! four-at-a-time limit, the arguments' schema, and the answer's. No grant,
-//! no XenoNet and nothing of this computer's.
+//! four-at-a-time limit, the arguments' schema, and the answer's (the MCP
+//! server's `contract`). No grant, no XenoNet and nothing of this
+//! computer's.
 
-use super::schema;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -12,6 +12,8 @@ use xenonet_api::limits::Buckets;
 use xenonet_assistant::fixtures;
 use xenonet_assistant::pages::Standalone;
 use xenonet_assistant::service::{self, Config, Inflight, ReadHost, LIMITS};
+use xenonet_mcp::fixture::contract as schema;
+use xenonet_mcp::fixture::Answer;
 use xenonet_os::error::Failure;
 
 /// The made-up session's grant, actor and connection.
@@ -19,12 +21,6 @@ const GRANT: &str = "gr_000000000000000000000000";
 const ACTOR: &str = "fixture-client";
 // The service's rate for a grant: one a second, ten at once.
 const RATE: (f64, f64) = (1.0, 10.0);
-
-/// What a read came to: its result envelope, or an error one.
-pub struct Answer {
-    pub ok: bool,
-    pub envelope: Value,
-}
 
 struct State {
     buckets: Buckets,
@@ -41,7 +37,7 @@ pub struct Fixture {
 }
 
 fn now() -> f64 {
-    super::now()
+    xenonet_text::time::now_ms()
 }
 
 impl Fixture {
@@ -70,7 +66,7 @@ impl Fixture {
     }
 
     /// service.read(session, { request_id, operation, arguments }).
-    pub fn read(&self, operation: &str, args: &Value, request_id: &str) -> Answer {
+    fn read_one(&self, operation: &str, args: &Value, request_id: &str) -> Answer {
         let cfg = self.config();
         let b = service::begin(&cfg, &json!({ "request_id": request_id, "operation": operation, "arguments": args }));
         if let Some(no) = &b.no {
@@ -99,13 +95,19 @@ impl Fixture {
     // here: the time, the made-up view and stats, and the check of the
     // answer against its schema.
     fn answer(&self, cfg: Config, op: &str, tool: &str, args: &Value, request_id: &Value) -> Result<Value, String> {
-        let parsed = schema::input(tool).parse(args).map_err(|_| "INVALID_ARGUMENT".to_string())?;
+        let parsed = schema::arguments(tool, args).ok_or_else(|| "INVALID_ARGUMENT".to_string())?;
         let done = ready(service::answer(&MadeUp, &cfg, &self.pages, op, tool, &parsed, &self.policy, request_id));
         match done {
             Ok(out) => Ok(out.get("envelope").cloned().unwrap_or(Value::Null)),
             Err(f) if f.fields.get("refused") == Some(&json!(true)) => Err(f.code().unwrap_or("INTERNAL_ERROR").to_string()),
             Err(_) => Err("INTERNAL_ERROR".into()),
         }
+    }
+}
+
+impl xenonet_mcp::fixture::Fixture for Fixture {
+    fn read(&self, operation: &str, args: &Value, request_id: &str) -> Answer {
+        self.read_one(operation, args, request_id)
     }
 }
 
@@ -130,7 +132,7 @@ impl ReadHost for MadeUp {
         Ok(b"fixture".to_vec())
     }
     async fn check(&self, tool: &str, envelope: &Value) -> Result<bool, Failure> {
-        Ok(schema::result(tool).parse(envelope).is_ok())
+        Ok(schema::answers(tool, envelope))
     }
 }
 
@@ -154,11 +156,11 @@ mod tests {
         let f = Fixture::new("0.0.0-test");
         for (tool, op) in schema::OPERATIONS {
             let args = if tool == "xenonet_session" { json!({ "session_id": "claude:0190fa00-0000-7000-8000-000000000001" }) } else { json!({}) };
-            let r = f.read(op, &args, "r_00000000-0000-4000-8000-000000000000");
+            let r = f.read_one(op, &args, "r_00000000-0000-4000-8000-000000000000");
             assert!(r.ok, "{tool}: {}", r.envelope);
             assert!(r.envelope["warnings"].as_array().unwrap().iter().any(|w| w["code"] == json!("FIXTURE_DATA")), "{tool}");
         }
-        let bad = f.read("sessions", &json!({ "path": "/etc" }), "r_00000000-0000-4000-8000-000000000001");
+        let bad = f.read_one("sessions", &json!({ "path": "/etc" }), "r_00000000-0000-4000-8000-000000000001");
         assert_eq!((bad.ok, bad.envelope["code"].clone()), (false, json!("INVALID_ARGUMENT")));
     }
 }

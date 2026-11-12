@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-console"
-description = "What only the console has: its themes (built in and your own), the environments around the map, the Spotify remote, the system panel, opening things and the xenonet command, the client of XenoNet Dev's control channel and the steps scripts run through it."
+description = "What only the console has: its themes (built in and your own), the environments around the map, the Spotify remote, the system panel, the client of XenoNet Dev's control channel and the steps scripts run through it."
 version.workspace = true
 edition.workspace = true
 # iroh, through xenonet-net, needs Rust 1.91.
@@ -17,18 +17,11 @@ regex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+# The core traits its cores implement, the instances XenoNet Dev runs as,
+# and the HTTP client of a running XenoNet.
 xenonet-api.workspace = true
-xenonet-components.workspace = true
 xenonet-os.workspace = true
 xenonet-text.workspace = true
-# Your credential store (Spotify's tokens), the openers of the apps'
-# URLs, and what the system panel reads.
-xenonet-actors.workspace = true
-xenonet-adapter.workspace = true
-
-[dev-dependencies]
-# The apps' openers, which their adapters put in place.
-xenonet-platforms.workspace = true
 
 [lints]
 workspace = true

@@ -72,7 +72,7 @@ fn device_id() -> String {
 }
 // The store's project id, or a made-up project's in made-up answers.
 fn project_id() -> String {
-    xenonet_assistant::PROJECT_ID.to_string()
+    xenonet_model::assistant::PROJECT_ID.to_string()
 }
 fn session_id() -> String {
     format!("^(claude|codex|grok):{UUID}$")

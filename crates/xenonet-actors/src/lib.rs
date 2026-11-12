@@ -1,8 +1,8 @@
 //! Actors (docs/design/actors/interface.md): the programs you allow in
 //! XenoNet: the registry (`registry`), registering them (`registration`),
 //! what they report (`reports`), waking them (`wake`), their remote
-//! connections (`connections`), their tokens (`tokens`) and the files that
-//! keep them (`token_file`); and the secret stores (`secret_store`, and
+//! connections (`connections`) and their tokens (`tokens`, whose files are
+//! xenonet-api's `token_file`); and the secret stores (`secret_store`, and
 //! `secrets`, which runs your credential store's program or keeps them in
 //! memory). Each module asks what it needs of the world
 //! through a trait of its own, and keeps its rows through a store trait of
@@ -23,7 +23,6 @@ pub mod secret_store;
 pub mod secrets;
 pub mod spend;
 pub mod store;
-pub mod token_file;
 pub mod tokens;
 pub mod wake;
 pub mod you;

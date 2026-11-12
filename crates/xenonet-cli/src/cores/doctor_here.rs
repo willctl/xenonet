@@ -1,7 +1,8 @@
-//! The doctor run on this machine, with no XenoNet to ask, which the
-//! doctor tool and `xenonet doctor` take when nothing answers:
-//! xenonet-doctor's checks, asking this machine for what they read. The
-//! checks that need XenoNet running are skipped by the checks themselves.
+//! The doctor run on this machine, with no XenoNet to ask, which `xenonet
+//! doctor` takes when nothing answers (and so the MCP servers' doctor
+//! tool, which runs `xenonet doctor --json` then): xenonet-doctor's
+//! checks, asking this machine for what they read. The checks that need
+//! XenoNet running are skipped by the checks themselves.
 //!
 //! Each check runs on a thread of its own and gets 8 seconds, side by side
 //! with the others.
@@ -386,7 +387,7 @@ fn check(id: &str, facts: Value, m: &Machine) -> Value {
 
 /// The checks the binary knows no Node for: it is the runtime.
 fn runtime_check() -> Value {
-    json!({ "status": "ok", "detail": format!("the xenonet binary {}, which needs no Node", crate::tools::VERSION) })
+    json!({ "status": "ok", "detail": format!("the xenonet binary {}, which needs no Node", crate::VERSION) })
 }
 
 /// runDoctor(machine({ paths }), { only }): every check (or those `only`
@@ -440,43 +441,6 @@ pub fn checkup_here(paths: &Paths, only: Option<&[String]>) -> Value {
     r
 }
 
-/// The folders of the XenoNet asked about, as config.js and workspace.js
-/// find them in a process with no --demo: XENONET_STATE_DIR and
-/// XENONET_CACHE_DIR, else the instance's own (XenoNet Dev's when that's
-/// the one asked about, `name`), and the projects folder in use.
-pub fn paths_for(name: Option<&str>) -> Paths {
-    let home = home();
-    let app = |kind: &str, n: &str| {
-        xenonet_os::dirs::app_dir(
-            kind,
-            std::env::var(if kind == "state" { "XDG_STATE_HOME" } else { "XDG_CACHE_HOME" }).ok().as_deref(),
-            std::env::var("LOCALAPPDATA").ok().as_deref(),
-            platform(),
-            &home,
-            n,
-        )
-    };
-    let dir = |kind: &str, v: &str| match var(v) {
-        Some(set) => xenonet_os::paths::resolve(&set),
-        None => xenonet_os::paths::resolve(&app(kind, name.unwrap_or("XenoNet"))),
-    };
-    let (state_dir, cache_dir) = (dir("state", "XENONET_STATE_DIR"), dir("cache", "XENONET_CACHE_DIR"));
-    let claude = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_else(|_| xenonet_os::paths::join(&home, ".claude"));
-    // The folder you chose is kept in the store, which the service reads:
-    // with none running, the projects folder is XENONET_PROJECTS_DIR's or
-    // the default.
-    let root = xenonet_state::workspace::root(std::env::var("XENONET_PROJECTS_DIR").ok().as_deref(), None, &home);
-    json!({
-        "homeDir": home,
-        "projectsDir": root["path"],
-        "codexHome": xenonet_os::paths::resolve(&std::env::var("CODEX_HOME").unwrap_or_else(|_| xenonet_os::paths::join(&home, ".codex"))),
-        "grokHome": xenonet_os::paths::resolve(&std::env::var("GROK_HOME").unwrap_or_else(|_| xenonet_os::paths::join(&home, ".grok"))),
-        "claudeProjectsDir": xenonet_os::paths::join(&claude, "projects"),
-        "stateDir": state_dir,
-        "cacheDir": cache_dir,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,7 +450,7 @@ mod tests {
     }
 
     fn tmp(name: &str) -> String {
-        let d = std::env::temp_dir().join(format!("xenonet-mcp-doctor-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("xenonet-cli-doctor-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d.to_string_lossy().into_owned()

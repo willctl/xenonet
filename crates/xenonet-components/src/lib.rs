@@ -1,7 +1,6 @@
 //! XenoNet's install: the xenonet command on your PATH (`command`), the
-//! service's settings (`config`), the instances XenoNet Dev runs as
-//! (`instances`) and its version (`version`); and its components, the
-//! service and the Tools, released and updated on their own. Their packages are checked against
+//! service's settings (`config`) and its version (`version`); and its
+//! components, the service and the Tools, released and updated on their own. Their packages are checked against
 //! their release's hash and size before anything is unpacked, unpacked
 //! only when every entry is a plain file or folder inside the package, and
 //! switched to only once the new runtime passes its startup check; a
@@ -17,7 +16,6 @@ pub mod console;
 pub mod console_policy;
 pub mod host;
 pub mod install;
-pub mod instances;
 pub mod packages;
 pub mod protocol;
 pub mod rpc;

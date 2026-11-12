@@ -101,7 +101,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = (xenonet_actors::tokens::is_token(a), xenonet_actors::tokens::is_gateway_token(a), xenonet_api::bearer::bearer_of(a));
             let _ = (xenonet_actors::secret_store::is_target(a), xenonet_actors::secret_store::is_secret(a));
             let _ = xenonet_os::private_file::others_in(a, b);
-            let _ = xenonet_actors::token_file::token_file_refusal(a, false, Some("/home/nova/Projects"));
+            let _ = xenonet_api::token_file::token_file_refusal(a, false, Some("/home/nova/Projects"));
         }
         _ => {
             if let Some(Value::Object(custom)) = &v {

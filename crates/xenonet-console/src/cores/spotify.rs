@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use xenonet_actors::secrets::Secrets;
 use xenonet_api::cores::{CoreError, Kind, Spotify, R};
 use xenonet_api::wire::Emitter;
 use xenonet_os::sync::Locked;
@@ -18,14 +17,24 @@ fn spotify_error(e: SpotifyError) -> CoreError {
     CoreError::of(Kind::Spotify, e.status, e.code, e.message)
 }
 
+/// Where the refresh token is kept: your computer's credential store, or
+/// memory for the demo and tests. The composition root gives it.
+#[async_trait]
+pub trait Vault: Send + Sync {
+    async fn has(&self, target: &str) -> Result<bool, String>;
+    async fn get(&self, target: &str) -> Result<Option<String>, String>;
+    async fn set(&self, target: &str, secret: &str, comment: &str) -> Result<bool, String>;
+    async fn remove(&self, target: &str) -> Result<bool, String>;
+}
+
 pub struct SpotifyRemote {
     core: Mutex<core::Spotify>,
-    secrets: Arc<Secrets>,
+    secrets: Arc<dyn Vault>,
     emitter: Emitter,
 }
 
 impl SpotifyRemote {
-    pub fn new(file: &str, port: u16, secrets: Arc<Secrets>, emitter: Emitter) -> Self {
+    pub fn new(file: &str, port: u16, secrets: Arc<dyn Vault>, emitter: Emitter) -> Self {
         SpotifyRemote { core: Mutex::new(core::Spotify::new(file, json!(port))), secrets, emitter }
     }
 
@@ -213,6 +222,27 @@ impl Spotify for DemoSpotify {
 mod tests {
     use super::*;
 
+    // A vault in memory.
+    #[derive(Default)]
+    struct Memory(Mutex<std::collections::HashMap<String, String>>);
+
+    #[async_trait]
+    impl Vault for Memory {
+        async fn has(&self, target: &str) -> Result<bool, String> {
+            Ok(self.0.locked().contains_key(target))
+        }
+        async fn get(&self, target: &str) -> Result<Option<String>, String> {
+            Ok(self.0.locked().get(target).cloned())
+        }
+        async fn set(&self, target: &str, secret: &str, _comment: &str) -> Result<bool, String> {
+            self.0.locked().insert(target.into(), secret.into());
+            Ok(true)
+        }
+        async fn remove(&self, target: &str) -> Result<bool, String> {
+            Ok(self.0.locked().remove(target).is_some())
+        }
+    }
+
     #[tokio::test]
     async fn the_demo_plays_and_pauses_and_never_reaches_spotify() {
         let s = DemoSpotify::new();
@@ -229,7 +259,7 @@ mod tests {
     #[tokio::test]
     async fn without_an_app_nothing_is_asked_of_spotify() {
         let dir = std::env::temp_dir().join(format!("xenonet-wire-spotify-{}", std::process::id()));
-        let s = SpotifyRemote::new(&dir.join("spotify.json").to_string_lossy(), 47999, Arc::new(Secrets::memory()), Emitter::new());
+        let s = SpotifyRemote::new(&dir.join("spotify.json").to_string_lossy(), 47999, Arc::new(Memory::default()), Emitter::new());
         let st = s.status().await.unwrap();
         assert_eq!(st["connected"], false);
         assert!(s.set_app(&json!("not an id")).unwrap_err().is(Kind::Spotify));
