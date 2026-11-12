@@ -646,6 +646,26 @@ pub fn share(paths: &AppPaths, root: &Path, address: &SpaceId, key: &str, endpoi
     })
 }
 
+/// Unshares `address` from another Xenolith's context key: a side entry, valid at any place in the
+/// chain and in force from where each holder stores it (review revision 10b), so narrowing never
+/// waits on anyone. Signed as the owner, on the curator's machine.
+pub fn unshare(paths: &AppPaths, root: &Path, address: &SpaceId, key: &str, owner: &dyn Signer, context: &dyn Signer, now: i64) -> Result<Value, String> {
+    let subject = Subject::parse(&format!("key:{key}")).ok_or_else(|| format!("{key} isn't a Xenolith's context key id (xns1_…)"))?;
+    locked(paths, || {
+        let (_, mut space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet"))?;
+        if space.view().curator.id() != context.public().id() {
+            return Err(format!("{address} is curated by another Xenolith ({}): unshare it there", space.view().curator.id()));
+        }
+        // The owner's alone: a side entry has no curator's signature.
+        let mut side = space.unshare(subject, None, now);
+        side.sign(&owner.public().id(), owner, None).map_err(|e| e.message)?;
+        space.offer_side(side).map_err(|e| e.message)?;
+        save_space(paths, &space, &mut unrecorded)?;
+        mark(root, address, &space, context, &mut unrecorded)?;
+        Ok(describe(&space))
+    })
+}
+
 /// Takes what another holder sent of a space this Xenolith holds (`chain`, as `Space::to_json`
 /// writes it): each entry and side entry it doesn't hold, by the chain's own rules, any order.
 /// One the rules refuse is left out; the rest stand. Returns whether anything was taken.

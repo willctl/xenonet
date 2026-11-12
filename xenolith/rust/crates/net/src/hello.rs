@@ -14,6 +14,10 @@
 //! 6): each with its genesis hash and the digest of what the sender holds of it, so a member that
 //! holds nothing of a space shared with it yet hears of it, and a space that doesn't admit the
 //! peer is never named to it.
+//!
+//! It also says where the sender's endpoint is (`addrs`) and, from a curator, where the other members
+//! of those spaces were last (`peers`), so members can reach each other with the curator away
+//! (revision 14's holders). Those are hints: QUIC checks the endpoint id at every dial.
 
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, VecDeque};
@@ -28,6 +32,8 @@ pub const SKEW_MS: i64 = 5 * 60 * 1000;
 /// How long a nonce is remembered.
 const NONCE_MS: i64 = 10 * 60 * 1000;
 const MAX_SPACES: usize = 256;
+const MAX_PEERS: usize = 256;
+const MAX_AT: usize = 8;
 
 /// A space as a hello tells of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,11 +43,26 @@ pub struct Told {
     pub digest: String,
 }
 
-/// A hello that checked: the peer's context key and the spaces it told of.
+/// A hello that checked: the peer's context key, the spaces it told of, where it is and where it
+/// says the other members it told of are.
 #[derive(Clone, Debug)]
 pub struct Checked {
     pub key: VerifyingKey,
     pub spaces: Vec<Told>,
+    pub at: Vec<String>,
+    pub peers: Vec<(String, Vec<String>)>,
+}
+
+/// Where a hello says endpoints are: its own addresses, and other members'.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Where {
+    pub at: Vec<String>,
+    pub peers: Vec<(String, Vec<String>)>,
+}
+
+fn addrs(v: Option<&Value>) -> Option<Vec<String>> {
+    let list = v?.as_array().filter(|l| l.len() <= MAX_AT)?;
+    list.iter().map(|a| a.as_str().filter(|a| a.parse::<std::net::SocketAddr>().is_ok()).map(String::from)).collect()
 }
 
 fn hex(b: &[u8]) -> String {
@@ -57,7 +78,7 @@ fn message(fields: &Map<String, Value>, exporter: Option<&[u8; 32]>) -> Vec<u8> 
 
 /// This Xenolith's hello to `to` from `from` (endpoint ids), at `now` (ms), on a connection whose
 /// keying material is `exporter`.
-pub fn make(key: &dyn Signer, from: &[u8; 32], to: &[u8; 32], spaces: &[Told], exporter: Option<&[u8; 32]>, now: i64) -> Option<Value> {
+pub fn make(key: &dyn Signer, from: &[u8; 32], to: &[u8; 32], spaces: &[Told], at: &Where, exporter: Option<&[u8; 32]>, now: i64) -> Option<Value> {
     let mut f = Map::new();
     f.insert("v".into(), json!(1));
     f.insert("key".into(), key.public().to_json());
@@ -67,6 +88,8 @@ pub fn make(key: &dyn Signer, from: &[u8; 32], to: &[u8; 32], spaces: &[Told], e
     f.insert("at".into(), json!(now));
     f.insert("bound".into(), json!(exporter.is_some()));
     f.insert("spaces".into(), json!(spaces.iter().map(|t| json!({ "space": t.space, "genesis": t.genesis, "digest": t.digest })).collect::<Vec<_>>()));
+    f.insert("addrs".into(), json!(at.at.iter().take(MAX_AT).collect::<Vec<_>>()));
+    f.insert("peers".into(), json!(at.peers.iter().take(MAX_PEERS).map(|(ep, a)| json!({ "endpoint": ep, "at": a.iter().take(MAX_AT).collect::<Vec<_>>() })).collect::<Vec<_>>()));
     let sig = key.sign(Purpose::SYNC_HELLO, &message(&f, exporter)).ok()?;
     f.insert("sig".into(), json!(b64(&sig)));
     Some(Value::Object(f))
@@ -129,11 +152,17 @@ pub fn check(v: Option<&Value>, me: &[u8; 32], from: &[u8; 32], exporter: Option
             _ => return Err(refused("its spaces")),
         }
     }
+    let at = addrs(v.get("addrs")).ok_or_else(|| refused("its addresses"))?;
+    let mut peers = vec![];
+    for p in v.get("peers").and_then(Value::as_array).filter(|l| l.len() <= MAX_PEERS).ok_or_else(|| refused("its peers"))? {
+        let ep = p.get("endpoint").and_then(Value::as_str).filter(|e| xenonet_log::space::is_endpoint_id(e)).ok_or_else(|| refused("its peers"))?;
+        peers.push((ep.to_string(), addrs(p.get("at")).ok_or_else(|| refused("its peers"))?));
+    }
     // Last, so a hello refused for anything else doesn't use up its nonce.
     if !nonces.take(nonce, now) {
         return Err(refused("it was taken before (a replay)"));
     }
-    Ok(Checked { key, spaces })
+    Ok(Checked { key, spaces, at, peers })
 }
 
 /// Which keys each endpoint may speak as, and in which spaces, by this Xenolith's chains and
@@ -153,6 +182,10 @@ mod tests {
         SeedSigner::from_seed(&[n; 32], KeyHome::File).unwrap()
     }
 
+    fn here() -> Where {
+        Where { at: vec!["127.0.0.1:47851".into()], peers: vec![("ab".repeat(32), vec!["10.0.0.2:47851".into()])] }
+    }
+
     fn told() -> Vec<Told> {
         vec![Told { space: "spc_abcdefghijklmnopqrstuvwxyz234567".into(), genesis: "g".into(), digest: "d".into() }]
     }
@@ -161,10 +194,11 @@ mod tests {
     fn a_hello_checks_on_its_own_connection_once() {
         let k = key(7);
         let x1 = [9u8; 32];
-        let h = make(&k, &A, &B, &told(), Some(&x1), T).unwrap();
+        let h = make(&k, &A, &B, &told(), &here(), Some(&x1), T).unwrap();
         let nonces = Nonces::default();
         let c = check(Some(&h), &B, &A, Some(&x1), &nonces, T + 1000).unwrap();
         assert_eq!((c.key.id(), c.spaces), (k.public().id(), told()));
+        assert_eq!(Where { at: c.at, peers: c.peers }, here(), "where it and the others are, as signed");
         // The same bytes again, on the same connection or another: refused.
         assert!(check(Some(&h), &B, &A, Some(&x1), &nonces, T + 2000).unwrap_err().contains("replay"));
         let fresh = Nonces::default();
@@ -175,7 +209,7 @@ mod tests {
     #[test]
     fn a_hello_is_refused_for_another_pair_a_stale_time_a_changed_field_or_none() {
         let k = key(7);
-        let h = make(&k, &A, &B, &told(), None, T).unwrap();
+        let h = make(&k, &A, &B, &told(), &here(), None, T).unwrap();
         let n = Nonces::default();
         assert!(check(Some(&h), &A, &B, None, &n, T).is_err(), "from and to swapped");
         assert!(check(Some(&h), &B, &[3; 32], None, &n, T).is_err(), "from another endpoint");
@@ -183,6 +217,9 @@ mod tests {
         let mut lied = h.clone();
         lied["spaces"] = json!([]);
         assert!(check(Some(&lied), &B, &A, None, &n, T).unwrap_err().contains("signature"));
+        let mut moved = h.clone();
+        moved["addrs"] = json!(["10.9.9.9:1"]);
+        assert!(check(Some(&moved), &B, &A, None, &n, T).unwrap_err().contains("signature"), "an address changed on the way");
         let mut other = h.clone();
         other["key"] = key(8).public().to_json();
         assert!(check(Some(&other), &B, &A, None, &n, T).unwrap_err().contains("signature"), "another key's name on it");

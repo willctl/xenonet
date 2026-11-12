@@ -11,6 +11,9 @@
 //!   curator alone (review revision 12); the curator's pages, removals and log days (`ctx.page`,
 //!   `ctx.remove`, `ctx.log`), sent to every member. What it took of other feeds is `Feeds`, a
 //!   xenonet-log `FeedStore` per space, so each entry is applied once, in its author's order.
+//! - **Holders.** A member keeps the curator's entries it took (`Relay`, `<state>/sync/held/`) and
+//!   where the other members were said to be (`Addrs`), so with the curator away one member fills
+//!   another (review revision 14; xenolith-net's engine decides who is served what).
 //! - **Texts apart.** An entry names its text by SHA-256 (`text: {sha256, bytes}`) and the text
 //!   travels beside it; texts are kept in `<state>/sync/blobs/` by that hash, so `forget` can drop
 //!   them and the entries still serve (revision 13).
@@ -444,6 +447,99 @@ impl Outbox {
 
     pub fn head(&self) -> Pos {
         self.entries.last().map_or(Pos::ORIGIN, FeedEntry::pos)
+    }
+}
+
+// ---------------------------------------------------------------- what a member holds
+
+/// The curator's entries a member took, kept so it can serve them to another member while the
+/// curator is away (review revision 14): `<state>/sync/held/<spc>.jsonl`, one entry a line, each
+/// signed by the curator that wrote it. Only the curator's kinds are kept here, never a note
+/// (revision 12); their texts stay in the blobs, where a forget drops them.
+pub struct Relay {
+    file: PathBuf,
+    entries: BTreeMap<(String, Pos), FeedEntry>,
+}
+
+/// The kinds only a curator writes: what members take and hold for each other.
+pub fn is_curators(kind: Kind) -> bool {
+    matches!(kind, Kind::CtxPage | Kind::CtxRemove | Kind::CtxLog | Kind::CtxForget | Kind::CtxSnapshot)
+}
+
+impl Relay {
+    pub fn load(paths: &AppPaths, space: &str) -> Relay {
+        let file = dir(paths).join("held").join(format!("{space}.jsonl"));
+        let entries = fs::read_to_string(&file)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| FeedEntry::parse(&v).ok())
+            .filter(|e| e.group == space && is_curators(e.kind))
+            .map(|e| ((e.author.clone(), e.pos()), e))
+            .collect();
+        Relay { file, entries }
+    }
+
+    /// Keeps `e`, appended to the file; one held already, or not a curator's kind, is left.
+    pub fn keep(&mut self, e: &FeedEntry) -> Result<(), String> {
+        let key = (e.author.clone(), e.pos());
+        if !is_curators(e.kind) || self.entries.contains_key(&key) {
+            return Ok(());
+        }
+        if let Some(p) = self.file.parent() {
+            fs::create_dir_all(p).map_err(|err| format!("cannot make {}: {err}", wiki::disp(p)))?;
+        }
+        let mut f = fs::OpenOptions::new().create(true).append(true).open(&self.file).map_err(|err| format!("cannot write {}: {err}", wiki::disp(&self.file)))?;
+        f.write_all(format!("{}\n", e.to_json()).as_bytes()).map_err(|err| format!("cannot write {}: {err}", wiki::disp(&self.file)))?;
+        self.entries.insert(key, e.clone());
+        Ok(())
+    }
+
+    /// `author`'s entries held here from `from` on, in order.
+    pub fn from(&self, author: &str, from: Pos) -> Vec<FeedEntry> {
+        self.entries.range((author.to_string(), from)..).take_while(|((a, _), _)| a == author).map(|(_, e)| e.clone()).collect()
+    }
+}
+
+// ---------------------------------------------------------------- where members are
+
+/// Where each member's endpoint was last said to be (`<state>/sync/addrs.json`): from its own
+/// hello, or from the curator's, which passes on its members' to each other so they can reach
+/// each other with the curator away. Hints only: QUIC checks the endpoint id at every dial.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Addrs(pub BTreeMap<String, Vec<String>>);
+
+/// The most addresses kept for one endpoint.
+pub const MAX_ADDRS: usize = 8;
+
+impl Addrs {
+    fn file(paths: &AppPaths) -> PathBuf {
+        dir(paths).join("addrs.json")
+    }
+
+    pub fn load(paths: &AppPaths) -> Addrs {
+        let v = read_json(&Addrs::file(paths)).unwrap_or(Value::Null);
+        let mut m = BTreeMap::new();
+        for (ep, list) in v["addrs"].as_object().into_iter().flatten() {
+            if is_endpoint(ep) {
+                m.insert(ep.clone(), list.as_array().into_iter().flatten().filter_map(Value::as_str).filter(|a| a.parse::<std::net::SocketAddr>().is_ok()).take(MAX_ADDRS).map(String::from).collect());
+            }
+        }
+        Addrs(m)
+    }
+
+    /// Records `addrs` for `endpoint`; whether that changed anything.
+    pub fn put(&mut self, endpoint: &str, addrs: &[String]) -> bool {
+        let list: Vec<String> = addrs.iter().filter(|a| a.parse::<std::net::SocketAddr>().is_ok()).take(MAX_ADDRS).cloned().collect();
+        if !is_endpoint(endpoint) || list.is_empty() || self.0.get(endpoint) == Some(&list) {
+            return false;
+        }
+        self.0.insert(endpoint.to_string(), list);
+        true
+    }
+
+    pub fn save(&self, paths: &AppPaths) -> Result<(), String> {
+        write_json(&Addrs::file(paths), &json!({ "v": 1, "addrs": self.0 }))
     }
 }
 
@@ -899,6 +995,38 @@ pub fn is_note(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_member_holds_only_the_curators_kinds_once_each_and_serves_them_in_order() {
+        let base = std::env::temp_dir().join(format!("xenolith-relay-{}", random_hex(8)));
+        let env = [("XENOLITH_HOME".to_string(), base.to_string_lossy().to_string())].into_iter().collect();
+        let paths = AppPaths::from_env(&env);
+        let key = xenonet_id::sign::SeedSigner::from_seed(&[5; 32], xenonet_id::sign::KeyHome::File).unwrap();
+        let author = xenonet_id::sign::Signer::public(&key).id();
+        let space = "spc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut w = Writer::resume(&author, space, 7, 0, 0, Link::ORIGIN, Link::ORIGIN);
+        let page = w.write(&key, Kind::CtxPage, 1, json!({ "slug": "a", "epoch": 0 })).unwrap();
+        let note = w.write(&key, Kind::CtxNote, 2, json!({ "title": "t" })).unwrap();
+        let log = w.write(&key, Kind::CtxLog, 3, json!({ "date": "2026-11-11", "epoch": 0 })).unwrap();
+        let mut r = Relay::load(&paths, space);
+        for e in [&page, &note, &log, &page] {
+            r.keep(e).unwrap();
+        }
+        let again = Relay::load(&paths, space);
+        let held: Vec<Kind> = again.from(&author, Pos::ORIGIN).iter().map(|e| e.kind).collect();
+        assert_eq!(held, [Kind::CtxPage, Kind::CtxLog], "never a note, each once, kept across a restart");
+        assert_eq!(again.from(&author, Pos::new(7, 2)).len(), 1, "from a place on");
+        assert!(again.from("xns1_other", Pos::ORIGIN).is_empty());
+
+        let mut a = Addrs::load(&paths);
+        let ep = "ab".repeat(32);
+        assert!(a.put(&ep, &["127.0.0.1:47851".into(), "not an address".into()]));
+        assert!(!a.put(&ep, &["127.0.0.1:47851".into()]), "the same again changes nothing");
+        assert!(!a.put("short", &["127.0.0.1:1".into()]), "no endpoint id");
+        a.save(&paths).unwrap();
+        assert_eq!(Addrs::load(&paths).0.get(&ep), Some(&vec!["127.0.0.1:47851".to_string()]));
+        let _ = fs::remove_dir_all(&base);
+    }
     use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
     use xenonet_log::feed::{Feed, Offer};
 

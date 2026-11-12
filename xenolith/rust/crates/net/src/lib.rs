@@ -9,7 +9,8 @@
 //!   followed from one (revision 18: no endpoint without a peer).
 //! - **Admission.** Each space's members are its chain's key subjects, each with the endpoint id
 //!   its share names; a member admits its curator, from the chain or, before the chain is here,
-//!   from its follow record. A connection from any other endpoint is refused before anything is
+//!   from its follow record, and the chain's other members, which may hold the curator's feed for
+//!   it (the engine's holders). A connection from any other endpoint is refused before anything is
 //!   read (revision 15), and a hello whose context key isn't the one bound to its endpoint ends the
 //!   connection (`hello`).
 //! - **Threads.** One thread runs the endpoint on a tokio runtime of its own, and never blocks:
