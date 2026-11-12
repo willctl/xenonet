@@ -19,8 +19,9 @@ its rules for working beside other agents.
   (xenolith-mcp: the MCP server's tools, resources and prompts), `crates/cli` (`xenolith`: the
   stdio server, the session hook, the commands and the installer, on the core alone, since the hook starts it for every conversation), `crates/service`
   (`xenolith-service`: the HTTP service, the window API, the curator and the Windows service),
-  `crates/net` (xenolith-net: Xenolith between machines on xenonet-net, so iroh and tokio; only
-  the service takes it) and `crates/tray` (`xenolith-tray`). Nothing but xenolith-net and the
+  `crates/net` (xenolith-net: Xenolith between machines on xenonet-net, `xenolith/sync/2` on its
+  own endpoint, so iroh and tokio; only the service takes it; what sync keeps in
+  `<state>/sync/` and what its entries do to the folder are the core's `sync.rs`) and `crates/tray` (`xenolith-tray`). Nothing but xenolith-net and the
   service may reach tokio, reqwest, rustls or iroh (`scripts/light.mjs`).
 - `ui/`: the window (React), built by `npm run build` into `dist/runtime/ui`.
 - `test/*.mjs`: the behaviour suites, run against the Rust programs. `eval/` and `scripts/eval.mjs`:
@@ -108,6 +109,10 @@ A release is a tag `xenolith-v<version>` and four archives, built by
 | The context signing key, the transport key and the standalone owner key are separate files in `<state>/keys`; one that can't be read is an error, never replaced by a new key | `keys::Keys::load_or_create`, `keys::tests`, `test/tokens.mjs` |
 | The standalone owner key signs only for a request with the owner key; a space it owns is weaker, shares into no network, and moves to a person only, never to a key | `keys::OwnerSigner::signer`; xenonet-log's space policy (`xenonet_log::space`), checked with this Xenolith's own keys in `keys::tests` |
 | Each space's chain lives in the state folder; a space folder's `xenolith-space.json` is information only, signed by the context key, and decides nothing; a space followed from another machine is never founded here | `chains::reconcile`, `chains::tests`, `test/spaces.mjs` |
+| Between machines a space's members are its chain's key subjects, each admitted only from the endpoint id its share names, and a member admits its curator by the chain or its follow record: any other endpoint is refused before anything is read, and a hello whose context key isn't the one bound to its endpoint, or that was signed for another connection, ends it | `xenolith_net::hello`, `engine::Side::hello_ext_in`, `crates/net/tests/sync.rs`, `test/sync.mjs` |
+| Notes and copy edits go to the curator alone; a member takes only the curator's pages, removals, log days and forgets, of the epoch its chain is at; a peer's note is never `user`; a text travels beside its entry, named by hash, so a forget drops it and the entry stays | `engine::Worker::envelope`, `sync::take`, `sync::tests`, `test/sync.mjs` |
+| Sync starts only once the upgrade has run, opens its endpoint only once a space is shared or followed, and uses no relay and no mDNS unless config.json's `sync` names them | `http::start_sync`, `sync::Settings` |
+| The endpoint's thread never waits on a file: what reads or writes one is the worker thread's, through a channel | `xenolith_net::engine`; judgment |
 | On a folder 1.x left, 2.0 founds, marks, moves and binds nothing until `xenolith upgrade --run`, records each change in `<state>/upgrade.json` before making it, and `--undo` takes back exactly those; it never deletes a 1.x file (`xenolith doctor` names them). A program that may make the folder first opens it with `upgrade::open_folder`, never `wiki::ensure_wiki` | `upgrade::tests`, the upgrade tests in `test/spaces.mjs` |
 | Files in the shared context folder are untrusted input (held changes, journals, settings, space markers) | `held::parse_file`, `curator::journal_problem`, `settings::approvals_and_problem`, `chains::reconcile`, and their tests |
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |

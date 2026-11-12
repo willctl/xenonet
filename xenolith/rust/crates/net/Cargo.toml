@@ -11,3 +11,12 @@ publish.workspace = true
 [dependencies]
 xenolith-core.workspace = true
 xenonet-net.workspace = true
+xenonet-log.workspace = true
+xenonet-id.workspace = true
+xenonet-model.workspace = true
+serde_json.workspace = true
+# The endpoint's runtime: one thread, with no more of tokio than xenonet-net already turns on.
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+# The spaces' folders, watched as XenoNet's adapters watch sessions (FSEvents, inotify,
+# ReadDirectoryChangesW), with the root's features, and kqueue beside FSEvents on macOS (engine::Watch).
+notify = { version = "8", default-features = false, features = ["macos_fsevent", "macos_kqueue"] }

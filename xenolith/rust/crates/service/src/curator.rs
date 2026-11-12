@@ -13,8 +13,9 @@
 //!
 //! Each space has its own curator (xenolith_core::spaces): this process runs one for this machine's
 //! space and one for every other space, and starts one for a space created while it runs. A space
-//! this machine followed from another under 1.x (xenolith_core::chains::followed) is curated there,
-//! never here.
+//! whose chain names another Xenolith as its curator (a copy sync keeps here), or that this machine
+//! followed under 1.x, is curated there, never here (xenolith_core::chains::curated_elsewhere): its
+//! notes go to its curator (xenolith-net).
 
 use serde_json::{Value, json};
 use std::io::Read;
@@ -38,7 +39,7 @@ type Others = Arc<Mutex<Vec<(SpaceId, Arc<Curator>, std::thread::JoinHandle<()>)
 fn start_space_curators(root: &Path, cfg: &CuratorCfg, reqlog: &Arc<RequestLog>, others: &Others) -> usize {
     let mut have = others.lock().unwrap();
     let mut started = 0;
-    let followed = xenolith_core::chains::followed(&AppPaths::current());
+    let followed = xenolith_core::chains::curated_elsewhere(&AppPaths::current());
     for id in spaces::list(root).into_iter().filter(|s| !s.is_local() && !followed.contains(&s.to_string())) {
         if have.iter().any(|(s, _, _)| *s == id) {
             continue;
@@ -133,7 +134,7 @@ pub fn run(args: &[String]) -> ! {
     let asks_only = has("--asks-only");
     if once && !asks_only {
         // File what is due in the other spaces first; this machine's space follows below.
-        let followed = xenolith_core::chains::followed(&paths);
+        let followed = xenolith_core::chains::curated_elsewhere(&paths);
         for id in spaces::list(&root).into_iter().filter(|s| !s.is_local() && !followed.contains(&s.to_string())) {
             let c = Arc::new(Curator::new(&spaces::space_dir(&root, &id), cfg.clone(), reqlog.clone(), true, Waker::new()));
             if let Err(e) = c.run() {

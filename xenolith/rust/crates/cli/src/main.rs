@@ -18,6 +18,7 @@
 //!   xenolith upgrade [--run | --undo]   the upgrade from 1.x: a dry run, doing it, taking it back
 //!                                       (see upgrade_cli.rs)
 //!   xenolith doctor [--json]            where the upgrade stands, and what 1.x left
+//!   xenolith sync [status | share | follow]  sync between machines (see sync_cli.rs)
 //!   xenolith --version
 
 mod access_cli;
@@ -33,6 +34,7 @@ mod note_cli;
 mod owner_client;
 mod status_cli;
 mod stdio;
+mod sync_cli;
 mod upgrade_cli;
 
 // The MCP server, shared with xenolith-service.
@@ -49,14 +51,14 @@ fn set_if_unset(k: &str, v: &str) {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith serve [--read-only | --init] | xenolith hook | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space> | bind <space> [--project prj_…] [--run]] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith token create|revoke ... | xenolith audit [verify | tail] | xenolith held [...] | xenolith note \"<title>\" [--body <text>] | xenolith migrate agent-wiki [--dry-run | --run | --resume | --rollback | --finish [--move-wiki] | --update-protocol] [--json] | xenolith status [--port N] [--json] | xenolith upgrade [--run | --undo] [--json] | xenolith doctor [--json] | xenolith --version\n(the HTTP service, the curator and the Windows service: xenolith-service)"
+        "usage: xenolith serve [--read-only | --init] | xenolith hook | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space> | bind <space> [--project prj_…] [--run]] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith token create|revoke ... | xenolith audit [verify | tail] | xenolith held [...] | xenolith note \"<title>\" [--body <text>] | xenolith migrate agent-wiki [--dry-run | --run | --resume | --rollback | --finish [--move-wiki] | --update-protocol] [--json] | xenolith status [--port N] [--json] | xenolith upgrade [--run | --undo] [--json] | xenolith doctor [--json] | xenolith sync [status | share <space> <key> <endpoint> [--level read|append|write] | follow <spc_…> <key> <endpoint> <ip:port>... [--all]] | xenolith --version\n(the HTTP service, the curator and the Windows service: xenolith-service)"
     );
     std::process::exit(2)
 }
 
 /// 1.x's sync and pairing, which sync/2 and joining replace.
 fn gone(what: &str) -> ! {
-    eprintln!("xenolith {what}: 1.x's sync and pairing are gone; spaces sync between machines over xenolith/sync/2 instead");
+    eprintln!("xenolith {what}: 1.x's pairing is gone; spaces sync between machines over xenolith/sync/2 instead (xenolith sync)");
     std::process::exit(2)
 }
 
@@ -95,7 +97,8 @@ fn main() {
         Some(cmd @ ("install" | "uninstall" | "install-service" | "uninstall-service")) => install::main(cmd, &args[1..]),
         Some("forget") => forget::run(&args[1..]),
         Some("migrate") => migrate::main(&args[1..]),
-        Some(cmd @ ("sync" | "pair")) => gone(cmd),
+        Some("sync") => sync_cli::run(&args[1..]),
+        Some("pair") => gone("pair"),
         Some("held") => held_cli::run(&args[1..]),
         Some("note") => note_cli::run(&args[1..]),
         Some("status") => status_cli::run(&args[1..]),

@@ -33,7 +33,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use xenonet_id::codec::{b64, random, unb64};
 use xenonet_id::sign::{Purpose, Signer, VerifyingKey};
-use xenonet_log::space::{Op, Owner, Space, SpacePolicy, found};
+pub use xenonet_log::space::Level;
+use xenonet_log::space::{Op, Owner, Space, SpacePolicy, Subject, found};
 pub use xenonet_model::ids::EntityRef;
 
 /// The marker each space folder gets.
@@ -559,6 +560,116 @@ pub fn bind(paths: &AppPaths, root: &Path, address: &SpaceId, to: EntityRef, own
         save_space(paths, &space, &mut unrecorded)?;
         mark(root, address, &space, context, &mut unrecorded)?;
         Ok(describe(&space))
+    })
+}
+
+// ---------------------------------------------------------------- sync (xenolith/sync/2)
+
+/// A member of a space as own mode admits it: its context key's id, the endpoint id its share
+/// names, and its level. Only a key subject with an endpoint is one: the others (persons,
+/// networks, machines) are shared mode's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Member {
+    pub key: String,
+    pub endpoint: String,
+    pub level: Level,
+}
+
+/// The members of a space by its chain as this Xenolith holds it, unshared ones left out.
+pub fn members(space: &Space) -> Vec<Member> {
+    space
+        .view()
+        .shares
+        .values()
+        .filter_map(|(subject, row)| match (subject, &row.endpoint) {
+            (Subject::Key(k), Some(e)) => space.level(subject).map(|level| Member { key: k.clone(), endpoint: e.clone(), level }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a holder has of a space, as two holders compare it: the ids of every entry and side entry
+/// it holds, in any order, hashed. Equal digests, nothing to send.
+pub fn digest(space: &Space) -> String {
+    let mut ids: Vec<String> = space.entries().iter().chain(space.held()).map(|e| e.hash()).chain(space.sides().map(xenonet_log::space::Side::id)).collect();
+    ids.sort();
+    ids.dedup();
+    b64(&xenonet_id::codec::sha256(ids.join("\n").as_bytes()))
+}
+
+/// Every space this Xenolith holds a chain of, by id, with its folder's address.
+pub fn held(paths: &AppPaths) -> Vec<(Placed, Space)> {
+    let Ok(Some(index)) = Index::load(paths) else { return vec![] };
+    index.spaces.into_iter().filter_map(|p| load_space(paths, &p.id).ok().map(|s| (p, s))).collect()
+}
+
+/// The spaces whose curator is elsewhere, by folder address: the ones 1.x followed, and the ones
+/// whose chain names another context key than this Xenolith's as curator. Their folders are
+/// copies; this machine's curator leaves them alone.
+pub fn curated_elsewhere(paths: &AppPaths) -> BTreeSet<String> {
+    let mine = crate::keys::context_id(paths);
+    let mut out = followed(paths);
+    for (p, s) in held(paths) {
+        if mine.as_deref() != Some(s.view().curator.id().as_str()) {
+            out.insert(p.address.to_string());
+        }
+    }
+    out
+}
+
+/// Shares `address` with another Xenolith: its context key's id and the endpoint id own mode
+/// admits it from, at `level`. Signed as the owner and the curator (this Xenolith), so only the
+/// curator's machine can do it, with the owner key.
+#[allow(clippy::too_many_arguments)]
+pub fn share(paths: &AppPaths, root: &Path, address: &SpaceId, key: &str, endpoint: &str, level: Level, owner: &dyn Signer, context: &dyn Signer, now: i64) -> Result<Value, String> {
+    let subject = Subject::parse(&format!("key:{key}")).ok_or_else(|| format!("{key} isn't a Xenolith's context key id (xns1_…)"))?;
+    if !xenonet_log::space::is_endpoint_id(endpoint) {
+        return Err(format!("{endpoint} isn't an endpoint id (64 hex digits)"));
+    }
+    locked(paths, || {
+        let (_, mut space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet"))?;
+        if space.view().curator.id() != context.public().id() {
+            return Err(format!("{address} is curated by another Xenolith ({}): share it there", space.view().curator.id()));
+        }
+        let after = space.unshares_of(&subject);
+        let mut e = space.next(Op::Share { subject, level, endpoint: Some(endpoint.to_string()), after }, None, now);
+        e.sign(&owner.public().id(), owner, None).map_err(|e| e.message)?;
+        if owner.public().id() != context.public().id() {
+            e.sign(&context.public().id(), context, None).map_err(|e| e.message)?;
+        }
+        space.offer(e).map_err(|e| e.message)?;
+        save_space(paths, &space, &mut unrecorded)?;
+        mark(root, address, &space, context, &mut unrecorded)?;
+        let mut d = describe(&space);
+        d["members"] = json!(members(&space).iter().map(|m| json!({ "key": m.key, "endpoint": m.endpoint, "level": m.level.as_str() })).collect::<Vec<_>>());
+        Ok(d)
+    })
+}
+
+/// Takes what another holder sent of a space this Xenolith holds (`chain`, as `Space::to_json`
+/// writes it): each entry and side entry it doesn't hold, by the chain's own rules, any order.
+/// One the rules refuse is left out; the rest stand. Returns whether anything was taken.
+pub fn merge(paths: &AppPaths, id: &str, chain: &Value) -> Result<bool, String> {
+    locked(paths, || {
+        let mut space = load_space(paths, id)?;
+        let before = digest(&space);
+        let entries: Vec<xenonet_log::space::Entry> = chain["entries"].as_array().into_iter().flatten().filter_map(|e| xenonet_log::space::Entry::parse(e).ok()).collect();
+        // Twice: an entry can follow one that comes after it in the list.
+        for _ in 0..2 {
+            for e in &entries {
+                let _ = space.offer(e.clone());
+            }
+        }
+        for s in chain["sides"].as_array().into_iter().flatten() {
+            if let Ok(s) = xenonet_log::space::Side::parse(s) {
+                let _ = space.offer_side(s);
+            }
+        }
+        if digest(&space) == before {
+            return Ok(false);
+        }
+        save_space(paths, &space, &mut unrecorded)?;
+        Ok(true)
     })
 }
 

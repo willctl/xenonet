@@ -124,6 +124,8 @@ pub struct App {
     /// context key; or why there is none.
     root: Result<xenolith_core::grants::Root, String>,
     bad_tokens: BadTokens,
+    /// Sync between machines (xenolith-net), once the upgrade from 1.x has run.
+    pub sync: OnceLock<xenolith_net::Engine>,
 }
 
 /// Bad tokens per source address: after BAD_TOKENS_PER_MINUTE in a minute, every request with a
@@ -310,6 +312,8 @@ pub fn status_report(app: &App, st: &State) -> Value {
     // Where the upgrade from 1.x stands: while it waits the service works as a folder reader and
     // writer and founds nothing, which isn't a fault, so it never makes the health degraded.
     s.insert("upgrade".into(), xenolith_core::upgrade::status_json(&AppPaths::current()));
+    // Sync between machines: off (null) until the upgrade has run.
+    s.insert("sync".into(), app.sync.get().map_or(Value::Null, xenolith_net::Engine::status));
     if let Some(e) = &st.setup_error {
         s.insert("error".into(), json!(e));
     }
@@ -831,6 +835,28 @@ fn found_spaces(app: &App, root: &std::path::Path) {
     }
 }
 
+/// Starts sync between machines (xenolith_net) once the upgrade from 1.x has run and the keys are
+/// there; until then it does nothing, so a 2.0 that hasn't been upgraded opens no endpoint and
+/// writes nothing a 1.x rollback would find.
+fn start_sync(app: &App, root: &std::path::Path) {
+    if app.sync.get().is_some() {
+        return;
+    }
+    let paths = AppPaths::current();
+    if !xenolith_core::upgrade::stage(&paths).is_ok_and(|s| s.upgraded()) {
+        return;
+    }
+    let Ok(keys) = app.keys.as_ref() else { return };
+    let settings = xenolith_core::sync::Settings::from_config(&app.state.read().unwrap().config);
+    let cfg = xenolith_net::Config { paths, root: root.to_path_buf(), keys: keys.clone(), settings, log: Arc::new(|w: &str| log(w)) };
+    match xenolith_net::Engine::start(cfg) {
+        Ok(e) => {
+            let _ = app.sync.set(e);
+        }
+        Err(e) => log(&format!("sync didn't start: {e}")),
+    }
+}
+
 /// Exit code after an upgrade: not 0, so service managers restart the program.
 pub const UPGRADED_EXIT: i32 = 75;
 
@@ -886,6 +912,7 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
         keys,
         root,
         bad_tokens: BadTokens::default(),
+        sync: OnceLock::new(),
     });
     log(&format!("v{} listening on http://127.0.0.1:{actual}/mcp ({mode} writes); wiki at {wiki_shown}", xenolith_core::VERSION));
 
@@ -901,6 +928,7 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
     }
     if let Some(root) = &root {
         found_spaces(&app, root);
+        start_sync(&app, root);
     }
     let shared = app.clone();
     let handler = move |req: &Request| -> Response {
@@ -951,6 +979,7 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
                 spaces_seen = now;
                 found_spaces(&shared, root);
             }
+            start_sync(&shared, root);
         }
         let Some(exe) = &exe else { continue };
         let now = exe_stamp(exe);

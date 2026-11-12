@@ -96,6 +96,14 @@ fn seed(paths: &AppPaths, what: Use, readers: &[String]) -> Result<[u8; 32], Str
     Err(format!("{} came and went while it was read", file.display()))
 }
 
+/// This Xenolith's context key's id, from its file, without the key: for a program that needs to
+/// know which spaces it curates and never signs (the curator's process). None before the service
+/// made the key.
+pub fn context_id(paths: &AppPaths) -> Option<String> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(Use::Context.file(paths)).ok()?).ok()?;
+    v["keyId"].as_str().filter(|k| k.starts_with("xns1_")).map(String::from)
+}
+
 /// This Xenolith's own endpoint's key. Its secret goes to the transport alone.
 pub struct TransportKey {
     seed: [u8; 32],

@@ -29,6 +29,13 @@ pub fn post(path: &str, body: &Value) -> Result<(u16, Value), String> {
     request(key.port, "POST", path, Some(&key.key), Some(body))
 }
 
+/// GET `path` from the running service (the one whose owner key this user can read), without the
+/// owner key.
+pub fn get(path: &str) -> Result<(u16, Value), String> {
+    let key = key()?;
+    request(key.port, "GET", path, None, None)
+}
+
 /// One HTTP/1.1 request to 127.0.0.1:`port`, with the owner key when given.
 fn request(port: u16, method: &str, path: &str, key: Option<&str>, body: Option<&Value>) -> Result<(u16, Value), String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));

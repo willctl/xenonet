@@ -298,6 +298,8 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             "/api/spaces/bind" => Some(("Binding a space", ", or run `xenolith spaces bind` in a terminal")),
             "/api/upgrade/run" => Some(("Running the upgrade", ", or run `xenolith upgrade --run` in a terminal")),
             "/api/tokens" => Some(("Making a token", ", or run `xenolith token create` in a terminal")),
+            "/api/sync/share" => Some(("Sharing a space with another Xenolith", ", or run `xenolith sync share` in a terminal")),
+            "/api/sync/follow" => Some(("Following a space from another Xenolith", ", or run `xenolith sync follow` in a terminal")),
             "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
             _ => None,
         };
@@ -359,6 +361,11 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
                 by,
                 vec![("action", json!("apply")), ("text", json!(audit::content_hash(text))), ("matches", r.as_ref().ok().map(|v| v["matches"].clone()).unwrap_or(Value::Null))],
             );
+            // What sync keeps of it goes too, here and, for the spaces this Xenolith curates, on
+            // every member (ctx.forget).
+            if let (true, Some(s)) = (r.is_ok(), app.sync.get()) {
+                s.forget(text, ignore_case);
+            }
             r
         } else {
             entry.result = Some("forget preview".into());
@@ -534,6 +541,58 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
                 json_reply(200, &v)
             }
             Err(e) => json_reply(409, &json!({ "error": e })),
+        };
+    }
+    if path == "/api/sync/share" && method == "POST" {
+        // Shares a space this Xenolith curates with another Xenolith: its context key and the
+        // endpoint id own mode admits it from, at a level. Signed as the owner and the curator.
+        let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+        let level = body["level"].as_str().map_or(Some(xenolith_core::chains::Level::Append), xenolith_core::chains::Level::parse);
+        let (Some(space), Some(key), Some(endpoint), Some(level)) =
+            (body["space"].as_str().and_then(|s| xenolith_core::spaces::SpaceId::parse(s).ok()), body["key"].as_str(), body["endpoint"].as_str(), level)
+        else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"space\": \"project:<name>\", \"key\": \"xns1_…\", \"endpoint\": \"<64 hex>\", \"level\": \"read|append|write\"}" }));
+        };
+        let done = app.signers().and_then(|(context, owner)| xenolith_core::chains::share(&AppPaths::current(), wiki_dir, &space, key, endpoint, level, owner, context, xenolith_core::text::now_ms()));
+        audit::best_effort(
+            &AppPaths::current(),
+            "space",
+            by,
+            vec![("space", json!(space.to_string())), ("event", json!("share")), ("key", json!(key)), ("level", json!(level.as_str())), ("done", json!(done.is_ok()))],
+        );
+        return match done {
+            Ok(v) => {
+                if let Some(s) = app.sync.get() {
+                    s.changed();
+                }
+                entry.result = Some("space shared".into());
+                json_reply(200, &v)
+            }
+            Err(e) => json_reply(409, &json!({ "error": e })),
+        };
+    }
+    if path == "/api/sync/follow" && method == "POST" {
+        // Follows a space another Xenolith curates: its id, the curator's context key, its endpoint
+        // id and where it's reached. What a join (xenolith join) will write.
+        let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+        let Some(f) = xenolith_core::sync::Follow::parse(&body) else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"space\": \"spc_…\", \"curator\": \"xns1_…\", \"endpoint\": \"<64 hex>\", \"addrs\": [\"ip:port\"], \"all\": false}" }));
+        };
+        let paths = AppPaths::current();
+        if xenolith_core::chains::held(&paths).iter().any(|(p, _)| p.id == f.space) {
+            return json_reply(409, &json!({ "error": format!("{} is held here already", f.space) }));
+        }
+        let done = xenolith_core::sync::follow(&paths, f.clone());
+        audit::best_effort(&paths, "space", by, vec![("space", json!(f.space)), ("event", json!("follow")), ("curator", json!(f.curator)), ("done", json!(done.is_ok()))]);
+        return match done {
+            Ok(()) => {
+                if let Some(s) = app.sync.get() {
+                    s.changed();
+                }
+                entry.result = Some("space followed".into());
+                json_reply(200, &json!({ "followed": f.to_json() }))
+            }
+            Err(e) => json_reply(500, &json!({ "error": e })),
         };
     }
     if path == "/api/upgrade/run" && method == "POST" {
