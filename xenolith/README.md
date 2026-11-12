@@ -26,7 +26,8 @@ no model runs on the read path.
 
 Everything users run is three Rust programs: `xenolith` (the MCP server over
 stdio, the session hook, the commands and the installer), `xenolith-service`
-(the HTTP service, the curator and the Windows service) and `xenolith-tray`
+(the HTTP service, the curator, sync between machines and the Windows
+service) and `xenolith-tray`
 (the tray or menu bar icon and the Xenolith window). The hook starts `xenolith`
 for every conversation, so it stays small and starts fast. You need Node only
 to build the window. [docs/rust-plan.md](docs/rust-plan.md) covers how
@@ -136,6 +137,36 @@ changes and nothing else, and works with the service stopped. 2.0 never deletes
 a 1.x file: `xenolith doctor` lists them, with any notes that never reached
 their curator, for you to delete once you no longer want a way back to 1.x. A
 folder 2.0 makes itself, where nothing was before, is upgraded from the start.
+Tokens made by 1.x don't work in 2.0: make each client's again with
+`xenolith token create` once the 2.0 service runs ([Tokens](#tokens)).
+
+**Machines that synced under 1.x.** 1.x and 2.0 don't sync with each other,
+so move every machine in one sitting:
+
+1. On each machine that followed spaces from another, with 1.x still
+   running, run `xenolith sync` until `xenolith sync status` shows nothing
+   waiting. Then stop 1.x's service and curator on every machine.
+2. With Xenolith stopped, copy the shared context folder, the config folder
+   and the state folder ([What goes where](#what-goes-where)), and keep the
+   1.10.0 archive.
+3. Install 2.0 on every machine. Run `xenolith upgrade`, read what it would
+   do, then `xenolith upgrade --run`: on the machine that curates the spaces
+   first, then on the others. A machine that followed a space keeps its 1.x
+   copy in `1x-copies/`; the space comes back by the join below.
+4. Let the other machines reach the curating one: UDP 47851 open to them
+   (or the port `sync.bind` names), or a relay in `sync.relays` when they
+   are on other networks.
+5. On the curating machine, `xenolith invite <space>... --level write`. On
+   each other machine, within ten minutes, run the `xenolith join` line it
+   printed and type the code. Check that the owner and the "founded as"
+   hashes `join` prints are the ones `invite` printed.
+6. `xenolith sync status` on both shows the space's members connected.
+
+To go back to 1.x, in this order: run `xenolith upgrade --undo` on each
+machine while 2.0 is still installed (it needs 2.0's manifest), stop 2.0,
+restore the config and state folders from the copy, and install 1.10.0
+again from its archive on every machine. 2.0 files the notes it takes into
+the folder's inbox as 1.x does, so no note is left only in 2.0's state.
 
 ## Moving from agent-wiki
 
@@ -530,14 +561,18 @@ xenolith join xlj1_… --at 192.168.1.20:47851
 An invite works once, for ten minutes, and five wrong codes retire it. The
 joiner proves the code first, and follows nothing until the chains it was sent
 check against the invite and share each space with its own key at its own
-endpoint. Xenolith's own endpoint listens on UDP 47851 (`sync.bind` in
-config.json), only once a space is shared with another Xenolith or an invite
-or a join needs it, and uses no relay and no mDNS unless `sync.relays` or
-`sync.mdns` names them.
+endpoint. It follows every space offered, or those `--only` names; `--all`
+also follows the spaces the curator shares with it later. Xenolith's own
+endpoint listens on UDP 47851 (`sync.bind` in config.json), only once a space
+is shared with another Xenolith or an invite or a join needs it, and uses no
+relay and no mDNS unless `sync.relays` or `sync.mdns` names them.
+`"sync": {"endpoint": "off"}` keeps it closed.
 
 **With XenoNet (shared mode).** On a machine where XenoNet runs, Xenolith also
 syncs over XenoNet's endpoint, with the members of the networks the machine is
-in, and needs no invite for them. Xenolith reaches XenoNet's forward socket in
+in, and needs no invite for them. On Windows, XenoNet's forward is a named
+pipe that isn't built yet, so shared mode is off there and Windows machines
+join by invite. Xenolith reaches XenoNet's forward socket in
 XenoNet's runtime folder (`sync.xenonet.socket` names another; `"sync":
 {"xenonet": "off"}` turns shared mode off), after checking the socket and the
 process on it are your account's, and asks there for an actor grant that names
@@ -569,7 +604,11 @@ xenolith spaces sequence project:atlas < signed-entry.json
 ```
 
 `draft` prints the entry and the act to sign; XenoNet's window signs it with
-the person's device; `sequence` appends it as the curator. The standalone owner
+the person's device; `sequence` appends it as the curator. A space made under
+its name stays tied to its project by that name: `xenolith spaces bind
+<space> --project prj_…` says whether it could be bound to the project's id,
+which takes the person's signature, and the window doesn't offer that act
+yet. The standalone owner
 key alone can share a space into no network and can move it to no one but the
 person. A peer over XenoNet counts only when its hello's grant is rooted at the
 machine that owns the connection's endpoint, by the network's chain, and names
@@ -587,6 +626,8 @@ while the curator is away. Texts travel beside their entries, named by hash, so
 `xenolith forget` drops them on every member of the spaces this Xenolith
 curates. `xenolith sync status` shows this Xenolith's key and endpoint, each
 space's members and who's connected, and shared mode.
+[docs/sync-design.md](docs/sync-design.md) says how sync/2, join/1 and
+shared mode work, and what isn't built yet.
 
 1.x's sync (`/sync/v1`, peer tokens, pairing) is gone, and 1.x and 2.x don't
 sync with each other. `xenolith doctor` names the files 1.x left; 2.0 never
@@ -1017,10 +1058,10 @@ its changes in and keeps the file's line endings.
 Xenolith runs on its own. It is built with some of XenoNet's library crates:
 `xenonet-id` (keys and signatures), `xenonet-log` (signed logs),
 `xenonet-authz` (authorization) and `xenonet-net` (the transport between
-machines), with the base crates they bring (`xenonet-model`, `xenonet-os`,
-`xenonet-text`). It never depends on XenoNet's app: not its service, its
-runtime, its surfaces or its adapters. It needs no XenoNet installed or
-running. If you use XenoNet too, it does
+machines), with the crates they bring (`xenonet-model`, `xenonet-os`,
+`xenonet-text`, and `xenonet-keys` through `xenonet-net`). It never depends
+on XenoNet's app: not its service, its surfaces or its adapters. It needs no
+XenoNet installed or running. If you use XenoNet too, it does
 two things with Xenolith:
 
 - **It shows the shared context.** XenoNet's map reads the folder (pages, the
@@ -1038,15 +1079,20 @@ two things with Xenolith:
 
 ```
 rust/crates/core/      xenolith-core: paths, pages and frontmatter, index, log, search, read, inbox, locks,
-                       request log, secret guard, the curator, Codex runs, Ask's worker, spaces,
-                       access, the audit chain, sync
+                       request log, secret guard, the curator, Codex runs, Ask's worker, spaces and
+                       their chains, keys, grants and access, the audit chain, the upgrade from 1.x,
+                       what sync keeps and does to the folder (sync.rs), what shared mode holds of
+                       XenoNet (xenonet.rs)
 rust/crates/mcp/       xenolith-mcp: the MCP server's tools, resources and prompts, which both programs serve
 rust/crates/cli/       xenolith: serve (MCP over stdio), hook, install and uninstall, migrate agent-wiki
                        (journal, rollback, finish; its fixture tests in src/migrate/tests.rs and
-                       tests/migrate_agent_wiki.rs), spaces, grants, tokens, audit, sync and held changes
+                       tests/migrate_agent_wiki.rs), spaces, grants, tokens, audit, upgrade, doctor,
+                       sync, invite and join, and held changes
 rust/crates/service/   xenolith-service: serve --http (MCP over HTTP, /health, /status, /ui, /api),
-                       curator, service (Windows)
-rust/crates/net/       xenolith-net: Xenolith between machines on XenoNet's xenonet-net (empty so far)
+                       curator, service (Windows), and sync between machines
+rust/crates/net/       xenolith-net: xenolith/sync/2 and xenolith/join/1 on its own iroh endpoint, holders,
+                       and shared mode over XenoNet's forward (docs/sync-design.md); only
+                       xenolith-service takes it
 rust/crates/tray/      xenolith-tray: the tray or menu bar icon, its menu, and the window
 protocol/PROTOCOL.md   rules every session follows (seeded into a new folder; you own its copy)
 protocol/POINTER.md    short global-instruction block
@@ -1062,7 +1108,7 @@ eval/local/            your own real-wiki questions (gitignored)
 test/                  the suites: e2e (two real MCP clients, both transports), curator (fake model),
                        tray, installer, the window (ui), Ask (the fake model drives the real read-only
                        server), portable (Linux/macOS differences), memory-eval, spaces, tokens,
-                       audit, resources, sync, the archive writers, opt-in live and stress tests
+                       audit, resources, sync, join, the archive writers, opt-in live and stress tests
 ```
 
 The suites talk to the programs over MCP, `/api` and their files: `npm test`

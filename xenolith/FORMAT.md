@@ -267,7 +267,7 @@ note's text.
 | `kind` | `log`, or `page` for a suggested page |
 | `app` | the app that sent it |
 | `source` | `user`, `observed`, `external` or `agent` (the default); only the person's own notes are `user` |
-| `by` | who submitted it, as the server knew it: `owner` or `cli` (the person), `local:<client>` (a program on this machine), or a token's subject such as `machine:laptop` |
+| `by` | who submitted it, as the server knew it: `owner` or `cli` (the person), `local:<client>` (a program on this machine), a token's subject such as `actor:hermes`, or, for a note that came by sync, the sending Xenolith's context key (`key:xns1_…`), or `person@<machine>` for the person on another of their machines |
 | `title` | one line |
 | `tags`, `pages` | lists |
 | `submitted` | a time |
@@ -288,7 +288,7 @@ Each note is in one place, which is its status:
 | `inbox/<id>.md` | waiting: pending, retrying or failed, as below |
 | `.curator/done/YYYY/MM/<id>.md` | filed by the curator, with its record in `.curator/audit/YYYY/MM/<id>.json` |
 | `.curator/sent/YYYY/MM/<id>.md` | in a space this machine follows: sent to the space's curator on another machine |
-| `.curator/sync/dead/<id>.md` | in a space this machine follows: refused for good by its curator |
+| `.curator/sync/dead/<id>.md` | refused for good by a curator under 1.x's sync; 2.0 writes none, and `xenolith doctor` names them |
 
 A waiting note's queue state is `.curator/state/<id>.json`, when the curator
 has tried it: `attempts` (a number), `lastError`, `nextAt` (when it is tried
@@ -297,8 +297,10 @@ No file, or `attempts` 0, is pending; `attempts` above 0 is retrying; `dead`
 is failed.
 
 A sent note's file starts with one line before its frontmatter,
-`<!-- sent to <peer> at <time>: <the curator's answer as JSON> -->`, and a
-refused one with `<!-- refused by <peer> at <time>: <reason> -->`.
+`<!-- sent to key:<the curator's context key id> at <time> -->`. A note 1.x
+sent starts with `<!-- sent to <peer> at <time>: <the curator's answer as
+JSON> -->`, and one it was refused with `<!-- refused by <peer> at <time>:
+<reason> -->`.
 
 `context_read` of `note:<id>` puts one status line before the note's text:
 
@@ -310,6 +312,7 @@ refused one with `<!-- refused by <peer> at <time>: <reason> -->`.
 
 ## What this format leaves out
 
-Who may read or write which space (`access.json`), tokens, sync settings and
-the audit chain live in Xenolith's config and state folders, not in this
-folder, and are not part of this format.
+Who may read or write which space (each space's chain and `access.json`),
+tokens, keys, sync settings and what sync keeps, and the audit chain live in
+Xenolith's config and state folders, not in this folder, and are not part of
+this format.
