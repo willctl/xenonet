@@ -1088,11 +1088,11 @@ pub fn relays_of(urls: &[String]) -> Relays {
 /// `relays` (`Nodes`' choice) and the machine's LAN setting, its doors open
 /// for the chains' members; and the tasks that take connections and keep
 /// them up, until the machine stops.
-pub async fn run(c: Weak<Common>, relays: Vec<String>) {
+pub async fn run(c: Weak<Common>, relays: Vec<String>, lan: crate::endpoint::LanLookup) {
     let Some(common) = c.upgrade() else { return };
     let Some(s) = common.shareds().into_iter().next() else { return };
     let Some(key) = s.key() else { return };
-    let settings = Settings { relays: relays_of(&relays), lan: s.opts.lan, bind: s.opts.bind, roots: added_roots(&s.opts.dir).unwrap_or_default() };
+    let settings = Settings { relays: relays_of(&relays), lan, bind: s.opts.bind, roots: added_roots(&s.opts.dir).unwrap_or_default() };
     // The members of its networks on the ALPNs it forwards for actors too.
     let forwards = s.opts.forwards.clone();
     let doors = forwards.as_ref().map_or_else(crate::admission::Doors::xenonet, |f| crate::admission::Doors::xenonet_forwarding(f.forwardable().alpns()));

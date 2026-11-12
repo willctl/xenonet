@@ -28,6 +28,8 @@ xenonet net create --name home --host studio
 
 This machine is now the founder. Add `--relay https://relay.example.net` to name your own relay, or `--relay n0` for n0's. Adding a relay asks you, so when your terminal can't, the network starts without it and says so; add it from the window then.
 
+The form also asks whether this machine finds the network's machines on your LAN by mDNS, which is off unless you pick it: with it on, the machine announces its network key on every LAN it joins, the same key each time, so anyone there can tell it's the same machine (they can't connect with it). In a terminal, add `--mdns on` or `--mdns off`. It's the machine's own setting, for all its networks: change it later in **Network settings › This machine** (**Find machines on this LAN**), or with `xenonet net set --mdns on|off`.
+
 A machine already in a network can start another one beside it: **Start another network…** in Network settings, or `xenonet net create` again. Everything that acts on one network then takes `--network <id|name>`, and without it the command asks which.
 
 ### The firewall

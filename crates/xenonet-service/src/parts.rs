@@ -144,8 +144,11 @@ impl parts::Network for NetService {
     fn host(&self, network: Option<&str>) -> Option<String> {
         self.on(network).ok()?.shared().network().map(|n| n.host)
     }
-    async fn create(&self, name: &str, host: &str, relay: Option<&str>, at_window: bool) -> NetResult {
-        answered(self.nodes().create(name, host, relay, at_window).await)
+    async fn create(&self, name: &str, host: &str, relay: Option<&str>, mdns: Option<bool>, at_window: bool) -> NetResult {
+        answered(self.nodes().create(name, host, relay, mdns, at_window).await)
+    }
+    fn set_lan(&self, on: bool) -> NetResult {
+        answered(self.nodes().set_lan(on))
     }
     async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult {
         answered(self.nodes().join_invite(invite, code, at, lan).await)

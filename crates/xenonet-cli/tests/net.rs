@@ -147,7 +147,11 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, _, err) = s.run(&["net", "revoke-device"]);
     assert_eq!(code, 1);
     assert!(err.contains("XenoNet's window"), "{err}");
-    // So is a new network key, and naming a mailbox, which ask you.
+    // mDNS on the LAN is answered on or off.
+    let (code, _, err) = s.run(&["net", "set", "--mdns=maybe"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("--mdns on or --mdns off"), "{err}");
+    // A new network key and naming a mailbox ask you, so they are the window's.
     let (code, _, err) = s.run(&["net", "rekey"]);
     assert_eq!(code, 1);
     assert!(err.contains("XenoNet's window") && err.contains("New network key"), "{err}");

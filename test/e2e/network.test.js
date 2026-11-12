@@ -752,6 +752,23 @@ test("Start a network names its relay: none, the person's own iroh-relay, or n0'
   const text = (await network()).text;
   assert.match(text, /Relay\s*None: the LAN and direct paths only\s*Your own iroh-relay\s*n0.s public relays \(rate-limited, run by n0\)/i);
   assert.match(text, /Your relay.s URL/i);
+  // The mDNS question, asked here, off unless the person picks it.
+  assert.match(text, /Find machines on this LAN\s*No\s*Yes, by mDNS/i);
+  assert.match(text, /announces this machine.s network key on every LAN it joins/i);
+  assert.equal(await s.eval(`return document.querySelector("#modal [data-net-mdns-kind]").value`), "off");
+  await s.driver("network", "close");
+}));
+
+test("mDNS on the LAN is this machine's own setting, turned on from Network settings", { timeout: limit(60000) }, shoot("network-mdns", async () => {
+  await simulate("net-founder", {}, (n) => n.inNetwork);
+  let { network: n } = await s.driver("network", "open");
+  assert.notEqual(n.mdns, "on");
+  await s.eval(`return (document.querySelector('#modal [data-net-mdns]').scrollIntoView({ block: "center" }), true)`);
+  await s.driver("settled");
+  await clickAt((await network()).at.mdns, "Find machines on this LAN");
+  n = await until(async () => ((await network()).mdns === "on" ? network() : null));
+  assert.ok(n, "on");
+  assert.equal((await served()).mdns, "on");
   await s.driver("network", "close");
 }));
 

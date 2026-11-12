@@ -491,3 +491,26 @@ async fn a_machine_a_week_behind_catches_up_from_a_compaction_made_on_its_own() 
     studio.send(None, To::All, Kind::Claims, claim("claim", "docs/")).unwrap();
     until("the next claim", 15, || claims() == ["src/", "docs/"]).await;
 }
+
+// mDNS on the LAN is asked at the network's setup and kept as the
+// machine's setting. The test answers off: on, the endpoint would bind a
+// multicast socket, which the endpoint's own tests cover by the lookups it
+// gets (nodes.rs, endpoint_tests.rs) without binding one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_mdns_question_is_answered_at_setup_and_kept_as_the_machines() {
+    let studio = Host::new("mdns", "studio").await;
+    assert_eq!(studio.state().await["mdns"], "unasked", "not asked before a network");
+    let (s, v) = studio.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "mdns": false })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["mdns"], "off");
+    let kept = common::kept(&studio.dir.join("state"));
+    assert_eq!(kept.lan().unwrap(), Some(false));
+    assert_eq!(studio.svc.nodes().lan(), xenonet_net::endpoint::LanLookup::Off);
+    // A second network leaves the answer as it was when it gives none.
+    let (s, v) = studio.call("POST", "/api/net/create", json!({ "name": "work", "host": "studio" })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["mdns"], "off");
+    // It's this machine's own, so a terminal sets it too.
+    let (s, v) = studio.call_as(false, "PUT", "/api/net/settings", json!({ "mdns": false })).await;
+    assert_eq!((s, v["mdns"].clone()), (200, json!("off")), "{v}");
+}

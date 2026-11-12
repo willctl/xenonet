@@ -361,6 +361,27 @@ impl Nodes {
         Ok(self.state())
     }
 
+    /// How this machine finds its networks' members on the LAN: by mDNS
+    /// when the person turned it on, never until they answered (the
+    /// machine's own default, `Options::lan`, which is off then).
+    pub fn lan(&self) -> crate::endpoint::LanLookup {
+        lan_of(self.opts.persist.lan().ok().flatten(), self.opts.lan)
+    }
+
+    /// The person's answer to mDNS on the LAN for link/2, a setting of this
+    /// machine: on announces its endpoint id, which stays the same, on
+    /// every LAN it joins, so it's theirs to give. The endpoint starts
+    /// again with it when it changed.
+    pub fn set_lan(&self, on: bool) -> R<Value> {
+        let had = self.lan();
+        self.opts.persist.put_lan(on)?;
+        if self.lan() != had && self.common.link2.reading().is_some() {
+            self.common.restart.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.common.relays_due.notify_one();
+        }
+        Ok(self.state())
+    }
+
     /// Whether a window host that takes this machine's load is connected
     /// now, so the service reads its load only then.
     pub fn wants_load(&self) -> bool {
@@ -414,10 +435,15 @@ impl Nodes {
     /// `xenonet net create`: a new network, beside any this machine is in
     /// already, with the relay the person names (`relay`: their own
     /// iroh-relay's URL, n0 for n0's public ones, or none).
-    pub async fn create(&self, name: &str, host: &str, relay: Option<&str>, at_window: bool) -> R<Value> {
+    pub async fn create(&self, name: &str, host: &str, relay: Option<&str>, mdns: Option<bool>, at_window: bool) -> R<Value> {
         let relays = relay.map(str::trim).filter(|r| !r.is_empty()).map(relay_urls).transpose()?;
         if self.nodes().iter().any(|n| n.shared().network().is_some_and(|f| f.name == name.trim())) {
             return Err(NetError::new(409, "taken", format!("this machine is in a network named {} already: give the new one another name", name.trim())));
+        }
+        // The question of mDNS is asked when the network is set up; the
+        // answer is the machine's, kept before its endpoint starts.
+        if let Some(on) = mdns {
+            self.set_lan(on)?;
         }
         let fresh = Node::open_in(self.opts.clone(), self.sink.clone(), self.common.clone(), None)?;
         fresh.create(name, host, at_window)?;
@@ -483,6 +509,11 @@ impl Nodes {
         let mut out = states.first().cloned().unwrap_or_else(|| self.empty.state());
         out["networks"] = Value::Array(states.iter().map(Node::network_of).collect());
         out["relaysHere"] = self.relays_json();
+        out["mdns"] = json!(match self.opts.persist.lan().ok().flatten() {
+            Some(true) => "on",
+            Some(false) => "off",
+            None => "unasked",
+        });
         out
     }
 
@@ -490,6 +521,16 @@ impl Nodes {
     // body in hand arrived in, else the first.
     fn current(&self) -> Option<Arc<Shared>> {
         ground::current().and_then(|n| self.common.shared_of(&n)).or_else(|| self.common.shareds().into_iter().next())
+    }
+}
+
+/// The LAN lookup the endpoint runs with: the person's answer, or the
+/// machine's default until they gave one.
+pub fn lan_of(answer: Option<bool>, default: crate::endpoint::LanLookup) -> crate::endpoint::LanLookup {
+    match answer {
+        Some(true) => crate::endpoint::LanLookup::On,
+        Some(false) => crate::endpoint::LanLookup::Off,
+        None => default,
     }
 }
 
@@ -517,7 +558,7 @@ async fn supervise(nodes: Weak<Nodes>) {
         let (common, mut have, task) = {
             let Some(n) = nodes.upgrade() else { return };
             let want = n.relays_wanted();
-            (n.common.clone(), want.clone(), tokio::spawn(link2n::run(Arc::downgrade(&n.common), want)))
+            (n.common.clone(), want.clone(), tokio::spawn(link2n::run(Arc::downgrade(&n.common), want, n.lan())))
         };
         let restart = loop {
             common.relays_due.notified().await;
@@ -720,6 +761,17 @@ mod tests {
         assert_eq!(home(&[vec![a.clone()], vec![]]), Vec::<String>::new(), "a network with no relay keeps the machine off every relay");
         assert_eq!(home(&[vec![a.clone(), b.clone()]]), vec![a, b]);
         assert_eq!(home(&[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn mdns_runs_only_when_the_person_turned_it_on() {
+        use crate::endpoint::{lookups, LanLookup};
+        assert_eq!(lan_of(None, LanLookup::Unasked), LanLookup::Unasked);
+        assert_eq!(lookups(lan_of(None, LanLookup::Unasked)).len(), 1, "unasked is off");
+        assert_eq!(lan_of(Some(false), LanLookup::Unasked), LanLookup::Off);
+        assert_eq!(lan_of(Some(true), LanLookup::Unasked), LanLookup::On);
+        assert_eq!(lan_of(Some(true), LanLookup::Off), LanLookup::On, "the answer wins over the default");
+        assert_eq!(lookups(lan_of(Some(true), LanLookup::Unasked)), [iroh::address_lookup::MemoryLookup::PROVENANCE, iroh_mdns_address_lookup::NAME]);
     }
 
     #[test]

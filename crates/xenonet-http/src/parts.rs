@@ -148,7 +148,11 @@ pub trait Network: Send + Sync {
     fn host(&self, network: Option<&str>) -> Option<String>;
     /// A new network, founded here beside any other: `relay` is the relay
     /// the person named (their own iroh-relay's URL, or n0).
-    async fn create(&self, name: &str, host: &str, relay: Option<&str>, at_window: bool) -> NetResult;
+    /// `mdns` is the person's answer to finding the members on the LAN by
+    /// mDNS, asked at the network's setup: None leaves it as it was.
+    async fn create(&self, name: &str, host: &str, relay: Option<&str>, mdns: Option<bool>, at_window: bool) -> NetResult;
+    /// Finding the members on the LAN by mDNS, a setting of this machine.
+    fn set_lan(&self, on: bool) -> NetResult;
     /// Joins over join/2 with an invite and its code, finding the inviter
     /// at `at`, through the invite's relay, or by mDNS (`lan`).
     async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult;

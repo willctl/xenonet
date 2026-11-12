@@ -85,6 +85,10 @@ const TAKES_VALUE: &[&str] = &[
 // a switch anywhere else.
 const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start", "network", "relay"])];
 const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
+/// Flags that take the word after them only when it's one of their
+/// choices, and are on alone: `--mdns on|off`, and `--mdns` on its own
+/// where it's a switch (xenonet net join, invite).
+const TAKES_CHOICE: &[(&str, &[&str])] = &[("mdns", &["on", "off"])];
 
 /// The flags given, by name: what JS's `flags` object holds.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -222,6 +226,9 @@ pub fn parse(argv: &[String]) -> Parsed {
             } else if takes_value(&key, rest.first()) && i + 1 < argv.len() {
                 i += 1;
                 set(&mut flags, &key, argv[i].clone());
+            } else if let Some(next) = argv.get(i + 1).filter(|n| TAKES_CHOICE.iter().any(|(k, choices)| *k == key && choices.contains(&n.as_str()))) {
+                set(&mut flags, &key, next.clone());
+                i += 1;
             } else if let Some(name) = k.strip_prefix("no-") {
                 flags.set(&camel(name), Value::Bool(false));
             } else {
@@ -329,7 +336,10 @@ mod tests {
         assert!(found.len() > 20, "the help files show flags with values: {found:?}");
         let missed: Vec<String> = found
             .into_iter()
-            .filter(|(command, name)| parse(&args(&[command, &format!("--{name}"), "x"])).flags.list(&camel(name)) != ["x"])
+            .filter(|(command, name)| {
+                let v = TAKES_CHOICE.iter().find(|(k, _)| *k == camel(name)).map_or("x", |(_, c)| c[0]);
+                parse(&args(&[command, &format!("--{name}"), v])).flags.list(&camel(name)) != [v]
+            })
             .map(|(command, name)| format!("xenonet {command} --{name}"))
             .collect();
         assert!(missed.is_empty(), "these read the word after them as a value in their help, and the parser doesn't: {missed:?}");

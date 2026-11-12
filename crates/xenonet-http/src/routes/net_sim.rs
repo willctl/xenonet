@@ -911,6 +911,12 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             state["person"]["device"] = json!(device_id(&host));
             state["person"]["devices"][0]["id"] = json!(device_id(&host));
             state["person"]["devices"][0]["label"] = json!(host);
+            // The person's answer to mDNS on the LAN, asked as the network
+            // is set up: the machine's, so it stays when none is given.
+            state["mdns"] = match body.get("mdns").and_then(Value::as_bool) {
+                Some(on) => json!(if on { "on" } else { "off" }),
+                None => sim.state.get("mdns").cloned().unwrap_or_else(|| json!("unasked")),
+            };
             sim.state = state;
             sim.agents.clear();
             Reply::json(200, sim.state.clone())
@@ -1230,6 +1236,10 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             if let Some(on) = body.get("shareLoad").and_then(Value::as_bool) {
                 sim.state["shareLoad"] = json!(on);
+            }
+            if let Some(on) = body.get("mdns").and_then(Value::as_bool) {
+                sim.state["mdns"] = json!(if on { "on" } else { "off" });
+                return Reply::json(200, served(sim));
             }
             match set_reach(&mut sim.state, body, now) {
                 Ok(()) => Reply::json(200, sim.state.clone()),

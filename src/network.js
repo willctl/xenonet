@@ -288,6 +288,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <p class="pj-note">On, the other consoles see this machine's sessions by their titles alone: not the text of a question waiting, the last message, or why a session seems stuck.</p>
       <label class="net-check"><input type="checkbox" data-net-load data-yours ${state.shareLoad !== false ? "checked" : ""}> Share load with the network</label>
       <p class="pj-note">On, the window hosts' consoles see this machine's CPU, GPU and memory, and what its parts are, in their Machines panel while they watch it.</p>
+      <label class="net-check"><input type="checkbox" data-net-mdns data-yours ${state.mdns === "on" ? "checked" : ""}> Find machines on this LAN (mDNS)</label>
+      <p class="pj-note">On, this machine announces its network key on the LAN it's on, the same key on every LAN, and finds the network's machines there.${state.mdns === "unasked" ? " You haven't chosen yet, so it's off." : ""}</p>
       ${settingHtml("start", state.start)}
       ${settingHtml("wake", state.wake)}
       ${state.start === "delegate" ? `<p class="pj-note" data-net-delegation="${h(state.self?.id ?? "")}">${h(delegationWords(state.delegated ? { by: state.delegated.by, at: state.delegated.at } : null))}</p>` : ""}
@@ -377,7 +379,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         <label class="ac-field"><span class="ac-k">This machine's id</span><input class="ac-input" data-net-self placeholder="studio" maxlength="32" spellcheck="false" autocomplete="off"></label>
         <label class="ac-field"><span class="ac-k">Relay</span><select class="ac-input" data-net-relay-kind><option value="">None: the LAN and direct paths only</option><option value="own">Your own iroh-relay</option><option value="n0">n0's public relays (rate-limited, run by n0)</option></select></label>
         <label class="ac-field"><span class="ac-k">Your relay's URL</span><input class="ac-input" data-net-relay-own placeholder="https://relay.example.net" spellcheck="false" autocomplete="off"></label>
+        <label class="ac-field"><span class="ac-k">Find machines on this LAN</span><select class="ac-input" data-net-mdns-kind><option value="off"${state.mdns === "on" ? "" : " selected"}>No</option><option value="on"${state.mdns === "on" ? " selected" : ""}>Yes, by mDNS</option></select></label>
       </div>
+      <p class="pj-note" data-net-mdns-note>Finding machines on this LAN by mDNS announces this machine's network key on every LAN it joins, the same key each time, so anyone there can tell it's the same machine (they can't connect with it). Without it, the network's machines find each other by the addresses they share, a relay, or an address you give.</p>
       <p class="pj-note">The id is what every console calls this machine: lowercase letters, digits and dashes. Pick a name, since XenoNet never uses the machine's own. This machine is the network's founder, whose key is its root. In a terminal: <code>xenonet net create --name &lt;name&gt; --host &lt;id&gt; [--relay &lt;url|n0&gt;]</code>. With no relay, the network's machines reach each other on the LAN and by direct paths.</p>
       ${errorHtml(view.error)}
       <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-create data-yours>Start the network</button></div>`;
@@ -687,13 +691,14 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const host = body().querySelector("[data-net-self]").value.trim();
     const kind = body().querySelector("[data-net-relay-kind]")?.value ?? "";
     const relay = kind === "n0" ? "n0" : kind === "own" ? (body().querySelector("[data-net-relay-own]")?.value.trim() ?? "") : "";
+    const mdns = body().querySelector("[data-net-mdns-kind]")?.value === "on";
     if (!name) return failed({ status: 400, error: "Give the network a name." });
     const problem = hostIdProblem(host, null);
     if (problem) return failed({ status: 400, error: problem });
     if (kind === "own" && !/^https?:\/\/\S+$/.test(relay)) return failed({ status: 400, error: "Give your relay's URL, as https://relay.example.net." });
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/create", { name, host, ...(relay ? { relay } : {}) });
-      if (!r.ok) return failed(r, `xenonet net create --name ${name} --host ${host}${relay ? ` --relay ${relay}` : ""}`);
+      const r = await calls.call("POST", "/api/net/create", { name, host, mdns, ...(relay ? { relay } : {}) });
+      if (!r.ok) return failed(r, `xenonet net create --name ${name} --host ${host}${relay ? ` --relay ${relay}` : ""} --mdns ${mdns ? "on" : "off"}`);
       sfx("success");
       chosen = networksOf(r.data).find((x) => x.name === name)?.id ?? chosen;
       if (r.data?.relayRefused) toast(`The network ${name} is started, without its relay: ${r.data.relayRefused}`, true);
@@ -884,6 +889,18 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     return refresh();
   }
 
+  // Finding the network's machines on this LAN by mDNS: this machine's own.
+  async function lan(on) {
+    const r = await calls.call("PUT", "/api/net/settings", { mdns: on });
+    if (!r.ok) {
+      failed(r, `xenonet net set --mdns ${on ? "on" : "off"}`);
+      return refresh();
+    }
+    sfx("toggle");
+    toast(on ? "This machine finds the network's machines on this LAN now." : "This machine doesn't announce itself on the LAN now.");
+    return refresh();
+  }
+
   async function onClick(e) {
     if (await secretClick(panel, e.target, (ok) => toast(ok ? "Line copied. Run it on the new machine." : "Couldn't copy it", !ok))) return;
     const t = e.target;
@@ -958,6 +975,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       panel.addEventListener("change", (e) => {
         if (e.target.matches("[data-net-titles]")) void titlesOnly(e.target.checked);
         if (e.target.matches("[data-net-load]")) void shareLoad(e.target.checked);
+        if (e.target.matches("[data-net-mdns]")) void lan(e.target.checked);
         if (e.target.matches("[data-net-share], [data-net-share-all]")) void share();
       });
       panel.addEventListener("keydown", (e) => {
@@ -1028,6 +1046,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       networkId: state.network?.id ?? null,
       self: state.self?.id ?? null,
       keyId: state.self?.keyId ?? null,
+      mdns: state.mdns ?? "unasked",
       // Every network this machine is in, each with its host id here, what
       // it sees of this machine and its relays; the one shown is `current`.
       networks: state.networks.map((x) => ({ id: x.id, name: x.name, host: x.host, current: x.id === state.network?.id, hosts: (x.hosts ?? []).length, sharing: x.sharing, relays: x.relays, mailboxes: x.mailboxes ?? [], inContact: x.inContact ?? null })),
@@ -1091,7 +1110,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]"), rekey: centre("[data-net-rekey]"), rekeyYes: centre("[data-net-rekey-yes]"), mailboxAdd: centres("data-net-mailbox-add"), mailboxRemove: centres("data-net-mailbox-remove"), ctxAllow: centres("data-net-ctx-allow"), ctxDeny: centres("data-net-ctx-deny"), ctxRevoke: centres("data-net-ctx-revoke"), ctxSign: centres("data-net-ctx-sign"), ctxNet: centres("data-net-ctx-net") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), mdns: centre("[data-net-mdns]"), mdnsKind: centre("[data-net-mdns-kind]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]"), rekey: centre("[data-net-rekey]"), rekeyYes: centre("[data-net-rekey-yes]"), mailboxAdd: centres("data-net-mailbox-add"), mailboxRemove: centres("data-net-mailbox-remove"), ctxAllow: centres("data-net-ctx-allow"), ctxDeny: centres("data-net-ctx-deny"), ctxRevoke: centres("data-net-ctx-revoke"), ctxSign: centres("data-net-ctx-sign"), ctxNet: centres("data-net-ctx-net") } : null,
     };
   }
 

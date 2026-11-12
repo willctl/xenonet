@@ -567,6 +567,18 @@ that stays off until the person answers it (`LanLookup::Unasked`), since
 it announces an endpoint id that stays the same on every LAN the machine
 joins.
 
+The person answers it when they set up a network: the Start a network
+form asks (off unless they pick on), and `xenonet net create --mdns
+on|off` takes the answer; later, Network settings › This machine, or
+`xenonet net set --mdns on|off` (`PUT /api/net/settings` with `mdns`).
+The answer is the machine's, in the store's settings (`net.mdns`), and
+`network/state/v1` says it (`mdns`: on, off or unasked). link/2's
+endpoint runs with it (`nodes::lan_of`), and starts again when it changes,
+since iroh takes its lookups at bind. Tests check the endpoint's lookups
+for each answer (`nodes.rs`, `endpoint_tests.rs`) and the answer's way
+from the routes into the store (`net_many.rs`); none binds a multicast
+socket.
+
 **Address records** (`xenonet-address/1`, `xenonet-log/src/address.rs`)
 carry the network, the host, its endpoint id, at most one home relay, up
 to 16 direct addresses, a time and a TTL of up to a day, signed by the
@@ -991,7 +1003,7 @@ And for any program on the machine, `/api/svc/<host>/<name>/<rest>`.
 **The command** (`xenonet net --help` has the text):
 
 ```text
-xenonet net create --name <name> --host <id> [--relay <url|n0>]
+xenonet net create --name <name> --host <id> [--relay <url|n0>] [--mdns on|off]
 xenonet net invite <id> [--window] [--mdns]     (the window's)
 xenonet net join <invite> <code> [--at <ip:port>] [--mdns]
 xenonet net status [--json]
@@ -1005,6 +1017,7 @@ xenonet net mailbox [remove <id>]               (adding is the window's)
 xenonet net rekey                               (the window's: in a terminal it says so)
 xenonet net set [--titles-only | --no-titles-only] [--share-load | --no-share-load]
                 [--start off|you|network|delegate] [--wake consent|network]
+                [--mdns on|off]
 xenonet net set --on <id> [--start …] [--wake …] [--approve <id>]
 xenonet net approve <id> [--op <op>]
 xenonet net revoke-device                       (the window's: in a terminal it says so)
@@ -1066,8 +1079,6 @@ in several.
 
 ## Not built yet
 
-- **mDNS on link/2.** The setting is asked nowhere yet, so link/2 runs
-  without mDNS; join/2 uses it with `--mdns`.
 - **Relays.** No command installs `relay-ca.pem` or sets a relay's auth
   token, and a home relay that moves reaches the members in the next
   address record a connection sends.

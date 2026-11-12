@@ -167,7 +167,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "state" => Ok(net.state()),
         "create" => {
             let relay = text("relay");
-            net.create(&text("name"), &text("host"), Some(relay.as_str()).filter(|r| !r.trim().is_empty()), window).await
+            net.create(&text("name"), &text("host"), Some(relay.as_str()).filter(|r| !r.trim().is_empty()), body.get("mdns").and_then(Value::as_bool), window).await
         }
         "join" => {
             let at = text("at");
@@ -278,6 +278,10 @@ async fn settings(svc: &dyn Network, network: Option<&str>, body: &Value, window
             return Err(bad("say what to set: start or wake, or approve a change that waits"));
         }
         return svc.set_reach(network, host, text("start").as_deref(), text("wake").as_deref(), window).await;
+    }
+    // This machine's LAN setting, which is its own, not a network's.
+    if let Some(on) = body.get("mdns").and_then(Value::as_bool) {
+        return svc.set_lan(on);
     }
     let titles = body.get("titlesOnly").and_then(Value::as_bool);
     let load = body.get("shareLoad").and_then(Value::as_bool);

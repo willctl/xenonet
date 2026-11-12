@@ -159,6 +159,14 @@ pub trait Persist: Send + Sync {
     fn put_own_relays(&self, _urls: &[String]) -> R<()> {
         Err(crate::NetError::new(501, "not-kept", "this machine doesn't keep relays of its own"))
     }
+    /// Whether this machine finds its networks' members on the LAN by
+    /// mDNS, as the person answered: None until they did.
+    fn lan(&self) -> R<Option<bool>> {
+        Ok(None)
+    }
+    fn put_lan(&self, _on: bool) -> R<()> {
+        Err(crate::NetError::new(501, "not-kept", "this machine doesn't keep its LAN setting"))
+    }
 }
 
 /// Everything kept in memory, gone with it: for tests, and the doctor's
@@ -183,6 +191,7 @@ struct Kept {
     sharing: BTreeMap<String, Sharing>,
     mail: Vec<Mail>,
     own_relays: Vec<String>,
+    lan: Option<bool>,
 }
 
 // The entries of `had` and those of `more` past them.
@@ -334,6 +343,13 @@ impl Persist for Memory {
     }
     fn own_relays(&self) -> R<Vec<String>> {
         Ok(self.0.locked().own_relays.clone())
+    }
+    fn lan(&self) -> R<Option<bool>> {
+        Ok(self.0.locked().lan)
+    }
+    fn put_lan(&self, on: bool) -> R<()> {
+        self.0.locked().lan = Some(on);
+        Ok(())
     }
     fn put_own_relays(&self, urls: &[String]) -> R<()> {
         self.0.locked().own_relays = urls.to_vec();

@@ -9,13 +9,18 @@ What acts on one network takes --network <id|name>. A machine in one
 network needs no --network; one in several is asked which.
 
   xenonet net create --name <name> --host <id> [--relay <url|n0>]
+                     [--mdns on|off]
                                    makes a network, beside any this machine
                                    is in, with this machine as its founder.
                                    --relay names the network's relay: your own
                                    iroh-relay's URL, or n0 for n0's public
                                    relays (rate-limited, run by n0). With
                                    none, machines reach each other on the
-                                   LAN and by direct paths only
+                                   LAN and by direct paths only. --mdns on
+                                   lets this machine find the others on your
+                                   LAN; it announces this machine's network
+                                   key there, the same on every LAN, so it's
+                                   off unless you turn it on
   xenonet net invite <id> [--window] [--mdns]
                                    an invite for a new machine, and its code
                                    apart: give it the invite, and tell it the
@@ -79,6 +84,7 @@ network needs no --network; one in several is asked which.
   xenonet net set [--titles-only | --no-titles-only]
                   [--share-load | --no-share-load]
                   [--start off|you|network|delegate] [--wake consent|network]
+                  [--mdns on|off]
                                    what this machine shares with the network
                                    (its load: CPU, GPU, memory and the parts,
                                    on by default), who may start sessions here (you,
@@ -100,7 +106,9 @@ network needs no --network; one in several is asked which.
                                    work you started on any of them, and
                                    lasts a year. Setting delegate makes it
                                    when none names the machine's device,
-                                   which asks you once more
+                                   which asks you once more. --mdns is
+                                   this machine's own: whether it finds the
+                                   machines of its networks on your LAN
   xenonet net set --on <id> [--start …] [--wake …] [--approve <id>]
                                    another machine's start and wake, from a
                                    window host. Narrowing is done at once;

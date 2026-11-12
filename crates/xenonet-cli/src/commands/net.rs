@@ -204,6 +204,22 @@ fn show_invite(r: &Value) {
     print(format!("\nOn {}: xenonet net join <invite> <code>{how}", t(r, "host")));
 }
 
+/// The person's answer to mDNS on the LAN: `--mdns on|off` (or
+/// `--mdns=on|off`, `--mdns`, `--no-mdns`), None when it's not given.
+fn mdns_answer(flags: &Flags) -> Result<Option<bool>, Fail> {
+    let word = match flags.get("mdns") {
+        None => return Ok(None),
+        Some(Value::Bool(false)) => "off".to_string(),
+        Some(Value::String(s)) => s.clone(),
+        Some(_) => "on".to_string(),
+    };
+    match word.as_str() {
+        "on" => Ok(Some(true)),
+        "off" => Ok(Some(false)),
+        _ => Err(Fail::new("--mdns on or --mdns off: whether this machine finds the network's machines on your LAN", 2)),
+    }
+}
+
 fn arg(args: &[String], i: usize, what: &str) -> Result<String, Fail> {
     args.get(i).filter(|a| !a.is_empty()).cloned().ok_or_else(|| Fail::new(format!("say {what}: xenonet net --help"), 2))
 }
@@ -345,6 +361,9 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             if let Some(relay) = flags.text("relay") {
                 body.insert("relay".into(), json!(relay));
             }
+            if let Some(on) = mdns_answer(flags)? {
+                body.insert("mdns".into(), json!(on));
+            }
             let st = call(&s, "POST", "/api/net/create", Some(&Value::Object(body)))?;
             out(&st, &|st| {
                 let made = list(st, "networks").iter().find(|n| str(n, "name") == Some(name.as_str())).map_or_else(|| st.clone(), view_of);
@@ -362,7 +381,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 return Err(Fail::new("that isn't an invite: an invite starts with xni2_, as Add a machine or xenonet net invite shows it", 2));
             }
             // The invite goes over join/2 to the machine that made it.
-            let mut body = json!({ "invite": invite, "code": code, "lan": flags.on("mdns") });
+            let mut body = json!({ "invite": invite, "code": code, "lan": mdns_answer(flags)?.unwrap_or(false) });
             if let Some(at) = flags.text("at") {
                 body["at"] = json!(at);
             }
@@ -393,7 +412,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "invite" => {
             let host = arg(args, 1, "the new machine's id: xenonet net invite <id>")?;
-            let r = call(&s, "POST", "/api/net/invite", Some(&within(json!({ "host": host, "window": flags.on("window"), "lan": flags.on("mdns") }))))?;
+            let r = call(&s, "POST", "/api/net/invite", Some(&within(json!({ "host": host, "window": flags.on("window"), "lan": mdns_answer(flags)?.unwrap_or(false) }))))?;
             out(&r, &|r| {
                 print(format!("Give {} this invite. It works once, for ten minutes:", c::bold(t(r, "host"))));
                 show_invite(r);
@@ -439,9 +458,18 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                     body.insert(k.into(), json!(v));
                 }
             }
+            // mDNS on the LAN is this machine's own setting, in no chain.
+            if let Some(on) = mdns_answer(flags)? {
+                let st = call(&s, "PUT", "/api/net/settings", Some(&json!({ "mdns": on })))?;
+                if body.is_empty() {
+                    return out(&st, &|_| {
+                        print(format!("{} this machine {} the network's machines on your LAN by mDNS", c::green("✓"), if on { "finds" } else { "doesn't look for" }));
+                    });
+                }
+            }
             if body.is_empty() {
                 return Err(Fail::new(
-                    "say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --start <off|you|network|delegate> or --wake <consent|network>",
+                    "say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --start <off|you|network|delegate>, --wake <consent|network> or --mdns <on|off>",
                     2,
                 ));
             }

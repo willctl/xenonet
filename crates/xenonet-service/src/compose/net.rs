@@ -23,6 +23,9 @@ use xenonet_net::{NetError, R};
 use xenonet_store::net::{self as kept, Network};
 use xenonet_store::{Db, StoreError};
 
+/// The store's setting for finding the networks' members on the LAN.
+const LAN: &str = "net.mdns";
+
 /// The store, as the network and the person keep in it.
 pub struct StorePersist(pub Arc<Db>);
 
@@ -126,6 +129,17 @@ impl Persist for StorePersist {
     }
     fn put_own_relays(&self, urls: &[String]) -> R<()> {
         self.0.put_own_relays(urls).map_err(store)
+    }
+    // A setting of this machine's, in the store's settings: "on" or "off".
+    fn lan(&self) -> R<Option<bool>> {
+        Ok(match self.0.setting(LAN).map_err(store)?.as_str() {
+            Some("on") => Some(true),
+            Some("off") => Some(false),
+            _ => None,
+        })
+    }
+    fn put_lan(&self, on: bool) -> R<()> {
+        self.0.set_setting(LAN, Some(&Value::from(if on { "on" } else { "off" }))).map_err(store)
     }
     fn feed_heads(&self, network: &str) -> R<Vec<(String, Pos)>> {
         self.0.feed_heads(network).map_err(store)
