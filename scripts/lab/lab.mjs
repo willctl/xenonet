@@ -387,13 +387,32 @@ function transportCtx(both) {
       const cmd = { save: `rm -rf ${dir}.lab-copy && cp -a ${dir} ${dir}.lab-copy`, restore: `test -d ${dir}.lab-copy && rm -rf ${dir} && cp -a ${dir}.lab-copy ${dir}`, drop: `rm -rf ${dir}.lab-copy` }[what];
       if (vmSh(inst(id), cmd).status !== 0) fail(`${id}: couldn't ${what} XenoNet's state dir`);
     },
-    relay: (id) => {
-      const r = g(id, "relay", { RELAY_VERSION: VERSIONS["iroh-relay"] }, { timeout: 30 * 60000 });
+    // One of the lab's relays (guest.sh's relay step), started in a VM: its URL.
+    relay: (id, name) => {
+      const r = g(id, "relay", { RELAY_VERSION: VERSIONS["iroh-relay"], RELAY: name }, { timeout: 30 * 60000 });
       const url = (r.stdout ?? "").match(/^relay=(\S+)$/m)?.[1];
-      if (!url) fail(`${id}: iroh-relay didn't start: ${(r.stderr ?? "").trim().split("\n").pop()}`);
+      if (!url) fail(`${id}: iroh-relay ${name} didn't start: ${(r.stderr ?? "").trim().split("\n").pop()}`);
       return url;
     },
-    relayOff: (id) => g(id, "relayoff"),
+    relayOff: (id, name) => g(id, "relayoff", { RELAY: name ?? "" }),
+    relayMetrics: (id, name) => g(id, "relaymetrics", { RELAY: name }).stdout ?? "",
+    // The lab's CA, from vm1 where the relays run, in each VM's relay-ca.pem;
+    // a VM whose XenoNet started again for it answers before this returns.
+    trustCa: (ids) => {
+      const ca = (g("vm1", "relayca").stdout ?? "").match(/^ca=(\S+)$/m)?.[1];
+      if (!ca) fail("vm1: the lab's relay CA isn't there");
+      for (const id of ids) if (/^changed$/m.test(g(id, "trustca", { CA_PEM: ca }).stdout ?? "")) answering(id);
+    },
+    ownRelay: (id, url, add) => g(id, "ownrelay", { URL: url, ADD: add ? "1" : "0" }),
+    // A packet capture of the lab's LAN in a VM, as root: "start" says
+    // whether it runs (false without tcpdump); "stop" ends it and says how
+    // many bytes it caught and whether `text` was among them, then deletes it.
+    capture: (id, verb, text = "") => {
+      const file = "/tmp/xenonet-lab-check.pcap";
+      if (verb === "start") return asRoot(inst(id), `command -v tcpdump >/dev/null || exit 3; rm -f ${file}; setsid nohup tcpdump -i ${LAN_DEV} -U -s 0 -w ${file} >/dev/null 2>&1 < /dev/null & sleep 1; pgrep -f 'tcpdump -i ${LAN_DEV}' >/dev/null`).status === 0;
+      const out = asRoot(inst(id), `pkill -f 'tcpdump -i ${LAN_DEV}' || true; sleep 1; echo "bytes=$(stat -c %s ${file} 2>/dev/null || echo 0)"; echo "found=$(grep -a -F -c -- ${shq(text || "-")} ${file} 2>/dev/null || echo 0)"; rm -f ${file}`).stdout ?? "";
+      return { bytes: Number(out.match(/^bytes=(\d+)$/m)?.[1] ?? 0), found: text !== "" && Number(out.match(/^found=(\d+)$/m)?.[1] ?? 0) > 0 };
+    },
     doctor: (id) => vmSh(inst(id), "~/.local/bin/xenonet doctor --json").stdout ?? "",
     logs: (id) => vmSh(inst(id), "~/.local/bin/xenonet logs --json").stdout ?? "",
     // A datagram from one machine ("mac", or a VM) to a VM on the lab's

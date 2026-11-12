@@ -132,19 +132,20 @@ provision:
     set -eux -o pipefail
 
     # The firewall, git, what the tools' downloads need, and the C compiler
-    # XenoNet's build needs (SQLite and ring). Only the first boot installs
-    # anything.
+    # XenoNet's build needs (SQLite and ring), and openssl and tcpdump for the
+    # relay checks (the lab's CA, and a capture of the LAN). Only the first
+    # boot installs anything.
     missing=0
-    for cmd in nft git curl tar xz zstd cc; do
+    for cmd in nft git curl tar xz zstd cc openssl tcpdump; do
       command -v "$cmd" >/dev/null || missing=1
     done
     if [ "$missing" = 1 ]; then
       if command -v apt-get >/dev/null; then
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -q
-        apt-get install -y -q --no-install-recommends nftables git curl ca-certificates tar xz-utils zstd gcc libc6-dev
+        apt-get install -y -q --no-install-recommends nftables git curl ca-certificates tar xz-utils zstd gcc libc6-dev openssl tcpdump
       else
-        dnf install -y -q --setopt=install_weak_deps=False nftables git-core curl tar xz zstd gcc
+        dnf install -y -q --setopt=install_weak_deps=False nftables git-core curl tar xz zstd gcc openssl tcpdump
       fi
     fi
 

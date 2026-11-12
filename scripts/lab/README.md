@@ -5,7 +5,7 @@ several machines. Each VM runs Claude Code, the Codex CLI and a headless
 XenoNet, which joins a network with the Mac's
 ([network.md](../../docs/guide/network.md)). The VMs and the Mac share a
 LAN, so the checks can test XenoNet's transport between machines: direct
-paths, mDNS, a relay, mailboxes and catch-up, which phase 5 of the
+paths, mDNS, your own relays, mailboxes and catch-up, which phase 5 of the
 rewrite builds ([direction.md](../../docs/design/direction.md)). The lab
 has two Linux VMs; a macOS guest isn't built.
 
@@ -82,10 +82,25 @@ plans, as on the Mac.
   isn't built. `~/.config/xenonet-lab/xenonet.env` holds a VM's settings:
   `vm2` has `XENONET_CLAUDE_USAGE=off`, so only `vm1` asks Anthropic for
   plan usage.
-- **iroh-relay** in `vm1`, once the relay check has run: built in the VM at
+- **iroh-relay** in `vm1`, once a relay check has run: built in the VM at
   the version `versions.json` pins (the iroh XenoNet uses), with
   `--features server --locked`, into `~/.local/bin`. The first build takes
-  a few minutes.
+  a few minutes. The checks run three from config files, with TLS, never
+  `--dev`, on certificates for vm1's lima0 address from **the lab's CA**,
+  which the first run makes in `~/.local/share/xenonet-lab/relay/`:
+
+  | Relay | URL | The network |
+  |---|---|---|
+  | `a` | `https://<vm1>:3443` (QUIC address discovery on UDP 7842) | lists it |
+  | `b` | `https://<vm1>:4443` | lists it |
+  | `elsewhere` | `https://<vm1>:5443` | doesn't list it; vm2 adds it as its own in `relay-unlisted` |
+
+  Each runs as a transient user service, `xenonet-lab-relay-<name>`, with
+  its metrics on 127.0.0.1 (ports 9090 to 9092). The checks put the CA in
+  each VM's `~/.local/state/xenonet/network/relay-ca.pem`, the setting
+  XenoNet trusts a relay's own CA by ([own-relay.md](../../docs/guide/own-relay.md)),
+  and start that VM's XenoNet again when it changed.
+- **openssl and tcpdump**, for the lab's CA and `relay-sealed`'s capture.
 - **Made-up repos** in `~/Projects` (`fixtures.mjs`), from the demo world's
   names and remotes: `atlas-api` on both VMs with the same remote and the
   same commits; `atlas-web` and `labs/geofence` on `vm1`; `ledger` and
@@ -157,7 +172,8 @@ Each prints one line:
   VMs' XenoNet was built without. The lab looks for the commit that lands
   each piece in the history the VM was built from, by its subject
   (`LANDS` in `transport.mjs`): `feat(net): … link/2 …` (commit 9),
-  `… holder …` (10), `… mailboxes …` (11) and `… several networks …` (13).
+  `… holder …` (10), `… mailboxes …` (11), `… several networks …` (13)
+  and `… self-hosted relays …` (13b, the own relays the relay checks need).
   `push` the VMs once it lands;
 - `owner`: the check needs something only you can set up, and says what;
   with the stand-in an agent uses instead;
@@ -173,7 +189,10 @@ Only `FAIL` makes `check` fail.
 | `mac-udp` | the Mac reaches each VM over UDP on the LAN | | run it: `--only mac-udp`, from your own terminal | | nothing |
 | `mdns` | mDNS finds the other machines, and the path to each is direct | link/2 | the network | `simulate net-founder` | nothing |
 | `lan-message` | a message on the LAN arrives in under 1 s | link/2 | the network | the delivery tests | two stand-in sessions |
-| `relay` | with vm1↔vm2 UDP dropped by nft, traffic goes through `iroh-relay --dev` in vm1 | link/2 | the network, and the relay's URL in it | the endpoint tests | starts the relay and drops the UDP, then stops and lifts both |
+| `relay` | with vm1↔vm2 UDP dropped by nft, they link through relay `a` or `b` in vm1, TLS from the lab's CA, and vm2's doctor rows for both say ok, "a CA you added" | link/2, own relays | the network, and relays `a` and `b` in it | the relay tests (`relay_tests.rs`) | starts the relays, puts the CA in each VM, drops the UDP; then stops the relays and lifts the UDP |
+| `relay-sealed` | the text of a message through the relay is nowhere in a capture of vm1's lima0, while the relays' byte counters show it went through them | link/2, own relays | as `relay` | `a_relay_sees_who_talks_never_what`, which reads what the relay itself sees | as `relay`, and a tcpdump of vm1's lima0, deleted afterwards |
+| `relay-unlisted` | vm2 adds `elsewhere` as its own relay; messages still come, and `elsewhere` never sees vm1 (its `unique_client_keys` stays at 1) | link/2, own relays | as `relay` | `a_relay_the_network_doesnt_list_is_never_used` | as `relay`, and `elsewhere` as vm2's own relay, taken out afterwards |
+| `relay-down` | stopping vm2's home relay moves vm2 to the other in 60 s, messages still come, and vm2's doctor names the one that's down | link/2, own relays | as `relay` | `a_relay_going_down_moves_relay_only_machines_to_another_listed_one` | as `relay`, and stops vm2's home relay |
 | `mailbox` | after `down vm2`, a mailbox delivers to vm2 once it's back, the sender offline | link/2, mailboxes | the network, and the Mac as its mailbox | `simulate host-offline` | stops vm2 and vm1's XenoNet, starts both again |
 | `gap` | after a partition, vm2 fills its gap from vm1 | link/2, holders | the network | the turmoil tests | cuts vm2 off the LAN, lets vm1 alone back, then lifts it |
 | `skew` | vm2's clock 3 min ahead is ordered by it; 6 min ahead is accepted, clamped to 5 min, and the doctor shows the skew | link/2 | the network | `simulate host-skew` | vm2's clock, with NTP off, then back on |
@@ -196,7 +215,9 @@ what's there today (`network`, `hosts[].id`, `hosts[].online`, `frozen`):
 `hosts[].found` (how its address was found, `mdns` among them),
 `hosts[].skewMs` (that machine's clock ahead of this one's, measured on the
 hello) and `self.hlcAheadMs` (this machine's HLC ahead of its own clock).
-The skew check also looks for vm2 in `xenonet doctor --json`. The phase 5
+The skew check also looks for vm2 in `xenonet doctor --json`, and the relay
+checks read its relay rows (`network.relay.<host:port>`), `relaysHere.url`
+(the machine's home relay) and the relays' metrics. The phase 5
 commit that adds each one names it so, or changes `transport.mjs` with it.
 
 ### Setting up the network (you)
@@ -209,11 +230,18 @@ VMs' state and say which is missing.
    **Add a machine** with host id `vm1`, and run the line it shows inside
    the VM: `limactl shell xenonet-vm1`, then paste it. The same for `vm2`.
    Say yes to finding machines on the LAN (mDNS) when it asks.
-2. **The relay** (for `relay`). Run `npm run lab -- check --only relay`
-   once: it builds and starts the relay in vm1 and prints its URL,
-   `http://<vm1's lima0 address>:3340`. Add that URL as a relay of the
-   network in the Mac's window (Network settings), then run the check
-   again.
+2. **The relays** (for `relay`, `relay-sealed`, `relay-unlisted` and
+   `relay-down`). Run `npm run lab -- check --only relay` once: it builds
+   and starts relays `a` and `b` in vm1, has both VMs trust the lab's CA,
+   and says their URLs, `https://<vm1's lima0 address>:3443` and `:4443`.
+   Add both as relays of the network in the Mac's window (**Network
+   settings › Relays › Add to** the network; it asks you, and the founder
+   or a second window host approves), then run
+   `npm run lab -- check --only relay,relay-sealed,relay-unlisted,relay-down`.
+   The Mac doesn't need the lab's CA: only the VMs reach the relays. Golden
+   copies built before the relay checks lack tcpdump: build them again, or
+   install it in vm1 (`sudo apt-get install -y tcpdump`), and
+   `relay-sealed` says so until then.
 3. **The mailbox** (for `mailbox`). Name the Mac as a mailbox of the
    network in its window (Network settings).
 4. **A second network** (for `networks`). Make N1 of the Mac and vm1 only,

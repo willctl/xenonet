@@ -18,6 +18,7 @@ export const LANDS = {
   holders: { commit: 10, subject: /^feat\(net\)!?: .*\bholders?\b/i },
   mailboxes: { commit: 11, subject: /^feat\(net\)!?: .*\bmailbox(es)?\b/i },
   networks: { commit: 13, subject: /^feat\(net\)!?: .*\bseveral networks\b/i },
+  "own relays": { commit: "13b", subject: /^feat\(net\)!?: .*\bself-hosted relays\b/i },
 };
 
 // The pieces of `needs` the history doesn't have yet.
@@ -33,10 +34,19 @@ export const waitsOn = (pieces) => `waits on ${pieces.map((p) => `${p} (phase 5 
 // `simulate` kinds each check names.
 export const OWNER = {
   join: "join vm1 and vm2 to one network with this Mac, as host ids vm1 and vm2: Add a machine in the Mac's XenoNet window, then run the line it shows inside the VM (limactl shell xenonet-vm1), and the same for vm2. Say yes to finding machines on the LAN (mDNS) when it asks",
-  relay: (url) => `add ${url} (iroh-relay --dev in vm1, which the check starts) as a relay of the lab's network in the Mac's XenoNet window, Network settings, then run npm run lab -- check --only relay again`,
+  relays: (urls) =>
+    `add ${urls.join(" and ")} (the lab's own iroh-relays in vm1, with TLS from the lab's CA, which the checks start) as relays of the lab's network in the Mac's XenoNet window, Network settings, then run npm run lab -- check --only ${RELAY_CHECKS.join(",")} again`,
+  tcpdump: "install tcpdump in vm1 (limactl shell xenonet-vm1, then sudo apt-get install -y tcpdump), or build the golden copies again, which have it",
   mailbox: "name this Mac as a mailbox of the lab's network in its XenoNet window, Network settings",
   networks: "make a second network, N1, of this Mac and vm1 only, and share atlas-web into it and no other network; the lab's network (N2) keeps vm2 and atlas-api",
 };
+
+// The relay checks, which share the lab's relays and the owner's step.
+export const RELAY_CHECKS = ["relay", "relay-sealed", "relay-unlisted", "relay-down"];
+// The lab's iroh-relays in vm1 (guest.sh's relay step): two the network
+// lists, and one it doesn't.
+export const RELAYS = { listed: ["a", "b"], unlisted: "elsewhere" };
+const RELAY_URLS = ["https://<vm1's lima0 address>:3443", "https://<vm1's lima0 address>:4443"];
 
 export const UDP_PORT = 47850;
 export const GROUP = "239.255.47.85";
@@ -64,6 +74,26 @@ export const listed = (net, key) => (Array.isArray(net?.[key]) ? net[key].map((x
 
 // Whether the other machine's link is up, as this VM sees it.
 export const online = (state, peer) => networksOf(state).some((n) => hostOf(n, peer)?.online === true);
+
+// An iroh-relay's counter from its metrics (Prometheus text), or null.
+export function metric(text, name) {
+  const m = String(text ?? "").match(new RegExp(`^relayserver_${name}(?:_total)?(?:\\{[^}]*\\})? (\\d+(?:\\.\\d+)?)$`, "m"));
+  return m ? Number(m[1]) : null;
+}
+
+// The doctor's row for the relay at `url`, from `xenonet doctor --json`.
+export function relayRow(doctorJson, url) {
+  let parsed;
+  try {
+    parsed = JSON.parse(doctorJson);
+  } catch {
+    return null;
+  }
+  const bare = String(url).replace(/\/$/, "");
+  return (parsed?.results ?? []).find((r) => String(r?.id ?? "").startsWith("network.relay.") && String(r?.title ?? "").includes(bare)) ?? null;
+}
+
+const bare = (u) => (typeof u === "string" ? u.replace(/\/$/, "") : u);
 
 // ---------- the firewall rules the checks add ----------
 
@@ -161,7 +191,7 @@ async function message(ctx, from, to, { a, b, project, within = 10 }) {
   await inbox.ready;
   const sent = answer(await ctx.standin(from, { session: a, project, register: false, calls: [{ name: "send", arguments: { to: b, text } }] }), "send");
   const got = answer(await inbox.done, "inbox");
-  return { got: Boolean(got?.text?.includes(text)), ms: got && sent ? got.done - sent.at : null, sent: sent?.text ?? "" };
+  return { got: Boolean(got?.text?.includes(text)), ms: got && sent ? got.done - sent.at : null, sent: sent?.text ?? "", text };
 }
 
 // A handoff, which goes as a kept entry of its machine's feed, and whether
@@ -171,6 +201,43 @@ async function handoff(ctx, vm, goal, project = "atlas-api") {
   await ctx.standin(vm, { session: s, project, calls: [{ name: "handoff", arguments: { to: "repo", goal, done: "nothing", next: "nothing: the lab made it" } }], end: true });
 }
 const offered = async (ctx, vm, session, goal, within) => Boolean(answer(await ctx.standin(vm, { session, project: "atlas-api", register: false, calls: [{ name: "handoff", until: goal, within }] }), "handoff")?.found);
+
+// The lab's listed relays running in vm1, trusted through the lab's CA in
+// each VM, the network listing both, and UDP between the VMs dropped, for
+// `body`; or what the owner adds. Everything is put back afterwards.
+async function withRelays(ctx, body) {
+  const p = await pair(ctx);
+  if (p.why) return owner(p.why);
+  let s;
+  try {
+    const urls = [];
+    for (const name of RELAYS.listed) urls.push(bare(await ctx.relay("vm1", name)));
+    await ctx.trustCa(["vm1", "vm2"]);
+    const net = sharedNetwork(await ctx.state("vm1"), await ctx.state("vm2")) ?? p.net;
+    const have = listed(net, "relays").map(bare);
+    const absent = urls.filter((u) => !have.includes(u));
+    if (absent.length) return owner(OWNER.relays(absent));
+    await ctx.nft("vm1", rules({ udpTo: await ctx.lanAddrs("vm2") }));
+    await ctx.nft("vm2", rules({ udpTo: await ctx.lanAddrs("vm1") }));
+    const path = await poll(ctx, 60000, async () => hostOf(networksOf(await ctx.state("vm2")).find((n) => n.id === net.id), "vm1")?.path === "relay");
+    if (!path) return fail("vm2's path to vm1 didn't move to a relay in 60 s");
+    s = await partners(ctx, "vm1", "vm2");
+    if (!s.seen) return fail("vm1's stand-in never saw vm2's in peers");
+    return await body({ net, urls, s });
+  } finally {
+    await ctx.nft("vm1", null);
+    await ctx.nft("vm2", null);
+    await ctx.relayOff("vm1");
+    if (s) await end(ctx, ["vm1", s.a], ["vm2", s.b]);
+  }
+}
+
+// What went into the lab's listed relays, in bytes, by their metrics.
+async function relayBytes(ctx) {
+  let n = 0;
+  for (const name of RELAYS.listed) n += metric(await ctx.relayMetrics("vm1", name), "bytes_recv") ?? 0;
+  return n;
+}
 
 // Each check: what it shows, the pieces it waits on, what the owner sets
 // up for it, the stand-in an agent uses in XenoNet Dev instead, what it
@@ -255,33 +322,103 @@ export const CHECKS = [
   },
   {
     id: "relay",
-    what: "with UDP between vm1 and vm2 dropped, traffic goes through an iroh-relay --dev in vm1",
-    needs: ["link/2"],
-    owner: `${OWNER.join}; then ${OWNER.relay("http://<vm1's lima0 address>:3340")}`,
-    standIn: "none: the endpoint tests (crates/xenonet-net/src/endpoint_tests.rs)",
-    changes: "runs iroh-relay in vm1 and drops UDP between the VMs, both put back afterwards",
-    reads: "the network's relays (URLs) and hosts[].path",
-    run: async (ctx) => {
-      const p = await pair(ctx);
-      if (p.why) return owner(p.why);
-      const url = await ctx.relay("vm1");
-      let s;
-      try {
-        if (!listed(p.net, "relays").includes(url)) return owner(OWNER.relay(url));
-        await ctx.nft("vm1", rules({ udpTo: await ctx.lanAddrs("vm2") }));
-        await ctx.nft("vm2", rules({ udpTo: await ctx.lanAddrs("vm1") }));
-        const path = await poll(ctx, 60000, async () => hostOf(networksOf(await ctx.state("vm2")).find((n) => n.id === p.net.id), "vm1")?.path === "relay");
-        if (!path) return fail("vm2's path to vm1 didn't move to the relay in 60 s");
-        s = await partners(ctx, "vm1", "vm2");
+    what: "with UDP between vm1 and vm2 dropped, they link through the lab's own iroh-relay in vm1, its TLS from the lab's CA, and the doctor says so",
+    needs: ["link/2", "own relays"],
+    owner: `${OWNER.join}; then ${OWNER.relays(RELAY_URLS)}`,
+    standIn: "none: the relay tests (crates/xenonet-net/src/relay_tests.rs)",
+    changes: "runs the lab's relays in vm1, puts the lab's CA in each VM's relay-ca.pem, and drops UDP between the VMs; the relays stop and the UDP comes back afterwards",
+    reads: "the network's relays (URLs), hosts[].path, and the relays' rows in xenonet doctor --json",
+    run: (ctx) =>
+      withRelays(ctx, async ({ urls, s }) => {
+        const doctor = await ctx.doctor("vm2");
+        const rows = [];
+        for (const url of urls) {
+          const row = relayRow(doctor, url);
+          if (row?.status !== "ok" || !/a CA you added/.test(row.detail ?? "")) return fail(`vm2's doctor on ${url}: ${row ? `${row.status}, ${row.detail}` : "no row"}`);
+          rows.push(`${url} ${(row.detail ?? "").split("; ").find((w) => /ms away/.test(w)) ?? "ok"}`);
+        }
         const m = await message(ctx, "vm1", "vm2", s);
-        return m.got ? ok(`path relay; a message came in ${m.ms} ms`) : fail("the path is the relay, but a message didn't come in 10 s");
-      } finally {
-        await ctx.nft("vm1", null);
-        await ctx.nft("vm2", null);
-        await ctx.relayOff("vm1");
-        if (s) await end(ctx, ["vm1", s.a], ["vm2", s.b]);
-      }
-    },
+        return m.got ? ok(`path relay; a message came in ${m.ms} ms; vm2's doctor: ${rows.join(", ")}`) : fail("the path is the relay, but a message didn't come in 10 s");
+      }),
+  },
+  {
+    id: "relay-sealed",
+    what: "what crosses the relay is sealed: the text of a message through it is nowhere on vm1's LAN, the relay's own traffic included",
+    needs: ["link/2", "own relays"],
+    owner: `${OWNER.join}; then ${OWNER.relays(RELAY_URLS)}`,
+    standIn: "none: a_relay_sees_who_talks_never_what (crates/xenonet-net/src/relay_tests.rs), which reads what the relay itself sees",
+    changes: "as relay, and a packet capture on vm1's lima0 while one message goes, deleted afterwards",
+    reads: "a capture of vm1's lima0 (tcpdump, as root), and the relays' byte counters (their metrics, on 127.0.0.1 in vm1)",
+    run: (ctx) =>
+      withRelays(ctx, async ({ s }) => {
+        const before = await relayBytes(ctx);
+        if (!(await ctx.capture("vm1", "start"))) return owner(OWNER.tcpdump);
+        let m = null;
+        let seen = null;
+        try {
+          m = await message(ctx, "vm1", "vm2", s);
+        } finally {
+          seen = await ctx.capture("vm1", "stop", m?.text ?? "");
+        }
+        if (!m.got) return fail("a message through the relay didn't come in 10 s");
+        const through = (await relayBytes(ctx)) - before;
+        if (!(through > 0)) return fail("the relays' counters didn't move: the message didn't go through them");
+        if (!(seen?.bytes > 0)) return fail("the capture on vm1's lima0 caught nothing");
+        if (seen.found) return fail(`the message's text crossed vm1's LAN in the clear (${seen.bytes} bytes caught)`);
+        return ok(`${through} bytes through the relays, ${seen.bytes} caught on vm1's lima0, the message's text in none`);
+      }),
+  },
+  {
+    id: "relay-unlisted",
+    what: "a relay the network doesn't list is never used for it: vm2 adds one of its own, and vm1 never contacts it",
+    needs: ["link/2", "own relays"],
+    owner: `${OWNER.join}; then ${OWNER.relays(RELAY_URLS)}`,
+    standIn: "none: a_relay_the_network_doesnt_list_is_never_used (crates/xenonet-net/src/relay_tests.rs)",
+    changes: "as relay, and a third relay in vm1 that vm2 adds as its own (xenonet net relay add --mine), taken out afterwards",
+    reads: "the unlisted relay's unique_client_keys (its metrics), and messages through stand-ins",
+    run: (ctx) =>
+      withRelays(ctx, async ({ s }) => {
+        const url = await ctx.relay("vm1", RELAYS.unlisted);
+        try {
+          await ctx.ownRelay("vm2", url, true);
+          // vm2's endpoint takes the relay in, then a message goes.
+          await ctx.sleep(10000);
+          const m = await message(ctx, "vm1", "vm2", s);
+          if (!m.got) return fail("with vm2's own relay added, a message didn't come in 10 s");
+          const keys = metric(await ctx.relayMetrics("vm1", RELAYS.unlisted), "unique_client_keys");
+          if (keys == null) return fail(`couldn't read ${url}'s metrics`);
+          if (keys > 1) return fail(`${url} saw ${keys} machines: vm1 contacted a relay its network doesn't list`);
+          return ok(`${url} saw ${keys === 1 ? "vm2 alone, whose own it is" : "no machine"}; the message went through the listed relays`);
+        } finally {
+          await ctx.ownRelay("vm2", url, false);
+          await ctx.relayOff("vm1", RELAYS.unlisted);
+        }
+      }),
+  },
+  {
+    id: "relay-down",
+    what: "when vm2's home relay stops, vm2 moves to the other listed relay, messages still come, and vm2's doctor names the one that's down",
+    needs: ["link/2", "own relays"],
+    owner: `${OWNER.join}; then ${OWNER.relays(RELAY_URLS)}`,
+    standIn: "none: a_relay_going_down_moves_relay_only_machines_to_another_listed_one and a_relay_going_down_leaves_direct_paths_and_the_doctor_names_it (crates/xenonet-net/src/relay_tests.rs)",
+    changes: "as relay, and stops vm2's home relay; every relay stops afterwards",
+    reads: "relaysHere.url (vm2's home relay), hosts[].path, and the relays' rows in xenonet doctor --json",
+    run: (ctx) =>
+      withRelays(ctx, async ({ net, urls, s }) => {
+        const homeOf = async () => bare((await ctx.state("vm2"))?.relaysHere?.url);
+        const home = await homeOf();
+        const name = RELAYS.listed[urls.indexOf(home)];
+        if (!name) return fail(`vm2's home relay is ${home ?? "none"}, not one of the lab's (${urls.join(", ")})`);
+        const left = urls.find((u) => u !== home);
+        await ctx.relayOff("vm1", name);
+        if (!(await poll(ctx, 60000, async () => (await homeOf()) === left))) return fail(`vm2's home didn't move from ${home} to ${left} in 60 s`);
+        if (!(await poll(ctx, 60000, async () => hostOf(networksOf(await ctx.state("vm2")).find((n) => n.id === net.id), "vm1")?.path === "relay"))) return fail("vm2's path to vm1 isn't through a relay after the move");
+        const m = await message(ctx, "vm1", "vm2", s);
+        if (!m.got) return fail(`with ${home} down, a message didn't come in 10 s`);
+        const row = relayRow(await ctx.doctor("vm2"), home);
+        if (!row || row.status === "ok" || !(row.detail ?? "").includes(home)) return fail(`vm2's doctor doesn't name ${home} as down: ${row ? row.detail : "no row"}`);
+        return ok(`home moved to ${left}; a message came in ${m.ms} ms; vm2's doctor: ${row.detail}`);
+      }),
   },
   {
     id: "mailbox",

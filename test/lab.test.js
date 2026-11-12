@@ -10,7 +10,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { BASES, VMS, LAB_INSTANCES, HOST_ID, LAN_DEV, labPaths, envFileText, guestScript, shq, sha512crypt, randomSalt, newPassword } from "../scripts/lab/config.mjs";
-import { CHECKS, LANDS, OWNER, missing, runCheck, rules, addrsOf, networksOf, sharedNetwork } from "../scripts/lab/transport.mjs";
+import { CHECKS, LANDS, OWNER, RELAY_CHECKS, metric, missing, relayRow, runCheck, rules, addrsOf, networksOf, sharedNetwork } from "../scripts/lab/transport.mjs";
 import { REPOS, reposFor, reposScript } from "../scripts/lab/fixtures.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -138,19 +138,19 @@ test("the made-up repos: atlas-api on every host with one remote, the rest on on
 // Subjects of commits on main before link/2, and the ones the plan names
 // for the pieces the checks wait on.
 const BEFORE = ["feat(net): the xenonet-net/2 envelope", "feat(log): relays, mailboxes and rekey chain ops; AddressRecord", "feat(net): Dial, the iroh endpoint and admission", "test(net): the turmoil harness"];
-const PLANNED = ["feat(net): link/2: hello, kept/loose/live streams, Want/Ack", "feat(net): fetch from any holder", "feat(net): mailboxes and Held receipts", "feat(net)!: several networks per machine"];
+const PLANNED = ["feat(net): link/2: hello, kept/loose/live streams, Want/Ack", "feat(net): fetch from any holder", "feat(net): mailboxes and Held receipts", "feat(net)!: several networks per machine", "feat(net): self-hosted relays: your own CA, listed relays only, doctor rows"];
 
 test("a transport check waits on the phase 5 commits it needs, found by their subjects", () => {
-  assert.deepEqual(missing(Object.keys(LANDS), BEFORE), ["link/2", "holders", "mailboxes", "networks"]);
+  assert.deepEqual(missing(Object.keys(LANDS), BEFORE), ["link/2", "holders", "mailboxes", "networks", "own relays"]);
   assert.deepEqual(missing(Object.keys(LANDS), [...BEFORE, ...PLANNED]), []);
   assert.deepEqual(missing(["link/2"], ["docs: link/2 in the plan", "feat(net): link/2"]), [], "a feat(net) commit lands it");
   assert.deepEqual(missing(["mailboxes"], ["docs(net): mailboxes"]), ["mailboxes"], "only a feat(net) commit lands a piece");
-  assert.deepEqual(Object.values(LANDS).map((l) => l.commit), [9, 10, 11, 13]);
+  assert.deepEqual(Object.values(LANDS).map((l) => l.commit), [9, 10, 11, 13, "13b"]);
 });
 
-test("the transport checks: the plan's eight and the LAN's three, each saying what it needs and changes", () => {
+test("the transport checks: the plan's eight, the LAN's three and the own relay's four, each saying what it needs and changes", () => {
   const ids = CHECKS.map((c) => c.id);
-  assert.deepEqual(ids, ["lan-udp", "lan-multicast", "mac-udp", "mdns", "lan-message", "relay", "mailbox", "gap", "skew", "networks", "restore"]);
+  assert.deepEqual(ids, ["lan-udp", "lan-multicast", "mac-udp", "mdns", "lan-message", ...RELAY_CHECKS, "mailbox", "gap", "skew", "networks", "restore"]);
   for (const c of CHECKS) {
     for (const n of c.needs) assert.ok(LANDS[n], `${c.id} needs ${n}`);
     assert.ok(c.what && c.changes && typeof c.run === "function", c.id);
@@ -163,6 +163,7 @@ test("the transport checks: the plan's eight and the LAN's three, each saying wh
   assert.deepEqual(by.gap, ["link/2", "holders"]);
   assert.deepEqual(by.networks, ["link/2", "networks"]);
   assert.deepEqual(by.restore, [], "a restore's new incarnation is in this build");
+  for (const id of RELAY_CHECKS) assert.deepEqual(by[id], ["link/2", "own relays"], id);
   // Only the Mac's own datagram may open a macOS window, so it runs only
   // when named.
   assert.deepEqual(CHECKS.filter((c) => c.optIn).map((c) => c.id), ["mac-udp"]);
@@ -174,10 +175,11 @@ test("the transport checks: the plan's eight and the LAN's three, each saying wh
 function fakeLab({ subjects = [...BEFORE, ...PLANNED], network = true, relays = true } = {}) {
   const sent = new Map();
   const goals = new Set();
-  const lab = { nft: {}, clock: 0 };
-  const url = "http://192.168.64.2:3340";
+  const lab = { nft: {}, clock: 0, off: new Set(), bytes: 0, own: [], ca: [] };
+  const urls = { a: "https://192.168.64.2:3443", b: "https://192.168.64.2:4443", elsewhere: "https://192.168.64.2:5443" };
+  const home = () => [urls.a, urls.b].find((u) => !lab.off.has(u)) ?? null;
   const host = (id, me) => ({ id, online: true, found: ["mdns"], path: lab.nft[me] ? "relay" : "direct", skewMs: id === "vm2" ? lab.clock : 0 });
-  const n2 = (me) => ({ id: "net-2", name: "lab", hosts: [host("mac", me), host("vm1", me), host("vm2", me)], relays: relays ? [url] : [], mailboxes: ["mac"], frozen: [] });
+  const n2 = (me) => ({ id: "net-2", name: "lab", hosts: [host("mac", me), host("vm1", me), host("vm2", me)], relays: relays ? [`${urls.a}/`, urls.b] : [], mailboxes: ["mac"], frozen: [] });
   const n1 = (me) => ({ id: "net-1", name: "N1", hosts: [host("mac", me), host("vm1", me)], relays: [], mailboxes: [], frozen: [] });
   const standin = async (vm, o) =>
     (o.calls ?? []).map((c) => {
@@ -197,7 +199,7 @@ function fakeLab({ subjects = [...BEFORE, ...PLANNED], network = true, relays = 
     sleep: async () => {},
     session: () => `s-${Math.random().toString(16).slice(2)}`,
     subjects: async () => subjects,
-    state: async (vm) => (network ? { networks: vm === "vm1" ? [n1(vm), n2(vm)] : [n2(vm)], self: { id: vm, hlcAheadMs: Math.min(lab.clock, 300000) } } : { network: null, hosts: [] }),
+    state: async (vm) => (network ? { networks: vm === "vm1" ? [n1(vm), n2(vm)] : [n2(vm)], self: { id: vm, hlcAheadMs: Math.min(lab.clock, 300000) }, relaysHere: { url: `${home()}/` } } : { network: null, hosts: [] }),
     standin,
     standinLater: (vm, o) => ({ ready: Promise.resolve(), done: new Promise((r) => setImmediate(() => r(standin(vm, o)))) }),
     lanAddrs: async (vm) => (vm === "vm1" ? ["192.168.64.2", "fe80::1"] : ["192.168.64.3"]),
@@ -207,9 +209,21 @@ function fakeLab({ subjects = [...BEFORE, ...PLANNED], network = true, relays = 
     up: async () => {},
     service: async () => {},
     snapshot: async () => {},
-    relay: async () => url,
-    relayOff: async () => {},
-    doctor: async () => JSON.stringify({ rows: [{ id: "network.clock", detail: "vm2 is 6 min ahead" }] }),
+    relay: async (vm, name) => (lab.off.delete(urls[name]), urls[name]),
+    relayOff: async (vm, name) => {
+      for (const [n, u] of Object.entries(urls)) if (!name || n === name) lab.off.add(u);
+    },
+    relayMetrics: async (vm, name) => `# HELP\nrelayserver_bytes_recv_total ${(lab.bytes += 100)}\nrelayserver_unique_client_keys_total ${name === "elsewhere" ? lab.own.length : 2}\n`,
+    trustCa: async (vms) => lab.ca.push(...vms),
+    ownRelay: async (vm, u, add) => (lab.own = add ? [u] : []),
+    capture: async (vm, verb) => (verb === "start" ? true : { bytes: 4096, found: false }),
+    doctor: async () =>
+      JSON.stringify({
+        results: [
+          { id: "network.clock", title: "This computer's clock is close", detail: "vm2 is 6 min ahead" },
+          ...[urls.a, urls.b].map((u) => ({ id: `network.relay.${u.slice(8)}`, title: `The relay ${u} answers`, ...(lab.off.has(u) ? { status: "warn", detail: `${u} doesn't answer at 192.168.64.2: refused` } : { status: "ok", detail: "listed by lab; 2 ms away; TLS valid, a certificate from a CA you added (relay-ca.pem); iroh-relay 1.4.1" }) })),
+        ],
+      }),
     logs: async () => "vm1 holds more of this machine's feed than it has: its store was restored, so it writes from a new incarnation",
     udp: async () => true,
   };
@@ -234,14 +248,40 @@ test("a transport check skips without both VMs, waits on missing code, and asks 
   assert.deepEqual(wait, { status: "wait", detail: "not in this build yet: waits on link/2 (phase 5 commit 9), holders (phase 5 commit 10)" });
   // No network yet: what the owner runs, never a failure.
   assert.deepEqual(await runCheck(restore, fakeLab({ network: false })), { status: "owner", detail: OWNER.join });
-  const noRelay = await runCheck(CHECKS.find((c) => c.id === "relay"), fakeLab({ relays: false }));
-  assert.equal(noRelay.status, "owner");
-  assert.match(noRelay.detail, /add http:\/\/192\.168\.64\.2:3340 .* as a relay/);
+  for (const id of RELAY_CHECKS) {
+    const ctx = fakeLab({ relays: false });
+    const noRelay = await runCheck(CHECKS.find((c) => c.id === id), ctx);
+    assert.equal(noRelay.status, "owner", id);
+    assert.match(noRelay.detail, /add https:\/\/192\.168\.64\.2:3443 and https:\/\/192\.168\.64\.2:4443 .* as relays/, id);
+    assert.deepEqual(ctx.lab.ca, ["vm1", "vm2"], `${id} has both VMs trust the lab's CA`);
+    assert.equal(ctx.lab.off.size, 3, `${id} stops the relays it started`);
+  }
   // A check that throws fails, with why.
   const boom = async () => {
     throw new Error("boom");
   };
   assert.deepEqual(await runCheck({ ...restore, run: boom }, fakeLab()), { status: "FAIL", detail: "boom" });
+});
+
+test("the relay checks fail when the relay sees plaintext, an unlisted relay is used, or the doctor doesn't name a relay that's down", async () => {
+  const run = (id, ctx) => runCheck(CHECKS.find((c) => c.id === id), ctx);
+  const clear = fakeLab();
+  clear.capture = async (vm, verb) => (verb === "start" ? true : { bytes: 4096, found: true });
+  assert.match((await run("relay-sealed", clear)).detail, /in the clear/);
+  const noDump = fakeLab();
+  noDump.capture = async () => false;
+  assert.deepEqual(await run("relay-sealed", noDump), { status: "owner", detail: OWNER.tcpdump });
+  const used = fakeLab();
+  used.relayMetrics = async () => "relayserver_unique_client_keys_total 2\nrelayserver_bytes_recv_total 5\n";
+  assert.match((await run("relay-unlisted", used)).detail, /vm1 contacted a relay its network doesn't list/);
+  assert.deepEqual(used.lab.own, [], "vm2's own relay is taken out again");
+  const quiet = fakeLab();
+  const doctor = quiet.doctor;
+  quiet.doctor = async () => JSON.stringify({ results: JSON.parse(await doctor()).results.map((r) => ({ ...r, status: "ok" })) });
+  assert.match((await run("relay-down", quiet)).detail, /doesn't name https:\/\/192\.168\.64\.2:3443 as down/);
+  assert.equal(metric("relayserver_accepts_total 7", "accepts"), 7);
+  assert.equal(metric("nothing", "accepts"), null);
+  assert.equal(relayRow("not json", "https://x"), null);
 });
 
 test("the networks check fails when anything of N1 reaches vm2", async () => {
@@ -292,6 +332,7 @@ test("guest.sh parses, and so does each Node script it runs in a VM", { skip: !b
     assert.equal(r.status, 0, r.stderr);
   });
   // The steps lab.mjs runs are all there.
-  for (const step of ["vm", "facts", "subjects", "lanaddrs", "netstate", "standin", "relay", "relayoff", "udpsend", "udplisten", "answering"]) assert.match(text, new RegExp(`^${step}\\(\\) \\{`, "m"), step);
+  for (const step of ["vm", "facts", "subjects", "lanaddrs", "netstate", "standin", "relay", "relayoff", "relayca", "trustca", "ownrelay", "relaymetrics", "udpsend", "udplisten", "answering"]) assert.match(text, new RegExp(`^${step}\\(\\) \\{`, "m"), step);
   assert.ok(!/authorized_keys\.new|hosts self|relay --port/.test(text), "nothing of the retired SSH hosts");
+  assert.ok(!/iroh-relay"? --dev/.test(text), "the lab's relays are real ones, with TLS, never --dev");
 });

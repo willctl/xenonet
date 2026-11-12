@@ -290,28 +290,112 @@ main().catch((e) => {
 EOF
 }
 
-# The relay for the relay check: iroh-relay, built at the version
-# versions.json pins with its server feature and its own lockfile, run in
-# its dev mode (plain HTTP on port 3340) as a transient user service, so it
-# stops with `relayoff` or the VM. It builds with the toolchain XenoNet's
-# checkout pins; the first build takes a few minutes.
+# The lab's own relays for the relay checks: iroh-relay, built at the
+# version versions.json pins with its server feature and its own lockfile,
+# from a config file, with TLS from the lab's CA (made here once, in
+# ~/.local/share/xenonet-lab/relay) on a certificate for this VM's lima0
+# address. RELAY names one: a and b, which the lab's network lists, and
+# elsewhere, which it doesn't. Each runs as a transient user service, so it
+# stops with `relayoff` or the VM. The first build takes a few minutes.
+RELAY_DIR="$HOME/.local/share/xenonet-lab/relay"
+
+relay_ports() {
+  case "$1" in
+    a) echo "3340 3443 9090 true" ;;
+    b) echo "3341 4443 9091 false" ;;
+    elsewhere) echo "3342 5443 9092 false" ;;
+    *) echo "no relay named $1" >&2; exit 1 ;;
+  esac
+}
+
+relay_certs() {
+  local ip="$1"
+  mkdir -p "$RELAY_DIR"
+  chmod 700 "$RELAY_DIR"
+  command -v openssl >/dev/null || { echo "openssl isn't in this VM" >&2; exit 1; }
+  if [ ! -s "$RELAY_DIR/ca.pem" ]; then
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 365 \
+      -subj "/CN=XenoNet lab relay CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+      -keyout "$RELAY_DIR/ca.key" -out "$RELAY_DIR/ca.pem" 2>/dev/null
+  fi
+  if [ ! -s "$RELAY_DIR/relay.pem" ] || [ "$(cat "$RELAY_DIR/relay.ip" 2>/dev/null)" != "$ip" ]; then
+    openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=$ip" \
+      -keyout "$RELAY_DIR/relay.key" -out "$RELAY_DIR/relay.csr" 2>/dev/null
+    printf 'subjectAltName=IP:%s\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n' "$ip" >"$RELAY_DIR/relay.ext"
+    openssl x509 -req -in "$RELAY_DIR/relay.csr" -CA "$RELAY_DIR/ca.pem" -CAkey "$RELAY_DIR/ca.key" -CAcreateserial \
+      -days 90 -extfile "$RELAY_DIR/relay.ext" -out "$RELAY_DIR/relay.pem" 2>/dev/null
+    echo "$ip" >"$RELAY_DIR/relay.ip"
+  fi
+}
+
 relay() {
   if [ "$("$HOME/.local/bin/iroh-relay" --version 2>/dev/null | awk '{print $2}')" != "$RELAY_VERSION" ]; then
     (cd "$HOME/xenonet" && rustup toolchain install >/dev/null && cargo install -q --locked --features server --root "$HOME/.local" iroh-relay --version "$RELAY_VERSION")
   fi
-  systemctl --user stop xenonet-lab-relay.service 2>/dev/null || true
-  systemd-run --user -q --collect --unit=xenonet-lab-relay "$HOME/.local/bin/iroh-relay" --dev
+  local ip http https metrics qad
+  ip="$(ip -o -4 addr show dev lima0 | awk '{print $4}' | cut -d/ -f1 | head -1)"
+  read -r http https metrics qad <<<"$(relay_ports "$RELAY")"
+  relay_certs "$ip"
+  cat >"$RELAY_DIR/$RELAY.toml" <<EOF
+# The lab's relay $RELAY (scripts/lab/guest.sh).
+enable_relay = true
+http_bind_addr = "0.0.0.0:$http"
+enable_quic_addr_discovery = $qad
+enable_metrics = true
+metrics_bind_addr = "127.0.0.1:$metrics"
+
+[tls]
+https_bind_addr = "0.0.0.0:$https"
+quic_bind_addr = "0.0.0.0:7842"
+cert_mode = "Manual"
+manual_cert_path = "$RELAY_DIR/relay.pem"
+manual_key_path = "$RELAY_DIR/relay.key"
+EOF
+  systemctl --user stop "xenonet-lab-relay-$RELAY.service" 2>/dev/null || true
+  systemd-run --user -q --collect --unit="xenonet-lab-relay-$RELAY" "$HOME/.local/bin/iroh-relay" --config-path "$RELAY_DIR/$RELAY.toml"
   local i
   for i in $(seq 1 30); do
-    if curl -s -o /dev/null -m 2 http://127.0.0.1:3340/; then echo "relay=http://$(ip -o -4 addr show dev lima0 | awk '{print $4}' | cut -d/ -f1 | head -1):3340"; return 0; fi
+    if curl -fs -o /dev/null -m 2 --cacert "$RELAY_DIR/ca.pem" "https://$ip:$https/healthz"; then echo "relay=https://$ip:$https"; return 0; fi
     sleep 1
   done
-  echo "iroh-relay --dev didn't answer on port 3340" >&2
+  echo "iroh-relay $RELAY didn't answer on https://$ip:$https" >&2
   exit 1
 }
 
+# Stops the relay RELAY names, or every one of the lab's.
 relayoff() {
-  systemctl --user stop xenonet-lab-relay.service 2>/dev/null || true
+  systemctl --user stop "xenonet-lab-relay-${RELAY:-*}.service" 2>/dev/null || true
+}
+
+# The lab's CA, base64 on one line, for the other VMs to trust.
+relayca() {
+  echo "ca=$(base64 -w0 "$RELAY_DIR/ca.pem")"
+}
+
+# The CA (CA_PEM, base64) in XenoNet's relay-ca.pem, the per-machine
+# setting for relays with a CA of their own; XenoNet starts again when it
+# changed, since the endpoint reads it when it starts.
+trustca() {
+  local dir="$HOME/.local/state/xenonet/network" pem
+  pem="$(printf %s "$CA_PEM" | base64 -d)"
+  mkdir -p "$dir"
+  if [ "$(cat "$dir/relay-ca.pem" 2>/dev/null)" != "$pem" ]; then
+    printf '%s\n' "$pem" >"$dir/relay-ca.pem"
+    systemctl --user restart xenonet.service
+    echo changed
+  fi
+}
+
+# A relay of this machine's own (URL), in (ADD=1) or out.
+ownrelay() {
+  if [ "$ADD" = 1 ]; then xenonet net relay add "$URL" --mine --json >/dev/null; else xenonet net relay remove "$URL" --mine --json >/dev/null || true; fi
+}
+
+# The metrics of the relay RELAY names, from 127.0.0.1.
+relaymetrics() {
+  local http https metrics qad
+  read -r http https metrics qad <<<"$(relay_ports "$RELAY")"
+  curl -fsS -m 5 "http://127.0.0.1:$metrics/metrics" || true
 }
 
 # One UDP datagram, NONCE, to ADDR:PORT, or to the multicast group GROUP
