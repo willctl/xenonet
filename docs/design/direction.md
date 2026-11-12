@@ -1,11 +1,11 @@
 # Direction: from the prototype to the system
 
 Status: analysis and target shape, last updated 2026-11-12. Written for the goals in
-[goals.md](goals.md). Phases 1 to 5 of the order of work are done;
-phase 6 is being built on `main`, and says below what has landed and
-what is left. "Where the code stands" is the measure taken before phase
-1, with the rows phase 3 answered stated as they stand; the order of work
-says what each phase changed. Will decides the open questions at the end
+[goals.md](goals.md). Phases 1 to 6 of the order of work are done. No
+release has been cut since; cutting it is Will's step, with the others
+phase 6 lists. "Where the code stands" is the measure taken before phase
+1, with the rows phases 3 and 6 answered stated as they stand; the order
+of work says what each phase changed. Will decides the open questions at the end
 as each phase reaches them; a question decided "as recommended" took the
 recommendation by Will's standing word, and stays on his review list.
 
@@ -50,9 +50,9 @@ schemas and the design docs. Sizes are lines of Rust under `crates/*/src`.
 | 5 Distributed and scalable | Presence is one sealed frame per host per tick, so O(hosts² × agents); by the frame cap of 64 KiB, a full presence with detail would be refused at roughly 50 to 100 agents per host, and 20 hosts would exhaust the 600 frames/min bucket (both inferred from the limits, not measured). One gateway, single SQLite, no failover by design, moved by hand. |
 | 6 Modular | The engine is a line-by-line port of JS: cores call each other through `Calls::call(path, method, args)` with string names and JS-shaped values (`crates/xenonet-engine/src/peer.rs`), so there are no typed boundaries between engine, store, policy, delivery and actors. `xenonet-base` holds the vendor registry, the Hermes plugin, pricing and 2.8k lines of Node emulation, and every crate depends on it. Five leaf crates depend on `xenonet-app` for JS shims. `connect.rs` (1,775 lines of Claude, Codex and Grok config writing) lives inside the messaging engine. `"claude"` and `"codex"` appear in over a hundred Rust files. The `cli` crate depends on 19 crates, `wire-app` on 15. |
 | 7 Seamless setup | Only Claude Code, Codex and Grok Build have `connect`; Codex still needs `/hooks` trust by hand, Hermes a config edit and a token file, Cursor a checkout and a hand-edited hooks file. The Mac app is unsigned (Open Anyway every version, no auto-update), Windows too. The plugin hard-codes port 47840 and breaks on Windows. The doctor's 33 checks are hand-listed, not derived from the registry. |
-| 8 Reuse | MCP (rmcp), inbound A2A and Biscuit (biscuit-auth 6, for every actor's grant) are adopted. The wire format, the chains, delivery and sync are XenoNet's own. ACP, which Grok Build, Hermes and the Claude Code adapter all speak, is not used to start or drive sessions. |
+| 8 Reuse | Adopted: iroh 1.x, Biscuit (biscuit-auth 6, for every actor's grant and Xenolith's), MCP on rmcp at the 2026-07-28 revision beside the 2025 handshake, A2A 1.0 on `a2a-lf`, inbound and outbound, and ACP (`agent-client-protocol`), which starts and drives Grok Build and Hermes. The wire format, the chains and delivery are XenoNet's own, and Xenolith's sync runs on them. |
 | 9 Verified | The authorization rules have an exhaustive decision matrix, property tests and compile-fail tests; there are 23 fuzz targets. No model and no simulation: nothing checks the chains, the tickets, the outbox or the claims under reordering, loss or crashes. |
-| 10 Xenolith follows | Xenolith is a separate workspace in the same repo, excluded from the root workspace, with its own copies of private-file, X25519, SHA-256 and token code. XenoNet reads its folder by format and syncs it as an opaque published service. Its spaces are free-text names, not XenoNet ids. |
+| 10 Xenolith follows | Xenolith is a separate workspace in the same repo that takes XenoNet's libraries by path, never its app. Its spaces are chains bound to `spc_` ids, its grants are Biscuits decided by `xenonet-authz`, and it syncs over `xenolith/sync/2` on xenonet-net, on its own endpoint or XenoNet's forward. Binding a space to its project's id is in the chain's rules but not offered at the window yet, so the map ties spaces by name. |
 
 ### Dead weight
 
@@ -150,8 +150,9 @@ xenonet-api       the typed local protocol; the only crate surfaces import
 xenonet-service   composition root; no logic
 xenonet-keys      the platform keys behind id's Signer and Vault (Secure Enclave, TPM, Windows Hello, polkit)
 xenonet-http      the local HTTP and SSE routes; imports xenonet-api alone
+xenonet-door      the local door's decisions; xenonet-saved: what XenoNet saves for you
 surfaces          xenonet-cli, xenonet-mcp, xenonet-console and the A2A edge, crates under crates/
-adapters/         claude-code, codex, grok-build, hermes, opencode, acp, git
+adapters/         claude-code, codex, grok-build, hermes, opencode, …, and the generic acp, a2a, mcp-catalog; git
 xenonet-doctor    runs every Check the crates and adapters expose
 * usable alone by another project
 ```
@@ -220,7 +221,8 @@ Each stream kind declares its order and retention:
 | Task events, Answer | run | per author | kept until the task ends, then 7 days |
 | Chain entries | group | hash chain | forever |
 | Presence | machine | last writer wins | live, while the connection is up and 30 s after |
-| Context notes and page versions | space | per author | forever |
+| Chain entries of a space | space | hash chain | forever |
+| Context notes and pages | space | per author | kept, with texts apart so a forget drops them; history on the curator |
 | Map, published services | machine | stream | live |
 
 ### Protocols
@@ -272,11 +274,13 @@ Each stream kind declares its order and retention:
   holder at a time. Into an agent's context: at-least-once with the id
   visible, acked when the turn that showed it ends. No global order; the
   HLC orders for display, `reply_to` gives causality.
-- **Edges:** MCP (rmcp 3, the 2026-07-28 revision) is how agents and
-  actors reach the engine, XenoNet's tools in one extension namespace. ACP
-  (`agent-client-protocol`) lives in one generic adapter that starts,
-  drives and relays prompts for every platform that speaks it. A2A 1.0
-  (`a2a-rs`) sits at the front door; inbound first, outbound later.
+- **Edges:** MCP (rmcp 3, the 2026-07-28 revision beside the 2025
+  handshake) is how agents and actors reach the engine; the tools keep
+  their names, and what XenoNet adds sits under the `dev.xenonet/`
+  extension. ACP (`agent-client-protocol`) lives in one generic adapter
+  that starts, drives and relays prompts for every platform that speaks
+  it. A2A 1.0 (a2aproject's a2a-rs, as `a2a-lf`) is inbound at the front
+  door and outbound to agents registered by their card.
 
 ### Authorization
 
@@ -392,7 +396,7 @@ Spotify) moves out of the core into the console.
 Xenolith stays a separate program that depends on XenoNet's libraries
 and never on the app: `xenonet-id`, `-log`, `-authz` and `-net`, the
 base crates `-model`, `-os` and `-text`, and `xenonet-keys`, which
-`-net` brings. It never takes the service, the runtime, the surfaces or the
+`-net` brings. It never takes the service, the surfaces or the
 adapters (decided by Will on 2026-11-11: "Libraries OK, never app"). It
 runs fully on its own, on its own iroh endpoint, and uses a running
 XenoNet only through an optional forward. A space is a chain bound to a
@@ -475,8 +479,9 @@ Will's step on inix and NEO-REX.
    a session index in place of the rebuild per call. The three `wire-*`
    crates and the `base` and `app` grab-bags are gone too, their code in
    `xenonet-text`, `xenonet-os`, `xenonet-api`, `xenonet-demo`,
-   `xenonet-console`, `xenonet-runtime`, `xenonet-state`'s runtime and the
-   domain crates, with the composition root in the service. No core crate
+   `xenonet-console`, the composition root's runtime, `xenonet-state`'s
+   runtime and the domain crates, with the composition root in the
+   service. No core crate
    depends on a surface or an adapter crate or names a platform, and
    `npm run lint:rust` fails if one does (`scripts/rust-layers.mjs`).
    Left for later: the core traits in `xenonet-api` still pass JSON (typed
@@ -485,11 +490,9 @@ Will's step on inix and NEO-REX.
    `xenonet-api`" rules wait for phase 3; the session index takes the map
    and the store's contacts by push but still reads the live tailer and
    the actors' list on each call; the per-app line views stay in
-   `xenonet-sources` as types the adapters name by format; the Pi
-   integration's session reading is still in `xenonet-integrations`; and
-   the network's merge (`xenonet-runtime`'s `remote`) still tells Claude
-   Code's plan readings from the registry's limits kind rather than
-   through its adapter.
+   `xenonet-sources` as types the adapters name by format; and the Pi
+   integration's session reading is in the root's `compose::integrations`,
+   not an adapter.
 3. **One authorization. Done (2026-11-11).** Four crates hold it, each
    usable alone ([authorization.md](authorization.md)). `xenonet-id` has
    keys and signatures bound to their purpose, the `Signer` and `Vault`
@@ -516,9 +519,8 @@ Will's step on inix and NEO-REX.
    presence, and every machine then refuses what it signs. Publishing a
    service is the person's `publish` act, with presence for that
    publication. The local API takes a credential on every route, with one
-   rules table, and Xenolith's sync sends it to a local XenoNet. Text from
-   another machine or an actor is `Information<T>` at the runtime's
-   boundary. The frame head stays `xenonet-net/1` and its kinds stay closed.
+   rules table. Text from another machine or an actor is
+   `Information<T>` where it comes in, in the root's runtime. The frame head stays `xenonet-net/1` and its kinds stay closed.
    Deleted: `reach.rs`, `operator.rs`'s acts but answers, the node's widen
    and operator nonces, `attest.rs`'s strength ladder and the model's
    `Strength` and `CheckedBy`; actor tokens as hashes, the capability
@@ -535,10 +537,8 @@ Will's step on inix and NEO-REX.
    for the widest acts, and the
    service as its own OS user; `Information<T>` inside the engine's own
    crate, which would need it in `xenonet-model`; typed requests in
-   `xenonet-api` (its core traits still pass JSON); the
-   MCP and console surfaces on `xenonet-api` alone (held to ceilings until
-   phase 5), and the composition crates' ceilings lowered as each phase
-   dissolves them ([rust-core.md](rust-core.md)); and project- and agent-scoped tokens and
+   `xenonet-api` (its core traits still pass JSON); the composition
+   crates' ceilings lowered ([rust-core.md](rust-core.md)); and project- and agent-scoped tokens and
    store-order revocation, which come with phase 4's stored ids and feeds.
 4. **Many-to-many ids, one store. Done (2026-11-11).** Add feeds and stored ids (project,
    agent, org, space) with checkouts as rows; claims become (project,
@@ -599,7 +599,7 @@ Will's step on inix and NEO-REX.
    long poll, signed requests, `network/frame/v1` and its kinds, the
    outbox and per-host queues, the clock offset, the gateway ticket and
    join route, `/net/v1`, the LAN door, `xenonet net gateway`, `--lan`);
-   the remote map's relay (`xenonet-runtime`'s `remote/`, `RelaySink`,
+   the remote map's relay (`RelaySink`,
    relay frames, the hub, the merge and the snapshot cache,
    `network/relay/v1`, `host/hello/v1`); the `@host:` qualified ids, for
    `agt_` ids on every machine; the 2 s presence tick. Left for later: a
@@ -611,27 +611,153 @@ Will's step on inix and NEO-REX.
    networks (it takes the first as its own); the chain's inert `gateway`
    op; collisions and MCP servers' details across machines; and the
    Kani proofs of the HLC, written and not yet run.
-6. **Xenolith and the edges.** Xenolith adopts the libraries, never
-   the app, and deletes its own pairing, tokens and crypto; spaces bind to
-   model ids; the generic ACP adapter; A2A outbound; MCP 2026-07-28.
-   Landed: the Windows TPM key; the ACP client (`xenonet-acp`), which
-   starts Grok Build and Hermes; MCP 2026-07-28 with XenoNet's channel
-   over `subscriptions/listen`; A2A inbound on `a2a-lf`, and outbound A2A
-   actors (`adapters/a2a`); spaces (`SpaceId`, `EntityRef`, the
-   `xenolith-space/1` policy, its Quint model, `Resource::Space`);
-   Xenolith built from path dependencies on the libraries, held to them by
-   the layering check, with keys of its own; the MCP and console surfaces
-   on `xenonet-api` alone (the root gives them what else they need, and
-   the doctor tool runs `xenonet doctor --json` when the service is down);
-   `link/2` and `join/2` generic over `Admission`, groups and
-   `JoinTarget`, and `forward(alpn)` for an actor's own protocol; Xenolith's
-   chain per space, its decisions through `xenonet-authz` with Biscuit
-   grants, `xenolith/sync/2` on its own endpoint and in shared mode over
-   XenoNet's forward, `xenolith/join/1` in place of pairing, fetching the
-   curator's feed from any member holding it, its grant minted and its
-   space entries signed at XenoNet's window, its 1.x sync code deleted, and
-   Xenolith in the VM lab. Left: dissolving the runtime, assistant and
-   integrations crates, and the docs.
+6. **Xenolith and the edges. Done (2026-11-12).** Xenolith takes the
+   libraries, never the app, and syncs its spaces on them; the edges speak
+   ACP, A2A 1.0 and MCP 2026-07-28 ([rust-core.md](rust-core.md),
+   [network.md](network.md#forwardalpn), [authorization.md](authorization.md),
+   [Xenolith's sync design](../../xenolith/docs/sync-design.md)).
+   Landed in XenoNet: spaces (`SpaceId`, `EntityRef`, xenonet-log's
+   `xenolith-space/1` policy, with sequenced and side entries, curator
+   epochs and the lowest-id rule for takes, `formal/space.qnt`), the
+   space marker signed by Xenolith's context key, and `Resource::Space`
+   with the ctx acts in `decide`; grant schemas (`Schema::XENONET`,
+   `Schema::XENOLITH`) with the optional `key(id)` and `forward(alpn)`
+   facts; link/2, join/2 and holders generic over `Admission`, groups and
+   `JoinTarget`; `forward(alpn)`, with the forwardable ALPNs registered by
+   the root (only `xenolith/sync/2`), one actor per ALPN, members only,
+   the connection's keying material in each header, and revocation ending
+   it; Xenolith's grant collected over the owner-only socket and approved
+   at the window (Network settings › Shared context), and its space
+   entries signed there (`space_sign`: Make it yours, Share into a
+   network, Stop sharing), with a project's narrowed sharing told to
+   Xenolith; the map tying a project space by `prj_` only for a signed
+   marker its owner signed; the generic ACP client (`xenonet-acp`, on
+   `agent-client-protocol` 5.2 without its process feature: no fs or
+   terminal for the agent, never `allow_always`), which starts Hermes and
+   Grok Build; A2A inbound on `a2a-lf` and outbound A2A actors
+   (`adapters/a2a`, `Act::Delegate`, the card pinned by hash, https only,
+   private addresses refused unless allowed, the bearer never shown); MCP
+   2026-07-28 beside the 2025 handshake, with the channel over
+   `subscriptions/listen`; the MCP and console surfaces on `xenonet-api`
+   alone, with the doctor tool running `xenonet doctor --json` when the
+   service is down; the Windows TPM signing key; and Xenolith in the VM
+   lab, with the cutover's rehearsal. Landed in Xenolith (2.0): path
+   dependencies on the libraries, held to them by the layering check and
+   the lockfile check (`scripts/xenolith-lock.mjs`); `xenolith` and
+   `xenolith-service` as separate programs, so the hook and the tray
+   reach no tokio or iroh; its context, transport and owner signing keys;
+   a chain per space, decisions through `xenonet-authz` and grants as
+   Biscuits; the upgrade gate (`xenolith upgrade`, `--run`, `--undo`,
+   `xenolith doctor`); `xenolith/sync/2` on its own endpoint, with notes
+   to the curator alone, texts by hash and forget, page epochs and the
+   copy's edits as proposals; `xenolith/join/1`; members holding the
+   curator's feed; and shared mode over the forward. Deleted:
+   `xenonet-runtime`, `xenonet-assistant` and `xenonet-integrations`, their
+   code in `xenonet-saved`, `xenonet-door`, `xenonet-actors`' `assistant`,
+   `adapters/mcp-catalog` and the root's `compose::runtime`,
+   `compose::assistant` and `compose::integrations`; Xenolith's pairing,
+   `/sync/v1`, its curl client, peer tokens, `xenolith_<hex>` tokens and
+   their hash table, the satellite mode and its once-a-minute pass, and
+   `x25519-dalek`; Xenolith's svc publication path and its credential
+   header; and the hand-written A2A types.
+   No release is cut: XenoNet 0.7.0 and Xenolith 2.0.0 are Will's step
+   (below). Left for later, by what the phase 6 review asked:
+   - Spaces: driving the code from `space.qnt`'s traces with
+     quint-connect; a superseded curator handing its unfiled inbox to the
+     new one, and a test of two takes in a partition with both filing;
+     the curator's snapshot of the live pages, and a forget that redacts
+     members' `.history/`; a `rekey` of a member's endpoint; a stored feed
+     incarnation checked after a restore; binding a space to its
+     project's id at the window, with machine and actor owners checked
+     when one binds.
+   - join/1 and the endpoint: a list to confirm before following, and the
+     relay and mDNS questions at `xenolith invite`; invites and joins in
+     a window; open invites kept across a restart.
+   - Shared mode: the Windows named pipe (so NEO-REX syncs by invite for
+     now); per-remote limits on forwarded connections; revocations and
+     project ids over the socket, and chains pushed on change; Xenolith
+     taking XenoNet actor grants with ctx rights, so an actor holds one
+     grant for both; one presence for a batch of moves to the person, one
+     Touch ID rather than two per share or move on a Mac, and spaces
+     founded with the person as owner; XenoNet appending the narrowing
+     unshare itself; a turned-down ask that stays turned down after
+     Xenolith restarts.
+   - ACP: the XenoNet MCP server named in `session/new`; delegated
+     Allows for ACP asks; `session/load` after an idle close; modes as ACP
+     modes; killing a started agent's process group on Unix and the
+     Windows job object; Hermes as a session on the map; an end-to-end
+     ACP test through the whole service; and Grok Build's headless start,
+     its fallback and the start for a mode, kept until a probe of its ACP
+     mode runs signed in.
+   - A2A: an Actors panel for outbound actors; showing `auth-required` in
+     the window; A2A's tenant; the push-notification refusal's wording,
+     which says XenoNet makes no outbound calls.
+   - Release: the release workflow running the lockfile check.
+   - From the plan's list after phase 6: gossip fan-out when iroh-gossip
+     is 1.0; per-network endpoint keys; an embedded relay; the service as
+     its own OS user; Xenolith's MCP on 2026-07-28; Ask from another
+     machine, run on the curator; Xenolith's owner decisions on
+     `xenonet-keys`; the org chain and sharing between persons;
+     `MergeSpace`; CBOR/COSE if an outside party needs it; hardware-key
+     taps for the widest acts; A2A over gRPC; and `xenonet-state` and
+     `xenonet-doctor` below their ceilings of 7, now tagged phase 7.
+
+   **Will's steps after phase 6:** what needs his presence, his sign-ins,
+   his machines or his say on a release, and the checks before the
+   cutover.
+   1. Review what phase 6 decided as recommended (questions 6 and 12 to
+      14, below) and overturn any of it.
+   2. Cut XenoNet 0.7.0 ([releases.md](../guide/releases.md)) and
+      Xenolith 2.0.0 ([xenolith/AGENTS.md](../../xenolith/AGENTS.md#releases)):
+      agents bump the versions and write the notes; Will tags (or has an
+      agent tag as willctl after `gh auth switch --user willctl`), tries
+      the archives and publishes, Xenolith with "latest" unticked. The
+      notes say 1.x and 2.x don't sync and 1.x's client tokens are made
+      again.
+   3. On inix, `grok login`, then `cargo run -p xenonet-acp --example
+      probe` for Grok Build, before its headless start is deleted.
+   4. On NEO-REX, the TPM check: `XENONET_REQUIRE_TPM=1 npm run cargo --
+      test -p xenonet-keys -- --nocapture` passes both TPM tests; after
+      installing and setting up, `xenonet doctor`'s `network.signing` is
+      ok and names the service's account; note how long a signature takes
+      (over 20 ms means batching feed entries); after a restart and a
+      reboot the key id and the machine's identity are the same;
+      optionally, another account or a deleted key is refused, with no new
+      key made.
+   5. Set both machines up again on the new build, since nothing carries
+      over: back up, update the app, its tools and its service, and
+      `xenonet service install`; found the person (Touch ID) and offer a
+      second device or the recovery phrase; `xenonet net create`, choosing
+      the relays and answering mDNS; join NEO-REX by invite and add it as
+      the person's device; set what each network sees; make the
+      delegation grant again and set NEO-REX to Delegated; issue the
+      actors' grants again (Grok Bot's gateway token, the Hermes plugin's
+      token); connect Claude Code and Codex again from the window
+      (`/hooks` once in Codex).
+   6. Before the cutover, run the lab's Xenolith checks
+      (`npm run lab -- check`, `xenolith-rehearsal` first), which haven't
+      had a real run yet.
+   7. Move Xenolith from 1.x on inix and NEO-REX in one sitting, by its
+      README's steps
+      ([From 1.x to 2.0](../../xenolith/README.md#from-1x-to-20)): drain
+      NEO-REX's 1.x queue and stop both, copy the folder, config and
+      state with Xenolith stopped and keep 1.10.0, install 2.0,
+      `xenolith upgrade` then `--run` (inix first), make UDP 47851
+      reachable (or set `sync.relays`), `xenolith invite` on inix and the
+      printed `xenolith join` on NEO-REX within ten minutes, checking the
+      owner and genesis hashes, then `xenolith sync status` on both. Make
+      1.x's client tokens again with `xenolith token create`. To go back:
+      `xenolith upgrade --undo` while 2.0 is still installed, then stop
+      2.0, restore the config and state folders, and reinstall 1.10.0 on
+      both.
+   8. On a Mac in the network, shared mode: in Network settings › Shared
+      context, Allow "Xenolith asks to sync over the network" with the
+      networks ticked (Touch ID), then for each space Make it yours and
+      Share into each network (Touch ID each). NEO-REX stays on the
+      invite until the named pipe is built.
+   9. Check: a session on NEO-REX sees inix's pages in `context_start`, a
+      note left on NEO-REX is filed by inix's curator, and `xenonet
+      doctor` and `xenolith status` are clean on both.
 
 ## Verification plan
 
@@ -657,9 +783,10 @@ change edits the spec first. Not verified formally: parsers and drift
 ## Open questions for Will
 
 Questions 1, 2, 4, 5, 8 and 11 are decided by Will; 3, 6, 9 and 10 were
-decided as recommended in phase 5, and are on his review list with the
-other calls phase 5 took as recommended, which stand under 1, 2 and 4.
-Question 7 can wait for the phase that needs it.
+decided as recommended in phase 5, and 12 to 14 and the close of 6 in
+phase 6. All of those are on his review list, with the other calls phase 5
+took as recommended, which stand under 1, 2 and 4. Question 7 can wait for
+the phase that needs it.
 
 1. **The person's root key, the presence check and the chain rules.**
    Decided by Will on 2026-11-08. The root key lives in the first
@@ -728,8 +855,9 @@ Question 7 can wait for the phase that needs it.
    with the data model but is exercised only by tests until then.
 6. **Wire format.** Keep the line head and JSON, or move to CBOR with
    COSE_Sign1 for outside interop? Decided as recommended in phase 5: the
-   `xenonet-net/2` envelope keeps the line head and JSON. CBOR and COSE
-   are revisited in phase 6.
+   `xenonet-net/2` envelope keeps the line head and JSON. Closed as
+   recommended in phase 6: JSON stays, and CBOR with COSE comes only if an
+   outside party needs it.
 7. **Claims.** Stay advisory with a deterministic winner, or allow a
    project to name one arbiter machine for exclusive leases?
 8. **Actor grants and the SSH hosts prototype.** The grants are decided
@@ -763,8 +891,26 @@ Question 7 can wait for the phase that needs it.
     machine is in shares all, and each one after starts with none.
 11. **Xenolith and XenoNet's code.** Decided by Will on 2026-11-11:
     "Libraries OK, never app." Xenolith may take the libraries (`xenonet-id`,
-    `-log`, `-authz`, `-net`, with `-model`, `-os`, `-text` and `-keys`), never the service, runtime, surfaces
+    `-log`, `-authz`, `-net`, with `-model`, `-os`, `-text` and `-keys`), never the service, surfaces
     or adapters, and keeps running fully on its own.
+12. **Xenolith's shape.** Decided as recommended in phase 6: Xenolith
+    keeps its own workspace and lockfile, with path dependencies into this
+    one; its key is bound to its machine by a `key(id)` fact in its actor
+    grant, not a new certificate; its standalone owner is a file key now,
+    marked weaker, with `xenonet-keys` later; a machine curates the spaces
+    it founds; and the transport is chosen per peer, the own endpoint for
+    shares to a key and XenoNet's forward for network members.
+13. **Context feeds' retention and remote `user` notes.** Decided as
+    recommended in phase 6: a space's chain is kept forever; its page feed
+    is kept with texts apart, so a forget drops them everywhere, and the
+    history stays on the curator. A note from another machine keeps
+    `user` only when its Xenolith is bound to a machine whose device is an
+    active device of the space's person owner.
+14. **Which apps start over ACP, and the versions.** Decided as
+    recommended in phase 6: Grok Build and Hermes start over ACP, and
+    Claude Code's ACP adapter, an npm package, isn't taken unless Will
+    wants it; Codex stays headless. The release after phase 6 is XenoNet
+    0.7.0 and Xenolith 2.0.0.
 
 ## Risks
 
