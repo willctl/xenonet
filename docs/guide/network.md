@@ -210,29 +210,11 @@ A request's body is at most 1 MiB and an answer's 4 MiB, or the caller gets 413.
 
 **A published service with no sign-in of its own is open to every program on every machine allowed to call it.** Give it tokens of its own, or name the machines that may call it.
 
-### Xenolith's sync between two machines
+### Xenolith between machines
 
-[Xenolith](../../xenolith/README.md#sync-between-machines) syncs a space between machines over HTTP, with its own tokens. Through the network, laptop follows a space that studio curates, and neither machine opens a port for it.
+Xenolith isn't a published service. It syncs spaces on its own protocol, `xenolith/sync/2`: on its own endpoint, or, in shared mode, through XenoNet's forward, which carries it to the machines of your networks for an actor whose grant names that protocol. [Sync between machines](../../xenolith/README.md#sync-between-machines) has the steps.
 
-On studio, where Xenolith's service listens on its usual port, 47850:
-
-```bash
-xenolith grant machine:laptop ctx:write:project:atlas
-xenolith token create machine:laptop
-```
-
-Then, in studio's XenoNet window, **Network settings › Publish a service**: name `xenolith`, address `http://127.0.0.1:47850`, paths `/sync/v1/`.
-
-On laptop, with the token in `studio.token`:
-
-```bash
-xenolith sync name laptop
-xenolith sync peer add studio http://127.0.0.1:47840/api/svc/studio/xenolith < studio.token
-xenolith sync follow project:atlas studio
-xenolith sync
-```
-
-Xenolith on laptop sends laptop's XenoNet API credential with each request to a `/api/svc/` address on 127.0.0.1 or localhost, read from XenoNet's `runtime` folder (or `XENONET_RUNTIME_DIR`) each time, so nothing more is needed when XenoNet restarts. Xenolith on studio gets each request with laptop's token and a `Forwarded` header, so it treats it as remote, and what studio granted `machine:laptop` decides what laptop may do.
+On the map, a project space is tied to its project by the project's id only when its folder's `xenolith-space.json` is signed by the context key Xenolith's grant names, and the space's owner owns the project. Any other space shows by its folder's name, and one about a project someone else owns says so ([the space marker](../../xenolith/FORMAT.md#the-space-marker)).
 
 ## When the gateway is down
 

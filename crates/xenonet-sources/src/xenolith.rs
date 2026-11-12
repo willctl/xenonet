@@ -260,13 +260,18 @@ pub enum Space {
     Refused,
 }
 
-// /^[a-z0-9][a-z0-9._-]{0,63}$/, and no "..".
+// /^[a-z0-9][a-z0-9._-]{0,63}(~[a-z2-7]{6})?$/, and no "..": a second
+// space of a kind and name, from another Xenolith, carries `~` and the
+// first six characters of its chain's id (xenolith/FORMAT.md, "Spaces").
 fn space_name(name: &str) -> bool {
-    let b = name.as_bytes();
-    b.first().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        && b.len() <= 64
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-'))
-        && !name.contains("..")
+    let (base, suffix) = name.split_once('~').map_or((name, None), |(b, s)| (b, Some(s)));
+    xenonet_model::ids::is_space_name(base) && suffix.is_none_or(|s| s.len() == 6 && s.bytes().all(|c| c.is_ascii_lowercase() || (b'2'..=b'7').contains(&c)))
+}
+
+/// A space's name without the `~…` a second space of that name carries:
+/// the name both are shown and tied by.
+pub fn base_name(name: &str) -> &str {
+    name.split_once('~').map_or(name, |(b, _)| b)
 }
 
 /// The space a context_* call works in, from its `space` as Xenolith's

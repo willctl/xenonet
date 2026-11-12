@@ -117,6 +117,7 @@ meet a space folder without one and shows it by its name.
   "about": "name:project:atlas",
   "genesis": "<the hash of the chain's entry 0, base64url>",
   "owner": "key:xns1_…",
+  "ownerSigned": true,
   "key": { "alg": "ed25519", "key": "<the context key that signed it, base64url>" },
   "sig": "<base64url>"
 }
@@ -124,13 +125,22 @@ meet a space folder without one and shows it by its name.
 
 - `space`: the chain's id. `about`: what it's about, `name:<kind>:<name>`
   until it's bound to an id (`prj_…`). `owner`: `person:prs_…`, or
-  `key:xns1_…` for a space the standalone owner key owns.
+  `key:xns1_…` for a space the standalone owner key owns. `ownerSigned`:
+  whether the owner has signed an entry of the chain, not only been named
+  by whoever founded it.
 - `sig` is the context key's Ed25519 signature, under the `xenolith-space/1`
   purpose, over the lines `xenolith-space-marker/1`, `space`, `about`,
-  `genesis`, `owner` and the key's id, joined by LF. Anyone can write this
-  file, so a reader trusts a marker only when it's signed by a context key it
-  knows to be that Xenolith's (XenoNet: the `key(id)` in Xenolith's grant),
-  and shows the space by its name otherwise.
+  `genesis`, `owner`, `ownerSigned` (`true` or `false`) and the key's id,
+  joined by LF. A marker with any other field, or without one of these, is
+  not one. xenonet-log's `space::marker` writes and checks it.
+- Anyone can write this file, so a reader trusts a marker only when it's
+  signed by a context key it knows to be that Xenolith's (XenoNet: the
+  `key(id)` in Xenolith's grant), and shows the space by its name otherwise.
+- A space counts as what it's about only when its owner owns that and has
+  signed in it. XenoNet's map ties a project space to its project by `about`
+  only then, with the project's owner on this machine as the owner's person;
+  a space about a project that isn't its owner's shows as "about it, owned
+  by" its owner, tied to nothing.
 
 ## Pages
 

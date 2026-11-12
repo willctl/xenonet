@@ -98,7 +98,7 @@ export function publishHtml(draft = {}, error = null) {
       <div class="ac-form">
         ${field("Its name", "data-net-svc-name", draft.name, "notes")}
         ${field("Its address", "data-net-svc-target", draft.target, "http://127.0.0.1:8080")}
-        ${field("Paths", "data-net-svc-paths", draft.paths, "/sync/v1/")}
+        ${field("Paths", "data-net-svc-paths", draft.paths, "/api/v1/")}
         ${field("Machines", "data-net-svc-hosts", draft.hosts, "every machine")}
       </div>
       <p class="pj-note">A program on another machine in the network reaches it through that machine's own XenoNet, at /api/svc/&lt;this machine&gt;/&lt;name&gt;/&lt;path&gt;, and only under the paths you list, each starting and ending with /. Leave Machines empty for every machine, or name them, separated by spaces. A service with no sign-in of its own is open to every program on the machines that may call it. Publishing asks you once.</p>

@@ -87,6 +87,15 @@ pub trait Store: Send + Sync {
     fn checkouts(&self) -> R<Value> {
         pending(STORE)
     }
+    /// How the map ties a space of the shared context, from its folder's
+    /// marker (`xenolith-space.json`, untrusted): `{ tie: "id", project,
+    /// space, about, owner }` when it holds by the context key Xenolith's
+    /// grant names and the project's owner owns the space; `{ tie:
+    /// "none", … }` for a space about an entity it isn't the space of;
+    /// `{ tie: "name" }` otherwise.
+    fn space_tie(&self, _marker: &Value) -> R<Value> {
+        pending(STORE)
+    }
     /// A candidate confirmed in the project it would join: the person's,
     /// at the window, which the route that calls it checks. The checkout.
     fn confirm_checkout(&self, _id: &str) -> R<Value> {

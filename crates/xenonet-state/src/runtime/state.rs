@@ -625,8 +625,12 @@ impl MapState {
         let wiki = match &self.cfg.wiki_dir {
             Some(dir) => {
                 let (dir, list, rootv, server, now) = (dir.clone(), Value::Array(projects.clone()), json!(root), self.cfg.wiki_server.clone(), self.now());
+                // A project space is tied to its project by id only when
+                // the store says its marker holds (Xenolith's key, the
+                // project's owner); the folder's file alone ties nothing.
+                let store = self.store.clone();
                 crate::runtime::util::blocking(move || {
-                    xenonet_sources::wiki::read_wiki(&dir, Some(&list), Some(&rootv), now, xenonet_sources::wiki::Out::Json(server))
+                    xenonet_sources::wiki::read_wiki(&dir, Some(&list), Some(&rootv), now, xenonet_sources::wiki::Out::Json(server), &|m| store.space_tie(m))
                         .ok()
                         .and_then(|o| crate::runtime::util::wiki_out(&o))
                 })

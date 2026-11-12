@@ -43,6 +43,9 @@ xenonet-platforms.workspace = true
 # keeps it (the runtime's Store core).
 xenonet-runtime.workspace = true
 xenonet-store.workspace = true
+# Space markers signed with made-up keys, as Xenolith signs them.
+xenonet-id.workspace = true
+xenonet-log.workspace = true
 
 [lints]
 workspace = true

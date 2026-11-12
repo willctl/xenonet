@@ -6292,6 +6292,8 @@ dependencies = [
  "xenonet-blocks",
  "xenonet-components",
  "xenonet-demo",
+ "xenonet-id",
+ "xenonet-log",
  "xenonet-model",
  "xenonet-os",
  "xenonet-platforms",

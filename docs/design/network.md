@@ -151,8 +151,7 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
 - Services through the network (section 14): `xenonet svc`, its owner's
   routes under `/api/net/svc`, the callers' `/api/svc/…` on each host's
   own API, and svc/2 streams between the two machines (`network/svc/v2`,
-  `crates/xenonet-net/src/svc.rs` and `svc2.rs`). A follower of
-  Xenolith's on one host syncs with its curator on another through them.
+  `crates/xenonet-net/src/svc.rs` and `svc2.rs`).
 - `crates/xenonet-service/tests/net_engine.rs` runs three services with the
   real engine on each: joining with tickets from the gateway's host and from
   another window host, presence, messages with receipts and replies, a gap
@@ -182,8 +181,7 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   second stream and on a new connection, and the service is called once;
   a stream naming a network the two don't share is refused. `svc2_tests.rs`
   has the window key's rules. `tests/net.rs` checks that relay frames
-  never reach the gateway's store. With Xenolith built, a real follower
-  pulls a page from a real curator through `/api/svc/<host>/xenolith`. The
+  never reach the gateway's store. The
   `net_svc` fuzz target reads paths, request and answer heads, window
   reads, addresses and headers.
 
@@ -1058,9 +1056,10 @@ off", including on another machine.
   - While the making host is away, an accept waits, and the tool says so.
   - A handoff no one takes lapses after a week, and its maker is told.
 
-**Xenolith through the network.** A follower on one host syncs with the
-curator on another through a service the curator's host publishes
-(section 14), and Xenolith's own tokens decide what it may do.
+**Xenolith through the network.** Xenolith syncs its spaces on its own
+protocol, `xenolith/sync/2`, which XenoNet's forward carries for an actor
+whose grant names it (`forward(alpn)`); the space's chain decides who
+takes part. It's never a published service.
 
 **Claims, focus and presence** are shared as section 6 says. Nothing else
 is copied between hosts. What an agent shares is what it writes into a
@@ -1158,8 +1157,7 @@ compromised account on a host can still do.
 A host's owner publishes a local HTTP service by name, and any program
 on another host in the network reaches it through its own XenoNet's
 local API. XenoNet knows nothing of what the service is: it carries the
-request and the answer, and checks them at both ends. The first use is
-Xenolith's sync, with a follower on one host and the curator on another.
+request and the answer, and checks them at both ends.
 
 **Publishing** widens what the network reaches, so it's the person's act
 `publish` ([authorization.md](authorization.md)), with their presence for

@@ -27,6 +27,7 @@ pub mod mailbox;
 pub mod net;
 pub mod projects;
 pub mod schema;
+pub mod spaces;
 pub mod sql;
 pub mod state;
 

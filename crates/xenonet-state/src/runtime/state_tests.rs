@@ -477,3 +477,77 @@ async fn a_home_folders_own_sessions_and_projects() {
     s.end();
     std::fs::remove_dir_all(&home).expect("cleaned up");
 }
+
+// The gate of revision 9: a project space whose marker holds by the
+// context key Xenolith's grant names is tied to its project by prj_; an
+// edited marker, or one about the project from someone who doesn't own
+// it, ties nothing beyond the space's name. The space is named apart from
+// the project (atlas-notes), so a tie by name would find nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_space_is_tied_by_its_signed_marker_not_its_folder() {
+    use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
+    const WILL: &str = "prs_wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww";
+    let home = std::env::temp_dir().join(format!("xenonet-state-space-tie-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join("Projects").join("atlas")).expect("a project");
+    std::fs::write(home.join("Projects").join("atlas").join("package.json"), "{}").expect("its package");
+    let space = home.join("wiki").join("spaces").join("project").join("atlas-notes");
+    std::fs::create_dir_all(space.join("pages")).expect("a space");
+    std::fs::write(space.join("pages").join("notes.md"), "# Notes\n").expect("a page");
+    let home_s = std::fs::canonicalize(&home).expect("the home").to_string_lossy().into_owned();
+    let mut env = process_env();
+    env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));
+    env.insert("XENONET_CLAUDE_USAGE".into(), json!("off"));
+    env.insert("XENONET_IDENTITIES".into(), json!("off"));
+    env.insert("XENONET_CLAUDE_DESKTOP_DIR".into(), json!(home.join("no-desktop").to_string_lossy()));
+    env.insert("XENONET_STATE_DIR".into(), json!(home.join(".state").to_string_lossy()));
+    env.insert("XENONET_CACHE_DIR".into(), json!(home.join(".cache").to_string_lossy()));
+    env.insert("XENONET_WIKI_DIR".into(), json!(home.join("wiki").to_string_lossy()));
+    env.insert("HOME".into(), json!(home_s));
+    for k in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XENONET_PROJECTS_DIR", "XENONET_READERS", "XENONET_NUMBAT_FILE", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"] {
+        env.shift_remove(k);
+    }
+    xenonet_platforms::install();
+    let cfg = MapConfig::new(false, false, env, &home_s, None);
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+    let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
+    // The store: Will's projects, and Xenolith's grant naming its key.
+    let db = Arc::new(xenonet_store::Db::memory().expect("a store in memory"));
+    db.set_owner(Arc::new(|| xenonet_store::projects::Owner { person: Some(WILL.into()), salt: Some([7; 32]) }));
+    let (lith, agent) = (SeedSigner::from_seed(&[1; 32], KeyHome::File).expect("a key"), SeedSigner::from_seed(&[2; 32], KeyHome::File).expect("a key"));
+    db.set_context_key(&lith.public().id(), "xenolith", &["aa01".into()], i64::MAX / 2, 0).expect("kept");
+    let store = Saved::new(Arc::new(xenonet_runtime::saved::Saved::new(db)));
+    let live = Live::new(&[(cfg.claude_projects_dir.clone(), "claude".into())], None, false, &cfg.home_dir, vendor.clone());
+    let s = MapState::new(cfg, store, vendor, &WireEnv::new("0.0.0"), Readers::Real, live);
+    let page = "wiki:project:atlas-notes/notes";
+    // The page's projects (the map's `mentions`), and what its node says
+    // the space is about when it isn't the project's.
+    let read = |g: &Value| {
+        let atlas = items(g.get("nodes")).iter().find(|n| s_of(n, "kind") == Some("project") && s_of(n, "path").is_some_and(|p| p.ends_with("/atlas"))).cloned().expect("atlas");
+        let tied = items(g.get("relations")).iter().any(|r| s_of(r, "a") == Some(page) && s_of(r, "kind") == Some("mentions") && r.get("b") == atlas.get("id"));
+        let node = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(page)).cloned().expect("the page");
+        (atlas, tied, node.get("spaceAbout").cloned())
+    };
+    let g = s.refresh_map().await.expect("a map");
+    let (atlas, tied, _) = read(&g);
+    assert!(!tied, "no marker: by its name, atlas-notes, which no project has");
+    let prj = s_of(&atlas, "projectId").expect("atlas's id").to_string();
+    let marker = |about: &str, owner: &str, by: &SeedSigner| {
+        xenonet_log::space::marker::sign_parts("spc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", about, "Z2VuZXNpcw", owner, true, by).expect("a marker")
+    };
+    let write = |m: &Value| std::fs::write(space.join("xenolith-space.json"), m.to_string()).expect("the marker");
+    let valid = marker(&prj, &format!("person:{WILL}"), &lith);
+    write(&valid);
+    assert!(read(&s.refresh_map().await.expect("a map")).1, "a valid marker ties the space to atlas by its prj_");
+    let mut edited = valid.clone();
+    edited["owner"] = json!("person:prs_mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm");
+    write(&edited);
+    assert!(!read(&s.refresh_map().await.expect("a map")).1, "an edited marker: by its name only");
+    write(&marker(&prj, &format!("person:{WILL}"), &agent));
+    assert!(!read(&s.refresh_map().await.expect("a map")).1, "signed by a key no grant names: by its name only");
+    write(&marker(&prj, "person:prs_mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm", &lith));
+    let (_, tied, about) = read(&s.refresh_map().await.expect("a map"));
+    assert_eq!((tied, about), (false, Some(json!(prj))), "about atlas, owned by someone else: shown so, tied to nothing");
+    s.end();
+    std::fs::remove_dir_all(&home).expect("cleaned up");
+}

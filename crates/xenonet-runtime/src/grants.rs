@@ -85,7 +85,16 @@ impl Grants for GrantsDriver {
 
     fn forward(&self, text: &str, alpn: &str) -> Result<(String, Vec<String>), &'static str> {
         let g = ground(&self.0, None).ok_or("no-grant")?;
-        forward_grant(&g, g.facts.now, text, alpn)
+        let f = forward_grant(&g, g.facts.now, text, alpn)?;
+        // The context key the grant names is the one the map trusts a
+        // space marker by (xenonet-store's `spaces`), for as long as the
+        // grant lasts and isn't revoked.
+        if let Some(key) = &f.key {
+            if let Err(e) = self.0.store.with(|s| s.db().set_context_key(key, &f.slug, &f.ids, f.until, g.facts.now)) {
+                self.0.log("warn", "grants.forward", &format!("the context key {key} names couldn't be kept: {}", e.message));
+            }
+        }
+        Ok((f.slug, f.ids))
     }
 
     fn cursor(&self, text: &str, bound: &str, after: Option<&str>) -> Result<String, String> {
@@ -117,10 +126,21 @@ impl Grants for GrantsDriver {
     }
 }
 
+/// A grant to forward an ALPN, decided.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Forward {
+    pub slug: String,
+    /// Its revocation ids, in hex.
+    pub ids: Vec<String>,
+    /// The context key it names (`key(id)`), when it names one: Xenolith's.
+    pub key: Option<String>,
+    pub until: i64,
+}
+
 /// A grant to forward `alpn` (`Grants::forward`): this machine's own
 /// actor's token, in its time and not revoked by `g`, whose `forward(alpn)`
-/// names exactly that ALPN; its slug and revocation ids.
-pub fn forward_grant(g: &dyn xenonet_authz::Ground, now: i64, text: &str, alpn: &str) -> Result<(String, Vec<String>), &'static str> {
+/// names exactly that ALPN.
+pub fn forward_grant(g: &dyn xenonet_authz::Ground, now: i64, text: &str, alpn: &str) -> Result<Forward, &'static str> {
     let token = match Token::parse(text, ACTOR_PREFIX, g, now) {
         Ok(t) => t,
         Err(e) if e.code == "revoked" => return Err("revoked"),
@@ -140,7 +160,7 @@ pub fn forward_grant(g: &dyn xenonet_authz::Ground, now: i64, text: &str, alpn: 
         None => return Err("no-grant"),
     }
     let ids = Token::ids_of(text, ACTOR_PREFIX).unwrap_or_else(|| vec![token.id()]);
-    Ok((token.bearer().slug.as_str().to_string(), ids))
+    Ok(Forward { slug: token.bearer().slug.as_str().to_string(), ids, key: token.key().map(str::to_string), until: token.until() })
 }
 
 /// Whether `a` lets an actor Allow nothing more than `b`.
@@ -261,10 +281,14 @@ mod tests {
         }
     }
 
-    fn grant(root: &TokenRoot, forward: Option<&str>, until: i64) -> (String, String) {
+    fn grant_with(root: &TokenRoot, key: Option<&str>, forward: Option<&str>, until: i64) -> (String, String) {
         let g = ActorGrant { actor: ActorSlug::new("lith").unwrap(), network: None, rights: vec![Action::Read], until };
-        let t = root.mint_actor_with(&g, &Schema::XENONET, &Binding::new(None, forward).unwrap()).unwrap();
+        let t = root.mint_actor_with(&g, &Schema::XENONET, &Binding::new(key, forward).unwrap()).unwrap();
         (t.encode(ACTOR_PREFIX).unwrap(), t.id())
+    }
+
+    fn grant(root: &TokenRoot, forward: Option<&str>, until: i64) -> (String, String) {
+        grant_with(root, None, forward, until)
     }
 
     #[test]
@@ -274,7 +298,12 @@ mod tests {
         let root = TokenRoot::new(machine.clone(), &signer, NOW - 1000, NOW + 3_600_000).unwrap();
         let mut g = One { machine, key: signer.public(), cert: root.certificate().clone(), revoked: BTreeSet::new() };
         let (sync, id) = grant(&root, Some("xenolith/sync/2"), NOW + 60_000);
-        assert_eq!(forward_grant(&g, NOW, &sync, "xenolith/sync/2"), Ok(("lith".to_string(), vec![id.clone()])));
+        assert_eq!(forward_grant(&g, NOW, &sync, "xenolith/sync/2"), Ok(Forward { slug: "lith".to_string(), ids: vec![id.clone()], key: None, until: NOW + 60_000 }));
+        // Xenolith's grant names its context key, which the map trusts
+        // space markers by.
+        let context = SeedSigner::from_seed(&[5; 32], KeyHome::File).unwrap().public().id();
+        let (keyed, _) = grant_with(&root, Some(&context), Some("xenolith/sync/2"), NOW + 60_000);
+        assert_eq!(forward_grant(&g, NOW, &keyed, "xenolith/sync/2").unwrap().key, Some(context));
         assert_eq!(forward_grant(&g, NOW, &sync, "xenonet/link/2"), Err("other-alpn"));
         let (none, _) = grant(&root, None, NOW + 60_000);
         assert_eq!(forward_grant(&g, NOW, &none, "xenolith/sync/2"), Err("no-grant"), "a grant without a forward forwards nothing");

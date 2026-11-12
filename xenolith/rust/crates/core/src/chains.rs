@@ -17,7 +17,7 @@
 //!   `<name>~<the first 6 characters of its spc_ after the prefix>` (FORMAT.md), so two spaces
 //!   both made as project:x stay apart, shown side by side, never merged.
 //! - **Markers.** Each space folder gets `xenolith-space.json`: {space, about, genesis hash,
-//!   owner}, signed by the context key, so a reader of the folder (XenoNet's map) can tell a marker
+//!   owner, whether the owner signed}, signed by the context key, so a reader of the folder (XenoNet's map) can tell a marker
 //!   this Xenolith wrote from one an agent wrote. Xenolith itself never reads a marker to decide
 //!   anything: what a folder is comes from the index, and a marker that differs is written again.
 //! - **Binding.** `bind` ties a space made under a name to the entity it's about (a project's
@@ -31,17 +31,15 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use xenonet_id::codec::{b64, random, unb64};
-use xenonet_id::sign::{Purpose, Signer, VerifyingKey};
+use xenonet_id::codec::{b64, random};
+use xenonet_id::sign::Signer;
 pub use xenonet_log::space::Level;
+pub use xenonet_log::space::marker::Marker;
 use xenonet_log::space::{Op, Owner, Space, SpacePolicy, Subject, found};
 pub use xenonet_model::ids::EntityRef;
 
 /// The marker each space folder gets.
-pub const MARKER: &str = "xenolith-space.json";
-/// What a marker's signature covers, first: so it can't be taken for a chain entry, whose signed
-/// bytes are JSON.
-const MARKER_TAG: &str = "xenolith-space-marker/1";
+pub const MARKER: &str = xenonet_log::space::marker::FILE;
 /// How many characters of the spc_ a later space of the same name adds to its folder.
 pub const SUFFIX_CHARS: usize = 6;
 
@@ -223,33 +221,17 @@ fn owner_text(owner: &Owner) -> String {
     }
 }
 
-fn marker_message(space: &str, about: &str, genesis: &str, owner: &str, key: &str) -> Vec<u8> {
-    format!("{MARKER_TAG}\n{space}\n{about}\n{genesis}\n{owner}\n{key}").into_bytes()
-}
-
-/// A space folder's marker, signed by `context`, this Xenolith's context key.
+/// A space folder's marker, signed by `context`, this Xenolith's context key (xenonet-log's
+/// `space::marker`, the format XenoNet's map reads too).
 pub fn marker(space: &Space, context: &dyn Signer) -> Result<Value, String> {
-    let v = space.view();
-    let key = context.public();
-    let (about, owner) = (v.about.to_string(), owner_text(&v.owner));
-    let sig = context.sign(Purpose::SPACE, &marker_message(&v.id, &about, &v.genesis, &owner, &key.id())).map_err(|e| e.message)?;
-    Ok(json!({ "v": 1, "space": v.id, "about": about, "genesis": v.genesis, "owner": owner, "key": key.to_json(), "sig": b64(&sig) }))
+    xenonet_log::space::marker::sign(space, context)
 }
 
-/// What a marker says, when its signature holds: (space, about, owner, the key that signed). Who
-/// that key is, the reader decides (XenoNet: the key its grant for this Xenolith names). Anything
-/// else in the file, or a marker that isn't signed by the key it names, is None.
-pub fn verify_marker(v: &Value) -> Option<(String, String, String, VerifyingKey)> {
-    let o = v.as_object()?;
-    let allowed = ["v", "space", "about", "genesis", "owner", "key", "sig"];
-    if o.keys().any(|k| !allowed.contains(&k.as_str())) || v["v"] != 1 {
-        return None;
-    }
-    let text = |k: &str| v[k].as_str();
-    let (space, about, genesis, owner) = (text("space")?, text("about")?, text("genesis")?, text("owner")?);
-    let key = VerifyingKey::parse(&v["key"])?;
-    let sig = unb64(text("sig")?)?;
-    (is_spc(space) && key.verify(Purpose::SPACE, &marker_message(space, about, genesis, owner, &key.id()), &sig)).then(|| (space.into(), about.into(), owner.into(), key))
+/// What a marker says, when its signature holds. Who the key that signed is, the reader decides
+/// (XenoNet: the key its grant for this Xenolith names). Anything else in the file, or a marker
+/// that isn't signed by the key it names, is None.
+pub fn verify_marker(v: &Value) -> Option<Marker> {
+    xenonet_log::space::marker::verify(v)
 }
 
 /// Writes `space`'s marker into its folder when the one there isn't exactly it.
@@ -268,7 +250,7 @@ fn mark(root: &Path, address: &SpaceId, space: &Space, context: &dyn Signer, rec
 /// whether a pass would write it: which key signed isn't checked here).
 fn marked_for(root: &Path, address: &SpaceId, id: &str) -> bool {
     let file = spaces::space_dir(root, address).join(MARKER);
-    fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| verify_marker(&v)).is_some_and(|(s, ..)| s == id)
+    fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| verify_marker(&v)).is_some_and(|m| m.space == id)
 }
 
 /// What a space founded here under its folder's name is about.
@@ -847,8 +829,8 @@ mod tests {
         assert_eq!(v.owner, Owner::Key(h.owner.public()));
         assert_eq!(v.curator.id(), h.context.public().id());
         assert!(v.weaker());
-        let (s, about, owner, key) = verify_marker(&h.marker("project:atlas")).unwrap();
-        assert_eq!((s, about.as_str(), owner, key.id()), (atlas.clone(), "name:project:atlas", format!("key:{}", h.owner.public().id()), h.context.public().id()));
+        let m = verify_marker(&h.marker("project:atlas")).unwrap();
+        assert_eq!((m.space, m.about.as_str(), m.owner, m.owner_signed, m.key.id()), (atlas.clone(), "name:project:atlas", format!("key:{}", h.owner.public().id()), true, h.context.public().id()));
         // Again, and again after a restart: nothing new.
         assert!(h.reconcile().is_empty());
         assert_eq!(h.id("project:atlas"), atlas);
@@ -880,8 +862,8 @@ mod tests {
         assert_eq!(r.founded, vec![sp("project:fake")], "the agent's folder is a new space of its own");
         assert_ne!(h.id("project:fake"), other);
         assert!(r.marked.contains(&sp("project:atlas")) && r.marked.contains(&sp("project:fake")));
-        assert_eq!(verify_marker(&h.marker("project:atlas")).unwrap().0, atlas, "written again from the chain");
-        assert_eq!(verify_marker(&h.marker("project:fake")).unwrap().0, h.id("project:fake"));
+        assert_eq!(verify_marker(&h.marker("project:atlas")).unwrap().space, atlas, "written again from the chain");
+        assert_eq!(verify_marker(&h.marker("project:fake")).unwrap().space, h.id("project:fake"));
     }
 
     #[test]
@@ -935,7 +917,7 @@ mod tests {
         assert_eq!(b.id("project:x"), xb, "B's own keeps the plain name");
         assert_eq!(b.id(&at.to_string()), xa);
         assert_eq!(spaces::list(&b.root).iter().map(ToString::to_string).collect::<Vec<_>>(), ["machine:local".to_string(), "project:x".into(), at.to_string()]);
-        assert_eq!(verify_marker(&b.marker(&at.to_string())).unwrap().0, xa);
+        assert_eq!(verify_marker(&b.marker(&at.to_string())).unwrap().space, xa);
         // Received again: the same folder. And a reconcile founds nothing for it.
         assert_eq!(receive(&b.paths, &b.root, &chain, &b.context).unwrap(), at);
         assert!(b.reconcile().founded.is_empty());

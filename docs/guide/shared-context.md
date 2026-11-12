@@ -22,10 +22,16 @@ a `context_log` or `context_upsert_page` that names pages beams on to those
 pages.
 
 Xenolith keeps pages for each space, such as a project, an identity, an
-actor or another machine, in `spaces/<kind>/<name>/` under its folder. Each
-space is laid out as the folder itself is. XenoNet shows every space's
-pages in the constellation, with the space in a page's panel, and ties a
-project space's pages to the project of that name. A `context_log` or
+actor or another machine, in `spaces/<kind>/<name>/` under its folder (a
+second space of that name, from another Xenolith, in `<name>~<six
+characters>/`). Each space is laid out as the folder itself is. XenoNet
+shows every space's pages in the constellation, with the space in a page's
+panel. It ties a project space's pages to its project by the project's id
+when the folder's marker, `xenolith-space.json`, is signed by the context key
+Xenolith's grant names and the space's owner owns the project; a space about
+a project someone else owns shows "about it, owned by" them, tied to
+nothing; any other space is tied to the projects of its name
+([the space marker](../../xenolith/FORMAT.md#the-space-marker)). A `context_log` or
 `context_upsert_page` with a `space` beams to that space's pages, never to a
 page of the same name in this machine's own space. The unfiled count is
 this machine's inbox.

@@ -367,6 +367,13 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
             if let Some(s) = &space {
                 node.insert("space".into(), json!(s));
             }
+            // A space about a project it isn't the space of: what it's
+            // about and who owns it, since it's tied to neither.
+            for k in ["spaceAbout", "spaceOwner"] {
+                if let Some(v) = get(p, k).filter(|v| !v.is_null()) {
+                    node.insert(k.into(), v.clone());
+                }
+            }
             g.set(&id, node);
             g.link(&root, &id, "page");
             for l in items(get(p, "links")) {

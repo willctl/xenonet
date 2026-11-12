@@ -149,6 +149,13 @@ impl Saved {
         )
     }
 
+    /// How the map ties a space, from its folder's marker (the Store core's
+    /// `space_tie`); by its name without a store, or when the store can't
+    /// say.
+    pub fn space_tie(&self, marker: &Value) -> Value {
+        read("a space's marker", self.store.space_tie(marker), json!({ "tie": "name" }))
+    }
+
     /// `{ names, hidden, pins, known, signins }`.
     pub fn identities(&self) -> Value {
         read("the identities", self.store.identities(), json!({ "names": {}, "hidden": {}, "pins": {}, "known": {}, "signins": {} }))

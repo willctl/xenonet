@@ -120,6 +120,9 @@ impl Store for Saved {
         let all = self.db.checkouts().map_err(failed)?;
         Ok(serde_json::json!({ "checkouts": all.iter().map(crate::checkouts::json_of).collect::<Vec<_>>() }))
     }
+    fn space_tie(&self, marker: &Value) -> R<Value> {
+        Ok(self.db.space_tie(marker, (self.clock)() as i64).map_err(failed)?.to_json())
+    }
     fn confirm_checkout(&self, id: &str) -> R<Value> {
         let Ok(id) = xenonet_model::ids::CheckoutId::parse(id) else {
             return Err(CoreError::status(400, format!("{id} isn't a checkout's id")));

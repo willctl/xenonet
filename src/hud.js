@@ -563,7 +563,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     } else if (node.kind === "page") {
       grid =
         row("type", `<span class="tag">${h(node.type)}</span>`) +
-        row("space", node.space ? h(node.space) : null) +
+        row("space", node.space ? `${h(node.space)}${node.spaceAbout ? ` <span class="dim">· about ${h(node.spaceAbout)}, owned by ${h(node.spaceOwner ?? "?")}</span>` : ""}` : null, node.spaceAbout ? "wrap" : "") +
         row("about", node.summary ? h(node.summary) : null, "wrap") +
         row("updated", node.updated ? `${timeAgo(node.updated)} <span class="dim">by ${h(node.updatedBy ?? "?")}</span>` : "—") +
         row("recent writes", node.writes?.length ? node.writes.slice().reverse().map((w) => `<span class="dim">${new Date(w.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${h(w.app)}</span> ${h(w.title)}`).join("<br>") : null, "wrap") +

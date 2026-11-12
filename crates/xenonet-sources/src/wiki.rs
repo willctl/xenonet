@@ -550,12 +550,52 @@ struct Page {
 }
 
 /// A space of the wiki: its id (None for this machine's own, the wiki's
-/// folder), kind, name and folder.
+/// folder), kind, name (without the `~…` of a second space of that name)
+/// and folder.
 struct SpaceDir {
     id: Option<String>,
     kind: String,
     name: String,
     dir: String,
+}
+
+/// The longest space marker read: one is a few hundred bytes.
+const MARKER_MAX: u64 = 16 * 1024;
+
+/// A space folder's marker (`xenolith-space.json`) as its JSON, when it
+/// has one that's a file, not a link, and JSON. Anyone can write it, so
+/// what it says is the caller's to check (`read_wiki`'s `tie`).
+fn marker_of(dir: &str) -> Option<Value> {
+    let file = paths::join(dir, "xenolith-space.json");
+    if linked(&file) {
+        return None;
+    }
+    let bytes = xenonet_os::fs::read_capped(std::path::Path::new(&file), MARKER_MAX).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// How a project space's pages are tied to the map's projects, from what
+/// `tie` made of its marker (`{ tie: name | id | none, project, about,
+/// owner }`): to the projects of its name, unless its marker ties it to
+/// one by id or says it's about one it doesn't count as the space of.
+enum Tied {
+    ByName,
+    ById(String),
+    /// "About E, owned by X", tied to nothing.
+    Not {
+        about: Value,
+        owner: Value,
+    },
+}
+
+fn tied(space: &SpaceDir, tie: &dyn Fn(&Value) -> Value) -> Tied {
+    let Some(marker) = marker_of(&space.dir) else { return Tied::ByName };
+    let t = tie(&marker);
+    match t.get("tie").and_then(Value::as_str) {
+        Some("id") => t.get("project").and_then(Value::as_str).map_or(Tied::ByName, |p| Tied::ById(p.to_string())),
+        Some("none") => Tied::Not { about: t.get("about").cloned().unwrap_or(Value::Null), owner: t.get("owner").cloned().unwrap_or(Value::Null) },
+        _ => Tied::ByName,
+    }
 }
 
 // A folder that's really there: not a link to one.
@@ -565,8 +605,9 @@ fn is_dir(p: &str) -> bool {
 
 /// The spaces besides this machine's own, as Xenolith lists them (list in
 /// xenolith/rust/crates/core/src/spaces.rs): each a wiki laid out as the
-/// folder is, in `spaces/<kind>/<name>/`, by kind and then name. A folder
-/// that isn't a space's name, or is a link, isn't one.
+/// folder is, in `spaces/<kind>/<name>/` (a second space of that name in
+/// `<name>~<six characters>/`), by kind and then folder. A folder that
+/// isn't a space's name, or is a link, isn't one.
 fn spaces_in(dir: &str) -> Vec<SpaceDir> {
     use crate::xenolith::{space_of, Space, SPACE_KINDS};
     let base = paths::join(dir, "spaces");
@@ -585,20 +626,23 @@ fn spaces_in(dir: &str) -> Vec<SpaceDir> {
             let id = format!("{kind}:{name}");
             let space_dir = paths::join(&kind_dir, &name);
             if space_of(Some(&Value::String(id.clone()))) == Space::Other(id.clone()) && is_dir(&space_dir) {
-                out.push(SpaceDir { id: Some(id), kind: kind.to_string(), name, dir: space_dir });
+                out.push(SpaceDir { id: Some(id), kind: kind.to_string(), name: crate::xenolith::base_name(&name).to_string(), dir: space_dir });
             }
         }
     }
-    out.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.name.cmp(&b.name)));
+    out.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.id.cmp(&b.id)));
     out
 }
 
 /// One space's pages and the last two days of its log, as of `now`, each
 /// page with the writes the log names it in. A project's space is that
-/// project's context, so its pages are tied to the projects of its name.
+/// project's context, so its pages are tied to its project: by the
+/// project's id when its marker holds (`tied`), else to the projects of
+/// its name.
 #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
-fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, now: f64) -> Result<(Vec<Page>, Vec<LogEntry>), TypeError> {
+fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, now: f64, tie: &dyn Fn(&Value) -> Value) -> Result<(Vec<Page>, Vec<LogEntry>), TypeError> {
     let dir = space.dir.as_str();
+    let tie = (space.kind == "project" && space.id.is_some()).then(|| tied(space, tie));
     let pages_dir = paths::join(dir, "pages");
     let mut pages: Vec<Page> = Vec::new();
     for f in names(&pages_dir).into_iter().filter(|f| f.ends_with(".md")) {
@@ -621,9 +665,14 @@ fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, 
         let updated = date_parse(&to_str(meta.get("updated"))?).filter(|t| *t != 0.0);
         let links: Vec<String> = wiki_links(&body).into_iter().filter(|l| *l != slug).collect();
         let mut named = mentioned_projects(&body, tags, projects, root)?;
-        if space.kind == "project" && space.id.is_some() {
+        if let Some(t) = &tie {
             for p in items(projects, "filter")? {
-                if lower(prop(Some(p), "name")?, "p.name")? == space.name {
+                let mine = match t {
+                    Tied::ByName => lower(prop(Some(p), "name")?, "p.name")? == space.name,
+                    Tied::ById(id) => prop(Some(p), "projectId")?.and_then(Value::as_str) == Some(id.as_str()),
+                    Tied::Not { .. } => false,
+                };
+                if mine {
                     let key = prop(Some(p), "key")?.cloned();
                     if !named.contains(&key) {
                         named.push(key);
@@ -646,6 +695,13 @@ fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, 
             ("path", Out::Str(file)),
             ("space", space.id.clone().map_or(Out::Null, Out::Str)),
         ];
+        let mut fields = fields;
+        // A space about a project it isn't the space of says so, beside
+        // its name: "about E, owned by X".
+        if let Some(Tied::Not { about, owner }) = &tie {
+            fields.push(("spaceAbout", Out::Json(about.clone())));
+            fields.push(("spaceOwner", Out::Json(owner.clone())));
+        }
         pages.push(Page { slug, fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect(), writes: Vec::new() });
     }
     let mut log: Vec<LogEntry> = Vec::new();
@@ -678,7 +734,7 @@ fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, 
 /// folder in a format XenoNet doesn't read, none of those, and the
 /// `problem` that says why.
 #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
-pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out) -> Result<Out, TypeError> {
+pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out, tie: &dyn Fn(&Value) -> Value) -> Result<Out, TypeError> {
     // A folder in a later format than XenoNet reads isn't parsed: the map
     // keeps its node and says why it shows nothing in it.
     if let Some(problem) = crate::xenolith::read_marker(dir).and_then(|m| crate::xenolith::format_problem(m.format)) {
@@ -695,7 +751,7 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
     let mut pages: Vec<Page> = Vec::new();
     let mut log: Vec<LogEntry> = Vec::new();
     for space in std::iter::once(local).chain(spaces_in(dir)) {
-        let (p, l) = read_space(&space, projects, root, now)?;
+        let (p, l) = read_space(&space, projects, root, now, tie)?;
         pages.extend(p);
         log.extend(l);
     }
@@ -759,6 +815,65 @@ mod tests {
         assert_eq!(parse_frontmatter("no front").0.len(), 0);
     }
 
+    // A store that ties nothing by id: every space by its name.
+    fn by_name(_: &Value) -> Value {
+        json!({ "tie": "name" })
+    }
+
+    // Each page of `read` as (space, projects, spaceAbout).
+    fn pages_of(read: &Out) -> Vec<(Value, Value, Value)> {
+        let Out::Obj(fields) = read else { panic!("an object") };
+        let Some((_, Out::Arr(pages))) = fields.iter().find(|(k, _)| k == "pages") else { panic!("pages") };
+        pages
+            .iter()
+            .map(|p| {
+                let Out::Obj(f) = p else { panic!("a page") };
+                let get = |k: &str| match f.iter().find(|(n, _)| n == k).map(|(_, v)| v) {
+                    Some(Out::Str(s)) => json!(s),
+                    Some(Out::Json(v)) => v.clone(),
+                    Some(Out::Arr(a)) => Value::Array(a.iter().map(|x| if let Out::Json(v) = x { v.clone() } else { Value::Null }).collect()),
+                    _ => Value::Null,
+                };
+                (get("space"), get("projects"), get("spaceAbout"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_project_space_is_tied_by_its_markers_id_else_by_its_name() {
+        let wiki = std::env::temp_dir().join(format!("xenonet-wiki-spaces-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&wiki);
+        for (dir, marker) in
+            [("spaces/project/atlas", Some("signed")), ("spaces/project/atlas~abc234", None), ("spaces/project/atlas~zzzzzz", Some("stranger")), ("spaces/project/atlas~bad", None)]
+        {
+            std::fs::create_dir_all(wiki.join(dir).join("pages")).unwrap();
+            std::fs::write(wiki.join(dir).join("pages/notes.md"), "# Notes\n").unwrap();
+            if let Some(m) = marker {
+                std::fs::write(wiki.join(dir).join("xenolith-space.json"), json!({ "m": m }).to_string()).unwrap();
+            }
+        }
+        // Two checkouts named atlas, of two projects; the marker names the
+        // second's.
+        let ps = json!([{ "name": "atlas", "key": "/w/atlas", "projectId": "prj_one" }, { "name": "atlas", "key": "/x/atlas", "projectId": "prj_two" }]);
+        let tie = |m: &Value| match m["m"].as_str() {
+            Some("signed") => json!({ "tie": "id", "project": "prj_two" }),
+            Some("stranger") => json!({ "tie": "none", "about": "prj_one", "owner": "person:prs_x" }),
+            _ => json!({ "tie": "name" }),
+        };
+        let read = read_wiki(wiki.to_str().unwrap(), Some(&ps), None, 0.0, Out::Null, &tie).unwrap();
+        let got = pages_of(&read);
+        assert_eq!(
+            got,
+            [
+                (json!("project:atlas"), json!(["/x/atlas"]), Value::Null),
+                (json!("project:atlas~abc234"), json!(["/w/atlas", "/x/atlas"]), Value::Null),
+                (json!("project:atlas~zzzzzz"), json!([]), json!("prj_one")),
+            ],
+            "by id; by name (a second space of the name, unmarked); about another's, tied to nothing; a folder that isn't a space's name isn't read"
+        );
+        std::fs::remove_dir_all(wiki).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn links_below_the_folder_are_passed_over() {
@@ -771,7 +886,7 @@ mod tests {
         std::fs::write(outside.join("secret.md"), "# Secret\n").unwrap();
         std::os::unix::fs::symlink(outside.join("secret.md"), wiki.join("pages/linked.md")).unwrap();
         std::os::unix::fs::symlink(&outside, wiki.join("inbox")).unwrap();
-        let read = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Null).unwrap();
+        let read = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Null, &by_name).unwrap();
         let Out::Obj(fields) = read else { panic!("an object") };
         let get = |k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap();
         let Out::Arr(pages) = get("pages") else { panic!("a list") };
@@ -790,7 +905,7 @@ mod tests {
         std::fs::write(wiki.join("inbox/note.md"), "# A note\n").unwrap();
         let read = |marker: &str| {
             std::fs::write(wiki.join("xenolith.json"), marker).unwrap();
-            let Out::Obj(fields) = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Str("xenolith".into())).unwrap() else { panic!("an object") };
+            let Out::Obj(fields) = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Str("xenolith".into()), &by_name).unwrap() else { panic!("an object") };
             fields
         };
         let field = |fields: &[(String, Out)], k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());

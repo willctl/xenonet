@@ -290,7 +290,7 @@ pub fn normalize(rest: &str) -> Result<Normal, &'static str> {
 /// An allowlist entry: a path prefix that starts and ends with /.
 fn check_allowed(p: &str) -> Result<(), String> {
     if !(p.starts_with('/') && p.ends_with('/')) || p.len() > 200 {
-        return Err(format!("{p}: a path a service may be reached at starts and ends with /, as /sync/v1/"));
+        return Err(format!("{p}: a path a service may be reached at starts and ends with /, as /api/v1/"));
     }
     if p.contains('%') || !p.bytes().all(|b| (0x21..=0x7e).contains(&b)) {
         return Err(format!("{p}: say the path in plain letters, digits and punctuation"));
@@ -516,7 +516,7 @@ impl Published {
         }
         let target = Target::parse(target)?;
         if paths.is_empty() {
-            return Err("say the paths callers may reach, as --paths /sync/v1/: nothing else of the service is reachable".into());
+            return Err("say the paths callers may reach, as --paths /api/v1/: nothing else of the service is reachable".into());
         }
         if paths.len() > MAX_PATHS {
             return Err(format!("at most {MAX_PATHS} paths"));
@@ -895,40 +895,37 @@ mod tests {
 
     #[test]
     fn paths_are_decoded_checked_and_encoded_one_way() {
-        let n = normalize("/sync/v1/spaces/project/atlas/pages?since=2&x=%2F").unwrap();
-        assert_eq!(
-            (n.decoded.as_str(), n.path.as_str(), n.query.as_deref()),
-            ("/sync/v1/spaces/project/atlas/pages", "/sync/v1/spaces/project/atlas/pages", Some("since=2&x=%2F"))
-        );
+        let n = normalize("/api/v1/spaces/project/atlas/pages?since=2&x=%2F").unwrap();
+        assert_eq!((n.decoded.as_str(), n.path.as_str(), n.query.as_deref()), ("/api/v1/spaces/project/atlas/pages", "/api/v1/spaces/project/atlas/pages", Some("since=2&x=%2F")));
         // An encoded slash is a slash once decoded, and is sent as one: the
         // service is sent the path the allowlist matched.
-        let n = normalize("/sync%2Fv1/x").unwrap();
-        assert_eq!((n.decoded.as_str(), n.path.as_str()), ("/sync/v1/x", "/sync/v1/x"));
+        let n = normalize("/api%2Fv1/x").unwrap();
+        assert_eq!((n.decoded.as_str(), n.path.as_str()), ("/api/v1/x", "/api/v1/x"));
         assert_eq!(normalize("/a%20b/%C3%A9").unwrap().path, "/a%20b/%C3%A9");
         assert_eq!(normalize("/a%3Fb").unwrap().path, "/a%3Fb", "a ? that was encoded stays in the path");
         assert_eq!(normalize("/x?").unwrap().target("/base"), "/base/x", "an empty query goes");
         assert_eq!(normalize("/x?a=1").unwrap().target(""), "/x?a=1");
         for bad in [
-            "/sync/v1/../admin",
-            "/sync/v1/%2e%2e/admin",
-            "/sync/v1/%2E%2e/admin",
-            "/sync/v1%2F..%2Fadmin",
-            "/sync/v1/./x",
-            "/sync//v1/",
-            "/sync/%2F/v1",
-            "/sync/v1;a=b",
-            "/sync/v1/%3Bx",
-            "/sync\\v1",
-            "/sync/v1/%5Cx",
-            "/sync/v1/%00",
-            "/sync/v1/%0a",
-            "/sync/v1/%zz",
-            "/sync/v1/%4",
-            "/sync/v1/%ff",
-            "/sync/v1/a b",
-            "/sync/v1/é",
-            "/sync/v1/#x",
-            "sync/v1/",
+            "/api/v1/../admin",
+            "/api/v1/%2e%2e/admin",
+            "/api/v1/%2E%2e/admin",
+            "/api/v1%2F..%2Fadmin",
+            "/api/v1/./x",
+            "/api//v1/",
+            "/api/%2F/v1",
+            "/api/v1;a=b",
+            "/api/v1/%3Bx",
+            "/api\\v1",
+            "/api/v1/%5Cx",
+            "/api/v1/%00",
+            "/api/v1/%0a",
+            "/api/v1/%zz",
+            "/api/v1/%4",
+            "/api/v1/%ff",
+            "/api/v1/a b",
+            "/api/v1/é",
+            "/api/v1/#x",
+            "api/v1/",
             "",
         ] {
             assert!(normalize(bad).is_err(), "{bad:?}");
@@ -944,14 +941,13 @@ mod tests {
 
     #[test]
     fn the_allowlist_matches_decoded_paths_by_prefix() {
-        let p = Published::new("xenolith", "http://127.0.0.1:4790", &["/sync/v1/".into()], &[], 0).unwrap();
-        for (path, ok) in [("/sync/v1/spaces", true), ("/sync/v1/", true), ("/sync/v1", false), ("/sync/v2/x", false), ("/mcp", false), ("/api/held", false), ("/sync/v1x/", false)]
-        {
+        let p = Published::new("files", "http://127.0.0.1:4790", &["/api/v1/".into()], &[], 0).unwrap();
+        for (path, ok) in [("/api/v1/spaces", true), ("/api/v1/", true), ("/api/v1", false), ("/api/v2/x", false), ("/mcp", false), ("/api/held", false), ("/api/v1x/", false)] {
             assert_eq!(p.reaches(&normalize(path).unwrap().decoded), ok, "{path}");
         }
-        assert!(p.reaches(&normalize("/sync%2Fv1/x").unwrap().decoded));
+        assert!(p.reaches(&normalize("/api%2Fv1/x").unwrap().decoded));
         assert!(!p.reaches(&normalize("/%73ync/v2/").unwrap().decoded));
-        for bad in ["sync/", "/sync", "/sync/../", "/a//", "/a;b/", "/%2e/", "/a b/"] {
+        for bad in ["api/", "/api", "/api/../", "/a//", "/a;b/", "/%2e/", "/a b/"] {
             assert!(Published::new("x1", "http://127.0.0.1:1", &[bad.into()], &[], 0).is_err(), "{bad}");
         }
         assert!(Published::new("x1", "http://127.0.0.1:1", &[], &[], 0).is_err(), "say the paths");
@@ -992,10 +988,10 @@ mod tests {
     #[test]
     fn the_service_is_sent_four_headers_its_host_and_who_called() {
         let given = h(&[
-            ("Authorization", "Bearer xenolith_0123"),
+            ("Authorization", "Bearer files_0123"),
             ("content-type", "application/json"),
             ("accept", "application/json"),
-            ("user-agent", "xenolith/1.0"),
+            ("user-agent", "files/1.0"),
             ("forwarded", "for=evil"),
             ("x-forwarded-for", "10.0.0.1"),
             ("x-forwarded-host", "evil.example"),
@@ -1008,10 +1004,10 @@ mod tests {
         assert_eq!(
             request_headers(&given, "127.0.0.1:4790", "laptop"),
             h(&[
-                ("authorization", "Bearer xenolith_0123"),
+                ("authorization", "Bearer files_0123"),
                 ("content-type", "application/json"),
                 ("accept", "application/json"),
-                ("user-agent", "xenolith/1.0"),
+                ("user-agent", "files/1.0"),
                 ("host", "127.0.0.1:4790"),
                 ("forwarded", "by=xenonet;for=laptop"),
             ])
@@ -1043,9 +1039,9 @@ mod tests {
     fn heads_cross_and_are_checked() {
         let req = Request {
             id: request_id().unwrap(),
-            name: "xenolith".into(),
+            name: "files".into(),
             method: "POST".into(),
-            path: "/sync/v1/x?y=1".into(),
+            path: "/api/v1/x?y=1".into(),
             headers: h(&[("authorization", "Bearer t")]),
             body: b"{\"a\":1}".to_vec(),
         };
@@ -1076,15 +1072,15 @@ mod tests {
         let l = Limiter::new(A_MINUTE);
         let t = 1_000_000.0;
         for i in 0..300 {
-            assert!(l.take("laptop", "xenolith", t).is_ok(), "{i}");
+            assert!(l.take("laptop", "files", t).is_ok(), "{i}");
         }
-        let wait = l.take("laptop", "xenolith", t).unwrap_err();
+        let wait = l.take("laptop", "files", t).unwrap_err();
         assert!((wait - 200.0).abs() < 1.0, "one more in 0.2 s: {wait}");
-        assert!(l.take("desk", "xenolith", t).is_ok(), "each caller has its own");
+        assert!(l.take("desk", "files", t).is_ok(), "each caller has its own");
         assert!(l.take("laptop", "other", t).is_ok(), "and each service");
-        assert!(l.take("laptop", "xenolith", t + 200.0).is_ok());
-        assert!(l.take("laptop", "xenolith", t + 200.0).is_err());
-        assert!(l.take("laptop", "xenolith", t + 60e3).is_ok());
+        assert!(l.take("laptop", "files", t + 200.0).is_ok());
+        assert!(l.take("laptop", "files", t + 200.0).is_err());
+        assert!(l.take("laptop", "files", t + 60e3).is_ok());
     }
 
     // What a machine in a network keeps, in memory.
@@ -1110,7 +1106,7 @@ mod tests {
     fn requests_are_checked_in_order_before_they_go() {
         let kept = in_a_network();
         let s = Services::open(kept.clone(), Some("net_0".into()));
-        s.publish(Published::new("xenolith", "http://127.0.0.1:4790", &["/sync/v1/".into()], &["laptop".into()], 0).unwrap()).unwrap();
+        s.publish(Published::new("files", "http://127.0.0.1:4790", &["/api/v1/".into()], &["laptop".into()], 0).unwrap()).unwrap();
         let req = |name: &str, method: &str, path: &str, body: usize| Request {
             id: request_id().unwrap(),
             name: name.into(),
@@ -1120,26 +1116,26 @@ mod tests {
             body: vec![b'x'; body],
         };
         let code = |r: Result<(Published, Normal), Answer>| r.err().map(|a| (a.status, a.code.unwrap_or_default()));
-        assert_eq!(code(s.check("laptop", &req("other", "GET", "/sync/v1/", 0), 0.0)), Some((404, "not-published".into())));
-        assert_eq!(code(s.check("desk", &req("xenolith", "GET", "/sync/v1/", 0), 0.0)), Some((403, "not-allowed".into())));
-        assert_eq!(code(s.check("laptop", &req("xenolith", "TRACE", "/sync/v1/", 0), 0.0)), Some((405, "method".into())));
-        assert_eq!(code(s.check("laptop", &req("xenolith", "GET", "/sync/v1/../../mcp", 0), 0.0)), Some((400, "bad-path".into())));
-        assert_eq!(code(s.check("laptop", &req("xenolith", "GET", "/mcp", 0), 0.0)), Some((403, "path-refused".into())));
-        assert_eq!(code(s.check("laptop", &req("xenolith", "POST", "/sync/v1/x", REQUEST_BODY + 1), 0.0)), Some((413, "too-big".into())));
-        let (p, n) = s.check("laptop", &req("xenolith", "POST", "/sync/v1/x?a=1", REQUEST_BODY), 0.0).unwrap();
-        assert_eq!((p.name.as_str(), n.target(&p.target.prefix)), ("xenolith", "/sync/v1/x?a=1".to_string()));
+        assert_eq!(code(s.check("laptop", &req("other", "GET", "/api/v1/", 0), 0.0)), Some((404, "not-published".into())));
+        assert_eq!(code(s.check("desk", &req("files", "GET", "/api/v1/", 0), 0.0)), Some((403, "not-allowed".into())));
+        assert_eq!(code(s.check("laptop", &req("files", "TRACE", "/api/v1/", 0), 0.0)), Some((405, "method".into())));
+        assert_eq!(code(s.check("laptop", &req("files", "GET", "/api/v1/../../mcp", 0), 0.0)), Some((400, "bad-path".into())));
+        assert_eq!(code(s.check("laptop", &req("files", "GET", "/mcp", 0), 0.0)), Some((403, "path-refused".into())));
+        assert_eq!(code(s.check("laptop", &req("files", "POST", "/api/v1/x", REQUEST_BODY + 1), 0.0)), Some((413, "too-big".into())));
+        let (p, n) = s.check("laptop", &req("files", "POST", "/api/v1/x?a=1", REQUEST_BODY), 0.0).unwrap();
+        assert_eq!((p.name.as_str(), n.target(&p.target.prefix)), ("files", "/api/v1/x?a=1".to_string()));
         // Kept, and read again.
         assert_eq!(Services::open(kept.clone(), Some("net_0".into())).list(), s.list());
-        assert!(s.unpublish("xenolith").unwrap());
-        assert!(!s.unpublish("xenolith").unwrap());
+        assert!(s.unpublish("files").unwrap());
+        assert!(!s.unpublish("files").unwrap());
         assert_eq!(Services::open(kept, Some("net_0".into())).list(), Vec::new());
     }
 
     #[test]
     fn a_request_id_goes_to_the_service_once_from_each_caller() {
         let s = Services::open(in_a_network(), Some("net_0".into()));
-        s.publish(Published::new("xenolith", "http://127.0.0.1:4790", &["/sync/v1/".into()], &[], 0).unwrap()).unwrap();
-        let req = Request { id: request_id().unwrap(), name: "xenolith".into(), method: "GET".into(), path: "/sync/v1/x".into(), headers: Vec::new(), body: Vec::new() };
+        s.publish(Published::new("files", "http://127.0.0.1:4790", &["/api/v1/".into()], &[], 0).unwrap()).unwrap();
+        let req = Request { id: request_id().unwrap(), name: "files".into(), method: "GET".into(), path: "/api/v1/x".into(), headers: Vec::new(), body: Vec::new() };
         assert!(s.check("laptop", &req, 0.0).is_ok());
         let again = s.check("laptop", &req, 1000.0).err().unwrap();
         assert_eq!((again.status, again.code.as_deref()), (409, Some("replayed")));
