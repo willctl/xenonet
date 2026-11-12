@@ -210,7 +210,13 @@ impl Shared {
             t.mesh.leave(&net.id);
         } else {
             let members: Vec<PeerId> = self.roster().view_ref().map(|v| v.members.values().map(|m| peer_id(&m.keys)).collect()).unwrap_or_default();
-            t.mesh.set_members(&net.id, members);
+            t.mesh.set_members(&net.id, members.clone());
+            // A member just admitted may have been refused a moment ago: the
+            // dials to the members not connected start again from the first
+            // wait, not from where refusals left them.
+            for p in members.into_iter().filter(|p| !t.links.is_connected(*p) && *p != t.dial.me()) {
+                t.links.nudge(p);
+            }
         }
         keep_all(&self.common, &t);
         self.common.relays_due.notify_one();
@@ -497,18 +503,38 @@ impl Shared {
         let me = self.network().map(|n| n.host);
         let how = if r.host == from { how } else { "forwarded" };
         if let Err(why) = checked.and_then(|()| if me.as_deref() == Some(r.host.as_str()) { Err(format!("{from} sent this machine's own address record")) } else { Ok(()) }) {
-            self.log("net.link2", &format!("an address record from {from} was refused: {why}"));
+            self.log("net.link2", &format!("an address record from {from} was refused: {why} (made at {}, for {} s; now {now})", r.at, r.ttl));
             return;
         }
         {
             let mut held = t.records.locked();
             let key = (r.network.clone(), r.host.clone());
-            if held.get(&key).is_some_and(|(at, _)| *at > r.at) {
-                return;
+            if let Some((at, _)) = held.get(&key) {
+                if *at > r.at {
+                    return;
+                }
+                if *at == r.at {
+                    // Held already: one more way it was found, and nothing
+                    // to pass on.
+                    t.found.locked().entry(key).or_default().insert(how);
+                    return;
+                }
             }
             held.insert(key, (r.at, record.clone()));
         }
         self.keep_records(&r.network);
+        // A record this machine hadn't held goes on to the other members
+        // it's connected to now, so a machine that just joined, or moved,
+        // is found by members it hasn't reached yet.
+        let skip = [Some(from), Some(r.host.as_str())];
+        if let Some(view) = self.roster().view_ref() {
+            for (host, m) in &view.members {
+                let p = peer_id(&m.keys);
+                if !skip.contains(&Some(host.as_str())) && t.links.is_connected(p) {
+                    let _ = t.links.send(p, Out::Control(Control::Address { network: r.network.clone(), record: record.clone() }));
+                }
+            }
+        }
         let direct: Vec<std::net::SocketAddr> = r.addrs.iter().filter_map(|a| a.parse().ok()).collect();
         let ttl = Duration::from_millis(r.until().saturating_sub(now));
         let peer = PeerId(r.endpoint);

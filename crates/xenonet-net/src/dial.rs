@@ -10,7 +10,10 @@
 //!   whatever the `Dial` underneath (iroh, or turmoil in the tests).
 //! - When two machines dial each other at once, both keep the connection
 //!   the lower endpoint id dialled and close the other, so they agree
-//!   without a word.
+//!   without a word. A peer that dials while an older connection to it
+//!   stands (one more than `CROSSING` old) has lost that one, having
+//!   restarted or moved, so its new one stays, whoever dialled the old:
+//!   the old would otherwise block it until QUIC gave up on it.
 //! - A connection carries the networks both machines are in by this
 //!   machine's chains. When a member is removed from one of them, that
 //!   network's traffic stops on the connection (`Link::check`), and the
@@ -203,6 +206,19 @@ pub struct Link {
     alpn: Alpn,
     dialler: PeerId,
     networks: RwLock<BTreeSet<String>>,
+    opened: tokio::time::Instant,
+}
+
+/// How long after a connection opened another to the same peer is taken
+/// as their two dials crossing: past it, the newer one is the peer coming
+/// back.
+pub const CROSSING: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether a connection that stands (dialled by `old`, `age` old) stays
+/// when another comes, dialled by `new`: only when the two crossed, and
+/// the one the lower endpoint id dialled is the old one.
+fn keeps_old(old: PeerId, new: PeerId, me: PeerId, peer: PeerId, age: std::time::Duration) -> bool {
+    old != new && new != me.min(peer) && age < CROSSING
 }
 
 impl fmt::Debug for Link {
@@ -435,10 +451,10 @@ impl Mesh {
             Side::Dialled => me,
             Side::Accepted => peer,
         };
-        let link = Arc::new(Link { wire, peer, alpn, dialler, networks: RwLock::new(networks) });
+        let link = Arc::new(Link { wire, peer, alpn, dialler, networks: RwLock::new(networks), opened: tokio::time::Instant::now() });
         let mut links = self.links.locked();
         if let Some(old) = links.get(&(peer, alpn)).filter(|l| !l.is_closed()).cloned() {
-            if old.dialler != dialler && dialler != me.min(peer) {
+            if keeps_old(old.dialler, dialler, me, peer, old.opened.elapsed()) {
                 link.close(Close::Crossed);
                 return Adopted::Kept(old);
             }
@@ -472,6 +488,21 @@ impl Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crossing_dials_keep_the_lower_ids_and_a_peer_coming_back_gets_its_new_one() {
+        let (lo, hi) = (PeerId([1; 32]), PeerId([2; 32]));
+        let soon = std::time::Duration::from_millis(200);
+        // hi dialled first, lo's dial crossed it: lo's stays, on both.
+        assert!(!keeps_old(hi, lo, hi, lo, soon), "at hi");
+        assert!(!keeps_old(hi, lo, lo, hi, soon), "at lo");
+        // lo dialled first, hi's dial crossed it: lo's stays.
+        assert!(keeps_old(lo, hi, lo, hi, soon));
+        assert!(keeps_old(lo, hi, hi, lo, soon));
+        // hi restarted and dials again, long after lo's connection opened:
+        // the old one is dead to hi, and its new one stays.
+        assert!(!keeps_old(lo, hi, lo, hi, CROSSING + soon));
+    }
 
     #[test]
     fn alpns_and_close_codes_read_back() {
