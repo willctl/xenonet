@@ -366,7 +366,8 @@ missing, it's a file, and the key says where it lives (`KeyHome`, the
 machine's own claim, so decisions call it asserted). A key made in
 hardware is never replaced: one that can't be opened at start is a doctor
 error, and a file key is made only where no key was made in hardware.
-There's no rekey, so moving a key means rejoining. Any program of the
+The signing key has no rekey (`rekey` replaces the transport key), so
+moving it means rejoining. Any program of the
 account can still ask the Secure Enclave or the TPM to sign, so the
 property is "can't be copied off the machine", and a service running as
 its own OS user is the hardening that completes it (question 2 below).
@@ -602,11 +603,7 @@ Will's step on inix and NEO-REX.
    the remote map's relay (`RelaySink`,
    relay frames, the hub, the merge and the snapshot cache,
    `network/relay/v1`, `host/hello/v1`); the `@host:` qualified ids, for
-   `agt_` ids on every machine; the 2 s presence tick. Left for later: a
-   command or window control that names a mailbox; writing `rekey`
-   entries; writing compact entries on their own, and taking a holder's
-   `Compacted` answer; the mDNS setting for link/2, which is asked
-   nowhere yet; installing `relay-ca.pem` and setting a relay's token
+   `agt_` ids on every machine; the 2 s presence tick. Left for later: installing `relay-ca.pem` and setting a relay's token
    from XenoNet; the lazy dial past 50 machines; the engine in several
    networks (it takes the first as its own); the chain's inert `gateway`
    op; collisions and MCP servers' details across machines; and the
