@@ -5067,13 +5067,16 @@ dependencies = [
 name = "xenonet-actors"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "getrandom 0.3.4",
+ "icu_normalizer",
  "regex",
  "serde_json",
  "sha2 0.10.9",
  "tokio",
  "unicode-normalization",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-authz",
  "xenonet-model",
  "xenonet-os",
@@ -5104,38 +5107,12 @@ name = "xenonet-api"
 version = "0.2.0"
 dependencies = [
  "async-trait",
- "bytes",
  "serde_json",
  "tokio",
  "xenonet-model",
  "xenonet-net",
  "xenonet-os",
  "xenonet-schema",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-assistant"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "getrandom 0.3.4",
- "icu_normalizer",
- "libc",
- "regex",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "xenonet-actors",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-authz",
- "xenonet-components",
- "xenonet-id",
- "xenonet-model",
- "xenonet-os",
- "xenonet-schema",
- "xenonet-store",
  "xenonet-text",
 ]
 
@@ -5271,6 +5248,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-door"
+version = "0.2.0"
+dependencies = [
+ "xenonet-api",
+ "xenonet-authz",
+ "xenonet-id",
+]
+
+[[package]]
 name = "xenonet-engine"
 version = "0.2.0"
 dependencies = [
@@ -5295,7 +5281,6 @@ dependencies = [
  "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",
- "xenonet-assistant",
  "xenonet-authz",
  "xenonet-blocks",
  "xenonet-claude-code",
@@ -5307,14 +5292,13 @@ dependencies = [
  "xenonet-engine",
  "xenonet-gemini-cli",
  "xenonet-id",
- "xenonet-integrations",
  "xenonet-log",
  "xenonet-model",
  "xenonet-net",
  "xenonet-opencode",
  "xenonet-os",
  "xenonet-platforms",
- "xenonet-runtime",
+ "xenonet-saved",
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
@@ -5411,27 +5395,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xenonet-integrations"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "getrandom 0.3.4",
- "libc",
- "regex",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "url",
- "xenonet-actors",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-os",
- "xenonet-sources",
- "xenonet-state",
- "xenonet-text",
-]
-
-[[package]]
 name = "xenonet-keys"
 version = "0.2.0"
 dependencies = [
@@ -5454,6 +5417,21 @@ dependencies = [
  "serde_json",
  "xenonet-id",
  "xenonet-model",
+]
+
+[[package]]
+name = "xenonet-mcp-catalog"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "serde_json",
+ "tokio",
+ "url",
+ "xenonet-adapter",
+ "xenonet-api",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -5549,26 +5527,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "xenonet-runtime"
+name = "xenonet-saved"
 version = "0.2.0"
 dependencies = [
- "async-trait",
- "regex",
- "reqwest",
  "serde_json",
- "tokio",
- "url",
- "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",
- "xenonet-authz",
- "xenonet-blocks",
- "xenonet-engine",
- "xenonet-id",
  "xenonet-model",
- "xenonet-net",
  "xenonet-os",
- "xenonet-schema",
  "xenonet-store",
  "xenonet-text",
 ]
@@ -5596,33 +5562,38 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "portable-pty",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "sha2 0.10.9",
  "tokio",
+ "url",
  "xenonet-a2a",
  "xenonet-acp",
  "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",
- "xenonet-assistant",
  "xenonet-authz",
+ "xenonet-blocks",
  "xenonet-components",
  "xenonet-console",
  "xenonet-doctor",
+ "xenonet-door",
  "xenonet-engine",
  "xenonet-grok-build",
  "xenonet-http",
  "xenonet-id",
- "xenonet-integrations",
  "xenonet-keys",
+ "xenonet-mcp-catalog",
  "xenonet-model",
  "xenonet-net",
  "xenonet-os",
  "xenonet-platforms",
- "xenonet-runtime",
+ "xenonet-saved",
  "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",

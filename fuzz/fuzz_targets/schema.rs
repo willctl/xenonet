@@ -11,7 +11,7 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use xenonet_model::{actor, graph, host, system};
+use xenonet_model::{actor, graph, system};
 use xenonet_schema::drift::DriftLog;
 use xenonet_schema::lenient;
 use xenonet_schema::typed;
@@ -33,8 +33,7 @@ fn schemas() -> &'static Schemas {
 
 /// XenoNet's own documents a record is read as: each gives the first
 /// problem, worded, or the record cleaned to what its type declares.
-const OWN: [fn(&Value) -> Option<String>; 6] = [
-    |v| typed::read::<host::Hello>(v).err().map(|i| i.worded("(the value)")),
+const OWN: [fn(&Value) -> Option<String>; 5] = [
     |v| typed::clean::<graph::SessionNode>(v).map(|c| c.to_string()),
     |v| typed::clean::<graph::ProjectNode>(v).map(|c| c.to_string()),
     |v| typed::clean::<system::System>(v).map(|c| c.to_string()),

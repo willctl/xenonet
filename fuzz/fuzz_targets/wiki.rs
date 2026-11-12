@@ -48,6 +48,6 @@ fuzz_target!(|data: &[u8]| {
         for v in meta.values() {
             let _ = (wiki::to_str(Some(v)), wiki::to_str_or_empty(Some(v)));
         }
-        let _ = wiki::read_wiki(&d.to_string_lossy(), Some(&projects), Some(&root), NOW, Out::Json(json!("agent-wiki")));
+        let _ = wiki::read_wiki(&d.to_string_lossy(), Some(&projects), Some(&root), NOW, Out::Json(json!("agent-wiki")), &|_| json!({ "tie": "name" }));
     });
 });

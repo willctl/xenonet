@@ -82,7 +82,7 @@ fuzz_target!(|data: &[u8]| {
         4 => {
             let _ = (ids::normalize_remote(a), ids::RepoId::of_remote(a), ids::remote_parts(a), ids::RepoId::parse(a));
             let _ = (ids::is_schema_path(a), ids::SchemaId::parse(a).map(|s| (s.short(), s.uri())));
-            let _ = (ids::is_host_id(a), ids::parse_qualified(a), ids::qualify(a, Some(b), Some(c)), ids::qualify(a, None, None));
+            let _ = ids::is_host_id(a);
             let _ = (apps::is_session_id(a), apps::app_of_session(a), ids::is_actor_slug(a), ids::parse_actor_id(a));
         }
         5 => {
