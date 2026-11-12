@@ -45,8 +45,11 @@
 //! **Retention and compaction.** Each kind has a retention
 //! (`Kind::retention`): claims and handoffs are kept while they're open,
 //! reports, messages and receipts for `RETENTION_MS` by their signed time,
-//! intents and assigns until their `until` passes, and a compact entry
-//! until the next. An author compacts with a signed compact entry
+//! intents and assigns until their `until` passes, a compact entry until
+//! the next, and Xenolith's kinds in a space (`ctx.*`: notes, proposals,
+//! pages, removals, log days, forgets and snapshots) for good, since a
+//! space's history is its curator's record (a forget drops texts, which
+//! those entries name by hash, never the entries). An author compacts with a signed compact entry
 //! (`Compact`): it names its incarnation, `upto` (every kept entry before
 //! it), the id of the entry at `upto` and the incarnation's link, and
 //! lists in `live` the entries of that range still open (`live_set`).
@@ -167,6 +170,24 @@ pub enum Kind {
     Receipt,
     /// What is still open of the range before it (`Compact`).
     Compact,
+    /// Xenolith's, in a space: a note for the space's curator to file.
+    CtxNote,
+    /// Xenolith's: a member's replace or removal of a page, against the
+    /// version it had (its base), for the curator to apply or hold.
+    CtxPropose,
+    /// Xenolith's, by the curator: a page's version, its text named by
+    /// hash and carried apart, so it can be forgotten.
+    CtxPage,
+    /// Xenolith's, by the curator: a page removed.
+    CtxRemove,
+    /// Xenolith's, by the curator: a day of the space's log.
+    CtxLog,
+    /// Xenolith's, by the curator with the owner's approval: texts every
+    /// holder drops, by hash, keeping the entries that named them.
+    CtxForget,
+    /// Xenolith's, by the curator: the live pages at an epoch, so a new
+    /// member gets the live set rather than the history.
+    CtxSnapshot,
 }
 
 /// Whether a kind is in the gapless sequence or outside it.
@@ -190,10 +211,30 @@ pub enum Retention {
     Until,
     /// Until the next compact entry.
     Superseded,
+    /// For good: a compact entry never drops it (a space's context).
+    Forever,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 8] = [Kind::Claim, Kind::Intent, Kind::Handoff, Kind::Assign, Kind::Report, Kind::Message, Kind::Receipt, Kind::Compact];
+    pub const ALL: [Kind; 15] = [
+        Kind::Claim,
+        Kind::Intent,
+        Kind::Handoff,
+        Kind::Assign,
+        Kind::Report,
+        Kind::Message,
+        Kind::Receipt,
+        Kind::Compact,
+        Kind::CtxNote,
+        Kind::CtxPropose,
+        Kind::CtxPage,
+        Kind::CtxRemove,
+        Kind::CtxLog,
+        Kind::CtxForget,
+        Kind::CtxSnapshot,
+    ];
+    /// Xenolith's kinds, which only a space's feeds carry.
+    pub const CTX: [Kind; 7] = [Kind::CtxNote, Kind::CtxPropose, Kind::CtxPage, Kind::CtxRemove, Kind::CtxLog, Kind::CtxForget, Kind::CtxSnapshot];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -205,6 +246,13 @@ impl Kind {
             Kind::Message => "message",
             Kind::Receipt => "receipt",
             Kind::Compact => "compact",
+            Kind::CtxNote => "ctx.note",
+            Kind::CtxPropose => "ctx.propose",
+            Kind::CtxPage => "ctx.page",
+            Kind::CtxRemove => "ctx.remove",
+            Kind::CtxLog => "ctx.log",
+            Kind::CtxForget => "ctx.forget",
+            Kind::CtxSnapshot => "ctx.snapshot",
         }
     }
 
@@ -226,6 +274,9 @@ impl Kind {
             Kind::Report | Kind::Message | Kind::Receipt => Retention::Aged(RETENTION_MS),
             Kind::Intent | Kind::Assign => Retention::Until,
             Kind::Compact => Retention::Superseded,
+            // Direction's retention table: a space's notes and pages are
+            // kept (forgetting drops texts, never entries).
+            Kind::CtxNote | Kind::CtxPropose | Kind::CtxPage | Kind::CtxRemove | Kind::CtxLog | Kind::CtxForget | Kind::CtxSnapshot => Retention::Forever,
         }
     }
 
@@ -237,7 +288,15 @@ impl Kind {
         match self {
             Kind::Claim | Kind::Handoff | Kind::Report | Kind::Compact => true,
             Kind::Intent | Kind::Assign | Kind::Message | Kind::Receipt => false,
+            // Never compacted, so never ended by absence.
+            Kind::CtxNote | Kind::CtxPropose | Kind::CtxPage | Kind::CtxRemove | Kind::CtxLog | Kind::CtxForget | Kind::CtxSnapshot => false,
         }
+    }
+
+    /// Whether this is one of Xenolith's kinds (`ctx.*`), which belong in
+    /// a space's feed. Which kinds a group takes is its engine's to check.
+    pub fn is_ctx(self) -> bool {
+        Kind::CTX.contains(&self)
     }
 }
 
@@ -399,6 +458,7 @@ pub fn live_set(held: &[FeedEntry], inc: u64, now: u64, open: impl Fn(&FeedEntry
             Retention::Aged(ms) => e.at.saturating_add(ms) >= now,
             Retention::Until => e.until().is_none_or(|u| u >= now),
             Retention::Superseded => false,
+            Retention::Forever => true,
         };
         if !keep {
             continue;

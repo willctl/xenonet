@@ -56,6 +56,8 @@ pub fn kind_of(k: EntryKind) -> Option<Kind> {
         EntryKind::Assign => Some(Kind::Assign),
         EntryKind::Report => Some(Kind::Report),
         EntryKind::Compact => None,
+        // Xenolith's, in a space's feed: never the engine's.
+        EntryKind::CtxNote | EntryKind::CtxPropose | EntryKind::CtxPage | EntryKind::CtxRemove | EntryKind::CtxLog | EntryKind::CtxForget | EntryKind::CtxSnapshot => None,
     }
 }
 

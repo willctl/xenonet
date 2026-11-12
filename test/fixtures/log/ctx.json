@@ -1,0 +1,305 @@
+{
+  "about": "Known answers for Xenolith's kinds in a space's feed (crates/xenonet-log/src/feed.rs): written by crates/xenonet-log/tests/ctx.rs. The seed is a test value, never a Xenolith's.",
+  "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+  "author": {
+    "seed": "XA0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0",
+    "keyId": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c"
+  },
+  "entries": [
+    {
+      "what": "a note for the curator",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c\",\"group\":\"spc_abcdefghijklmnopqrstuvwxyz234567\",\"inc\":1792512345678,\"seq\":1,\"prev\":{\"inc\":0,\"seq\":0},\"kind\":\"ctx.note\",\"at\":1792512345679,\"bodyHash\":\"QFcV2Cb7oTGGSvv_VPA9NeNnNqC0152VarNhRb7LMwo\"}",
+      "id": "gsKwf4tHqC52Muny9yKW05260ZAPU9TbeOChnoVL5yM",
+      "header": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 1,
+        "prev": {
+          "inc": 0,
+          "seq": 0
+        },
+        "kind": "ctx.note",
+        "at": 1792512345679,
+        "bodyHash": "QFcV2Cb7oTGGSvv_VPA9NeNnNqC0152VarNhRb7LMwo"
+      },
+      "entry": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 1,
+        "prev": {
+          "inc": 0,
+          "seq": 0
+        },
+        "kind": "ctx.note",
+        "at": 1792512345679,
+        "body": {
+          "id": "2026-11-11_09-00-00-000-abc123",
+          "kind": "log",
+          "app": "codex",
+          "source": "agent",
+          "title": "Atlas moves to Postgres 17",
+          "tags": [],
+          "pages": [
+            "db"
+          ],
+          "text": {
+            "sha256": "SqfS2MW4mnkE2aJH-UGxby-rYuFR03C4VpfWL-MwGmQ",
+            "bytes": 20
+          }
+        },
+        "sig": "JfK26wcwbwQDHnt6MBD6PIhYVyWzInbMLiMvJVH5elcujt7kDlp9RWsawrb9THO_wpoZok3BVaCzA7S1TyXfAQ"
+      }
+    },
+    {
+      "what": "a replace against the version the member had",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c\",\"group\":\"spc_abcdefghijklmnopqrstuvwxyz234567\",\"inc\":1792512345678,\"seq\":2,\"prev\":{\"inc\":1792512345678,\"seq\":1,\"id\":\"gsKwf4tHqC52Muny9yKW05260ZAPU9TbeOChnoVL5yM\"},\"kind\":\"ctx.propose\",\"at\":1792512345680,\"bodyHash\":\"_UqiFndKTQHgjKCMjhL7p8qcGgMmLPpC_Rr_U1Peo4M\"}",
+      "id": "-MLwbmij2PUtjteASIN_0wBgDOpz4mSwSXcyp_eFOUA",
+      "header": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 2,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 1,
+          "id": "gsKwf4tHqC52Muny9yKW05260ZAPU9TbeOChnoVL5yM"
+        },
+        "kind": "ctx.propose",
+        "at": 1792512345680,
+        "bodyHash": "_UqiFndKTQHgjKCMjhL7p8qcGgMmLPpC_Rr_U1Peo4M"
+      },
+      "entry": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 2,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 1,
+          "id": "gsKwf4tHqC52Muny9yKW05260ZAPU9TbeOChnoVL5yM"
+        },
+        "kind": "ctx.propose",
+        "at": 1792512345680,
+        "body": {
+          "slug": "db",
+          "mode": "replace",
+          "base": "0123456789abcdef",
+          "title": "Atlas database",
+          "text": {
+            "sha256": "x0oBj8EfTuQv3wYtr1pH12RhDPII5K3VlB0H4CYWVQQ",
+            "bytes": 62
+          }
+        },
+        "sig": "0X-XDevr2aE6_XIpiJEwZ3pSR1PfEYp4tLF3XB_r-cwPqbvNCYmgrrgdtXKAL8AEaHNI561xCW4SCCVhLjurAw"
+      }
+    },
+    {
+      "what": "a page's version",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c\",\"group\":\"spc_abcdefghijklmnopqrstuvwxyz234567\",\"inc\":1792512345678,\"seq\":3,\"prev\":{\"inc\":1792512345678,\"seq\":2,\"id\":\"-MLwbmij2PUtjteASIN_0wBgDOpz4mSwSXcyp_eFOUA\"},\"kind\":\"ctx.page\",\"at\":1792512345681,\"bodyHash\":\"kD0Q9APu9oJU76sbUYx_fJNpk7su_2JSctFClc8LBRY\"}",
+      "id": "H0D6xQRGO0oCF4MSs7QqaOGL6cVmEhFy1naeiEhzUCg",
+      "header": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 3,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 2,
+          "id": "-MLwbmij2PUtjteASIN_0wBgDOpz4mSwSXcyp_eFOUA"
+        },
+        "kind": "ctx.page",
+        "at": 1792512345681,
+        "bodyHash": "kD0Q9APu9oJU76sbUYx_fJNpk7su_2JSctFClc8LBRY"
+      },
+      "entry": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 3,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 2,
+          "id": "-MLwbmij2PUtjteASIN_0wBgDOpz4mSwSXcyp_eFOUA"
+        },
+        "kind": "ctx.page",
+        "at": 1792512345681,
+        "body": {
+          "slug": "db",
+          "epoch": 0,
+          "n": 1,
+          "base": "none",
+          "version": "0123456789abcdef",
+          "text": {
+            "sha256": "x0oBj8EfTuQv3wYtr1pH12RhDPII5K3VlB0H4CYWVQQ",
+            "bytes": 62
+          }
+        },
+        "sig": "Brr34YIino7_sYFsrveQWpBEzD70sFgvHioCnZQHok54FJyxYhAIem8zm8spfpbLMQELWdaSOy7aV5KIY6uqAg"
+      }
+    },
+    {
+      "what": "a page removed",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c\",\"group\":\"spc_abcdefghijklmnopqrstuvwxyz234567\",\"inc\":1792512345678,\"seq\":4,\"prev\":{\"inc\":1792512345678,\"seq\":3,\"id\":\"H0D6xQRGO0oCF4MSs7QqaOGL6cVmEhFy1naeiEhzUCg\"},\"kind\":\"ctx.remove\",\"at\":1792512345682,\"bodyHash\":\"1-I8WXOBnTlpZUalu18qgmAbHhXwBYviJxltkYnfr1g\"}",
+      "id": "b3Q5AA5XLVo6lrKH7G0Q_n0li9MeRSfWLvzEHWPYKtM",
+      "header": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 4,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 3,
+          "id": "H0D6xQRGO0oCF4MSs7QqaOGL6cVmEhFy1naeiEhzUCg"
+        },
+        "kind": "ctx.remove",
+        "at": 1792512345682,
+        "bodyHash": "1-I8WXOBnTlpZUalu18qgmAbHhXwBYviJxltkYnfr1g"
+      },
+      "entry": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 4,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 3,
+          "id": "H0D6xQRGO0oCF4MSs7QqaOGL6cVmEhFy1naeiEhzUCg"
+        },
+        "kind": "ctx.remove",
+        "at": 1792512345682,
+        "body": {
+          "slug": "old",
+          "epoch": 0,
+          "base": "fedcba9876543210"
+        },
+        "sig": "_Siiuto2gOZ95lKFRXTYfJHNIOifL4Z7emrg8Q85phz5ql_vvtm2bcmyRNNLUkgRMlIbQ4eSd0OpYn9P1gGzCg"
+      }
+    },
+    {
+      "what": "a day of the log",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c\",\"group\":\"spc_abcdefghijklmnopqrstuvwxyz234567\",\"inc\":1792512345678,\"seq\":5,\"prev\":{\"inc\":1792512345678,\"seq\":4,\"id\":\"b3Q5AA5XLVo6lrKH7G0Q_n0li9MeRSfWLvzEHWPYKtM\"},\"kind\":\"ctx.log\",\"at\":1792512345683,\"bodyHash\":\"P6Hz368IanVDz-VE4NH8mLQbRwz6uwjwBewtQA51qeQ\"}",
+      "id": "M7afuMRV9lLLbgsSocqbL0M2y3RHKuqbkyLRjtI9UbQ",
+      "header": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 5,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 4,
+          "id": "b3Q5AA5XLVo6lrKH7G0Q_n0li9MeRSfWLvzEHWPYKtM"
+        },
+        "kind": "ctx.log",
+        "at": 1792512345683,
+        "bodyHash": "P6Hz368IanVDz-VE4NH8mLQbRwz6uwjwBewtQA51qeQ"
+      },
+      "entry": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 5,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 4,
+          "id": "b3Q5AA5XLVo6lrKH7G0Q_n0li9MeRSfWLvzEHWPYKtM"
+        },
+        "kind": "ctx.log",
+        "at": 1792512345683,
+        "body": {
+          "date": "2026-11-11",
+          "epoch": 0,
+          "version": "00112233aabbccdd",
+          "text": {
+            "sha256": "fWK7qvSI0_QSr7XaPskMxTJs0oYuJnw5grEE0B7oFY0",
+            "bytes": 49
+          }
+        },
+        "sig": "t2Ycv_qxMyHKFZHPCQWbL_cq17jaa4eO8a8tMsYHhc4pBwT9bOsG7fZAD3IZaZ6ts0P-4X98tMEeRrK4MzO9BA"
+      }
+    },
+    {
+      "what": "texts dropped",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c\",\"group\":\"spc_abcdefghijklmnopqrstuvwxyz234567\",\"inc\":1792512345678,\"seq\":6,\"prev\":{\"inc\":1792512345678,\"seq\":5,\"id\":\"M7afuMRV9lLLbgsSocqbL0M2y3RHKuqbkyLRjtI9UbQ\"},\"kind\":\"ctx.forget\",\"at\":1792512345684,\"bodyHash\":\"2Y0_gsjBpGJ2-4p7bpH5F69G0yKsI6OfgltesH9rUTQ\"}",
+      "id": "yO5hKrg6zZpCO4S0jy9J5qyImgWoTlicf7IG-v0FYWo",
+      "header": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 6,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 5,
+          "id": "M7afuMRV9lLLbgsSocqbL0M2y3RHKuqbkyLRjtI9UbQ"
+        },
+        "kind": "ctx.forget",
+        "at": 1792512345684,
+        "bodyHash": "2Y0_gsjBpGJ2-4p7bpH5F69G0yKsI6OfgltesH9rUTQ"
+      },
+      "entry": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 6,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 5,
+          "id": "M7afuMRV9lLLbgsSocqbL0M2y3RHKuqbkyLRjtI9UbQ"
+        },
+        "kind": "ctx.forget",
+        "at": 1792512345684,
+        "body": {
+          "epoch": 0,
+          "hashes": [
+            "x0oBj8EfTuQv3wYtr1pH12RhDPII5K3VlB0H4CYWVQQ"
+          ]
+        },
+        "sig": "1S7RyCe4KWU9R5vqVoQaYiqcwPZNKL7ToT4sV8LAxsdnXNAhYCsP8shuKNLZrwGeoefViQp0ftHbYTpflo3gCw"
+      }
+    },
+    {
+      "what": "the live pages",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c\",\"group\":\"spc_abcdefghijklmnopqrstuvwxyz234567\",\"inc\":1792512345678,\"seq\":7,\"prev\":{\"inc\":1792512345678,\"seq\":6,\"id\":\"yO5hKrg6zZpCO4S0jy9J5qyImgWoTlicf7IG-v0FYWo\"},\"kind\":\"ctx.snapshot\",\"at\":1792512345685,\"bodyHash\":\"YuVf7qwuGhdQEBSfw8yoVJGIKdRdcwpA2R9oeyP8cDE\"}",
+      "id": "Ngid-F9Uc063CsupjchaW1aacUGIS4zzQ8Up2KkhHgs",
+      "header": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 7,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 6,
+          "id": "yO5hKrg6zZpCO4S0jy9J5qyImgWoTlicf7IG-v0FYWo"
+        },
+        "kind": "ctx.snapshot",
+        "at": 1792512345685,
+        "bodyHash": "YuVf7qwuGhdQEBSfw8yoVJGIKdRdcwpA2R9oeyP8cDE"
+      },
+      "entry": {
+        "author": "xns1_fxgjoykk3voq5f2xawdqxxec6qrknx5c",
+        "group": "spc_abcdefghijklmnopqrstuvwxyz234567",
+        "inc": 1792512345678,
+        "seq": 7,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 6,
+          "id": "yO5hKrg6zZpCO4S0jy9J5qyImgWoTlicf7IG-v0FYWo"
+        },
+        "kind": "ctx.snapshot",
+        "at": 1792512345685,
+        "body": {
+          "epoch": 0,
+          "pages": [
+            {
+              "slug": "db",
+              "version": "0123456789abcdef",
+              "sha256": "x0oBj8EfTuQv3wYtr1pH12RhDPII5K3VlB0H4CYWVQQ"
+            }
+          ]
+        },
+        "sig": "8OmibVBGVj0rNkxJ85Dz78K7CrVJ-4KWYZRQEzNk-KY2Mx0Gn7-StsdG191_k2ryRPW0jXIOEA2GZR5dLWpqAA"
+      }
+    }
+  ]
+}

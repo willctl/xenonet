@@ -511,6 +511,10 @@ fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &
         EntryKind::Intent => crate::intents::intent_in(w, host, &e.body).map_err(fail),
         EntryKind::Assign => crate::intents::assign_in(w, host, &e.body).map_err(fail),
         EntryKind::Report => crate::intents::report_in(w, host, &e.body).map_err(fail),
+        // Xenolith's kinds belong in a space's feed, never a network's.
+        EntryKind::CtxNote | EntryKind::CtxPropose | EntryKind::CtxPage | EntryKind::CtxRemove | EntryKind::CtxLog | EntryKind::CtxForget | EntryKind::CtxSnapshot => {
+            Err(Fail::Bad(format!("a {} belongs in a space's feed, not a network's", e.kind.as_str())))
+        }
     };
     if let Err(f) = done {
         w.log("warn", "net.receive", &format!("a {} from {host} wasn't taken: {}", e.kind.as_str(), why(&f)));
