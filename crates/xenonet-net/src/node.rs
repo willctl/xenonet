@@ -114,6 +114,10 @@ pub struct Options {
     pub link: bool,
     /// Finding members on the LAN by mDNS, as the machine's setting says.
     pub lan: crate::endpoint::LanLookup,
+    /// The actors' forwards (`forward`): link/2's endpoint admits the
+    /// members of this machine's networks on their ALPNs too, and hands
+    /// those connections to them. None: nothing is forwarded.
+    pub forwards: Option<Arc<crate::forward::Forwards>>,
 }
 
 impl Options {
@@ -134,6 +138,7 @@ impl Options {
             bind: None,
             link: false,
             lan: crate::endpoint::LanLookup::Unasked,
+            forwards: None,
         }
     }
 }

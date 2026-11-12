@@ -251,15 +251,22 @@ pub fn row_json(r: &Row) -> Value {
     Value::Object(r.0.iter().map(|(k, c)| (k.clone(), cell_json(c))).collect())
 }
 
+/// What hears of each token revoked, by its revocation id (hex).
+pub type OnRevoke = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// The engine's tables in the store.
 pub struct EngineStore {
     db: Arc<Db>,
+    // Told as a revocation is written: what a grant keeps open (an actor's
+    // forwards) ends with it. Told even when the write's transaction rolls
+    // back later, which only closes what can be opened again.
+    on_revoke: std::sync::RwLock<Vec<OnRevoke>>,
 }
 
 impl EngineStore {
     /// The engine's side of `db`, pruned.
     pub fn new(db: Arc<Db>, now: f64) -> std::result::Result<Self, String> {
-        let store = EngineStore { db };
+        let store = EngineStore { db, on_revoke: std::sync::RwLock::default() };
         store.prune(now).map_err(|e| e.to_string())?;
         Ok(store)
     }
@@ -976,7 +983,20 @@ impl EngineStore {
             "INSERT OR IGNORE INTO revoked (id, actor, reason, at) VALUES (?, ?, ?, ?)",
             &[field(r, "id", 1)?, field(r, "actor", 2)?, field(r, "reason", 3)?, field(r, "at", 4)?],
         )?;
+        if let Some(id) = r.get("id").and_then(Value::as_str) {
+            let hooks = self.on_revoke.read().map(|h| h.clone()).unwrap_or_default();
+            for h in hooks {
+                h(id);
+            }
+        }
         Ok(())
+    }
+
+    /// `f` hears of every token revoked from now on, by its id.
+    pub fn on_revoke(&self, f: OnRevoke) {
+        if let Ok(mut h) = self.on_revoke.write() {
+            h.push(f);
+        }
     }
     /// A revoked token, by any of its revocation ids in hex.
     pub fn revoked(&self, id: &str) -> Result<Option<Row>> {
@@ -1275,7 +1295,12 @@ mod tests {
             )
             .unwrap();
         }
+        // What a grant keeps open hears of its revocation as it's written.
+        let heard = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let h = heard.clone();
+        s.on_revoke(Arc::new(move |id: &str| h.lock().unwrap().push(id.to_string())));
         s.revoke_token(&json!({ "id": "i-old", "actor": "actor:muse", "reason": "rotated", "at": 5.0 })).unwrap();
+        assert_eq!(*heard.lock().unwrap(), ["i-old"]);
         assert_eq!(s.revoked("i-old").unwrap().and_then(|r| r.text("reason").map(str::to_string)).as_deref(), Some("rotated"));
         let mut ids = s.issued_token_ids().unwrap();
         ids.sort();

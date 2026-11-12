@@ -374,6 +374,8 @@ pub const RULES: &[Rule] = &[
     // ---- other machines ----
     r("GET",    "/api/net/state", YOU, Read(State)),
     r("GET",    "/api/net/svc", YOU, Read(State)),
+    // The actors forwarding an ALPN over this machine's endpoint, and to whom.
+    r("GET",    "/api/net/forwards", YOU, Read(State)),
     r("POST",   "/api/net/create", YOU, Nothing),
     r("POST",   "/api/net/join", YOU, Nothing),
     r("POST",   "/api/net/leave", YOU, Nothing),
@@ -711,6 +713,7 @@ mod tests {
         assert_eq!(rule("POST", "/api/assistant/gr_0123456789abcdef01234567/tunnel/start").unwrap().who, &[Window]);
         assert_eq!(rule("PATCH", "/api/svc/desk/notes/x").unwrap().who, &[Program]);
         assert_eq!(rule("POST", "/api/checkouts/chk_x/confirm").unwrap().who, &[Window], "a checkout joins its project by the person's word alone");
+        assert_eq!(rule("GET", "/api/net/forwards").unwrap().who, &[You], "who forwards what is the owner's to read");
         // No row, no route: a path made up now, or a method a path doesn't take.
         assert!(rule("GET", "/api/brand-new").is_none());
         assert!(rule("PUT", "/api/graph").is_none());

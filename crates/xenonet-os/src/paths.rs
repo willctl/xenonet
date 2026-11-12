@@ -269,6 +269,15 @@ pub fn real_path(p: &Path) -> PathBuf {
     crate::fs::realpath_native(&p.to_string_lossy()).map_or_else(|_| p.to_path_buf(), PathBuf::from)
 }
 
+/// The effective user id this process runs as: what a local socket's peer
+/// is checked against, so only this account reaches it.
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "geteuid(2), which std doesn't wrap")]
+pub fn own_uid() -> u32 {
+    // SAFETY: geteuid takes nothing, can't fail and touches no memory.
+    unsafe { libc::geteuid() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

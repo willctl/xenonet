@@ -253,6 +253,7 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
         let mut opts = NetService::options(&config.state_dir, kept, &config.home, &version, log);
         opts.vault = Some(crate::compose::keys::vault(config.instance.as_deref(), config.demo));
+        opts.forwards = ctx.cores.forwards.net();
         match NetService::open(opts) {
             Ok(svc) => {
                 if let Some(g) = &parts.gateway {
@@ -300,6 +301,19 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
             None,
             Some("XenoNet's window still works; the xenonet command, hooks and MCP servers can't reach the API until it's written"),
         );
+    }
+    // The actors' forwards, on an owner-only socket beside the credential.
+    #[cfg(unix)]
+    if let Some(f) = ctx.cores.forwards.net() {
+        let path = crate::compose::forward::socket_path(Path::new(&config.runtime_dir), port);
+        let c = ctx.clone();
+        // A socket that can't be opened (a path past the OS's limit) is
+        // shown in the forwards' list, where an actor that needs it looks.
+        let at = match crate::compose::forward::listen(f.clone(), &path, move |w| c.log("warn", "net.forward", w, None, None)) {
+            Ok(_) => Ok(path.to_string_lossy().into_owned()),
+            Err(e) => Err(format!("the forward socket couldn't be opened, so nothing is forwarded for actors: {e}")),
+        };
+        f.set_socket(at);
     }
     let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
     // Desktop's window, as it last said: shown, hidden or closed.

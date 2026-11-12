@@ -73,6 +73,7 @@ pub mod doctor;
 pub mod endpoint;
 pub mod envelope;
 pub mod files;
+pub mod forward;
 pub mod frame;
 pub mod gateway;
 pub mod ground;

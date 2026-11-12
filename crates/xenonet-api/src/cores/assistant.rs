@@ -43,6 +43,13 @@ pub trait Grants: Send + Sync {
     fn check(&self, _slug: &str, _token: &str, _action: &str) -> Result<String, &'static str> {
         Err("invalid")
     }
+    /// Whether `token` is a grant of this machine's actor, in its time and
+    /// not revoked, whose `forward(alpn)` names `alpn` exactly: the actor's
+    /// slug and the token's revocation ids (hex), or `no-grant`,
+    /// `other-alpn`, `revoked` or `expired`.
+    fn forward(&self, _token: &str, _alpn: &str) -> Result<(String, Vec<String>), &'static str> {
+        Err("no-grant")
+    }
     /// A page cursor: `token` narrowed to one read, bound to `bound` (the
     /// grant, the operation and its filters, as the reads write them), for
     /// five minutes, holding `after` (base64url).

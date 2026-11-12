@@ -134,6 +134,8 @@ pub struct Transport2 {
     pub post: std::sync::Mutex<Post>,
     /// This machine's presence, what each peer has of it, and the peers'.
     pub presence: std::sync::Mutex<Live>,
+    /// The actors' forwards, which take the connections on their ALPNs.
+    pub forwards: Option<Arc<crate::forward::Forwards>>,
 }
 
 /// This machine's clock, and how far its HLC is ahead of it.
@@ -834,7 +836,10 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
     let Some(s) = common.shareds().into_iter().next() else { return };
     let Some(key) = s.key() else { return };
     let settings = Settings { relays: relays_of(&relays), lan: s.opts.lan, bind: s.opts.bind, roots: added_roots(&s.opts.dir).unwrap_or_default() };
-    let admission = Arc::new(crate::admission::Admission::new());
+    // The members of its networks on the ALPNs it forwards for actors too.
+    let forwards = s.opts.forwards.clone();
+    let doors = forwards.as_ref().map_or_else(crate::admission::Doors::xenonet, |f| crate::admission::Doors::xenonet_forwarding(f.forwardable().alpns()));
+    let admission = Arc::new(crate::admission::Admission::with(doors));
     let dial = match IrohDial::bind(&key, &settings, admission.clone()).await {
         Ok(d) => Arc::new(d),
         Err(e) => {
@@ -844,6 +849,11 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
     };
     let mesh = Arc::new(Mesh::new(dial.clone(), admission));
     let links = Links::new(mesh.clone(), Arc::new(NodeMachine(c.clone())));
+    if let Some(f) = &forwards {
+        f.set_mesh(Some(mesh.clone()));
+        let f = f.clone();
+        links.hand_others(Arc::new(move |link| f.incoming(link)));
+    }
     let t = Arc::new(Transport2 {
         dial,
         mesh,
@@ -854,6 +864,7 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
         fetch_due: tokio::sync::Notify::new(),
         post: std::sync::Mutex::default(),
         presence: std::sync::Mutex::default(),
+        forwards,
     });
     *common.link2.writing() = Some(t);
     for n in common.shareds() {
@@ -894,6 +905,9 @@ async fn fetch_clock(c: Weak<Common>) {
 /// Stops link/2: every connection closes, and the endpoint.
 pub fn stop(c: &Common) {
     let Some(t) = c.link2.writing().take() else { return };
+    if let Some(f) = &t.forwards {
+        f.set_mesh(None);
+    }
     for l in t.mesh.links() {
         l.close(Close::Done);
     }

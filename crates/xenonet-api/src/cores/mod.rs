@@ -15,6 +15,7 @@ pub mod assistant;
 pub mod delivery;
 pub mod door;
 pub mod engine;
+pub mod forwards;
 pub mod hosts;
 pub mod intents;
 pub mod services;
@@ -31,6 +32,7 @@ pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Grant
 pub use delivery::{Policy, Router};
 pub use door::{Apps, LocalDoor};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
+pub use forwards::Forwards;
 pub use hosts::{HttpApi, Hub, HubNet, SelfApi};
 pub use intents::{Intents, Reporter};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
@@ -187,6 +189,8 @@ pub struct Cores {
     /// it: the composition root's (xenonet-authz, the adapters).
     pub door: Arc<dyn LocalDoor>,
     pub apps: Arc<dyn Apps>,
+    /// The actors' forwards over this machine's endpoint.
+    pub forwards: Arc<dyn Forwards>,
     /// What plugs the engine into the network's link once the service has
     /// made it (the service's gateway/network.rs): the engine's driver sets
     /// it, and the service calls it once, before the link starts. The link
@@ -260,7 +264,8 @@ impl Cores {
             demo: p.clone(),
             intents: p.clone(),
             door: p.clone(),
-            apps: p,
+            apps: p.clone(),
+            forwards: p,
             on_net: None,
         }
     }

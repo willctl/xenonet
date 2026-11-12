@@ -451,7 +451,13 @@ pub struct Links {
     conns: Mutex<BTreeMap<PeerId, Arc<Conn>>>,
     keep: Mutex<Keep>,
     changed: Notify,
+    /// Where connections on the mesh's other protocols go (the forwards').
+    others: std::sync::RwLock<Option<Others>>,
 }
+
+/// What takes the connections a mesh admitted on protocols other than its
+/// `Links`' own.
+pub type Others = Arc<dyn Fn(Arc<Link>) + Send + Sync>;
 
 impl Links {
     /// link/2's connections.
@@ -462,7 +468,22 @@ impl Links {
     /// `protocol`'s connections, over `mesh`, whose admission has a door
     /// for its ALPN.
     pub fn over(protocol: Protocol, mesh: Arc<Mesh>, machine: Arc<dyn Machine>) -> Arc<Links> {
-        Arc::new_cyclic(|this| Links { this: this.clone(), protocol, mesh, machine, conns: Mutex::new(BTreeMap::new()), keep: Mutex::new(Keep::default()), changed: Notify::new() })
+        Arc::new_cyclic(|this| Links {
+            this: this.clone(),
+            protocol,
+            mesh,
+            machine,
+            conns: Mutex::new(BTreeMap::new()),
+            keep: Mutex::new(Keep::default()),
+            changed: Notify::new(),
+            others: std::sync::RwLock::new(None),
+        })
+    }
+
+    /// Hands the connections the mesh admits on its other protocols to
+    /// `others` from now on (the forwarded ALPNs'); without, they close.
+    pub fn hand_others(&self, others: Others) {
+        *xenonet_os::sync::ReadWrite::writing(&self.others) = Some(others);
     }
 
     pub fn protocol(&self) -> &Protocol {
@@ -511,6 +532,8 @@ impl Links {
         while let Some(link) = self.mesh.accept().await {
             if link.alpn() == self.protocol.alpn {
                 self.adopt(link);
+            } else if let Some(others) = xenonet_os::sync::ReadWrite::reading(&self.others).clone().filter(|_| !link.alpn().is_xenonet()) {
+                others(link);
             } else {
                 // join/2 and svc/2 are other doors' (phase 5's commits 14
                 // and 15), not this mesh's yet.

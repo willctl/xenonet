@@ -83,6 +83,11 @@ impl Grants for GrantsDriver {
         }
     }
 
+    fn forward(&self, text: &str, alpn: &str) -> Result<(String, Vec<String>), &'static str> {
+        let g = ground(&self.0, None).ok_or("no-grant")?;
+        forward_grant(&g, g.facts.now, text, alpn)
+    }
+
     fn cursor(&self, text: &str, bound: &str, after: Option<&str>) -> Result<String, String> {
         let g = ground(&self.0, None).ok_or("this machine's governance isn't plugged in")?;
         let token = Token::parse(text, ACTOR_PREFIX, &g, g.facts.now).map_err(|e| e.message)?;
@@ -110,6 +115,32 @@ impl Grants for GrantsDriver {
             _ => Err(BAD),
         }
     }
+}
+
+/// A grant to forward `alpn` (`Grants::forward`): this machine's own
+/// actor's token, in its time and not revoked by `g`, whose `forward(alpn)`
+/// names exactly that ALPN; its slug and revocation ids.
+pub fn forward_grant(g: &dyn xenonet_authz::Ground, now: i64, text: &str, alpn: &str) -> Result<(String, Vec<String>), &'static str> {
+    let token = match Token::parse(text, ACTOR_PREFIX, g, now) {
+        Ok(t) => t,
+        Err(e) if e.code == "revoked" => return Err("revoked"),
+        Err(_) => return Err("no-grant"),
+    };
+    // This machine's own actor's, and its forward this ALPN alone: a grant
+    // forwards the one it names, never another.
+    if &token.bearer().machine != g.own_machine() {
+        return Err("no-grant");
+    }
+    if token.until() < now {
+        return Err("expired");
+    }
+    match token.forward() {
+        Some(a) if a == alpn => {}
+        Some(_) => return Err("other-alpn"),
+        None => return Err("no-grant"),
+    }
+    let ids = Token::ids_of(text, ACTOR_PREFIX).unwrap_or_else(|| vec![token.id()]);
+    Ok((token.bearer().slug.as_str().to_string(), ids))
 }
 
 /// Whether `a` lets an actor Allow nothing more than `b`.
@@ -165,4 +196,97 @@ pub fn set_allows(w: &Runtime, at_window: bool, slug: &str, scope: Option<&Value
     let now = xenonet_text::time::now_ms();
     let allows = scope.map_or(Value::Null, |v| Value::String(v.to_string()));
     w.store.with(|s| s.put_scope(&serde_json::json!({ "token": token, "actor": format!("actor:{slug}"), "allows": allows, "at": now }))).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use xenonet_authz::{ActorGrant, ActorSlug, Binding, Consent, Device, MachineId, NetworkId, RootCertificate, Schema, Settings, StandingGrant, TokenRoot};
+    use xenonet_id::codec::hex;
+    use xenonet_id::sign::{KeyHome, SeedSigner, Signer, VerifyingKey};
+
+    const NOW: i64 = 1_800_000_000_000;
+
+    // A ground that knows one machine, its one root, and what's revoked.
+    struct One {
+        machine: MachineId,
+        key: VerifyingKey,
+        cert: RootCertificate,
+        revoked: BTreeSet<String>,
+    }
+
+    impl xenonet_authz::Ground for One {
+        fn own_machine(&self) -> &MachineId {
+            &self.machine
+        }
+        fn role(&self, _: &NetworkId, _: &MachineId) -> Option<xenonet_authz::Role> {
+            None
+        }
+        fn settings(&self, _: Option<&NetworkId>) -> Settings {
+            Settings::default()
+        }
+        fn own_person(&self) -> Option<xenonet_authz::PersonId> {
+            None
+        }
+        fn device(&self, _: &xenonet_authz::PersonId, _: &xenonet_authz::DeviceId) -> Option<Device> {
+            None
+        }
+        fn revoked(&self, id: &[u8]) -> bool {
+            self.revoked.contains(&hex(id))
+        }
+        fn token_roots(&self, key_id: u32) -> Vec<RootCertificate> {
+            (self.cert.key_id() == key_id).then(|| self.cert.clone()).into_iter().collect()
+        }
+        fn signing_key(&self, machine: &MachineId) -> Option<VerifyingKey> {
+            (machine == &self.machine).then(|| self.key.clone())
+        }
+        fn consent(&self, _: &xenonet_authz::SessionId) -> Consent {
+            Consent::default()
+        }
+        fn device_of(&self, _: &MachineId) -> Option<xenonet_authz::DeviceId> {
+            None
+        }
+        fn delegations(&self) -> Vec<StandingGrant> {
+            Vec::new()
+        }
+        fn allow_scope(&self, _: &[u8]) -> Option<xenonet_authz::AllowScope> {
+            None
+        }
+        fn ask(&self, _: &xenonet_authz::AskId) -> Option<xenonet_authz::Asked> {
+            None
+        }
+        fn governance_synced_at(&self) -> Option<i64> {
+            None
+        }
+    }
+
+    fn grant(root: &TokenRoot, forward: Option<&str>, until: i64) -> (String, String) {
+        let g = ActorGrant { actor: ActorSlug::new("lith").unwrap(), network: None, rights: vec![Action::Read], until };
+        let t = root.mint_actor_with(&g, &Schema::XENONET, &Binding::new(None, forward).unwrap()).unwrap();
+        (t.encode(ACTOR_PREFIX).unwrap(), t.id())
+    }
+
+    #[test]
+    fn a_forward_needs_this_machines_grant_naming_that_alpn_in_its_time_and_not_revoked() {
+        let signer = SeedSigner::from_seed(&[3; 32], KeyHome::File).unwrap();
+        let machine = MachineId::new("m1").unwrap();
+        let root = TokenRoot::new(machine.clone(), &signer, NOW - 1000, NOW + 3_600_000).unwrap();
+        let mut g = One { machine, key: signer.public(), cert: root.certificate().clone(), revoked: BTreeSet::new() };
+        let (sync, id) = grant(&root, Some("xenolith/sync/2"), NOW + 60_000);
+        assert_eq!(forward_grant(&g, NOW, &sync, "xenolith/sync/2"), Ok(("lith".to_string(), vec![id.clone()])));
+        assert_eq!(forward_grant(&g, NOW, &sync, "xenonet/link/2"), Err("other-alpn"));
+        let (none, _) = grant(&root, None, NOW + 60_000);
+        assert_eq!(forward_grant(&g, NOW, &none, "xenolith/sync/2"), Err("no-grant"), "a grant without a forward forwards nothing");
+        assert_eq!(forward_grant(&g, NOW, "xenonet_actor_bm90IGEgdG9rZW4", "xenolith/sync/2"), Err("no-grant"));
+        let (short, _) = grant(&root, Some("xenolith/sync/2"), NOW + 1);
+        assert_eq!(forward_grant(&g, NOW + 2, &short, "xenolith/sync/2"), Err("expired"));
+        g.revoked.insert(id);
+        assert_eq!(forward_grant(&g, NOW, &sync, "xenolith/sync/2"), Err("revoked"));
+        // Another machine's grant forwards nothing here.
+        let other = SeedSigner::from_seed(&[4; 32], KeyHome::File).unwrap();
+        let theirs = TokenRoot::new(MachineId::new("m2").unwrap(), &other, NOW - 1000, NOW + 3_600_000).unwrap();
+        let (t, _) = grant(&theirs, Some("xenolith/sync/2"), NOW + 60_000);
+        assert_eq!(forward_grant(&g, NOW, &t, "xenolith/sync/2"), Err("no-grant"));
+    }
 }

@@ -127,6 +127,10 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         Err(e) => env.emitter.log("error", "integrations.start", &format!("the integrations' records can't be kept: {}", e.message)),
     }
 
+    // The actors' forwards over this machine's endpoint, decided on the
+    // engine's grants.
+    super::forward::wire(cores);
+
     // The doctor last: its context is the other cores.
     let settings = doctor::Settings {
         demo,

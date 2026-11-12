@@ -37,6 +37,8 @@
 //!   and `wake`. Start and wake are settings entries in the network's
 //!   chain, signed here (with presence where they widen); `approve` signs
 //!   one that waits, by its id.
+//! - `GET forwards`: the actors whose grants forward an ALPN over this
+//!   machine's endpoint (`xenonet_net::forward`), and their connections.
 //! - `GET svc`, `POST svc/publish`, `POST svc/unpublish`: the services this
 //!   host publishes to the network. Other hosts reach them at
 //!   `/api/svc/…` (routes/svc.rs). Publishing widens what the network
@@ -125,7 +127,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
 async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Reply {
     let known = matches!(
         (method, rest),
-        ("GET", "state" | "svc")
+        ("GET", "state" | "svc" | "forwards")
             | (
                 "POST",
                 "create"
@@ -150,6 +152,12 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         return Reply::error(404, "not found");
     }
     // Who may is rules.rs's: yours, and a ticket the window's.
+    if rest == "forwards" {
+        return match ctx.cores.forwards.list() {
+            Ok(v) => Reply::json(200, v),
+            Err(e) => refused(&e),
+        };
+    }
     if rest == "state" {
         if let Some(s) = simulated_net_state(ctx) {
             return Reply::json(200, super::net_sim::with_own_agents(ctx, s).await);
