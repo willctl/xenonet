@@ -286,6 +286,12 @@ impl App {
         Ok((&keys.context, keys.owner.signer(owner, &owner.key)?))
     }
 
+    /// This start's owner key, for an owner act that signs later (an invite's Shares, once its
+    /// joiner's code checks), on a request the caller has checked came with it.
+    pub fn owner_key(&self) -> Result<&str, String> {
+        self.owner.as_ref().map(|o| o.key.as_str()).map_err(Clone::clone)
+    }
+
     /// The state, retrying setup if it failed (e.g. folder permissions fixed since startup).
     pub fn state(&self) -> State {
         if self.state.read().unwrap().setup_error.is_some() {

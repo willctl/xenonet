@@ -298,8 +298,8 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             "/api/spaces/bind" => Some(("Binding a space", ", or run `xenolith spaces bind` in a terminal")),
             "/api/upgrade/run" => Some(("Running the upgrade", ", or run `xenolith upgrade --run` in a terminal")),
             "/api/tokens" => Some(("Making a token", ", or run `xenolith token create` in a terminal")),
-            "/api/sync/share" => Some(("Sharing a space with another Xenolith", ", or run `xenolith sync share` in a terminal")),
-            "/api/sync/follow" => Some(("Following a space from another Xenolith", ", or run `xenolith sync follow` in a terminal")),
+            "/api/sync/invite" => Some(("Inviting another Xenolith", ", or run `xenolith invite` in a terminal")),
+            "/api/sync/join" => Some(("Joining another Xenolith's spaces", ", or run `xenolith join` in a terminal")),
             "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
             _ => None,
         };
@@ -543,56 +543,62 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             Err(e) => json_reply(409, &json!({ "error": e })),
         };
     }
-    if path == "/api/sync/share" && method == "POST" {
-        // Shares a space this Xenolith curates with another Xenolith: its context key and the
-        // endpoint id own mode admits it from, at a level. Signed as the owner and the curator.
+    if path == "/api/sync/invite" && method == "POST" {
+        // An invite for one Xenolith to join spaces this one curates (xenolith_net::join): the
+        // Shares are appended once its code checks, signed as the owner and the curator.
         let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
         let level = body["level"].as_str().map_or(Some(xenolith_core::chains::Level::Append), xenolith_core::chains::Level::parse);
-        let (Some(space), Some(key), Some(endpoint), Some(level)) =
-            (body["space"].as_str().and_then(|s| xenolith_core::spaces::SpaceId::parse(s).ok()), body["key"].as_str(), body["endpoint"].as_str(), level)
-        else {
-            return json_reply(400, &json!({ "error": "Send JSON: {\"space\": \"project:<name>\", \"key\": \"xns1_…\", \"endpoint\": \"<64 hex>\", \"level\": \"read|append|write\"}" }));
+        let spaces: Option<Vec<xenolith_core::spaces::SpaceId>> =
+            body["spaces"].as_array().map(|a| a.iter().filter_map(Value::as_str).filter_map(|s| xenolith_core::spaces::SpaceId::parse(s).ok()).collect());
+        let (Some(spaces), Some(level)) = (spaces.filter(|s| !s.is_empty() && s.len() == body["spaces"].as_array().map_or(0, Vec::len)), level) else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"spaces\": [\"project:<name>\"], \"level\": \"read|append|write\"}" }));
         };
-        let done = app.signers().and_then(|(context, owner)| xenolith_core::chains::share(&AppPaths::current(), wiki_dir, &space, key, endpoint, level, owner, context, xenolith_core::text::now_ms()));
+        let ttl = body["seconds"].as_i64().map_or(xenolith_net::join::TICKET_MS, |s| s.saturating_mul(1000));
+        let Some(engine) = app.sync.get() else {
+            return json_reply(409, &json!({ "error": "sync is off until the upgrade from 1.x has run (xenolith upgrade)" }));
+        };
+        let done = app.owner_key().and_then(|k| engine.invite(&spaces, level, k, ttl));
         audit::best_effort(
             &AppPaths::current(),
             "space",
             by,
-            vec![("space", json!(space.to_string())), ("event", json!("share")), ("key", json!(key)), ("level", json!(level.as_str())), ("done", json!(done.is_ok()))],
+            vec![("spaces", json!(spaces.iter().map(ToString::to_string).collect::<Vec<_>>())), ("event", json!("invite")), ("level", json!(level.as_str())), ("done", json!(done.is_ok()))],
         );
         return match done {
             Ok(v) => {
-                if let Some(s) = app.sync.get() {
-                    s.changed();
-                }
-                entry.result = Some("space shared".into());
+                entry.result = Some("invite made".into());
                 json_reply(200, &v)
             }
             Err(e) => json_reply(409, &json!({ "error": e })),
         };
     }
-    if path == "/api/sync/follow" && method == "POST" {
-        // Follows a space another Xenolith curates: its id, the curator's context key, its endpoint
-        // id and where it's reached. What a join (xenolith join) will write.
+    if path == "/api/sync/join" && method == "POST" {
+        // Joins with an invite and its code (xenolith_net::join): follows what the invite offers,
+        // once the inviter proved the code and its answer checked.
         let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
-        let Some(f) = xenolith_core::sync::Follow::parse(&body) else {
-            return json_reply(400, &json!({ "error": "Send JSON: {\"space\": \"spc_…\", \"curator\": \"xns1_…\", \"endpoint\": \"<64 hex>\", \"addrs\": [\"ip:port\"], \"all\": false}" }));
+        let at: Option<Vec<std::net::SocketAddr>> = body["at"].as_array().map_or(Some(vec![]), |a| a.iter().map(|x| x.as_str().and_then(|x| x.parse().ok())).collect());
+        let (Some(invite), Some(code), Some(at)) = (body["invite"].as_str(), body["code"].as_str(), at) else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"invite\": \"xlj1_…\", \"code\": \"…\", \"at\": [\"ip:port\"], \"only\": [\"project:<name>\"], \"all\": false}" }));
         };
-        let paths = AppPaths::current();
-        if xenolith_core::chains::held(&paths).iter().any(|(p, _)| p.id == f.space) {
-            return json_reply(409, &json!({ "error": format!("{} is held here already", f.space) }));
-        }
-        let done = xenolith_core::sync::follow(&paths, f.clone());
-        audit::best_effort(&paths, "space", by, vec![("space", json!(f.space)), ("event", json!("follow")), ("curator", json!(f.curator)), ("done", json!(done.is_ok()))]);
+        let only: Vec<String> = body["only"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+        let choice = xenolith_net::join::Choice { at, only, all: body["all"].as_bool().unwrap_or(false) };
+        let Some(engine) = app.sync.get() else {
+            return json_reply(409, &json!({ "error": "sync is off until the upgrade from 1.x has run (xenolith upgrade)" }));
+        };
+        let done = engine.join(invite, code, &choice);
+        let followed: Vec<Value> = done.as_ref().map(|v| v["followed"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
+        audit::best_effort(
+            &AppPaths::current(),
+            "space",
+            by,
+            vec![("event", json!("join")), ("spaces", json!(followed.iter().map(|f| f["space"].clone()).collect::<Vec<_>>())), ("done", json!(done.is_ok()))],
+        );
         return match done {
-            Ok(()) => {
-                if let Some(s) = app.sync.get() {
-                    s.changed();
-                }
-                entry.result = Some("space followed".into());
-                json_reply(200, &json!({ "followed": f.to_json() }))
+            Ok(v) => {
+                entry.result = Some("joined".into());
+                json_reply(200, &v)
             }
-            Err(e) => json_reply(500, &json!({ "error": e })),
+            Err(e) => json_reply(409, &json!({ "error": e })),
         };
     }
     if path == "/api/upgrade/run" && method == "POST" {

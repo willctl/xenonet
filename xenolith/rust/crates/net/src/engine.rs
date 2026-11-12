@@ -30,9 +30,18 @@ const SETTLE: Duration = Duration::from_millis(150);
 /// How long a follow record's addresses are kept in the endpoint's lookup.
 const ADDR_TTL: Duration = Duration::from_secs(365 * 24 * 3600);
 
-pub enum Job {
+pub(crate) enum Job {
     /// The engine stops.
     Stop,
+    /// An invite or a join needs the endpoint now, peers or not.
+    OpenNow,
+    /// A joiner's code checked: share the invite's spaces with it, and answer.
+    Admit {
+        pending: Box<crate::join::Pending>,
+        key: String,
+        endpoint: String,
+        reply: tokio::sync::oneshot::Sender<Result<Value, String>>,
+    },
     /// A share or a follow changed.
     Changed,
     /// The endpoint opened.
@@ -762,6 +771,23 @@ impl Worker {
                 self.scan();
             }
             Job::Fs | Job::Stop => {}
+            Job::OpenNow => {
+                if let Some(open) = self.open.take() {
+                    let _ = open.send(());
+                }
+            }
+            Job::Admit { pending, key, endpoint, reply } => {
+                let r = crate::join::admit_on_worker(&self.cfg, &pending, &key, &endpoint);
+                match &r {
+                    Ok(_) => {
+                        self.log(&format!("{key} joined {} with an invite, at {}", pending.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "), pending.level.as_str()));
+                        self.refresh();
+                        self.scan();
+                    }
+                    Err(e) => self.log(&format!("a join from {key} wasn't let in: {e}")),
+                }
+                let _ = reply.send(r);
+            }
             Job::Forget { text, ignore_case } => self.forget(&text, ignore_case),
             Job::Hello { peer, key, told } => self.hello(peer, key, told),
             Job::GroupHello { peer, group, digest, heads } => self.group_hello(peer, &group, digest, &heads),

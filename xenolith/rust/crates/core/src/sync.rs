@@ -5,8 +5,7 @@
 //! - **Who's who.** A space's members are the subjects its chain shares it with (chains.rs), each a
 //!   context key with the endpoint id own mode admits it from (xenonet-log's `Share{key,
 //!   endpoint}`). A Xenolith that follows a space it holds no chain of yet knows its curator from a
-//!   follow record (`Follow`), which joining (`xenolith join`) will write; until then the owner
-//!   writes one with `xenolith sync follow`.
+//!   follow record (`Follow`), which joining (`xenolith join`, xenolith-net's join/1) writes.
 //! - **Feeds.** Each Xenolith writes one feed per space (`Outbox`, append-only, `<state>/sync/out/`):
 //!   a member's notes (`ctx.note`) and its edits of the pages it holds (`ctx.propose`), sent to the
 //!   curator alone (review revision 12); the curator's pages, removals and log days (`ctx.page`,
@@ -104,7 +103,7 @@ impl Settings {
 
 // ---------------------------------------------------------------- follow records
 
-/// A space this Xenolith follows, as a join (or the owner's `xenolith sync follow`) named it: its
+/// A space this Xenolith follows, as a join named it: its
 /// id, and its curator's context key and endpoint, so the curator is admitted before the chain is
 /// here. The chain, once it comes, says who curates from then on; a follow only lets it in.
 #[derive(Clone, Debug, PartialEq, Eq)]

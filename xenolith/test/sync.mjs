@@ -1,6 +1,6 @@
 // Sync between machines over xenolith/sync/2 (the Rust programs only), as Xenolith instances on
 // this one, each with its own temp home and folder and its own endpoint on 127.0.0.1: "studio"
-// curates project:atlas and shares it with "laptop" (write) and "desk" (append), which follow it.
+// curates project:atlas, and "laptop" (write) and "desk" (append) join it with invites.
 // Notes left on a member reach the curator's inbox, its curator files them, and the pages come
 // back; edits in a member's copy go to the curator as proposals; a stranger and a member's stolen
 // transport key get nothing. Nothing here touches the installed Xenolith.
@@ -108,7 +108,19 @@ describe('sync/2 between Xenoliths', { timeout: 300_000 }, () => {
   let laptop;
   let desk;
   let space;
-  const follow = (m) => ok(m, 'sync', 'follow', space, status(studio).key, status(studio).endpointId, `127.0.0.1:${studio.port}`);
+  // An invite from the studio, joined with its code on stdin.
+  const join = (m, level) => {
+    const inv = JSON.parse(ok(studio, 'invite', 'project:atlas', '--level', level, '--json').out);
+    const r = spawnSync(rustBin(), ['join', inv.invite, '--at', `127.0.0.1:${studio.port}`, '--json'], { env: m.env, encoding: 'utf8', input: `${inv.code}\n` });
+    assert.equal(r.status, 0, `${m.name}: xenolith join: ${r.stderr}`);
+    return JSON.parse(r.stdout);
+  };
+  // A follow record written by hand, as a stranger who knows the ids would: no share stands behind it.
+  const follow = (m) => {
+    fs.mkdirSync(path.join(m.home, 'sync'), { recursive: true });
+    const f = { space, curator: status(studio).key, endpoint: status(studio).endpointId, addrs: [`127.0.0.1:${studio.port}`], all: false };
+    fs.writeFileSync(path.join(m.home, 'sync', 'follow.json'), JSON.stringify({ v: 1, follows: [f] }));
+  };
 
   before(async () => {
     [studio, laptop, desk] = await Promise.all([machine('studio'), machine('laptop'), machine('desk')]);
@@ -118,11 +130,8 @@ describe('sync/2 between Xenoliths', { timeout: 300_000 }, () => {
     await Promise.all([start(studio), start(laptop), start(desk)]);
     await until('the studio founded project:atlas', () => status(studio).spaces?.some((s) => s.address === 'project:atlas'));
     space = status(studio).spaces.find((s) => s.address === 'project:atlas').id;
-    const shared = JSON.parse(ok(studio, 'sync', 'share', 'project:atlas', status(laptop).key, status(laptop).endpointId, '--level', 'write', '--json').out);
-    assert.equal(shared.id, space);
-    ok(studio, 'sync', 'share', 'project:atlas', status(desk).key, status(desk).endpointId, '--level', 'append');
-    follow(laptop);
-    follow(desk);
+    assert.equal(join(laptop, 'write').followed[0].space, space);
+    join(desk, 'append');
   });
   after(async () => {
     for (const m of [studio, laptop, desk]) await stop(m);
@@ -208,8 +217,8 @@ describe('sync/2 between Xenoliths', { timeout: 300_000 }, () => {
   test("a stranger is refused before its hello, and a member's transport key without its context key at its hello", async () => {
     const cafe = await machine('cafe');
     ok(cafe, 'serve', '--init');
-    await start(cafe);
     follow(cafe);
+    await start(cafe);
     await new Promise((r) => setTimeout(r, 3_000));
     assert.ok(!fs.existsSync(cafe.atlas), 'the stranger got nothing');
     await stop(cafe);
@@ -221,10 +230,10 @@ describe('sync/2 between Xenoliths', { timeout: 300_000 }, () => {
     await start(thief);
     await stop(thief);
     fs.copyFileSync(path.join(laptop.home, 'keys', 'transport.key'), path.join(thief.home, 'keys', 'transport.key'));
+    follow(thief);
     await start(thief);
     assert.equal(status(thief).endpointId, laptopEndpoint, "the laptop's endpoint id");
     assert.notEqual(status(thief).key, status(studio).spaces.find((s) => s.id === space).members.find((x) => x.level === 'write').key, 'and its own context key');
-    follow(thief);
     await until("the studio refused the thief's hello", () => studio.service.log().includes('which no space here binds to that endpoint'));
     assert.ok(!fs.existsSync(thief.atlas), 'the thief got nothing');
     await stop(thief);

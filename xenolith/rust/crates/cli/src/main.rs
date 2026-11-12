@@ -18,7 +18,8 @@
 //!   xenolith upgrade [--run | --undo]   the upgrade from 1.x: a dry run, doing it, taking it back
 //!                                       (see upgrade_cli.rs)
 //!   xenolith doctor [--json]            where the upgrade stands, and what 1.x left
-//!   xenolith sync [status | share | follow]  sync between machines (see sync_cli.rs)
+//!   xenolith sync [status]             sync between machines (see sync_cli.rs)
+//!   xenolith invite <space>... | join <invite>   one Xenolith joins spaces another curates
 //!   xenolith --version
 
 mod access_cli;
@@ -58,7 +59,7 @@ fn usage() -> ! {
 
 /// 1.x's sync and pairing, which sync/2 and joining replace.
 fn gone(what: &str) -> ! {
-    eprintln!("xenolith {what}: 1.x's pairing is gone; spaces sync between machines over xenolith/sync/2 instead (xenolith sync)");
+    eprintln!("xenolith {what}: 1.x's pairing is gone; one Xenolith joins another's spaces with an invite instead (xenolith invite, xenolith join)");
     std::process::exit(2)
 }
 
@@ -98,6 +99,8 @@ fn main() {
         Some("forget") => forget::run(&args[1..]),
         Some("migrate") => migrate::main(&args[1..]),
         Some("sync") => sync_cli::run(&args[1..]),
+        Some("invite") => sync_cli::invite(&args[1..]),
+        Some("join") => sync_cli::join(&args[1..]),
         Some("pair") => gone("pair"),
         Some("held") => held_cli::run(&args[1..]),
         Some("note") => note_cli::run(&args[1..]),

@@ -1,18 +1,19 @@
-//! Sync between machines, from a terminal (xenolith-net's `xenolith/sync/2`):
+//! Sync between machines, from a terminal (xenolith-net's `xenolith/sync/2` and `xenolith/join/1`):
 //!
-//!   xenolith sync [status] [--json]                     this Xenolith's key and endpoint, the spaces
-//!                                                       it syncs, their members, who's connected
-//!   xenolith sync share <space> <key> <endpoint> [--level read|append|write]
-//!                                                       share a space this Xenolith curates with
-//!                                                       another Xenolith (its context key and its
-//!                                                       endpoint id, from its `xenolith sync`)
-//!   xenolith sync follow <spc_…> <curator key> <endpoint> <ip:port>... [--all]
-//!                                                       follow a space another Xenolith curates
-//!                                                       (--all: and every other space it shares
-//!                                                       with this one)
+//!   xenolith sync [status] [--json]          this Xenolith's key and endpoint, the spaces it syncs,
+//!                                            their members, who's connected
+//!   xenolith invite <space>... [--level read|append|write] [--json]
+//!                                            an invite for one other Xenolith to join these spaces
+//!                                            (this one curates them): the invite, its code and the
+//!                                            line to run there; it works once, for ten minutes
+//!   xenolith join <invite> [--at <ip:port>]... [--only <space>]... [--all] [--json]
+//!                                            join with an invite; the code is read from a prompt
+//!                                            or stdin, never an argument (--all: and every space
+//!                                            the curator shares with this one later)
 //!
-//! Share and follow go through the running service with the owner key. Joining with an invite
-//! (`xenolith join`) will write the same records without the ids being typed.
+//! Each goes through the running service with the owner key. There is no command that writes a
+//! share or a follow record by hand: a join writes both, after both sides proved the code and the
+//! joiner checked the chains it was sent.
 
 use crate::owner_client;
 use serde_json::{Value, json};
@@ -24,7 +25,7 @@ fn fail(msg: &str) -> ! {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith sync [status] [--json]\n       xenolith sync share <space> <key> <endpoint> [--level read|append|write] [--json]\n       xenolith sync follow <spc_…> <curator key> <endpoint> <ip:port>... [--all] [--json]"
+        "usage: xenolith sync [status] [--json]\n       xenolith invite <space>... [--level read|append|write] [--json]\n       xenolith join <invite> [--at <ip:port>]... [--only <space>]... [--all] [--json]"
     );
     std::process::exit(2)
 }
@@ -34,8 +35,10 @@ pub fn run(args: &[String]) -> ! {
     let words: Vec<&str> = args.iter().map(String::as_str).filter(|a| *a != "--json").collect();
     match words.first().copied() {
         None | Some("status") => status(json_out),
-        Some("share") => share(&words[1..], json_out),
-        Some("follow") => follow(&words[1..], json_out),
+        Some(w @ ("share" | "follow")) => {
+            eprintln!("xenolith sync {w}: gone; join with an invite instead (xenolith invite on the curator, xenolith join here)");
+            std::process::exit(2)
+        }
         _ => usage(),
     }
 }
@@ -75,33 +78,94 @@ fn status(json_out: bool) -> ! {
     std::process::exit(0)
 }
 
-fn answer(r: Result<(u16, Value), String>, json_out: bool, done: &str) -> ! {
-    let (code, v) = r.unwrap_or_else(|e| fail(&e));
+/// The values after each `flag`, and the words that are no flag's.
+fn split<'a>(w: &[&'a str], flags: &[&str]) -> (Vec<&'a str>, Vec<(&'a str, &'a str)>) {
+    let mut pos = vec![];
+    let mut named = vec![];
+    let mut i = 0;
+    while i < w.len() {
+        if flags.contains(&w[i]) {
+            let Some(v) = w.get(i + 1) else { usage() };
+            named.push((w[i], *v));
+            i += 2;
+        } else {
+            pos.push(w[i]);
+            i += 1;
+        }
+    }
+    (pos, named)
+}
+
+/// `xenolith invite`.
+pub fn invite(args: &[String]) -> ! {
+    let json_out = args.iter().any(|a| a == "--json");
+    let w: Vec<&str> = args.iter().map(String::as_str).filter(|a| *a != "--json").collect();
+    let (spaces, named) = split(&w, &["--level"]);
+    if spaces.is_empty() || spaces.iter().any(|s| s.starts_with("--")) {
+        usage();
+    }
+    let level = named.iter().find(|(f, _)| *f == "--level").map_or("append", |(_, v)| *v);
+    let (code, v) = owner_client::post("/api/sync/invite", &json!({ "spaces": spaces, "level": level })).unwrap_or_else(|e| fail(&e));
     if code != 200 {
         fail(v["error"].as_str().unwrap_or("refused"));
     }
     if json_out {
         println!("{v}");
-    } else {
-        println!("{done}");
+        std::process::exit(0)
     }
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    println!("An invite for one Xenolith to join, at {}, owned by {}:", s("level"), v["offer"]["owner"].as_str().unwrap_or("?"));
+    for sp in v["offer"]["spaces"].as_array().into_iter().flatten() {
+        println!("  {} ({}, founded as {})", sp["address"].as_str().unwrap_or(""), sp["space"].as_str().unwrap_or(""), sp["genesis"].as_str().unwrap_or(""));
+    }
+    let at: Vec<String> = v["at"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|a| format!(" --at {a}")).collect();
+    println!("\nOn the other machine, run:\n\n  xenolith join {}{}\n", s("invite"), at.join(""));
+    println!("and type this code when it asks (tell it another way than the invite; it works once, for ten minutes):\n\n  {}\n", s("code"));
     std::process::exit(0)
 }
 
-fn share(w: &[&str], json_out: bool) -> ! {
-    let level = w.iter().position(|a| *a == "--level").and_then(|i| w.get(i + 1)).copied().unwrap_or("append");
-    let pos: Vec<&str> = w.iter().enumerate().filter(|(i, a)| !a.starts_with("--") && (*i == 0 || w[i - 1] != "--level")).map(|(_, a)| *a).collect();
-    let [space, key, endpoint] = pos[..] else { usage() };
-    let body = json!({ "space": space, "key": key, "endpoint": endpoint, "level": level });
-    answer(owner_client::post("/api/sync/share", &body), json_out, &format!("Shared {space} with {key} ({level})."))
+/// The code, from a prompt when stdin is a terminal, else stdin's first line.
+fn read_code() -> String {
+    use std::io::{BufRead, IsTerminal, Write};
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        eprint!("Code: ");
+        let _ = std::io::stderr().flush();
+    }
+    let mut line = String::new();
+    if stdin.lock().read_line(&mut line).is_err() || line.trim().is_empty() {
+        fail("no code: type the code `xenolith invite` showed on the other machine, or give it on stdin");
+    }
+    line.trim().to_string()
 }
 
-fn follow(w: &[&str], json_out: bool) -> ! {
-    let all = w.contains(&"--all");
-    let pos: Vec<&str> = w.iter().filter(|a| !a.starts_with("--")).copied().collect();
-    if pos.len() < 4 {
+/// `xenolith join`.
+pub fn join(args: &[String]) -> ! {
+    let json_out = args.iter().any(|a| a == "--json");
+    let all = args.iter().any(|a| a == "--all");
+    let w: Vec<&str> = args.iter().map(String::as_str).filter(|a| *a != "--json" && *a != "--all").collect();
+    let (pos, named) = split(&w, &["--at", "--only"]);
+    let [invite] = pos[..] else { usage() };
+    if invite.starts_with("--") {
         usage();
     }
-    let body = json!({ "space": pos[0], "curator": pos[1], "endpoint": pos[2], "addrs": pos[3..], "all": all });
-    answer(owner_client::post("/api/sync/follow", &body), json_out, &format!("Following {} from {}.", pos[0], pos[1]))
+    let at: Vec<&str> = named.iter().filter(|(f, _)| *f == "--at").map(|(_, v)| *v).collect();
+    let only: Vec<&str> = named.iter().filter(|(f, _)| *f == "--only").map(|(_, v)| *v).collect();
+    let code = read_code();
+    let (status, v) = owner_client::post("/api/sync/join", &json!({ "invite": invite, "code": code, "at": at, "only": only, "all": all })).unwrap_or_else(|e| fail(&e));
+    if status != 200 {
+        fail(v["error"].as_str().unwrap_or("refused"));
+    }
+    if json_out {
+        println!("{v}");
+        std::process::exit(0)
+    }
+    println!("Joined: spaces owned by {}, curated by {}, at {}.", v["owner"].as_str().unwrap_or("?"), v["curator"].as_str().unwrap_or("?"), v["level"].as_str().unwrap_or("?"));
+    for f in v["followed"].as_array().into_iter().flatten() {
+        println!("  following {} as {} (founded as {})", f["offeredAs"].as_str().unwrap_or(""), f["address"].as_str().unwrap_or(""), f["genesis"].as_str().unwrap_or(""));
+    }
+    for f in v["skipped"].as_array().into_iter().flatten() {
+        println!("  not following {} (founded as {})", f["offeredAs"].as_str().unwrap_or(""), f["genesis"].as_str().unwrap_or(""));
+    }
+    std::process::exit(0)
 }
