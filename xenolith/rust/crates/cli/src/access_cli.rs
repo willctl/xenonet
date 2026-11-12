@@ -1,8 +1,13 @@
 //! Spaces and who may use them, from a terminal (xenolith_core::spaces and access):
 //!
-//!   xenolith spaces [--json]                          the spaces, and each one's pages
+//!   xenolith spaces [--json]                          the spaces, each one's pages and its chain
+//!                                                      (id, what it's about, owner, curator)
 //!   xenolith spaces add <space> [--identity <name>]   start a space; a project's identities let
 //!                                                      identity:<name> grants reach it
+//!   xenolith spaces bind <space> [--project prj_…] [--repo <remote>] [--run] [--json]
+//!                                                      tie a space made under its name to its
+//!                                                      project: what it would do, and with --run,
+//!                                                      do it through the service (the owner key)
 //!   xenolith grant <subject> <scope> [--days N]       allow a subject (actor:<slug>, client:<id>,
 //!                                                      machine:<name>) a scope, for N days (30)
 //!   xenolith revoke <subject> [<scope>]               take its grants away: all, or one scope
@@ -22,6 +27,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use xenolith_core::access::{self, GRANT_MS, Policy, format_scope, format_selector, parse_scope};
 use xenolith_core::audit;
+use xenolith_core::chains;
 use xenolith_core::paths::AppPaths;
 use xenolith_core::spaces::{self, SpaceId};
 use xenolith_core::text::{from_ms, local_iso, now_ms};
@@ -34,7 +40,7 @@ fn fail(msg: &str) -> ! {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json] | xenolith access local <read|append|write|admin|none> | xenolith token create <subject> [--scope \"<scopes>\"] [--label <text>] [--days N] | xenolith token revoke <tok_…|subject> | xenolith audit [verify | tail [N]] [--json]"
+        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith spaces bind <space> [--project prj_…] [--repo <remote>] [--run] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json] | xenolith access local <read|append|write|admin|none> | xenolith token create <subject> [--scope \"<scopes>\"] [--label <text>] [--days N] | xenolith token revoke <tok_…|subject> | xenolith audit [verify | tail [N]] [--json]"
     );
     std::process::exit(2)
 }
@@ -52,7 +58,7 @@ fn positional(args: &[String]) -> Vec<&str> {
     for a in args {
         if skip {
             skip = false;
-        } else if matches!(a.as_str(), "--days" | "--identity" | "--label" | "--scope" | "--hours") {
+        } else if matches!(a.as_str(), "--days" | "--identity" | "--label" | "--scope" | "--hours" | "--project" | "--repo") {
             skip = true;
         } else if !a.starts_with("--") {
             out.push(a.as_str());
@@ -94,7 +100,10 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 .map(|id| {
                     let dir = spaces::space_dir(&root, &id);
                     let pages = wiki::list_pages(&dir).map(|p| p.len()).unwrap_or(0);
-                    json!({ "space": id.to_string(), "pages": pages, "identities": policy.facts(&id).identities })
+                    // Its chain, as the state folder has it: none yet until the service founds it,
+                    // and none for a copy of a space another machine curates.
+                    let chain = chains::of_address(&paths, &id).map(|(_, s)| chains::describe(&s)).unwrap_or(Value::Null);
+                    json!({ "space": id.to_string(), "pages": pages, "identities": policy.facts(&id).identities, "chain": chain })
                 })
                 .collect();
             if json_out {
@@ -103,10 +112,50 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 for s in &list {
                     let ids =
                         s["identities"].as_array().filter(|a| !a.is_empty()).map(|a| format!("  (identity {})", a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))).unwrap_or_default();
-                    println!("{:<32} {:>4} page(s){ids}", s["space"].as_str().unwrap_or(""), s["pages"]);
+                    let chain = match s["chain"]["id"].as_str() {
+                        Some(id) => format!("  {id}, about {}{}", s["chain"]["about"].as_str().unwrap_or("?"), if s["chain"]["weaker"] == true { ", owned by this Xenolith's owner key" } else { "" }),
+                        None => "  (no chain yet)".into(),
+                    };
+                    println!("{:<32} {:>4} page(s){ids}{chain}", s["space"].as_str().unwrap_or(""), s["pages"]);
                 }
             }
             std::process::exit(0)
+        }
+        ("spaces", ["bind", space]) => {
+            let id = SpaceId::parse(space).unwrap_or_else(|e| fail(&e.to_string()));
+            let to =
+                opts(args, "--project").first().map(|p| chains::EntityRef::parse(p).ok().filter(|e| e.kind() == "project").unwrap_or_else(|| fail(&format!("\"{p}\" is not a project's id (prj_…)"))));
+            let repo = opts(args, "--repo").first().copied();
+            let plan = chains::bind_plan(&paths, &id, to.as_ref(), repo).unwrap_or_else(|e| fail(&e));
+            if !args.iter().any(|a| a == "--run") {
+                if json_out {
+                    println!("{}", json!({ "dryRun": true, "plan": plan }));
+                } else {
+                    println!("{} ({}) is about {}.", plan["space"].as_str().unwrap_or(""), plan["id"].as_str().unwrap_or(""), plan["about"].as_str().unwrap_or(""));
+                    if let Some(r) = plan["repo"].as_str() {
+                        println!("Its repo: {r}.");
+                    }
+                    match plan["why"].as_str() {
+                        None => println!("--run would tie it to {}.", plan["to"].as_str().unwrap_or("")),
+                        Some(why) => println!("It can't be bound now: {why}."),
+                    }
+                    println!("Nothing was changed: this was a dry run.");
+                }
+                std::process::exit(0)
+            }
+            let Some(to) = to else { fail(plan["why"].as_str().unwrap_or("name the project with --project prj_…")) };
+            match crate::owner_client::post("/api/spaces/bind", &json!({ "space": id.to_string(), "to": to.to_string() })) {
+                Ok((200, v)) => {
+                    if json_out {
+                        println!("{}", json!({ "bound": true, "chain": v }));
+                    } else {
+                        println!("{id} is now about {}.", v["about"].as_str().unwrap_or(""));
+                    }
+                    std::process::exit(0)
+                }
+                Ok((_, v)) => fail(&format!("not bound: {}", v["error"].as_str().unwrap_or("the service refused"))),
+                Err(e) => fail(&e),
+            }
         }
         ("spaces", ["add", space]) => {
             let id = SpaceId::parse(space).unwrap_or_else(|e| fail(&e.to_string()));

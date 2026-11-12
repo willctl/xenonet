@@ -3,7 +3,10 @@
 //! spaces is that space as it is. Every other space has the same layout in `spaces/<kind>/<name>/` under it.
 //!
 //! Space ids read like selector terms (access.rs): `project:atlas`, `identity:adal`,
-//! `actor:hermes`, `machine:local`. Names are lowercase, so an id is one folder on every OS.
+//! `actor:hermes`, `machine:local`. Names are lowercase, so an id is one folder on every OS. A
+//! second space of the same kind and name, from another Xenolith, lives beside the first as
+//! `<name>~<six characters of its spc_>` (`project:atlas~abc234`; chains.rs); its chain's own name
+//! is still the plain one.
 //! Reads of the machine space never reach into `spaces/` (wiki::read_section refuses the path),
 //! so a grant on one space never shows another.
 
@@ -19,7 +22,7 @@ pub const SPACES_DIR: &str = "spaces";
 /// This machine's own space: the configured wiki folder.
 pub const LOCAL: &str = "local";
 
-static NAME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9._-]{0,63}$").unwrap());
+static NAME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9._-]{0,63}(~[a-z2-7]{6})?$").unwrap());
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SpaceId {
@@ -38,7 +41,9 @@ impl SpaceId {
             return wiki_err(format!("\"{kind}\" is not a kind of space: use project, identity, actor or machine."));
         }
         if !NAME_RE.is_match(name) || name.contains("..") {
-            return wiki_err(format!("\"{name}\" is not a space name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, up to 64."));
+            return wiki_err(format!(
+                "\"{name}\" is not a space name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, up to 64 (and, for a second space of that name, ~ and six more)."
+            ));
         }
         Ok(SpaceId { kind: kind.into(), name: name.into() })
     }
@@ -49,6 +54,11 @@ impl SpaceId {
 
     pub fn is_local(&self) -> bool {
         self.kind == "machine" && self.name == LOCAL
+    }
+
+    /// The name without the `~…` a second space of that name carries: the name its chain has.
+    pub fn base_name(&self) -> &str {
+        self.name.split_once('~').map_or(&self.name, |(n, _)| n)
     }
 }
 
@@ -142,7 +152,25 @@ mod tests {
         assert_eq!(SpaceId::parse("Project:XenoNet").unwrap().to_string(), "project:xenonet");
         assert_eq!(SpaceId::parse(" actor:hermes ").unwrap(), SpaceId { kind: "actor".into(), name: "hermes".into() });
         assert!(SpaceId::parse("machine:local").unwrap().is_local());
-        for bad in ["xenonet", "app:claude", "project:", "project:../x", "project:a/b", "project:-x", "project:a b", "project:.hidden", "project:a..b"] {
+        let second = SpaceId::parse("project:atlas~abc234").unwrap();
+        assert_eq!((second.name.as_str(), second.base_name()), ("atlas~abc234", "atlas"));
+        assert!(!SpaceId::parse("machine:local~abc234").unwrap().is_local());
+        for bad in [
+            "xenonet",
+            "app:claude",
+            "project:",
+            "project:../x",
+            "project:a/b",
+            "project:-x",
+            "project:a b",
+            "project:.hidden",
+            "project:a..b",
+            "project:a~",
+            "project:a~abc",
+            "project:a~abc2345",
+            "project:a~abc189",
+            "project:~abc234",
+        ] {
             assert!(SpaceId::parse(bad).is_err(), "{bad}");
         }
         assert!(SpaceId::parse(&format!("project:{}", "a".repeat(65))).is_err());

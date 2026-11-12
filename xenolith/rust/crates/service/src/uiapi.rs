@@ -294,6 +294,7 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             "/api/held" | "/api/revert" => Some(("Deciding a change", ", or run `xenolith held` in a terminal")),
             "/api/forget" => Some(("Forgetting", ", or run `xenolith forget` in a terminal")),
             "/api/note" => Some(("A note from you", "")),
+            "/api/spaces/bind" => Some(("Binding a space", ", or run `xenolith spaces bind` in a terminal")),
             "/api/pair/offer" => Some(("Offering a pairing code", ", or run `xenolith pair offer` in a terminal")),
             "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
             _ => None,
@@ -482,6 +483,26 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
                 json_reply(200, &json!({ "code": code, "expiresAt": expires, "expiresInSeconds": xenolith_core::pair::CODE_TTL_MS / 1000 }))
             }
             Err(e) => json_reply(409, &json!({ "error": e.to_string() })),
+        };
+    }
+    if path == "/api/spaces/bind" && method == "POST" {
+        // Ties a space made under a name to the entity it's about, signed as the owner and the
+        // curator; the space's chain decides whether that owner may.
+        let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+        let (Some(space), Some(to)) = (
+            body["space"].as_str().and_then(|s| xenolith_core::spaces::SpaceId::parse(s).ok()),
+            body["to"].as_str().and_then(|t| xenolith_core::chains::EntityRef::parse(t).ok()).filter(|t| t.is_bound()),
+        ) else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"space\": \"project:<name>\", \"to\": \"prj_…\"}" }));
+        };
+        let done = app.signers().and_then(|(context, owner)| xenolith_core::chains::bind(&AppPaths::current(), wiki_dir, &space, to, owner, context, xenolith_core::text::now_ms()));
+        audit::best_effort(&AppPaths::current(), "space", by, vec![("space", json!(space.to_string())), ("event", json!("bind")), ("to", body["to"].clone()), ("done", json!(done.is_ok()))]);
+        return match done {
+            Ok(v) => {
+                entry.result = Some("space bound".into());
+                json_reply(200, &v)
+            }
+            Err(e) => json_reply(409, &json!({ "error": e })),
         };
     }
     if path == "/api/note" && method == "POST" {

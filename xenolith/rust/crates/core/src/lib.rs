@@ -2,13 +2,14 @@
 //! frontmatter, the index, the daily log, search, the inbox, cross-process locks, the request log
 //! and the secret guard, in the formats FORMAT.md documents, which every earlier release wrote
 //! too, so an upgrade works on the same folder. It also holds spaces, who may use them (access),
-//! the audit chain and sync.
+//! the audit chain, each space's chain and sync.
 
 pub mod access;
 pub mod activity;
 pub mod asks;
 pub mod askworker;
 pub mod audit;
+pub mod chains;
 pub mod codex;
 pub mod cron;
 pub mod curator;

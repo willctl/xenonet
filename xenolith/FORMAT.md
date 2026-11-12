@@ -90,11 +90,45 @@ is a folder with the same layout (without the marker and without `spaces/`)
 at `spaces/<kind>/<name>/`:
 
 - `kind` is one of `project`, `identity`, `actor` or `machine`.
-- `name` matches `^[a-z0-9][a-z0-9._-]{0,63}$` and doesn't contain `..`.
-- A space's id is `<kind>:<name>`, such as `project:atlas`.
+- `name` matches `^[a-z0-9][a-z0-9._-]{0,63}(~[a-z2-7]{6})?$` and doesn't
+  contain `..`. The `~` and six characters mark a second space of that kind
+  and name, from another Xenolith: the first keeps `spaces/project/atlas/`,
+  the second is `spaces/project/atlas~abc234/`, the six characters being the
+  first six of its chain's id after `spc_`. Both are named `atlas`.
+- A space's id is `<kind>:<name>`, such as `project:atlas` or
+  `project:atlas~abc234`.
 
 A folder under `spaces/` whose name isn't a valid id, or that is a link, is
 not a space.
+
+### The space marker
+
+Each space folder Xenolith curates, the root included, holds
+`xenolith-space.json`: which chain the folder is, for a reader that wants to
+tie a space to what it's about. It's information only: Xenolith decides
+nothing by it and writes it again when it differs.
+
+```json
+{
+  "v": 1,
+  "space": "spc_…",
+  "about": "name:project:atlas",
+  "genesis": "<the hash of the chain's entry 0, base64url>",
+  "owner": "key:xns1_…",
+  "key": { "alg": "ed25519", "key": "<the context key that signed it, base64url>" },
+  "sig": "<base64url>"
+}
+```
+
+- `space`: the chain's id. `about`: what it's about, `name:<kind>:<name>`
+  until it's bound to an id (`prj_…`). `owner`: `person:prs_…`, or
+  `key:xns1_…` for a space the standalone owner key owns.
+- `sig` is the context key's Ed25519 signature, under the `xenolith-space/1`
+  purpose, over the lines `xenolith-space-marker/1`, `space`, `about`,
+  `genesis`, `owner` and the key's id, joined by LF. Anyone can write this
+  file, so a reader trusts a marker only when it's signed by a context key it
+  knows to be that Xenolith's (XenoNet: the `key(id)` in Xenolith's grant),
+  and shows the space by its name otherwise.
 
 ## Pages
 

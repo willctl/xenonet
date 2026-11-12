@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { curatorCmd, rustBin, srvT } from './impl.mjs';
+import { curatorCmd, rustBin, srv, srvT } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
@@ -206,5 +206,118 @@ describe('spaces and grants from the command line', { timeout: 60_000 }, () => {
     assert.match(g.err, /Not changed: .*access\.json is not a JSON object/);
     assert.equal(fs.readFileSync(path.join(E.home, 'access.json'), 'utf8'), '{ broken');
     assert.match(JSON.parse(cli(E.env, 'access', '--json').out).problem, /not a JSON object/);
+  });
+});
+
+/** The HTTP service on a free port, until its stdin closes. */
+function startService(env) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let err = '';
+    const timer = setTimeout(() => reject(new Error(`the service did not start:\n${err}`)), 10_000);
+    proc.stderr.setEncoding('utf8');
+    proc.stderr.on('data', (d) => {
+      err += d;
+      if (/listening on http:\/\/127\.0\.0\.1:\d+\/mcp/.test(err)) {
+        clearTimeout(timer);
+        resolve({ proc, log: () => err });
+      }
+    });
+    proc.on('exit', (code) => reject(new Error(`the service exited ${code}:\n${err}`)));
+  });
+}
+
+async function stopService(s) {
+  const gone = new Promise((r) => s.proc.once('exit', r));
+  s.proc.stdin.end();
+  await gone;
+}
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** A space's chain as `xenolith spaces --json` shows it, once the service has founded it. */
+async function chainOf(env, space) {
+  for (let i = 0; i < 100; i++) {
+    const s = JSON.parse(cli(env, 'spaces', '--json').out).spaces.find((x) => x.space === space);
+    if (s?.chain) return s.chain;
+    await pause(100);
+  }
+  throw new Error(`${space} has no chain`);
+}
+
+const markerOf = (E, ...rel) => path.join(E.wikiDir, ...rel, 'xenolith-space.json');
+const readMarker = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+
+describe('a chain per space', { timeout: 60_000 }, () => {
+  test('the service founds one for each space it curates, and a hand-edited marker changes nothing', async () => {
+    const E = makeEnv();
+    assert.equal(cli(E.env, 'spaces', 'add', 'project:atlas').code, 0);
+    assert.equal(JSON.parse(cli(E.env, 'spaces', '--json').out).spaces[1].chain, null, 'none until the service starts');
+    const atlasMarker = markerOf(E, 'spaces', 'project', 'atlas');
+    let s = await startService(E.env);
+    let atlas;
+    try {
+      atlas = await chainOf(E.env, 'project:atlas');
+      assert.match(atlas.id, /^spc_[a-z2-7]{32}$/);
+      assert.deepEqual([atlas.about, atlas.weaker, atlas.epoch], ['name:project:atlas', true, 0], 'founded under its name, owned by the standalone key');
+      assert.match(atlas.owner, /^key:xns1_/);
+      const local = await chainOf(E.env, 'machine:local');
+      assert.equal(readMarker(markerOf(E)).space, local.id, "this machine's own space too");
+      const marker = readMarker(atlasMarker);
+      assert.deepEqual([marker.space, marker.about, marker.owner], [atlas.id, 'name:project:atlas', atlas.owner]);
+      // A space a stdio server starts while the service runs is founded within seconds.
+      const c = await connect(E.env);
+      try {
+        await ok(c, 'context_log', { app: 'claude-code', space: 'project:zephyr', title: 'Zephyr starts', body: 'A new project.' });
+      } finally {
+        await c.close();
+      }
+      const zephyr = await chainOf(E.env, 'project:zephyr');
+      assert.notEqual(zephyr.id, atlas.id);
+      // By hand: atlas's marker now names zephyr, and a person as its owner.
+      fs.writeFileSync(atlasMarker, JSON.stringify({ ...marker, space: zephyr.id, owner: `person:prs_${'a'.repeat(32)}` }));
+    } finally {
+      await stopService(s);
+    }
+    s = await startService(E.env);
+    try {
+      assert.deepEqual(await chainOf(E.env, 'project:atlas'), atlas, 'the same chain: the marker decided nothing');
+      for (let i = 0; i < 50 && readMarker(atlasMarker).space !== atlas.id; i++) await pause(100);
+      assert.equal(readMarker(atlasMarker).space, atlas.id, 'and the marker is written again');
+      const c = await connect(E.env);
+      try {
+        await ok(c, 'context_log', { app: 'claude-code', space: 'project:atlas', title: 'Atlas still', body: 'Notes go where they went.' });
+      } finally {
+        await c.close();
+      }
+      assert.equal(files(path.join(E.wikiDir, 'spaces', 'project', 'atlas', 'inbox')).length, 1);
+      assert.equal(files(path.join(E.wikiDir, 'spaces', 'project', 'zephyr', 'inbox')).length, 1, "nothing more reached zephyr's");
+    } finally {
+      await stopService(s);
+    }
+  });
+
+  test('spaces bind: a dry run says what it would do; --run asks the service, whose chain refuses a space the owner key owns', async () => {
+    const E = makeEnv();
+    assert.equal(cli(E.env, 'spaces', 'add', 'project:atlas').code, 0);
+    const s = await startService(E.env);
+    try {
+      const atlas = await chainOf(E.env, 'project:atlas');
+      const prj = `prj_${'b'.repeat(32)}`;
+      const dry = cli(E.env, 'spaces', 'bind', 'project:atlas', '--project', prj, '--repo', 'git@github.com:willctl/atlas.git', '--json');
+      assert.equal(dry.code, 0, dry.err);
+      const { dryRun, plan } = JSON.parse(dry.out);
+      assert.equal(dryRun, true);
+      assert.deepEqual([plan.id, plan.about, plan.to, plan.repo, plan.canRun], [atlas.id, 'name:project:atlas', prj, 'github.com/willctl/atlas', false]);
+      assert.match(plan.why, /moves to the person/);
+      assert.match(cli(E.env, 'spaces', 'bind', 'project:atlas', '--repo', 'https://github.com/willctl/atlas').out, /--project prj_.*Nothing was changed: this was a dry run\./s);
+      const run = cli(E.env, 'spaces', 'bind', 'project:atlas', '--project', prj, '--run');
+      assert.equal(run.code, 1);
+      assert.match(run.err, /not bound: .*move-owner/);
+      assert.deepEqual(await chainOf(E.env, 'project:atlas'), atlas, 'the chain is as it was');
+      assert.match(cli(E.env, 'spaces', 'bind', 'project:atlas', '--project', 'nope').err, /not a project's id/);
+    } finally {
+      await stopService(s);
+    }
   });
 });

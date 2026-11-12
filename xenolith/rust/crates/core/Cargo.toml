@@ -24,9 +24,7 @@ xenonet-log.workspace = true
 xenonet-authz.workspace = true
 # Files only their owner may read, from the moment they exist (private_file).
 xenonet-os.workspace = true
-
-[dev-dependencies]
-# What a space is about, for founding one with this Xenolith's keys in keys.rs's tests.
+# What a space is about (EntityRef) and the ids it's bound to (chains.rs).
 xenonet-model.workspace = true
 
 [target.'cfg(unix)'.dependencies]

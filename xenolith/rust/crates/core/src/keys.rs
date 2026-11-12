@@ -22,7 +22,8 @@ use crate::paths::AppPaths;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use xenonet_id::codec::{b64, random, unb64_n};
-use xenonet_id::sign::{KeyHome, SeedSigner, Signer, VerifyingKey};
+pub use xenonet_id::sign::Signer;
+use xenonet_id::sign::{KeyHome, SeedSigner, VerifyingKey};
 
 /// The keys' folder: in the state folder, never the shared context folder (whose files anyone with
 /// the folder can write).

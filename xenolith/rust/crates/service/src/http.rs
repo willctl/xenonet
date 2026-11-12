@@ -118,7 +118,7 @@ pub struct App {
     /// This start's owner key, or why it could not be written (approvals then wait for a restart).
     owner: Result<OwnerKey, String>,
     /// The keys this Xenolith signs and connects with (xenolith_core::keys), or why they couldn't
-    /// be read. Nothing signs with them yet.
+    /// be read. The context key signs the spaces' chains and markers (xenolith_core::chains).
     keys: Result<Arc<Keys>, String>,
     bad_tokens: BadTokens,
 }
@@ -253,6 +253,15 @@ impl App {
     /// Why decisions can't be made in the window this start, if the owner key could not be written.
     pub fn owner_problem(&self) -> Option<&str> {
         self.owner.as_ref().err().map(String::as_str)
+    }
+
+    /// This Xenolith's context key and the standalone owner's, to sign as the owner with: for this
+    /// service's own acts (founding a space) and for a request the owner key came with, which the
+    /// caller has checked.
+    pub fn signers(&self) -> Result<(&dyn xenolith_core::keys::Signer, &dyn xenolith_core::keys::Signer), String> {
+        let keys = self.keys.as_ref().map_err(Clone::clone)?;
+        let owner = self.owner.as_ref().map_err(Clone::clone)?;
+        Ok((&keys.context, keys.owner.signer(owner, &owner.key)?))
     }
 
     /// The state, retrying setup if it failed (e.g. folder permissions fixed since startup).
@@ -971,6 +980,25 @@ pub fn run(port: u16, parent_stdin: bool, exit_on_upgrade: bool) -> ! {
     }
 }
 
+/// The times of the folders a new space folder changes (`spaces/` and each kind's): a space made
+/// or removed changes one, and nothing else in the folder does.
+fn spaces_stamp(root: &std::path::Path) -> Vec<Option<std::time::SystemTime>> {
+    let base = root.join(xenolith_core::spaces::SPACES_DIR);
+    std::iter::once(base.clone()).chain(xenolith_core::spaces::KINDS.iter().map(|k| base.join(k))).map(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok()).collect()
+}
+
+/// Founds a chain for each space this Xenolith curates that has none, and puts the markers right
+/// (xenolith_core::chains). Without the keys or the owner key, nothing is founded until they're
+/// there, and the log says why.
+fn found_spaces(app: &App, root: &std::path::Path) {
+    let r = app.signers().and_then(|(context, owner)| xenolith_core::chains::reconcile(&AppPaths::current(), root, context, owner, now_ms()));
+    match r {
+        Ok(r) if r.is_empty() => {}
+        Ok(r) => log(&format!("spaces: {}", r.to_json())),
+        Err(e) => log(&format!("the spaces' chains were not brought up to date: {e}")),
+    }
+}
+
 /// Exit code after an upgrade: not 0, so service managers restart the program.
 pub const UPGRADED_EXIT: i32 = 75;
 
@@ -1024,6 +1052,13 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
 
     let exe = std::env::current_exe().ok().filter(|_| watch_exe);
     let stamp = exe.as_deref().and_then(exe_stamp);
+    // A chain for each space this Xenolith curates, before the first request; then again whenever
+    // a space folder appears (a stdio server or a command made it).
+    let root = app.state.read().unwrap().wiki_dir.clone();
+    let mut spaces_seen = root.as_deref().map(spaces_stamp);
+    if let Some(root) = &root {
+        found_spaces(&app, root);
+    }
     let shared = app.clone();
     let handler = move |req: &Request| -> Response {
         app.inflight.fetch_add(1, Ordering::SeqCst);
@@ -1067,6 +1102,13 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
     };
     let mut ended = Ended::Stopped;
     while !stop.wait_stop(2000) {
+        if let Some(root) = &root {
+            let now = Some(spaces_stamp(root));
+            if now != spaces_seen {
+                spaces_seen = now;
+                found_spaces(&shared, root);
+            }
+        }
         let Some(exe) = &exe else { continue };
         let now = exe_stamp(exe);
         // Once the new file has been in place for a second (an install copies, then renames).
