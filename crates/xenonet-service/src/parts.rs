@@ -148,33 +148,33 @@ impl parts::Network for NetService {
     fn is_gateway(&self, network: Option<&str>) -> bool {
         self.on(network).is_ok_and(|n| n.shared().is_gateway())
     }
+    // No LAN door: the machines of a network reach each other on link/2,
+    // which finds them on the LAN by itself.
     async fn listen(&self, addr: SocketAddr) -> Result<(), CoreError> {
-        NetService::listen(self, addr).await.map_err(refusal)
+        Err(refusal(NetError::bad(format!("XenoNet doesn't listen on {addr}: machines reach each other on link/2, which finds them on the LAN by itself"))))
     }
-    fn unlisten(&self) {
-        NetService::unlisten(self);
-    }
+    fn unlisten(&self) {}
     fn lans(&self) -> Vec<SocketAddr> {
-        NetService::lans(self)
+        Vec::new()
     }
     async fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, relay: Option<&str>, at_window: bool) -> NetResult {
         let r = self.nodes().create(name, host, address, lan, relay, at_window).await;
-        self.networks_changed().await;
+        self.networks_changed();
         answered(r)
     }
     async fn join(&self, address: &str, ticket: &str) -> NetResult {
         let r = self.nodes().join(address, ticket).await;
-        self.networks_changed().await;
+        self.networks_changed();
         answered(r)
     }
     async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult {
         let r = self.nodes().join_invite(invite, code, at, lan).await;
-        self.networks_changed().await;
+        self.networks_changed();
         answered(r)
     }
     async fn leave(&self, network: Option<&str>, force: bool) -> NetResult {
         let r = self.nodes().leave(network, force).await;
-        self.networks_changed().await;
+        self.networks_changed();
         answered(r)
     }
     fn tunnel_address(&self, address: Option<&str>) {
@@ -199,7 +199,7 @@ impl parts::Network for NetService {
     }
     async fn take_gateway(&self, network: Option<&str>, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult {
         let r = self.on(network)?.take_gateway(address, lan, at_window).await;
-        self.networks_changed().await;
+        self.networks_changed();
         answered(r)
     }
     async fn set_gateway(&self, network: Option<&str>, address: &str) -> NetResult {

@@ -5,9 +5,8 @@
 //! machine: the request goes to `<host>` on a svc/2 stream, and the
 //! service's answer comes back as this route's answer.
 //!
-//! It's on this local API only, never under `/net/v1/`, which the front
-//! door hands to the network's gateway on its LAN and tunnel doors. The
-//! API's own checks apply (`Host` is this machine's), and a request from a
+//! It's on this local API only, never behind the actor gateway's front
+//! door. The API's own checks apply (`Host` is this machine's), and a request from a
 //! web page is refused: it has an `Origin`, or a browser's `Sec-Fetch-Site`.
 //! `Authorization` is the service's own credential: it passes untouched,
 //! and is never read here as an actor's token.

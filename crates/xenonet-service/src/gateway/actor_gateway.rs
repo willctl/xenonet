@@ -157,9 +157,6 @@ struct Inner {
     stats: Mutex<Stats>,
     server: Mutex<Option<tokio::task::JoinHandle<()>>>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
-    /// The network's node, whose gateway routes the front door serves
-    /// while this host is the network's gateway.
-    net: std::sync::OnceLock<Arc<xenonet_net::nodes::Nodes>>,
     /// A2A agents' side, whose card and JSON-RPC the front door serves
     /// while the owner has it on.
     a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
@@ -197,7 +194,6 @@ impl ActorGateway {
                 stats: Mutex::new(Stats::default()),
                 server: Mutex::new(None),
                 now,
-                net: std::sync::OnceLock::new(),
                 a2a: std::sync::OnceLock::new(),
             }),
         }
@@ -205,15 +201,6 @@ impl ActorGateway {
 
     pub fn port(&self) -> u16 {
         self.inner.port
-    }
-
-    /// The networks' nodes, for the front door's `/net/v1/` routes.
-    pub fn set_net(&self, node: Arc<xenonet_net::nodes::Nodes>) {
-        let _ = self.inner.net.set(node);
-    }
-
-    pub fn net(&self) -> Option<Arc<xenonet_net::nodes::Nodes>> {
-        self.inner.net.get().cloned()
     }
 
     /// A2A's side, for the front door's `/a2a` and Agent Card.
@@ -256,7 +243,7 @@ impl ActorGateway {
         }
         // Its port taken: no server, so the next start tries again.
         let listener = TcpListener::bind(("127.0.0.1", self.inner.port)).await?;
-        let door = super::front_door::Door { kind: super::front_door::DoorKind::Tunnel { port: self.inner.port }, actor: Some(self.clone()), node: None };
+        let door = super::front_door::Door { port: self.inner.port, actor: self.clone() };
         // Its connections are the task's, so stopping the gateway closes
         // them too, as the JS's closeAllConnections does: a client's
         // kept-alive connection doesn't outlive the gateway turned off.

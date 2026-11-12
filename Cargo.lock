@@ -6221,7 +6221,6 @@ dependencies = [
  "hyper-util",
  "portable-pty",
  "reqwest",
- "rusqlite",
  "rustls",
  "serde",
  "serde_json",

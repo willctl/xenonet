@@ -246,8 +246,7 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         }
     }
     // The network across machines (docs/design/network.md): this machine's
-    // node, whose gateway routes the actor gateway's front door serves
-    // while this host is the network's gateway.
+    // nodes, one for each network it's in, on link/2.
     if let Some(kept) = kept {
         let c = ctx.clone();
         let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
@@ -256,9 +255,6 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         opts.forwards = ctx.cores.forwards.net();
         match NetService::open(opts) {
             Ok(svc) => {
-                if let Some(g) = &parts.gateway {
-                    g.gateway().set_net(svc.nodes().clone());
-                }
                 // The engine takes what arrives, and sends through it.
                 if let Some(plug) = &ctx.cores.on_net {
                     plug(&*svc);

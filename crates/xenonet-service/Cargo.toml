@@ -99,8 +99,6 @@ futures.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # The network tests' person chain entries (a revocation, a new device).
 xenonet-log.workspace = true
-# The network tests look into the gateway's queue (gateway.sqlite).
-rusqlite.workspace = true
 # The fake A2A agent the outbound tests call (adapters/a2a/tests/fake)
 # serves TLS with rustls's own stream.
 rustls.workspace = true

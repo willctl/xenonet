@@ -1,13 +1,11 @@
 //! The networks in the service (docs/design/network.md): this machine's
-//! nodes (xenonet-net), one per network it's in, each with its link to its
-//! gateway, and, for each network whose LAN-only gateway this host is, the
-//! listener on the address the person picked.
+//! nodes (xenonet-net), one per network it's in. No door serves the
+//! network between machines: they reach each other on link/2.
 //!
 //! The engine reaches the networks through `net()` (`xenonet_model::ops::
 //! Net`) and plugs its `Sink` in with `sinks().set(…)`. Until it does, a
 //! sink that logs takes what arrives.
 
-use super::front_door::listen_lan;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -24,9 +22,6 @@ use xenonet_os::sync::Locked;
 pub struct NetService {
     this: std::sync::Weak<NetService>,
     nodes: Arc<Nodes>,
-    /// The LAN listeners, by address: one for each network whose LAN-only
-    /// gateway this host is.
-    lan: Mutex<BTreeMap<SocketAddr, tokio::task::JoinHandle<()>>>,
     /// Follows each network's gateway when it moves, by network id.
     watchers: Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
 }
@@ -38,7 +33,7 @@ impl NetService {
         let log = opts.log.clone();
         let sinks = Arc::new(SinkSlot::new(Arc::new(LogSink::new(log))));
         let nodes = Nodes::open(opts, sinks)?;
-        Ok(Arc::new_cyclic(|this| NetService { this: this.clone(), nodes, lan: Mutex::new(BTreeMap::new()), watchers: Mutex::new(BTreeMap::new()) }))
+        Ok(Arc::new_cyclic(|this| NetService { this: this.clone(), nodes, watchers: Mutex::new(BTreeMap::new()) }))
     }
 
     /// When a network's gateway moves, its link starts again toward it: on
@@ -69,34 +64,16 @@ impl NetService {
                     if was && !node.shared().is_gateway() {
                         tokio::time::sleep(std::time::Duration::from_millis(node.shared().timing().handover_ms)).await;
                     }
-                    let Some(me) = weak.upgrade() else { return };
-                    let restarted = match node.start() {
-                        Ok(()) => me.sync_lan().await,
-                        Err(e) => Err(e),
-                    };
-                    if let Err(e) = restarted {
+                    if weak.upgrade().is_none() {
+                        return;
+                    }
+                    if let Err(e) = node.start() {
                         node.shared().log("net.gateway", &format!("the link didn't start again after the gateway moved: {}", e.message));
                     }
                 }
             });
             watchers.insert(id, task);
         }
-    }
-
-    async fn restart(&self) -> R<()> {
-        self.nodes.start()?;
-        self.sync_lan().await
-    }
-
-    /// A LAN listener runs for each network whose LAN-only gateway this
-    /// host is, and no other.
-    async fn sync_lan(&self) -> R<()> {
-        let want: Vec<SocketAddr> = self.nodes.lan_doors().iter().map(|l| parse_lan(l)).collect::<R<_>>()?;
-        for addr in &want {
-            self.listen(*addr).await?;
-        }
-        self.unlisten();
-        Ok(())
     }
 
     /// The service's own options: its state folder, where the networks are
@@ -134,55 +111,22 @@ impl NetService {
     /// Starts each network's link, the LAN listeners of the networks whose
     /// LAN-only gateway this host is, and link/2, and follows each gateway
     /// when it moves.
-    pub async fn start(self: &Arc<Self>) -> R<()> {
+    pub fn start(self: &Arc<Self>) -> impl std::future::Future<Output = R<()>> {
         self.watch();
-        self.restart().await
+        std::future::ready(self.nodes.start())
     }
 
     /// A network was made, joined or left: each gateway's move is followed,
     /// and the LAN listeners are the gateways' here.
-    pub async fn networks_changed(&self) {
+    pub fn networks_changed(&self) {
         self.watch();
-        if let Err(e) = self.sync_lan().await {
-            self.node().shared().log("net.gateway", &format!("a LAN listener didn't start: {}", e.message));
-        }
-    }
-
-    /// Listens for a network on a LAN address, beside any other.
-    pub async fn listen(&self, addr: SocketAddr) -> R<()> {
-        if self.lan.locked().contains_key(&addr) {
-            return Ok(());
-        }
-        let task = listen_lan(addr, self.nodes.clone()).await.map_err(|e| NetError::bad(format!("XenoNet can't listen on {addr}: {e}")))?;
-        if let Some(old) = self.lan.locked().insert(addr, task) {
-            old.abort();
-        }
-        Ok(())
-    }
-
-    /// The LAN listeners no network's gateway here uses close.
-    pub fn unlisten(&self) {
-        let used = self.nodes.lan_doors();
-        self.lan.locked().retain(|addr, t| {
-            let keep = used.contains(&addr.to_string());
-            if !keep {
-                t.abort();
-            }
-            keep
-        });
-    }
-
-    pub fn lans(&self) -> Vec<SocketAddr> {
-        self.lan.locked().keys().copied().collect()
     }
 
     pub fn stop(&self) {
         for (_, t) in std::mem::take(&mut *self.watchers.locked()) {
             t.abort();
         }
-        for (_, t) in std::mem::take(&mut *self.lan.locked()) {
-            t.abort();
-        }
+
         self.nodes.stop();
     }
 
