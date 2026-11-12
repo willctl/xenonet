@@ -59,7 +59,6 @@ const report = process.argv.includes("--report");
 const BASE = new Set(["xenonet-text", "xenonet-os", "xenonet-model"]);
 // The composition crates' ceilings, and the phase each dissolves in.
 const COMPOSITION = {
-  "xenonet-runtime": { ceiling: 10, phase: 5, why: "the engine's drivers go to the engine, the store and the transport" },
   "xenonet-state": { ceiling: 7, phase: 4, why: "the map's state goes into the one store" },
   "xenonet-doctor": { ceiling: 7, phase: 5, why: "it runs the checks the crates and adapters expose, through the registry" },
 };

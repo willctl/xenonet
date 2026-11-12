@@ -254,7 +254,7 @@ start from another machine) is decided and limited like any other
 ([delegation.md](../guide/delegation.md)); then XenoNet runs the agent with
 none of its credentials in the environment, opens a session in the folder
 and sends the first prompt as a turn, framed as who asked rather than as
-the user's words (`crates/xenonet-runtime/src/acp.rs`). The session stays
+the user's words (`crates/xenonet-service/src/compose/runtime/acp.rs`). The session stays
 open between turns, and a message routed to it is its next turn, after the
 router's consent and wake checks.
 

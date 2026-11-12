@@ -1,0 +1,26 @@
+[package]
+name = "xenonet-saved"
+description = "What XenoNet saves for you, as the routes and the map ask it (the Store core): the store's state domain with what each change does to it, and the checkouts it keeps, as this machine finds them."
+version.workspace = true
+edition.workspace = true
+# The api, through xenonet-net, needs Rust 1.91.
+rust-version = "1.91"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+# The Store core it is.
+xenonet-api.workspace = true
+# The store's state domain and its projects' checkouts.
+xenonet-store.workspace = true
+# What the version control the binary installed says of a folder.
+xenonet-adapter.workspace = true
+xenonet-model.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
+
+[lints]
+workspace = true

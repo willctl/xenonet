@@ -78,7 +78,7 @@ fn bins() -> (PathBuf, PathBuf) {
 /// A forward is decided on the machine's own grants, as the engine's are:
 /// this machine's actor's token, in its time, forwarding exactly `alpn`;
 /// and a grant is collected for a context key the person approved (the
-/// runtime's own path is xenonet-runtime's tests/forward_grants.rs).
+/// runtime's own path is tests/runtime_forward_grants.rs).
 struct Machine(Arc<NetService>, Arc<Mutex<Vec<String>>>);
 
 impl Grants for Machine {

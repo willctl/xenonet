@@ -186,5 +186,5 @@ impl Saved {
 #[cfg(test)]
 pub fn in_memory() -> Saved {
     let db = Arc::new(xenonet_store::Db::memory().expect("a store in memory"));
-    Saved::new(Arc::new(xenonet_runtime::saved::Saved::new(db)))
+    Saved::new(Arc::new(xenonet_saved::Saved::new(db)))
 }

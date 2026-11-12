@@ -3,7 +3,7 @@
 //! starts: core/delivery/runs.js. How a program is started on each
 //! platform, whether a run may start now, and which records and logs are
 //! kept are here; starting the process, writing its log and watching it
-//! are the runner's (xenonet-runtime's `runs`).
+//! are the runner's (the service's `compose::runtime::runs`).
 //!
 //! At most `CAP` runs go at once on a machine, one per session, and a turn
 //! runs `TURN_MS` at most. Each run's output goes to `runs/<id>.log` in

@@ -47,7 +47,7 @@ demo, the tests and every other instance get `Fake`, which never prompts
 or touches the hardware (`crates/xenonet-service/src/compose/keys.rs`).
 The network crate (`crates/xenonet-net`) holds the person on the machine
 (`identity.rs`) and its facts for a decision (`ground.rs`); the runtime
-(`crates/xenonet-runtime/src/ground.rs`) adds what only the engine holds.
+(`crates/xenonet-service/src/compose/runtime/ground.rs`) adds what only the engine holds.
 
 ## The principals
 
@@ -413,7 +413,7 @@ machine to work it or `any` (`@any` in the signed act: any machine whose
 device the delegation names), and its arbiter (the maker's machine by
 default, or one the delegation names), and the machine it's given to
 decides it under that delegation alone
-(`crates/xenonet-runtime/src/intents.rs`). For `any`, each machine whose
+(`crates/xenonet-service/src/compose/runtime/intents.rs`). For `any`, each machine whose
 device the delegation names and that holds a checkout of the project
 sends a take, with the person's device's signature confirming that
 checkout (`Purpose::CHECKOUT`, signed when the person confirms it at that
@@ -541,7 +541,7 @@ principal, isn't a token and can't be read as one, and an `Authorized`
 can't be built outside the crate or changed after `decide` made it.
 
 The runtime wraps text in `Information` where it comes in from another
-machine or an actor (`crates/xenonet-runtime`): a message's body
+machine or an actor (`crates/xenonet-service/src/compose/runtime`): a message's body
 (`network.rs`, `message_in`), an ask's question and input (`asks.rs`,
 `ask_in`), a handoff's goal and notes (`handoff_in`), and a start's
 prompt, which is taken out of the request before the start is decided and

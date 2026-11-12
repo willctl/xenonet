@@ -770,7 +770,7 @@ calls carry `Authorization: Bearer`, never `x-xenonet-agent`.
   - The doctor looks for tokens in the repos it knows, with `git grep`:
     in what's tracked, what's untracked, and ignored files such as a
     `.env`, where tokens are most often left, outside dependency, build
-    and cache folders (`crates/xenonet-runtime/src/tokens.rs`). Only a
+    and cache folders (`crates/xenonet-service/src/compose/runtime/tokens.rs`). Only a
     token XenoNet issued counts: the revocation ids of each one found are
     held to the ids the store keeps of the tokens it issued, so a
     made-up token in a test fixture or a fuzz seed isn't a warning. When

@@ -42,7 +42,7 @@ getrandom.workspace = true
 xenonet-platforms.workspace = true
 # The local door as the composition root wires it in, for the tests that
 # go through the rules table.
-xenonet-runtime.workspace = true
+xenonet-door.workspace = true
 # The tray's status and a made-up machine's load, checked as their types.
 xenonet-schema.workspace = true
 

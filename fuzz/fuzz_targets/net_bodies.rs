@@ -29,9 +29,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use xenonet_fuzz::net::{body_for, entry_after, overlay, Choices};
 use xenonet_id::sign::Signer as _;
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing};
-use xenonet_runtime::engine::EngineDriver;
-use xenonet_runtime::network;
-use xenonet_runtime::runtime::{Runtime, Setup};
+use xenonet_service::compose::runtime::engine::EngineDriver;
+use xenonet_service::compose::runtime::network;
+use xenonet_service::compose::runtime::{Runtime, Setup};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Cores, Engine as _, State, R};
 use xenonet_service::wire::WireEnv;
@@ -153,12 +153,12 @@ fn engine() -> Engine {
         runs_bin: config.runs_bin.clone(),
         permission_hold_ms: config.permission_hold_ms,
         launcher_exec: config.launcher_exec.clone(),
-        made_up: xenonet_runtime::actors::MadeUp::none(),
+        made_up: xenonet_service::compose::runtime::actors::MadeUp::none(),
         db: Some(Arc::new(xenonet_store::Db::open(std::path::Path::new(&config.state_dir)).expect("the engine's store"))),
     };
     xenonet_fuzz::adapters();
     let _in = runtime().enter();
-    let w = xenonet_runtime::runtime(&cores, setup, &env).expect("the engine's parts");
+    let w = xenonet_service::compose::runtime::runtime(&cores, setup, &env).expect("the engine's parts");
     let net = Arc::new(FakeNet::default());
     network::set_net(&w, net.clone());
     // The fixed network's chain and its owner's, as studio holds them.
@@ -168,7 +168,7 @@ fn engine() -> Engine {
     let owner = xenonet_fuzz::net::person();
     kept.put_person(owner.id().expect("the owner"), true, owner.entries()).expect("the owner's chain");
     let identity = xenonet_net::identity::Identity::open(identity_dir, kept, None).expect("the identity");
-    xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Gov(identity))));
+    xenonet_service::compose::runtime::ground::set_governance(&w, Some(Arc::new(Gov(identity))));
     Engine { dir, w, net, runs: 0, last: 0.0, seqs: std::collections::HashMap::new(), heads: std::collections::HashMap::new() }
 }
 

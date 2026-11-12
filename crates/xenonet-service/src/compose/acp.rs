@@ -1,5 +1,5 @@
 //! The apps XenoNet starts over ACP (the registry's `acp`): the runtime's
-//! ACP side (`xenonet_runtime::acp::Acp`), on the generic ACP client
+//! ACP side (`crate::compose::runtime::acp::Acp`), on the generic ACP client
 //! (xenonet-acp). Each session XenoNet starts is one agent process, one
 //! `Client`, held open between turns and closed when it's been idle for
 //! `IDLE`, or when the service stops.
@@ -22,6 +22,9 @@
 //! - What the session does goes to the activity feed, for an app whose
 //!   transcripts XenoNet doesn't read (Grok Build's it reads).
 
+use crate::compose::runtime::acp::{Acp, Failed, Message, Start, Started};
+use crate::compose::runtime::starts::Answer as Told;
+use crate::compose::runtime::Runtime;
 use futures::future::BoxFuture;
 use futures::FutureExt as _;
 use serde_json::{json, Value};
@@ -35,9 +38,6 @@ use xenonet_api::From;
 use xenonet_authz::Information;
 use xenonet_engine::delivery::starts::Finish;
 use xenonet_os::sync::Locked as _;
-use xenonet_runtime::acp::{Acp, Failed, Message, Start, Started};
-use xenonet_runtime::runtime::Runtime;
-use xenonet_runtime::starts::Answer as Told;
 
 /// How long a session is held open after its last turn, for a reply,
 /// before its agent is closed.
@@ -107,7 +107,7 @@ impl Host for Hears {
         // Held on a blocking thread, as a run's ask is: the hold can last
         // ten minutes.
         let asked = tokio::task::spawn_blocking(move || {
-            let ok = xenonet_runtime::asks::hold_acp(&w, &me, None, &prompt.ask, &tool, prompt.kind, prompt.input.read());
+            let ok = crate::compose::runtime::asks::hold_acp(&w, &me, None, &prompt.ask, &tool, prompt.kind, prompt.input.read());
             (ok, tool)
         });
         async move {
@@ -234,7 +234,7 @@ impl AcpSide {
                         json!({ "sessionId": held.agent, "app": held.app, "kind": "turn-end", "interrupted": interrupted, "ts": xenonet_text::time::now_ms() }),
                     );
                 }
-                let body = xenonet_runtime::starts::acp_turn_end(&w, &held.app, &held.agent, &f, minutes, true);
+                let body = crate::compose::runtime::starts::acp_turn_end(&w, &held.app, &held.agent, &f, minutes, true);
                 (held.told)(&w, "ended", body);
             }
             // An agent that stopped is closed now; one that answered waits

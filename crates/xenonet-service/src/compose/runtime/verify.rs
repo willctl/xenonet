@@ -1,0 +1,335 @@
+//! The process checks (crates/xenonet-engine/src/verify.rs) on this
+//! machine: the process at the other end of a request's TCP connection,
+//! found by its ports, and the ones above it, checked against what the
+//! request says it is. The lookups block on commands, so each check runs
+//! on a blocking thread.
+
+use crate::compose::runtime::procs::{self, System};
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use xenonet_api::cores::Verify;
+use xenonet_api::peer::Peer;
+use xenonet_engine::procs::Link;
+use xenonet_engine::verify::{Fail, Host, Verdict, Verifier};
+use xenonet_store::engine::Shared;
+use xenonet_text::json::number;
+use xenonet_text::time::now_ms;
+
+/// What a check reads: procs, the clock, and the process on the other end
+/// of this request's socket.
+pub struct Lookups<'a> {
+    pub sys: &'a System,
+    pub peer: Option<Peer>,
+}
+
+impl Host for Lookups<'_> {
+    fn now(&mut self) -> f64 {
+        now_ms()
+    }
+    fn supported(&mut self) -> bool {
+        self.sys.procs.supported
+    }
+    fn chains(&mut self) -> bool {
+        self.sys.procs.chains
+    }
+    fn peer(&mut self) -> Option<f64> {
+        self.peer.and_then(|p| procs::peer_of(self.sys, p.conn, p.local.port(), p.remote.port()).as_f64())
+    }
+    fn chain(&mut self, pid: f64, again: bool, exe: bool) -> Vec<Link> {
+        // A table that couldn't be read is a process that can't be seen.
+        self.sys.procs.chain(&mut self.sys.io(), Some(pid), again, exe).unwrap_or_default()
+    }
+    fn alive(&mut self, pid: f64, start: f64) -> Result<bool, Fail> {
+        self.sys.procs.alive(&mut self.sys.io(), pid, start).map_err(Fail::Procs)
+    }
+    fn signed(&mut self, p: &Link) -> bool {
+        self.sys.procs.signed(&mut self.sys.io(), p.row.pid, p.row.start, &p.row.program, p.agent, p.product.map(|pr| (pr.product, pr.role)))
+    }
+    fn cwd(&mut self, pid: f64) -> Option<String> {
+        self.sys.procs.cwd(&mut self.sys.io(), pid)
+    }
+}
+
+/// The Applications folders the tray app may run from: the machine's, and
+/// the home folder's, as written and under the home folder's real path,
+/// since lsof names an executable by its real path. A demo's home is its
+/// made-up world's, so a demo's tray runs from that world's Applications.
+pub fn tray_apps(home: &str) -> Vec<String> {
+    let mut out = vec!["/Applications".to_string()];
+    if home.is_empty() {
+        return out;
+    }
+    // The tray is a macOS app, so these are macOS paths, joined with `/`
+    // whatever system the check runs on.
+    let mut homes = vec![home.to_string()];
+    if let Ok(real) = std::fs::canonicalize(home) {
+        homes.push(real.to_string_lossy().into_owned());
+    }
+    for h in homes {
+        let apps = format!("{}/Applications", h.trim_end_matches('/'));
+        if !out.contains(&apps) {
+            out.push(apps);
+        }
+    }
+    out
+}
+
+/// A product id as a route gives it: a string, or nothing.
+fn product_of(v: &Value) -> Option<String> {
+    v.as_str().map(str::to_string)
+}
+
+/// The pid a route names: a number, nothing for null, and for anything
+/// else a pid no process has, so the check refuses it as naming one that
+/// isn't the caller's.
+fn pid_of(v: &Value) -> Option<f64> {
+    match v {
+        Value::Null => None,
+        Value::Number(n) => Some(n.as_f64().unwrap_or(f64::NAN)),
+        _ => Some(f64::NAN),
+    }
+}
+
+/// The processes an actor's request may call its own, nearest first, for
+/// a chain as a verdict's JSON gives it.
+pub fn own_of(chain: &[Value]) -> &[Value] {
+    let links: Vec<Link> = chain.iter().map(procs::link_of).collect();
+    let n = xenonet_engine::verify::own_of(&links).len();
+    &chain[..n]
+}
+
+/// The checks, as the routes call them.
+pub struct Checks {
+    pub verifier: Arc<Verifier>,
+    pub sys: Arc<System>,
+}
+
+impl Checks {
+    pub fn new(store: Shared, sys: Arc<System>) -> Checks {
+        // The service is its own process, so no app is its parent: the
+        // Desktop that connects says which process is home.
+        Checks { verifier: Arc::new(Verifier::new(Arc::new(crate::compose::runtime::store::Store(store)), None)), sys }
+    }
+
+    async fn run(&self, peer: Option<Peer>, f: impl FnOnce(&Verifier, &mut dyn Host) -> Result<Verdict, Fail> + Send + 'static) -> Value {
+        let (v, sys) = (self.verifier.clone(), self.sys.clone());
+        let out = tokio::task::spawn_blocking(move || {
+            let mut h = Lookups { sys: &sys, peer };
+            f(&v, &mut h)
+        })
+        .await;
+        match out {
+            Ok(Ok(verdict)) => verdict.json(),
+            // A check that couldn't run refuses, never lets through.
+            Ok(Err(f)) => json!({ "ok": false, "checked": true, "reason": f.to_string() }),
+            Err(e) => json!({ "ok": false, "checked": true, "reason": e.to_string() }),
+        }
+    }
+
+    /// A process and the ones above it, as pids; None where XenoNet can't
+    /// look.
+    pub fn lineage(&self, pid: Option<f64>) -> Option<Vec<f64>> {
+        let mut h = Lookups { sys: &self.sys, peer: None };
+        self.verifier.lineage(&mut h, pid)
+    }
+}
+
+#[async_trait]
+impl Verify for Checks {
+    async fn check(&self, peer: Peer, id: &str, hook: bool) -> Value {
+        let id = id.to_string();
+        self.run(Some(peer), move |v, h| v.check(h, &id, hook)).await
+    }
+    async fn person(&self, peer: Peer) -> Value {
+        self.run(Some(peer), |v, h| Ok(v.person(h))).await
+    }
+    async fn window(&self, peer: Peer) -> Value {
+        self.run(Some(peer), |v, h| Ok(v.window(h))).await
+    }
+    async fn desktop(&self, peer: Option<Peer>) -> Value {
+        let connected = peer.is_some();
+        self.run(peer, move |v, h| Ok(v.desktop(h, connected))).await
+    }
+    async fn tray(&self, peer: Peer, home: &str) -> Value {
+        let apps = tray_apps(home);
+        self.run(Some(peer), move |v, h| Ok(v.tray(h, &apps))).await
+    }
+    async fn actor(&self, peer: Peer, slug: &str, product: Value, pid: Value) -> Value {
+        let (slug, product, pid) = (slug.to_string(), product_of(&product), pid_of(&pid));
+        self.run(Some(peer), move |v, h| Ok(v.actor(h, &slug, product.as_deref(), pid))).await
+    }
+    async fn register(&self, peer: Peer, product: Value, pid: Value) -> Value {
+        let (product, pid) = (product_of(&product), pid_of(&pid));
+        self.run(Some(peer), move |v, h| Ok(v.register(h, product.as_deref(), pid))).await
+    }
+    async fn asker(&self, peer: Peer) -> Value {
+        self.run(Some(peer), |v, h| Ok(v.asker(h))).await
+    }
+    async fn peer(&self, peer: Peer) -> String {
+        let (v, sys) = (self.verifier.clone(), self.sys.clone());
+        let pid = tokio::task::spawn_blocking(move || v.peer(&mut Lookups { sys: &sys, peer: Some(peer) })).await;
+        match pid {
+            Ok(Some(pid)) => xenonet_text::json::number_string(pid),
+            _ => "?".into(),
+        }
+    }
+    fn state(&self) -> Value {
+        let c = self.verifier.counts();
+        json!({
+            "checked": number(c.checked),
+            "refused": number(c.refused),
+            "unchecked": number(c.unchecked),
+            "unseen": number(c.unseen),
+            "lastRefusal": c.last_refusal.as_ref().map_or(Value::Null, |r| json!({ "agent": r.agent, "reason": r.reason, "at": number(r.at) })),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checks() -> Checks {
+        Checks::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), System::new())
+    }
+
+    #[tokio::test]
+    async fn a_request_with_no_process_to_see_passes_unchecked_or_is_refused_as_unseen() {
+        xenonet_platforms::install();
+        let c = checks();
+        // A loopback address with no connection behind it: nothing owns it.
+        let peer = Peer::new("127.0.0.1:9".parse().unwrap(), "127.0.0.1:1".parse().unwrap());
+        let v = c.check(peer, "claude:0190d3e0-0000-7000-8000-000000000001", false).await;
+        // No process on the other end: let through unchecked.
+        assert_eq!(v["ok"], true, "{v}");
+        let you = c.person(peer).await;
+        if c.sys.procs.chains {
+            assert_eq!((you["ok"].clone(), you["unseen"].clone()), (json!(false), json!(true)), "{you}");
+        }
+        assert_eq!(c.peer(peer).await, "?");
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.chains { 1 } else { 2 }));
+        // A session of an app XenoNet doesn't check is refused, never let
+        // through unchecked.
+        let other = c.check(peer, "gemini-cli:x", false).await;
+        assert_eq!(other["ok"], false, "{other}");
+        assert_eq!(
+            other["reason"],
+            "requests in gemini-cli:x's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session"
+        );
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.chains { 1 } else { 2 }));
+        let last = &c.state()["lastRefusal"];
+        assert_eq!((last["agent"].clone(), last["reason"].clone()), (json!("gemini-cli:x"), other["reason"].clone()));
+    }
+
+    // A made-up Mac, answering the commands procs asks for: the Claude app
+    // with two Claude Code sessions (200 and 300, both signed), a shell
+    // under the first, and a plain terminal; each connection's process by
+    // its remote port, as netstat names it.
+    fn machine() -> Arc<System> {
+        let rows = [
+            (1, 0, "/sbin/launchd"),
+            (100, 1, "/Applications/Claude.app/Contents/MacOS/Claude"),
+            (200, 100, "/Users/me/.local/share/claude/versions/2.1.288"),
+            (220, 200, "/bin/zsh"),
+            (300, 100, "/Users/me/.local/share/claude/versions/2.1.288"),
+            (400, 1, "/bin/zsh"),
+        ];
+        let ps = rows.iter().map(|(pid, ppid, p)| format!("{pid:>5} {ppid:>5} Fri Oct  3 16:34:29 2026 {p}\n")).collect::<Vec<_>>().concat();
+        let by_port = [(51000, 220), (51001, 400), (51002, 300), (51003, 200)];
+        let netstat = by_port.iter().map(|(port, pid)| format!("tcp4       0      0  127.0.0.1.{port}        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 proc:{pid}            00102 00000104 0000000003bca9cb\n")).collect::<Vec<_>>().concat();
+        System::with(
+            "darwin",
+            Box::new(move |c| match c.file.as_str() {
+                "ps" if c.args.first().map(String::as_str) == Some("-axo") => Ok(ps.clone()),
+                "netstat" => Ok(netstat.clone()),
+                // Only the sessions' own processes are signed.
+                "codesign" if c.args.last().is_some_and(|p| p == "200" || p == "300") => Ok(String::new()),
+                _ => Err(xenonet_engine::procs::Failure { message: format!("Command failed: {}", c.file), stdout: None }),
+            }),
+        )
+    }
+
+    fn from(port: u16) -> Peer {
+        Peer::new(format!("127.0.0.1:{port}").parse().unwrap(), "127.0.0.1:47842".parse().unwrap())
+    }
+
+    // The tray app in the home folder's Applications, started by launchd at
+    // login (500), and the same executable started from a shell under
+    // Claude Code (510); lsof names each executable by its real path.
+    #[tokio::test]
+    async fn the_tray_passes_from_its_bundle_in_an_applications_folder_and_never_under_an_agent() {
+        xenonet_platforms::install();
+        const TRAY: &str = "/Users/me/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
+        let rows = [
+            (1, 0, "/sbin/launchd"),
+            (100, 1, "/Applications/Claude.app/Contents/MacOS/Claude"),
+            (200, 100, "/Users/me/.local/share/claude/versions/2.1.288"),
+            (220, 200, "/bin/zsh"),
+            (500, 1, TRAY),
+            (510, 220, TRAY),
+        ];
+        let ps = rows.iter().map(|(pid, ppid, p)| format!("{pid:>5} {ppid:>5} Fri Oct  3 16:34:29 2026 {p}\n")).collect::<Vec<_>>().concat();
+        let netstat = [(51010, 500), (51011, 510)]
+            .iter()
+            .map(|(port, pid)| format!("tcp4       0      0  127.0.0.1.{port}        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 proc:{pid}            00102 00000104 0000000003bca9cb\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        let exes: Vec<(String, String)> = rows.iter().map(|(pid, _, p)| (pid.to_string(), (*p).to_string())).collect();
+        let sys = System::with(
+            "darwin",
+            Box::new(move |c| match c.file.as_str() {
+                "ps" if c.args.first().map(String::as_str) == Some("-axo") => Ok(ps.clone()),
+                "netstat" => Ok(netstat.clone()),
+                "lsof" if c.args.iter().any(|a| a == "txt") => {
+                    let asked: Vec<&str> = c.args.get(2).map(|l| l.split(',').collect()).unwrap_or_default();
+                    let lines: Vec<String> = exes.iter().filter(|(pid, _)| asked.contains(&pid.as_str())).map(|(pid, exe)| format!("p{pid}\nftxt\nn{exe}\n")).collect();
+                    Ok(lines.concat())
+                }
+                _ => Err(xenonet_engine::procs::Failure { message: format!("Command failed: {}", c.file), stdout: None }),
+            }),
+        );
+        let c = Checks::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), sys);
+        assert_eq!(tray_apps("/Users/me"), ["/Applications", "/Users/me/Applications"]);
+        assert_eq!(c.tray(from(51010), "/Users/me").await, json!({ "ok": true, "checked": true }));
+        let under = c.tray(from(51011), "/Users/me").await;
+        assert_eq!(under["reason"], "XenoNet's tray can't run under a Claude Code process", "{under}");
+        let other = c.tray(from(51010), "/Users/you").await;
+        assert_eq!(other["ok"], false, "another home's Applications: {other}");
+    }
+
+    #[tokio::test]
+    async fn a_request_in_a_sessions_name_is_held_to_the_process_it_comes_from() {
+        xenonet_platforms::install();
+        let c = Checks::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), machine());
+        let s = "claude:0190d3e0-0000-7000-8000-00000000000a";
+        // From the shell under Claude Code: it's that session's, now pinned
+        // to its process.
+        let ok = c.check(from(51000), s, false).await;
+        assert_eq!((ok["ok"].clone(), ok["root"]["pid"].clone()), (json!(true), json!(200)), "{ok}");
+        // From a plain terminal: no Claude Code above it.
+        let no = c.check(from(51001), s, false).await;
+        assert_eq!(no["ok"], false);
+        assert!(no["reason"].as_str().unwrap().contains("have to come from a Claude Code process"), "{no}");
+        // From the other session's process, while the first still runs.
+        let other = c.check(from(51002), s, false).await;
+        assert!(other["reason"].as_str().unwrap().contains("belongs to another Claude Code process"), "{other}");
+        // Claude Code's own hook, from its signed process, is sure of it.
+        let hook = c.check(from(51003), s, true).await;
+        assert_eq!((hook["ok"].clone(), hook["sure"].clone()), (json!(true), json!(true)), "{hook}");
+        // What's yours: refused from under an agent, and the process seen.
+        let you = c.person(from(51000)).await;
+        assert!(you["reason"].as_str().unwrap().starts_with("this is yours to do, and it came from under a Claude Code process"), "{you}");
+        assert_eq!(c.person(from(51001)).await["ok"], true);
+        assert_eq!(c.peer(from(51001)).await, "400");
+        assert_eq!(c.state()["refused"], json!(3));
+        assert_eq!(c.lineage(Some(220.0)), Some(vec![220.0, 200.0, 100.0]));
+        // An actor's own script from the plain terminal, and the chain its
+        // verdict shows; a pid that's no number names no process of its.
+        let own = c.actor(from(51001), "wren", Value::Null, Value::Null).await;
+        assert_eq!((own["ok"].clone(), own["root"]["pid"].clone(), own["chain"].as_array().map(Vec::len)), (json!(true), json!(400), Some(1)), "{own}");
+        assert_eq!(own_of(own["chain"].as_array().unwrap()).len(), 1, "no app above the shell");
+        let named = c.actor(from(51001), "wren", Value::Null, json!("400")).await;
+        assert_eq!(named["reason"], "the pid it names has to be the calling process or one of its parents", "{named}");
+    }
+}

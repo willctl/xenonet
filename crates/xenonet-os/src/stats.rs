@@ -3,8 +3,7 @@
 //! memory, and the GPU (its name, how busy, its memory). Read only while a
 //! window asks. In a network, the service sends a reading every few
 //! seconds to the window hosts' consoles that watch this machine's map,
-//! unless it doesn't share its load (xenonet-runtime's
-//! remote/runtime/relay.rs).
+//! unless it doesn't share its load (xenonet-net's load.rs).
 //!
 //! The GPU comes from what the system has: NVIDIA's nvidia-smi left
 //! running in its loop mode, a Mac's IOAccelerator statistics (ioreg), the

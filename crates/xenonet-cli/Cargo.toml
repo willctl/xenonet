@@ -47,7 +47,8 @@ xenonet-components.workspace = true
 xenonet-engine.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
-xenonet-runtime.workspace = true
+# What XenoNet saves for you, the Store core `serve()` puts in.
+xenonet-saved.workspace = true
 
 # The local time zone, as JS's Date shows a time (localtime_r), and the
 # terminal's width (TIOCGWINSZ), as Node's process.stdout.columns reads it.

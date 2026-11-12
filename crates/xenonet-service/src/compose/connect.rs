@@ -7,15 +7,15 @@
 //! needs XenoNet's install (xenonet-components) beside the runtime's files
 //! and processes.
 
+use crate::compose::runtime::exec::{self, Spec};
+use crate::compose::runtime::fs;
+use crate::compose::runtime::Setup;
 use async_trait::async_trait;
 use serde_json::Value;
 use xenonet_adapter::connect::{Connect as Core, Instance, Machine, Options, Problem};
 use xenonet_api::cores::{Connect, CoreError, R};
 use xenonet_api::instances::INSTANCES;
 use xenonet_os::fs::FsError;
-use xenonet_runtime::exec::{self, Spec};
-use xenonet_runtime::fs;
-use xenonet_runtime::runtime::Setup;
 
 /// This machine: its files, and the agents' CLIs on PATH.
 struct Here;

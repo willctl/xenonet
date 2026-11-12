@@ -12,7 +12,7 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use std::sync::Arc;
 use xenonet_api::cores::Store;
-use xenonet_runtime::saved::{layout_changes, rules_to_clear, Saved};
+use xenonet_saved::{layout_changes, rules_to_clear, Saved};
 use xenonet_store::Db;
 
 const NOW: f64 = 1_791_230_000_000.0;

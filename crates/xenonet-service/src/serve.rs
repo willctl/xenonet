@@ -43,7 +43,7 @@ struct Parts {
 /// the rest: the local door's decisions (xenonet-authz, through the
 /// runtime) and the app registry as the routes ask it (the adapters).
 pub fn wire_root(cores: &mut Cores) {
-    cores.door = xenonet_runtime::door::local();
+    cores.door = xenonet_door::local();
     cores.apps = xenonet_platforms::registry();
 }
 

@@ -119,7 +119,7 @@ pub fn yours(env: &Value) -> Result<(), Fail> {
         let reason = verdict.get("reason").and_then(Value::as_str).unwrap_or("this is yours to do");
         return Err(Fail::new(reason, 1));
     }
-    let sys = xenonet_runtime::procs::System::new();
+    let sys = xenonet_service::compose::runtime::procs::System::new();
     if !sys.procs.chains {
         return Ok(());
     }

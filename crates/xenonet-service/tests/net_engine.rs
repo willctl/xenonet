@@ -28,8 +28,8 @@ use xenonet_api::cores::{self, Cores, State, R};
 use xenonet_api::wire::WireEnv;
 use xenonet_net::node::{now_ms, Options};
 use xenonet_os::log::Log;
-use xenonet_runtime::runtime::Runtime;
 use xenonet_service::a2a::{A2a, A2aCores, A2aParts, Limits};
+use xenonet_service::compose::runtime::Runtime;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
 use xenonet_service::gateway::actor_gateway::{ActorGateway, GatewayCores, GatewayHooks};
@@ -274,7 +274,7 @@ impl Host {
         cores.state = Arc::new(Map { at: now_ms(), sessions: sessions.clone() });
         let env = WireEnv::new("0.0.0-test");
         // As the binary's serve closure gives the engine its settings.
-        let setup = xenonet_runtime::runtime::Setup {
+        let setup = xenonet_service::compose::runtime::Setup {
             demo: config.demo,
             actors: config.actors,
             port: config.port,
@@ -286,16 +286,16 @@ impl Host {
             runs_bin: config.runs_bin.clone(),
             permission_hold_ms: config.permission_hold_ms,
             launcher_exec: config.launcher_exec.clone(),
-            made_up: xenonet_runtime::actors::MadeUp::none(),
+            made_up: xenonet_service::compose::runtime::actors::MadeUp::none(),
             db: Some(Arc::new(xenonet_store::Db::open(Path::new(&config.state_dir)).expect("the test machine's store"))),
         };
         // The real adapters, as the binary installs them at start.
         xenonet_platforms::install();
-        let world = xenonet_runtime::wire(&mut cores, setup, &env).expect("the engine's parts");
+        let world = xenonet_service::compose::runtime::wire(&mut cores, setup, &env).expect("the engine's parts");
         // As the binary's serve closure plugs it.
         let plugged = world.clone();
         cores.on_net = Some(Arc::new(move |svc: &dyn NetLink| {
-            xenonet_runtime::network::plug(&plugged, svc);
+            xenonet_service::compose::runtime::network::plug(&plugged, svc);
         }));
         cores.verify = Arc::new(You);
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
@@ -859,7 +859,7 @@ async fn actors_reach_actors_on_other_machines() {
     let id = unread["id"].as_f64().unwrap();
     let receipt = || a.world.store.with(|s| s.net_deliveries(id).unwrap().first().and_then(|d| d.text("receipt").map(str::to_string)));
     until("the stored receipt", 10, || async { receipt().as_deref() == Some("stored") }).await;
-    xenonet_runtime::network::unread_at(&a.world, now_ms() + 8.0 * 24.0 * 3600e3);
+    xenonet_service::compose::runtime::network::unread_at(&a.world, now_ms() + 8.0 * 24.0 * 3600e3);
     assert_eq!(receipt().as_deref(), Some("unread"));
     assert_eq!(texts(&b.ctx.cores.engine.inbox(&kite, Duration::ZERO).await.unwrap()), ["Are you there?"]);
     until("the seen receipt after unread", 10, || async { receipt().as_deref() == Some("seen") }).await;
@@ -916,7 +916,7 @@ async fn a_device_revoked_from_another_machine_signs_nothing_desk_takes() {
     // while it could sign, as they'd come in its frames.
     let identity = b.svc.node().shared().identity().clone();
     let desk = xenonet_authz::Resource::Machine(xenonet_authz::MachineId::new("desk").unwrap());
-    let authority = xenonet_runtime::ground::authority(&identity, true, &desk, &xenonet_authz::Act::Message, "", now_ms() as i64).unwrap();
+    let authority = xenonet_service::compose::runtime::ground::authority(&identity, true, &desk, &xenonet_authz::Act::Message, "", now_ms() as i64).unwrap();
     // A message as you from laptop, signed by laptop's device: an entry of
     // laptop's feed, with that signature beside it.
     let as_you = |mid: &str, text: &str| {
@@ -1111,7 +1111,8 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
 
     // A start as you made away from the window: your device signs nothing
     // there, so it's refused before anything is sent, on every system.
-    let weak = xenonet_runtime::starts::ask(&a.world, json!({ "kind": "you", "id": "you", "title": "you" }), &json!({ "machine": "desk", "prompt": "Weak?" }), false);
+    let weak =
+        xenonet_service::compose::runtime::starts::ask(&a.world, json!({ "kind": "you", "id": "you", "title": "you" }), &json!({ "machine": "desk", "prompt": "Weak?" }), false);
     assert_eq!(weak.map_err(|(s, _)| s), Err(403));
     assert_eq!(fake_runs(&c).len(), 1);
     // From a terminal, without the window's key: the route refuses at once,
@@ -1362,7 +1363,7 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     // An answer whose frame can't go (to a machine that isn't in the
     // network) leaves the ask on the console, to answer again.
     let ghost = json!({ "op": "ask", "id": "ask_ghost", "session": "claude:x", "tool": "Bash", "input": "ls", "at": now_ms(), "until": now_ms() + 60e3 });
-    xenonet_runtime::asks::ask_in(&b.world, "ghost", &xenonet_authz::Information::new(ghost.to_string()));
+    xenonet_service::compose::runtime::asks::ask_in(&b.world, "ghost", &xenonet_authz::Information::new(ghost.to_string()));
     let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": "ask_ghost", "decision": "allow" })).await;
     assert_ne!(s, 200, "{v}");
     assert!(shown(&b).await.iter().any(|x| x["id"] == "ask_ghost"), "kept to answer again");
@@ -1744,10 +1745,10 @@ fn signed_intent_by(b: &Host, goal: &str, target: &str, project: &str, delegatio
         arbiter: arbiter.into(),
         assigned: None,
     };
-    let (resource, act) = xenonet_runtime::intents::intend_of(&row).unwrap();
-    row.id = xenonet_runtime::intents::id_of(&resource, &act);
-    let authority = xenonet_runtime::ground::authority(&identity, true, &resource, &act, "", now).unwrap();
-    let body = xenonet_runtime::intents::make_body(&row, &authority);
+    let (resource, act) = xenonet_service::compose::runtime::intents::intend_of(&row).unwrap();
+    row.id = xenonet_service::compose::runtime::intents::id_of(&resource, &act);
+    let authority = xenonet_service::compose::runtime::ground::authority(&identity, true, &resource, &act, "", now).unwrap();
+    let body = xenonet_service::compose::runtime::intents::make_body(&row, &authority);
     (row, body)
 }
 

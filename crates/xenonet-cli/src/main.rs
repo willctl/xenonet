@@ -160,16 +160,16 @@ fn serve(args: &[String]) -> i32 {
             };
             // The one store, which every part that keeps something keeps in;
             // what XenoNet saves for you is its first core.
-            let db = xenonet_runtime::open_store(&config.state_dir, env);
+            let db = xenonet_service::compose::runtime::open_store(&config.state_dir, env);
             if let Some(db) = &db {
                 // The demo's made-up world makes the same ids each run.
                 if config.demo {
-                    xenonet_runtime::seed_ids(db, "demo");
+                    xenonet_service::compose::runtime::seed_ids(db, "demo");
                 }
-                cores.store = std::sync::Arc::new(xenonet_runtime::saved::Saved::new(db.clone()));
+                cores.store = std::sync::Arc::new(xenonet_saved::Saved::new(db.clone()));
             }
             xenonet_state::runtime::wire(&mut cores, &map, demo, env);
-            let setup = xenonet_runtime::runtime::Setup {
+            let setup = xenonet_service::compose::runtime::Setup {
                 demo: config.demo,
                 actors: config.actors,
                 port: config.port,
@@ -181,18 +181,18 @@ fn serve(args: &[String]) -> i32 {
                 runs_bin: config.runs_bin.clone(),
                 permission_hold_ms: config.permission_hold_ms,
                 launcher_exec: config.launcher_exec.clone(),
-                made_up: xenonet_runtime::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
+                made_up: xenonet_service::compose::runtime::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
                 db,
             };
             // The engine's world, which the network's link plugs into once
             // the service has made it.
             let connect = xenonet_service::compose::connect::ConnectDriver::new(&setup);
-            if let Some(world) = xenonet_runtime::wire(&mut cores, setup, env) {
+            if let Some(world) = xenonet_service::compose::runtime::wire(&mut cores, setup, env) {
                 // The apps that start over ACP, on the generic ACP client.
                 xenonet_service::compose::acp::plug(&world);
                 cores.connect = std::sync::Arc::new(connect);
                 cores.on_net = Some(std::sync::Arc::new(move |svc: &dyn NetLink| {
-                    xenonet_runtime::network::plug(&world, svc);
+                    xenonet_service::compose::runtime::network::plug(&world, svc);
                 }));
             }
             let app = xenonet_service::compose::app::Settings {

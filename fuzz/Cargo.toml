@@ -18,7 +18,8 @@ members = ["."]
 # libfuzzer-sys is the only crate the workspace doesn't have already;
 # async-trait and tokio are for the service's routes and its stand-in cores.
 # The network's targets read xenonet-net's envelopes, chain and services, and the
-# engine's runtime (xenonet-runtime) for the bodies other hosts send.
+# engine's runtime (xenonet-service's compose/runtime/) for the bodies other
+# hosts send.
 [dependencies]
 async-trait = "0.1"
 libfuzzer-sys = "0.4"
@@ -51,7 +52,7 @@ xenonet-schema = { path = "../crates/xenonet-schema" }
 xenonet-service = { path = "../crates/xenonet-service" }
 xenonet-sources = { path = "../crates/xenonet-sources" }
 xenonet-state = { path = "../crates/xenonet-state" }
-xenonet-runtime = { path = "../crates/xenonet-runtime" }
+xenonet-saved = { path = "../crates/xenonet-saved" }
 
 [[bin]]
 name = "json"

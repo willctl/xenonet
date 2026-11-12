@@ -5,8 +5,8 @@
 //! governance was last synced. A `Facts` is a snapshot, taken for one
 //! decision. What only the engine holds (the asks waiting, consent rows,
 //! revocations, actors' allow scopes, another machine's token roots as an
-//! act carried them) is the runtime's to add over it (xenonet-runtime's
-//! ground).
+//! act carried them) is the runtime's to add over it (the service's
+//! compose::runtime::ground).
 
 use crate::identity::Identity;
 use std::sync::Arc;

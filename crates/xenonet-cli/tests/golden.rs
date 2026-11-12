@@ -578,7 +578,7 @@ fn agents_above() -> &'static [&'static str] {
     static ABOVE: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     ABOVE.get_or_init(|| {
         xenonet_platforms::install();
-        let sys = xenonet_runtime::procs::System::new();
+        let sys = xenonet_service::compose::runtime::procs::System::new();
         let me = f64::from(std::process::id());
         sys.procs.chain(&mut sys.io(), Some(me), true, false).unwrap_or_default().into_iter().filter_map(|l| l.agent).collect()
     })

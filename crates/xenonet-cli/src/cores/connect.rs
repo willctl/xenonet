@@ -9,7 +9,7 @@ use crate::sys;
 use serde_json::Value;
 use xenonet_adapter::connect::{Connect, Instance, Machine, Options, Problem};
 use xenonet_os::fs::FsError;
-use xenonet_runtime::fs;
+use xenonet_service::compose::runtime::fs;
 
 /// This computer: its files, and the agents' CLIs on PATH.
 struct Here;

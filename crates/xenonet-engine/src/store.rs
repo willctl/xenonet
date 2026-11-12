@@ -4,7 +4,7 @@
 //! targets, and delivery's policy, wake budget and audit.
 //!
 //! The engine defines this and depends on no store: the composition gives
-//! it one (xenonet-runtime's `store::Store`, over xenonet-store's tables).
+//! it one (the service's `compose::runtime::store::Store`, over xenonet-store's tables).
 //! A row comes back as a JSON object in its columns' order, every integer
 //! a number, as the engine has always read them; a failure as the store
 //! words it, with its code (`ERR_SQLITE_ERROR`) when it has one, which

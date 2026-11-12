@@ -1,5 +1,5 @@
 //! The engine's store for its tests: the real tables, in a store in
-//! memory, as xenonet-runtime's `store::Store` gives them to the engine.
+//! memory, as the service's `compose::runtime::store::Store` gives them to the engine.
 //! A copy of that impl, since the engine's own tests can't link the
 //! runtime's.
 

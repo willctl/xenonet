@@ -1,4 +1,4 @@
-// The person's intents (crates/xenonet-runtime/src/intents.rs): work asked
+// The person's intents (crates/xenonet-service/src/compose/runtime/intents.rs): work asked
 // for here, done on the machine it names, or on any machine their
 // delegation names, under one of their delegations. The view lists them
 // with how each stands, who took one for any machine, and on whom one not

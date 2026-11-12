@@ -516,7 +516,7 @@ async fn a_project_space_is_tied_by_its_signed_marker_not_its_folder() {
     db.set_owner(Arc::new(|| xenonet_store::projects::Owner { person: Some(WILL.into()), salt: Some([7; 32]) }));
     let (lith, agent) = (SeedSigner::from_seed(&[1; 32], KeyHome::File).expect("a key"), SeedSigner::from_seed(&[2; 32], KeyHome::File).expect("a key"));
     db.set_context_key(&lith.public().id(), "xenolith", &["aa01".into()], i64::MAX / 2, 0).expect("kept");
-    let store = Saved::new(Arc::new(xenonet_runtime::saved::Saved::new(db)));
+    let store = Saved::new(Arc::new(xenonet_saved::Saved::new(db)));
     let live = Live::new(&[(cfg.claude_projects_dir.clone(), "claude".into())], None, false, &cfg.home_dir, vendor.clone());
     let s = MapState::new(cfg, store, vendor, &WireEnv::new("0.0.0"), Readers::Real, live);
     let page = "wiki:project:atlas-notes/notes";

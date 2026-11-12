@@ -1679,7 +1679,7 @@ mod tests {
         let mut cores = Cores::pending(false, false);
         cores.verify = Arc::new(Window);
         // The local door and the registry as the composition root wires them.
-        cores.door = xenonet_runtime::door::local();
+        cores.door = xenonet_door::local();
         cores.apps = xenonet_platforms::registry();
         let home = |k: &str| (k == "HOME" || k == "USERPROFILE").then(|| "/home/nova".to_string());
         let mut config = crate::config::Config::from(&["--demo".to_string(), "--dev".to_string()], &home);

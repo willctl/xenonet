@@ -733,7 +733,7 @@ async fn map(w: &World, c: &mut Check) {
     // The ids it mints, the same every run.
     db.use_ids(xenonet_model::ids::Ids::seeded("golden"));
     let tick = clock.clone();
-    let store = Saved::new(Arc::new(xenonet_runtime::saved::Saved::with_clock(db, Arc::new(move || tick.now()))));
+    let store = Saved::new(Arc::new(xenonet_saved::Saved::with_clock(db, Arc::new(move || tick.now()))));
     let remembered = xenonet_text::json::parse(&std::fs::read_to_string(Path::new(&cfg.state_dir).join("state.json")).expect("the fixture's state")).expect("JSON");
     seed(&store, &remembered["identities"]);
     let roots: Vec<(String, String)> = xenonet_adapter::platforms().iter().filter_map(|p| Some((transcript_dirs(&cfg, p.id()).into_iter().next()?, p.id().to_string()))).collect();

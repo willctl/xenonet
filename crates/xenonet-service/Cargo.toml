@@ -72,11 +72,17 @@ xenonet-id.workspace = true
 # log's file (serve.rs).
 xenonet-model.workspace = true
 xenonet-schema.workspace = true
-# The composition's connect driver (compose/connect.rs): the runtime's
-# files and processes, the setup it's made from, and XenoNet's install
-# (the xenonet command the hooks run, the instances); and the local door's
-# decisions, which every service's cores get (serve.rs's wire_root).
-xenonet-runtime.workspace = true
+# The local door's decisions, which every service's cores get (serve.rs's
+# wire_root), and what XenoNet saves for you, which the engine's runtime
+# (compose/runtime/) finds checkouts with.
+xenonet-door.workspace = true
+xenonet-saved.workspace = true
+# A webhook wake follows no redirect (compose/runtime/wakes.rs), and its
+# URL is read as the WHATWG standard reads one.
+url.workspace = true
+# The engine runtime's lifecycle and health, listed with the map's blocks.
+xenonet-blocks.workspace = true
+# XenoNet's install (the xenonet command the hooks run, the instances).
 xenonet-components.workspace = true
 # The composition's other cores (compose/app.rs): refusals, the doctor,
 # and the MCP catalog, with Grok Build's config.toml, which it reads
@@ -99,6 +105,8 @@ xenonet-acp.workspace = true
 futures.workspace = true
 
 [dev-dependencies]
+# The demo's world, which tests/runtime_actors.rs names its nodes from.
+xenonet-demo.workspace = true
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
 # The network tests' person chain entries (a revocation, a new device).

@@ -40,8 +40,8 @@ xenonet-adapter = { workspace = true, features = ["testing"] }
 ruzstd.workspace = true
 xenonet-platforms.workspace = true
 # What XenoNet saves for you, kept in a store in memory, as the service
-# keeps it (the runtime's Store core).
-xenonet-runtime.workspace = true
+# keeps it (the Store core).
+xenonet-saved.workspace = true
 xenonet-store.workspace = true
 # Space markers signed with made-up keys, as Xenolith signs them.
 xenonet-id.workspace = true
