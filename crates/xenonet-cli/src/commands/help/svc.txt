@@ -4,8 +4,9 @@ machine's own XenoNet, as if it ran there:
 
   http://127.0.0.1:<its XenoNet's port>/api/svc/<this host>/<name>/<path>
 
-The request crosses sealed, like everything between machines, and the
-gateway can't read it. XenoNet knows nothing of what the service is.
+The request goes straight between the two machines, encrypted, and no
+gateway or relay can read it. XenoNet knows nothing of what the service
+is.
 
   xenonet svc list [--json]        what this machine publishes
   xenonet svc unpublish <name>     takes a service off the network
@@ -22,9 +23,9 @@ This machine's XenoNet sends the service each request with a Forwarded
 header naming the calling host (Forwarded: by=xenonet;for=laptop). Only
 the caller's Authorization, Content-Type, Accept and User-Agent headers
 cross, and the answer comes back without Set-Cookie. A request's body is
-at most 1 MiB, an answer's 4 MiB, and each host may call each service
-300 times a minute. A caller waits 90 s at most, and gets 503 when the
-host is offline.
+at most 8 MiB, and so is an answer's, and each host may call each
+service 300 times a minute. A caller waits 90 s at most, and gets 503
+when the host is offline.
 
 A service with no sign-in of its own is open to every program on every
 host allowed to call it: give it its own tokens, or name the hosts that

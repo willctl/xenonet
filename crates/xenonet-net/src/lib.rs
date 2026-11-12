@@ -30,8 +30,8 @@
 //! - `ground`: the facts this machine decides incoming acts on
 //!   (`xenonet_authz::Ground`), and the `Governance` the engine reads them
 //!   through.
-//! - `svc`: services a host publishes to the network, and requests to
-//!   other hosts' services, in `svc` frames.
+//! - `svc`: services a host publishes to the network: the checks at both
+//!   ends of a request to one.
 //! - `doctor`: what the doctor says about the network, from its files.
 //!
 //! The transport that replaces the gateway (phase 5), beside it until the
@@ -65,6 +65,9 @@
 //!   check of the chain from its genesis; another program's join is a
 //!   `JoinTarget` of its own. `ticket`'s gateway proofs stay beside it for
 //!   the gateway's join route until the gateway goes.
+//! - `svc2`: `xenonet/svc/2`, one bi stream per request: services members
+//!   publish, and the window's reads of another machine's transcripts
+//!   under a per-launch window key its device certified.
 
 pub mod admission;
 pub mod codec;
@@ -97,6 +100,7 @@ pub mod share;
 pub mod sim;
 pub mod sink;
 pub mod svc;
+pub mod svc2;
 pub mod ticket;
 
 /// The feeds (xenonet-log's), as the network carries them, for the engine

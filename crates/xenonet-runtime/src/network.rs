@@ -396,9 +396,8 @@ pub fn receive(w: &Runtime, incoming: Incoming) {
             crate::asks::answer_in(w, &from, &body);
             Ok(())
         }
-        // The map's frames go to the relay and the hub, and services'
-        // requests and answers to the network's services: never the engine.
-        Kind::Relay | Kind::Svc => Ok(()),
+        // The map's frames go to the relay and the hub: never the engine.
+        Kind::Relay => Ok(()),
     };
     if let Err(e) = done {
         w.log("warn", "net.receive", &format!("a {} from {from} wasn't taken: {}", kind.as_str(), why(&e)));

@@ -503,13 +503,20 @@ async fn signal() {
 /// whether a console is open here, from Desktop's window as it last said
 /// and the pages reading the event stream.
 fn plug_hub(ctx: &Arc<Ctx>, net: Option<&Arc<NetService>>, port: u16, window: &Arc<Mutex<Option<String>>>) {
+    let api: Arc<dyn crate::cores::SelfApi> =
+        Arc::new(crate::cores::HttpApi { port, timeout: Duration::from_secs(20), max_bytes: 8 << 20, own: Some(ctx.self_key.reveal().to_string()) });
+    // Window reads from other machines (svc/2) read this service as the
+    // relay does: the network decided what they may read.
+    if let Some(svc) = net {
+        svc.nodes().common().set_reads(Arc::new(SelfReads(api.clone())));
+    }
     let Some(hub) = ctx.cores.hub.clone() else { return };
     if let Some(svc) = net {
         hub.plug_net(crate::cores::HubNet {
             net: svc.net(),
             sinks: svc.sinks().clone(),
             events: ctx.events.clone(),
-            api: Arc::new(crate::cores::HttpApi { port, timeout: Duration::from_secs(20), max_bytes: 16 << 20, own: Some(ctx.self_key.reveal().to_string()) }),
+            api,
             home: ctx.config.home.clone(),
             version: ctx.version.clone(),
             platform: crate::borrowed::platform().to_string(),
@@ -528,6 +535,16 @@ fn plug_hub(ctx: &Arc<Ctx>, net: Option<&Arc<NetService>>, port: u16, window: &A
             }
         }
     });
+}
+
+/// This service's own API, as svc/2's window reads read it.
+pub struct SelfReads(pub Arc<dyn crate::cores::SelfApi>);
+
+impl xenonet_net::svc2::LocalReads for SelfReads {
+    fn get(&self, path: &str) -> xenonet_net::dial::Fut<'_, Result<(u16, Value), (String, u16)>> {
+        let path = path.to_string();
+        Box::pin(async move { self.0.get(&path).await })
+    }
 }
 
 fn shutdown(ctx: &Arc<Ctx>, parts: &Parts) {

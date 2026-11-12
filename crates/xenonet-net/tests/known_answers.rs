@@ -96,27 +96,6 @@ fn answers() -> Value {
     let d = Draft { network: NET, id: "frm_00000000-0000-4000-8000-0000000000aa".into(), kind: "message", from: "studio", to: "laptop", at: 1_792_512_345_678 };
     let f = host_frame(&d, &studio, laptop.public(), &body, Some(secret(9))).unwrap();
     assert_eq!(open_frame(NET, &laptop, &f).unwrap(), body);
-    // A request to a service studio published, from laptop: sealed for
-    // studio, as every frame between hosts is.
-    let svc_body = json!({
-        "schema": "network/svc/v1",
-        "op": "request",
-        "id": "svq_000102030405060708090a0b0c0d0e0f",
-        "name": "xenolith",
-        "method": "GET",
-        "path": "/sync/v1/spaces/project/atlas/pages",
-        "headers": [["authorization", "Bearer xenolith_test"]],
-        "body": "",
-    });
-    let svc = host_frame(
-        &Draft { kind: "svc", from: "laptop", to: "studio", id: "frm_00000000-0000-4000-8000-0000000000cc".into(), ..d },
-        &laptop,
-        studio.public(),
-        &svc_body,
-        Some(secret(10)),
-    )
-    .unwrap();
-    assert_eq!(open_frame(NET, &studio, &svc).unwrap(), svc_body);
     let g = gateway_frame(
         &Draft { kind: "ping", from: "studio", to: "laptop", id: "frm_00000000-0000-4000-8000-0000000000bb".into(), ..d },
         &studio,
@@ -165,12 +144,6 @@ fn answers() -> Value {
             "sealingHead": f.sealing_head(NET),
             "head": f.head(NET),
             "frame": f.to_json(),
-        },
-        "svcFrame": {
-            "ephemeralSecret": b64(&secret(10)),
-            "body": svc_body,
-            "head": svc.head(NET),
-            "frame": svc.to_json(),
         },
         "gatewayFrame": { "head": g.head(NET), "frame": g.to_json() },
         "ticket": {
@@ -243,10 +216,6 @@ fn the_fixtures_check_from_their_own_values() {
     let studio_in_roster = v["roster"][0]["host"]["machine"].clone();
     assert_eq!(studio_in_roster, machine.to_json(), "the roster's key for studio's machine");
     entry.verify(&machine).unwrap();
-    let s = Frame::parse(&v["svcFrame"]["frame"]).unwrap();
-    assert_eq!((s.kind.as_str(), s.head(net)), ("svc", v["svcFrame"]["head"].as_str().unwrap().to_string()));
-    assert!(s.verify(net, laptop.public()));
-    assert_eq!(open_frame(net, &studio, &s).unwrap(), v["svcFrame"]["body"]);
     let g = Frame::parse(&v["gatewayFrame"]["frame"]).unwrap();
     assert!(g.verify(net, studio.public()));
     let t = &v["ticket"];

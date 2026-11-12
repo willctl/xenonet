@@ -1,13 +1,21 @@
 // Services through the network (docs/design/network.md, "Services through
 // the network"): three services in this process, each with its own state
-// folder. hub founds the network and is its LAN-only gateway on a
-// loopback port the OS picks; studio and laptop join. studio publishes a
-// made-up HTTP service, and laptop's programs reach it at
-// /api/svc/studio/<name>/… on laptop's own API: an allowlisted path passes
-// and one outside it is refused; the service is sent laptop's id in
-// Forwarded, never a caller's own, and the caller's bearer untouched; the
-// size caps hold; a host outside --hosts is refused; and with studio
-// offline, laptop answers 503 at once.
+// folder and its own iroh endpoint on loopback. hub founds the network and
+// is its LAN-only gateway (joining still goes through it); studio and
+// laptop join. Requests go on svc/2 between the two machines, never
+// through the gateway. studio publishes a made-up HTTP service, and
+// laptop's programs reach it at /api/svc/studio/<name>/… on laptop's own
+// API: an allowlisted path passes and one outside it is refused; the
+// service is sent laptop's id in Forwarded, as the connection
+// authenticated it, never a caller's own, and the caller's bearer
+// untouched; the size caps hold; a host outside --hosts is refused; and
+// with studio offline, laptop answers 503 at once.
+//
+// The window's reads of another machine's transcript go on svc/2 too:
+// hub's window (a window host's, the person's device on it certifying its
+// window key) reads studio's; an agent's read is refused; laptop, no
+// window host, is refused at studio; and once studio shares titles only,
+// its transcripts answer 403 while its stats still go.
 //
 // NET_TEST_LOG=1 prints what each host logs.
 
@@ -25,6 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{self, Cores};
+use xenonet_net::dial::Fut;
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
 use xenonet_os::log::Log;
@@ -108,7 +117,28 @@ fn options(dir: &Path, who: &str) -> Options {
     o.caps = Caps::default();
     // A caller waits 6 s here, not 90, so the timeout shows quickly.
     o.svc_ms = 6000;
+    // svc/2 runs on each machine's endpoint, on loopback, with no mDNS.
+    o.link = true;
+    o.bind = Some("127.0.0.1:0".parse().unwrap());
+    o.lan = xenonet_net::endpoint::LanLookup::Off;
     o
+}
+
+/// studio's own API as window reads read it: a made-up transcript, and
+/// each path read.
+#[derive(Default)]
+struct Reads(Mutex<Vec<String>>);
+
+impl xenonet_net::svc2::LocalReads for Reads {
+    fn get(&self, path: &str) -> Fut<'_, Result<(u16, Value), (String, u16)>> {
+        self.0.lock().unwrap().push(path.to_string());
+        let body = if path.contains("/transcript") {
+            json!({ "id": "claude:abc", "entries": [{ "role": "user", "text": "hello" }], "cursor": null })
+        } else {
+            json!({ "id": "claude:abc", "turns": 3 })
+        };
+        Box::pin(async move { Ok((200, body)) })
+    }
 }
 
 struct Host {
@@ -238,7 +268,7 @@ async fn made_up_service(seen: Arc<Mutex<Vec<Seen>>>) -> u16 {
                         let (status, out): (u16, Vec<u8>) = match path.as_str() {
                             "/sync/v1/echo" => (201, json!({ "method": method, "target": target, "body": String::from_utf8_lossy(&body) }).to_string().into_bytes()),
                             "/sync/v1/large" => (200, vec![b'l'; 3 << 20]),
-                            "/sync/v1/big" => (200, vec![b'b'; (4 << 20) + 1]),
+                            "/sync/v1/big" => (200, vec![b'b'; (8 << 20) + 1]),
                             "/sync/v1/slow" => {
                                 tokio::time::sleep(Duration::from_secs(10)).await;
                                 (200, b"late".to_vec())
@@ -279,6 +309,13 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     for h in [&gw, &a, &b] {
         live(h, 3).await;
     }
+    // Each finds the others' endpoints, from the address records in their
+    // presence (the engine's, sent here by hand), and connects on link/2.
+    for (i, h) in [&gw, &a, &b].into_iter().enumerate() {
+        let body = json!({ "schema": "network/presence/v1", "counter": i + 1, "full": true, "agents": [], "removed": [], "you": false, "roster": "" });
+        h.svc.net().send(xenonet_model::ops::Outgoing::new(xenonet_model::ops::To::All, xenonet_model::ops::Kind::Presence, body)).unwrap();
+    }
+    until("link/2 between all three", 20, || async { [&gw, &a, &b].iter().all(|h| h.svc.node().shared().link2().is_some_and(|t| t.links.peers().len() == 2)) }).await;
 
     let seen = Arc::new(Mutex::new(Vec::new()));
     let port = made_up_service(seen.clone()).await;
@@ -322,7 +359,7 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
 
     // An allowlisted path passes, with the caller's bearer untouched and
     // its query as it came. The service is told the call came from laptop,
-    // as the frame's signature proved it, and nothing the caller said
+    // as the connection authenticated it, and nothing the caller said
     // about forwarding crosses.
     let (s, h, body) = b
         .call(
@@ -354,7 +391,7 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     }
     // And its answer comes back without its cookie or hop-by-hop headers.
     assert_eq!((header(&h, "x-kept"), header(&h, "set-cookie"), header(&h, "keep-alive")), (Some("yes"), None, None), "{h:?}");
-    // The gateway carried it and never had the bearer in the clear.
+    // The gateway never carried it.
     let gw_db = root.join("hub").join("state").join("network");
     for f in ["gateway.sqlite", "gateway.sqlite-wal"] {
         let bytes = std::fs::read(gw_db.join(f)).unwrap_or_default();
@@ -391,8 +428,8 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let (s, _, _) = b.call("GET", "/api/svc/studio/files/sync/v1/x", None, &[("sec-fetch-site", "cross-site")]).await;
     assert_eq!(s, 403);
 
-    // The size caps: a body over 1 MiB, an answer over 4 MiB.
-    let (s, h, _) = b.call("POST", "/api/svc/studio/files/sync/v1/echo", Some(&vec![b'x'; (1 << 20) + 1]), &[]).await;
+    // The size caps: a body over 8 MiB, an answer over 8 MiB.
+    let (s, h, _) = b.call("POST", "/api/svc/studio/files/sync/v1/echo", Some(&vec![b'x'; (8 << 20) + 1]), &[]).await;
     assert_eq!((s, header(&h, "x-xenonet-refused")), (413, Some("too-big")));
     let (s, _, body) = b.call("POST", "/api/svc/studio/files/sync/v1/echo", Some(&vec![b'x'; 1 << 20]), &[]).await;
     assert_eq!((s, json_of(&body)["body"].as_str().map(str::len)), (201, Some(1 << 20)), "1 MiB goes");
@@ -422,6 +459,37 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     assert_eq!(s, 200, "{}", String::from_utf8_lossy(&out));
     let (s, h, _) = gw.call("GET", "/api/svc/studio/private/sync/v1/x", None, &[]).await;
     assert_eq!((s, header(&h, "x-xenonet-refused")), (404, Some("not-published")));
+
+    // The window's reads of studio's transcripts, on svc/2.
+    let reads = Arc::new(Reads::default());
+    a.svc.nodes().common().set_reads(reads.clone());
+    let transcript = "/api/session/%40studio%3Aclaude%3Aabc/transcript?limit=120";
+    let (s, v) = gw.window("GET", transcript, Value::Null).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!((v["host"].clone(), v["id"].clone(), v["entries"][0]["text"].clone()), (json!("studio"), json!("@studio:claude:abc"), json!("hello")));
+    assert_eq!(reads.0.lock().unwrap().as_slice(), ["/api/session/claude:abc/transcript?limit=120"]);
+    // Another page of it, under the same window key.
+    let (s, _) = gw.window("GET", "/api/session/%40studio%3Aclaude%3Aabc/stats", Value::Null).await;
+    assert_eq!(s, 200);
+    // An agent's read of another machine's transcript: refused here, with
+    // or without the window's key.
+    gw.peers.agent.store(true, Ordering::SeqCst);
+    let (s, v) = gw.window("GET", transcript, Value::Null).await;
+    assert_eq!(s, 403, "{v}");
+    gw.peers.agent.store(false, Ordering::SeqCst);
+    let (s, _, _) = gw.call("GET", transcript, None, &[]).await;
+    assert_eq!(s, 403);
+    // laptop is no window host: studio refuses its window.
+    let (s, v) = b.window("GET", "/api/session/%40studio%3Aclaude%3Aabc/transcript", Value::Null).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("not-window")), "{v}");
+    // studio shares titles only: its transcripts stay on it, its stats go.
+    let (s, v) = a.window("PUT", "/api/net/settings", json!({ "titlesOnly": true })).await;
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = gw.window("GET", transcript, Value::Null).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("titles-only")), "{v}");
+    let (s, _) = gw.window("GET", "/api/session/%40studio%3Aclaude%3Aabc/stats", Value::Null).await;
+    assert_eq!(s, 200);
+    assert_eq!(reads.0.lock().unwrap().len(), 3, "none of the refused reads reached studio's API");
 
     // studio goes offline: laptop says so at once, without waiting.
     a.svc.stop();

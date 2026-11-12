@@ -48,6 +48,11 @@ impl Purpose {
     /// A Xenolith's hello on `xenolith/sync/2`: its context key speaking
     /// for its endpoint on one connection.
     pub const SYNC_HELLO: Purpose = Purpose("xenolith-sync-hello/1");
+    /// A person's device certifying the key their window on one machine
+    /// reads other machines' transcripts with (`xenonet-net`'s `svc2`).
+    pub const WINDOW: Purpose = Purpose("xenonet-window/1");
+    /// One read by that window key.
+    pub const WINDOW_READ: Purpose = Purpose("xenonet-window-read/1");
     /// A signature nothing verifies, which the doctor times a key with:
     /// its own tag, so it can't be taken for any other.
     pub const PROBE: Purpose = Purpose("xenonet-probe/1");

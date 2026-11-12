@@ -462,6 +462,8 @@ pub struct Links {
     changed: Notify,
     /// Where connections on the mesh's other protocols go (the forwards').
     others: std::sync::RwLock<Option<Others>>,
+    /// Where svc/2's connections go.
+    services: std::sync::RwLock<Option<Others>>,
 }
 
 /// What takes the connections a mesh admitted on protocols other than its
@@ -486,6 +488,7 @@ impl Links {
             keep: Mutex::new(Keep::default()),
             changed: Notify::new(),
             others: std::sync::RwLock::new(None),
+            services: std::sync::RwLock::new(None),
         })
     }
 
@@ -493,6 +496,12 @@ impl Links {
     /// `others` from now on (the forwarded ALPNs'); without, they close.
     pub fn hand_others(&self, others: Others) {
         *xenonet_os::sync::ReadWrite::writing(&self.others) = Some(others);
+    }
+
+    /// Hands the connections the mesh admits on svc/2 to `services` from
+    /// now on; without, they close.
+    pub fn hand_services(&self, services: Others) {
+        *xenonet_os::sync::ReadWrite::writing(&self.services) = Some(services);
     }
 
     pub fn protocol(&self) -> &Protocol {
@@ -541,11 +550,12 @@ impl Links {
         while let Some(link) = self.mesh.accept().await {
             if link.alpn() == self.protocol.alpn {
                 self.adopt(link);
+            } else if let Some(services) = xenonet_os::sync::ReadWrite::reading(&self.services).clone().filter(|_| link.alpn() == Alpn::Svc) {
+                services(link);
             } else if let Some(others) = xenonet_os::sync::ReadWrite::reading(&self.others).clone().filter(|_| !link.alpn().is_xenonet()) {
                 others(link);
             } else {
-                // join/2 and svc/2 are other doors' (phase 5's commits 14
-                // and 15), not this mesh's yet.
+                // join/2 runs on an endpoint of its own (`node_join`).
                 link.close(Close::Done);
             }
         }

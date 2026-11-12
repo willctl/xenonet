@@ -1,6 +1,8 @@
-//! Reads of another machine of the network through its relay
-//! (docs/design/network.md, section 7): a remote session's transcript and
-//! stats, and a collision on one host, only by XenoNet's own window
+//! Reads of another machine of the network (docs/design/network.md,
+//! section 7): a remote session's transcript and stats, over svc/2 under
+//! the window's key where this machine's endpoint runs and through the
+//! host's relay otherwise, and a collision on one host through its relay,
+//! only by XenoNet's own window
 //! (rules.rs: those rows are the window's when they name another
 //! machine), so a session here can't read another machine's transcripts.
 //! Every other route that takes an id refuses remote ones, since other
@@ -23,6 +25,7 @@ pub fn window_only_reply() -> Reply {
 
 pub struct HostRoutes {
     pub hub: Option<Arc<dyn Hub>>,
+    pub net: Option<Arc<dyn crate::parts::Network>>,
 }
 
 // ^(?:claude|codex):[0-9A-Za-z][0-9A-Za-z._-]{0,127}$
@@ -95,8 +98,10 @@ impl HostRoutes {
             if let Some((raw, what)) = rest.split_once('/') {
                 if !raw.is_empty() && (what == "transcript" || what == "stats") && req.method == "GET" {
                     let Some(id) = decode_uri_component(raw) else { return Ok(None) };
-                    let Some(hub) = self.hub.as_ref().filter(|_| id.starts_with('@')) else { return Ok(None) };
-                    let Some((host, local)) = remote_session(Some(&id)).filter(|(h, _)| hub.has(h)) else {
+                    if !id.starts_with('@') || (self.hub.is_none() && self.net.is_none()) {
+                        return Ok(None);
+                    }
+                    let Some((host, local)) = remote_session(Some(&id)) else {
                         return Ok(Some(Reply::error(404, "XenoNet doesn't know that session")));
                     };
                     let mut params: Vec<(&str, String)> = Vec::new();
@@ -112,18 +117,32 @@ impl HostRoutes {
                     }
                     let pairs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
                     let q = if pairs.is_empty() { String::new() } else { format!("?{}", search(&pairs)) };
-                    let r = hub.get(&host, &format!("/api/session/{local}/{what}{q}")).await?;
-                    let body = if r.body.is_object() {
-                        let mut b = r.body.clone();
+                    let path = format!("/api/session/{local}/{what}{q}");
+                    let read = match &self.net {
+                        Some(net) => net.window_read(&host, &path).await,
+                        None => None,
+                    };
+                    let (status, body) = match read {
+                        Some(r) => r,
+                        None => {
+                            let Some(hub) = self.hub.as_ref().filter(|h| h.has(&host)) else {
+                                return Ok(Some(Reply::error(404, "XenoNet doesn't know that session")));
+                            };
+                            let r = hub.get(&host, &path).await?;
+                            (r.status, r.body)
+                        }
+                    };
+                    let body = if body.is_object() {
+                        let mut b = body;
                         if b.get("id").is_some_and(Value::is_string) {
                             b["id"] = json!(id);
                         }
                         b["host"] = json!(host);
                         b
                     } else {
-                        r.body
+                        body
                     };
-                    return Ok(Some(Reply::json(r.status, body)));
+                    return Ok(Some(Reply::json(status, body)));
                 }
             }
         }

@@ -150,9 +150,9 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
 - A2A behind the front door (section 12).
 - Services through the network (section 14): `xenonet svc`, its owner's
   routes under `/api/net/svc`, the callers' `/api/svc/…` on each host's
-  own API, and `svc` frames (`network/svc/v1`,
-  `crates/xenonet-net/src/svc.rs`). A follower of Xenolith's on one host
-  syncs with its curator on another through them.
+  own API, and svc/2 streams between the two machines (`network/svc/v2`,
+  `crates/xenonet-net/src/svc.rs` and `svc2.rs`). A follower of
+  Xenolith's on one host syncs with its curator on another through them.
 - `crates/xenonet-service/tests/net_engine.rs` runs three services with the
   real engine on each: joining with tickets from the gateway's host and from
   another window host, presence, messages with receipts and replies, a gap
@@ -168,18 +168,24 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   shares titles only keeps its transcripts; a `gap` brings a fresh
   snapshot; and the relay stops once the subscription lapses. The
   `net_relay` fuzz target reads asks and answers on both sides.
-- `crates/xenonet-service/tests/net_svc.rs` runs three services and a
-  made-up HTTP service published on one host and reached from another: an
-  allowlisted path passes and others are refused, the service is sent the
-  caller's id in `Forwarded` and the caller's bearer untouched, the size
-  caps and `--hosts` hold, a program that goes away stops the wait, a slow
-  service is a 504, and an offline host a 503 at once.
-  `crates/xenonet-net/tests/svc_replay.rs` sends a svc request dated ahead
-  again after its arrival is two minutes old, and after the gateway sets
-  the host's clock back, and the service is called once. `tests/net.rs`
-  checks that relay and svc frames never reach the gateway's store. With Xenolith built, a real follower pulls a page from a real
-  curator through `/api/svc/<host>/xenolith`. The `net_svc` fuzz target
-  reads paths, requests, answers, addresses and headers.
+- `crates/xenonet-service/tests/net_svc.rs` runs three services, each
+  with its iroh endpoint on loopback, and a made-up HTTP service published
+  on one host and reached from another over svc/2: an allowlisted path
+  passes and others are refused, the service is sent the caller's id in
+  `Forwarded` and the caller's bearer untouched, the size caps and
+  `--hosts` hold, a program that goes away stops the wait, a slow service
+  is a 504, and an offline host a 503 at once. The window's reads go the
+  same way: a window host's window reads another machine's transcript, an
+  agent's read is refused, a machine that isn't a window host is refused,
+  and a machine that shares titles only answers 403 for its transcripts.
+  `crates/xenonet-net/tests/svc_replay.rs` sends one request again on a
+  second stream and on a new connection, and the service is called once;
+  a stream naming a network the two don't share is refused. `svc2_tests.rs`
+  has the window key's rules. `tests/net.rs` checks that relay frames
+  never reach the gateway's store. With Xenolith built, a real follower
+  pulls a page from a real curator through `/api/svc/<host>/xenolith`. The
+  `net_svc` fuzz target reads paths, request and answer heads, window
+  reads, addresses and headers.
 
 Rules beyond the sections below:
 
@@ -254,6 +260,8 @@ carrying the network's traffic, which still goes through the gateway:
   Frames still carry the feeds.
 - Joining over `xenonet/join/2` (section 4), which is how
   `xenonet net invite` and `xenonet net join <invite> <code>` work.
+- Services and the window's reads of other machines over
+  `xenonet/svc/2` (section 14), one stream per request, with no gateway.
 - The chain's `relays`, `mailboxes` and `rekey` ops, and signed address
   records (section 3). No mailbox holds envelopes yet.
 - `sim`: a turmoil harness for the transport, and `formal/delivery.qnt`
@@ -347,7 +355,7 @@ request to its handler by path before anything else is checked:
 - The network routes have their own limits:
   - 1 MiB for an up batch;
   - 16 MiB for a relay batch (`frames?relay=1`), which carries the map's
-    relay frames or one service's `svc` frame, 12 MiB at most each: a
+    relay frames, 12 MiB at most each: a
     body of 8 MiB at most, sealed and in base64;
   - no time limit on the down stream, which ends itself (below).
 - The front door reads bodies as streams and counts as it reads.
@@ -480,9 +488,9 @@ xenonet-net/1
   time.
 - There's no forward secrecy for what waits in a queue. So frames that
   carry a secret are never queued, and expire in 60 s. Those are the
-  actor token answer and the ticket checks. Services' `svc` frames, which
-  may carry a service's own credential, are never queued either, and a
-  host drops one older than two minutes (section 14).
+  actor token answer and the ticket checks. Services' requests, which may
+  carry a service's own credential, go on svc/2 between the two machines
+  and never through the gateway (section 14).
 
 **The envelope** (`xenonet-net/2`, `crates/xenonet-net/src/envelope.rs`)
 is what carries one feed entry, or one live presence delta, between two
@@ -836,9 +844,10 @@ unchanged.
   shaped reads (the map, the live state and the engine's state) only, with
   detail off.
 - **Another machine's transcripts and stats are the window's alone.** A
-  console's host reads them through the relay only for its own window (its
-  credential, and no token), never for an agent, an actor or a browser tab
-  there.
+  console's host reads them only for its own window (its credential, and
+  no token), never for an agent, an actor or a browser tab there: over
+  svc/2 under the window's key (section 14) where its endpoint runs, and
+  through the relay otherwise.
 - **The relay's privacy rules stay:**
   - home folders cross as `~`;
   - no transcripts are cached;
@@ -961,8 +970,8 @@ unchanged.
   `handoff`, `operator`, `roster` and `gateway` frames, in
   `<state>/network/gateway.sqlite`. It waits a week, up to 10,000 frames
   or 50 MB per host.
-- Presence, claims, relay and svc frames for a host that's away are dropped:
-  it gets a full set when it's back. Relay and svc frames never reach the
+- Presence, claims and relay frames for a host that's away are dropped:
+  it gets a full set when it's back. Relay frames never reach the
   gateway's store even for a host that's linked: they wait in memory for
   its link.
 - When a queue is full, the oldest frame goes. The gateway sends a `gap`
@@ -1131,8 +1140,8 @@ message, a handoff or Xenolith. That keeps context selective, which the
 | Prompt injection across machines | Messages are framed as information. Bypassed sessions hold them. Hop and fan-out caps, and per-link limits: 600 frames and 60 messages a minute, and the map's relay frames, 120 a minute, apart |
 | An agent reading other machines' transcripts | Another machine's transcript, stats and diffs are read only for the window: its credential, and no token. A host serves its map only to a window host's console, and a host that shares titles only keeps its transcripts. The relay reads its own API with the service's own credential, through its allowlist of GETs |
 | A forged "from you" | An act as you carries your device's signature over that act, and an Allow, an admit or a widening your presence block for it; the receiver checks both against its own copy of your person chain. No frame's word on how it was checked is read |
-| Replay | Frame ids for a week. Relay and svc frame ids until their own date is two minutes old, against a floor that only rises, so a gateway that sets a host's clock back can't replay one; relay frames with their seq within a subscription too. Request nonces for 2 minutes; times within 60 s |
-| Keys and tokens leaking | Private keys stay in owner-only files, or the Secure Enclave on a Mac. Tickets are kept hashed. XenoNet keeps an actor token's revocation id, never the token. Nothing secret is queued, svc frames, which may carry a service's bearer, never reach the gateway's disk, and on a LAN-only gateway `/mcp` isn't served |
+| Replay | Frame ids for a week. Relay frame ids until their own date is two minutes old, against a floor that only rises, so a gateway that sets a host's clock back can't replay one; relay frames with their seq within a subscription too. Request nonces for 2 minutes; times within 60 s. A svc/2 request id once per caller for 15 minutes, a window read's nonce once, within two minutes of its time |
+| Keys and tokens leaking | Private keys stay in owner-only files, or the Secure Enclave on a Mac. Tickets are kept hashed. XenoNet keeps an actor token's revocation id, never the token. Nothing secret is queued, services' requests, which may carry a service's bearer, never go through the gateway, and on a LAN-only gateway `/mcp` isn't served |
 | A2A misuse | A2A clients are actors: gateway tokens, default-deny scopes, rate limits. Outbound calls go only to agents the person registered, by a pinned card, over https to public addresses unless allowed |
 | A service published to the network | Nothing is published until the owner does it, from the window or their own terminal. Targets are loopback IPs over plain http, never XenoNet's own ports; no redirects, proxy or name lookups. Only the paths named, checked once decoded; roster hosts, or the ones named; 300 requests a minute for each caller; the caller in `Forwarded` from the frame's signature; four headers in and no cookies out. A service with no auth of its own is open to every program on every allowed host |
 
@@ -1187,58 +1196,66 @@ XenoNet's API credential (`x-xenonet-credential`, from
 `<runtime>/api-<port>.cred`) as for any local route. `Authorization` is
 the service's own credential, never read as an actor's token.
 
-**Frames.** `svc` (`network/svc/v1`) has two bodies, keyed by a request
-id the caller makes (`svq_` and 32 hex digits):
+**svc/2.** Each request is one bi stream on the QUIC connection the two
+machines' endpoints hold (`xenonet/svc/2`, admitted like link/2: members
+of a network both are in, by each one's own chains). A stream carries a
+head (`network/svc/v2`, a u32 length and JSON) and then as many bytes of
+body as the head says, at most 8 MiB; the answer comes back on the same
+stream the same way. A request's head names its network, a request id
+the caller makes (`svq_` and 32 hex digits), the name, the method, the
+path (`rest` and its query) and the caller's `Authorization`,
+`Content-Type`, `Accept` and `User-Agent`; an answer's, the status, the
+headers and a `code` when XenoNet answered rather than the service.
+Nothing goes through the gateway, and nothing is kept: QUIC's TLS
+carries it between the two machines alone.
 
-- `request`: the name, method, path (`rest` and its query), the caller's
-  `Authorization`, `Content-Type`, `Accept` and `User-Agent`, and the body
-  in base64url;
-- `answer`: the status, headers and body, and a `code` when XenoNet
-  answered rather than the service.
-
-They're sealed and signed like every host frame, so the gateway sees the
-head only. Each goes up alone in a relay batch (`frames?relay=1`), since
-other frames are held to 64 KiB, with a bucket of 600 a minute at the
-gateway apart from the engine's and the map's. They're live only, since a
-request may carry the service's bearer:
-
-- The gateway never writes one to its store. It holds it in memory for
-  the host's link, as it does relay frames, and drops it when the host
-  isn't linked.
-- A host takes each relay or svc frame once. It drops one dated more than
-  two minutes before now by the gateway's clock, and keeps each id it took
-  until that's true of the frame's own date, so one dated ahead isn't
-  taken again later. The gateway sets each host's clock offset, so that
-  floor only rises: setting a host's clock back can't make a frame fresh
-  again. A host whose own clock jumps ahead takes no relay or svc frames
-  dated before the jump, less two minutes, until real time catches up.
+- **Who calls** is the connection's endpoint id, as the handshake
+  authenticated it, mapped to the member in the chain of the network the
+  head names. The connection must carry that network, so a service
+  published in one network never answers a member of only another over a
+  connection the two share (403 `not-in-network`).
+- **Once.** The publishing host keeps each caller's request ids for 15
+  minutes, and answers one sent again, on another stream or a new
+  connection, 409 `replayed` without calling the service.
 
 **The caller's host:**
 
-- It answers 503 before sending when its own link is down, or when the
-  gateway's last ping didn't list the target host as linked: the gateway
-  takes a live frame for an unlinked host as accepted and drops it.
-- It waits for the answer by the request's id, 90 s at most (504). A host
-  on the long-poll fallback adds up to 25 s a hop.
-- What waits is answered 503 as soon as the target goes unlinked or this
-  host's link drops, and at once when the gateway refuses the frame (429
-  for its rate, 413, else 502) or the batch doesn't reach it.
+- It answers 503 at once when it has no connection to the target, on
+  link/2 or through the gateway, and when a dial fails.
+- It waits for the answer on the stream, 90 s at most (504).
 - It waits on 256 requests at most, and 64 to one host, so a host that
   never answers holds a quarter of the places, for 90 s each.
 
+**The window's reads of another machine** go on svc/2 too, as a `window`
+head with no body: a session's transcript (`cursor`, `limit`) or its
+stats, nothing else. The window's machine makes a key once a launch, in
+memory, and the person's device on it certifies it once (one Touch ID):
+the person, the device, the key, the machine's endpoint id, and 12 hours.
+Each read is signed by that key over the network, both endpoint ids, a
+nonce, its time and the path. The machine read checks, in order: the
+caller is a window host in the network (403 `not-window`), the path (a
+machine that shares titles only answers its transcripts 403
+`titles-only`), the cert names the endpoint the connection came from
+(`cert-elsewhere`), the network's owner, and the device the chain names
+on that machine, still active in the person's chain, its signature and
+its 12 hours, the read within two minutes of its clock (`clock-skew`)
+and signed for it, and its nonce new (409 `replayed`); then 300 reads a
+minute from one machine. It reads its own API as the relay does, and
+answers its status and JSON.
+
 **The publishing host** checks, in order: the name is published (404),
-the caller may call (403), its rate (300 a minute for each caller host
+the caller may call (403), the request id is new (409), its rate (300 a minute for each caller host
 and service, 429), the method (GET, HEAD, POST, PUT, PATCH, DELETE or
-OPTIONS, 405), the path (400 or 403), and the body (1 MiB, 413). The
+OPTIONS, 405), the path (400 or 403), and the body (8 MiB, 413). The
 path's query is split off first and passed on as it came. The rest is
 percent-decoded strictly, refused with `..`, `.`, `//`, `;`, `\` or a
 control character in it, matched against the prefixes, and encoded again
 the one way, so the service is sent the path the allowlist matched.
 
-It rebuilds the request from the frame: the method, the target's prefix
+It rebuilds the request from the stream: the method, the target's prefix
 and the path, the body, and only the four headers above, then
 `Host: 127.0.0.1:<port>` and `Forwarded: by=xenonet;for=<caller>`, the
-caller being the frame's signature-checked sender. A `Forwarded`,
+caller being the member the connection authenticated. A `Forwarded`,
 `X-Forwarded-*` or `Via` from the caller never crosses. `Authorization`
 is never stripped or logged on either side. It forwards 32 requests at
 once at most, and 8 from one caller host, so no one host holds every
@@ -1247,7 +1264,7 @@ far and no further: each was let in by the person, and these caps keep a
 misbehaving one from shutting the others out.
 
 **On the way back,** `Set-Cookie`, hop-by-hop headers and what
-`Connection` names are dropped, on both hosts. An answer over 4 MiB is a
+`Connection` names are dropped, on both hosts. An answer over 8 MiB is a
 413. XenoNet's own refusals carry `X-XenoNet-Refused: <code>` and a JSON
 `{ error, code }`.
 
@@ -1277,10 +1294,9 @@ does `xenonet svc --help`.
 - `seq` is set by the gateway, per recipient, within an epoch.
 - **Gateway frames** are `hello`, `ping`, `gap`, `roster` and `removed`.
   They aren't sealed, and they're signed by the gateway's host key.
-- **Host frames** are `presence`, `message`, `relay`, `operator` and
-  `svc`. They're sealed and signed by the sending host.
-  `relay` and `svc` frames go up in relay batches of their own
-  (`frames?relay=1`).
+- **Host frames** are `presence`, `message`, `relay` and `operator`.
+  They're sealed and signed by the sending host. `relay` frames go up in
+  relay batches of their own (`frames?relay=1`).
 - A `message` frame carries the sending machine's feed
   (`network/message/v3`): an entry of it (xenonet-log's `feed`, signed by
   the machine signing key the roster lists for it), with the act's
@@ -1355,7 +1371,7 @@ any method a service takes: another host's published service (section
   to whoever hasn't acked them.
 - `<state>/network/gateway.sqlite`, on the gateway only: tickets (hashed),
   queues, frame ids, the epoch, and the last presence of each host. Never
-  relay or svc frames, which the gateway holds in memory only.
+  relay frames, which the gateway holds in memory only.
 - The store's engine tables: `net_presence` (the latest per host),
   `claims` (with the author and host), a `host` column on `messages` and
   `deliveries`, and `handoffs`.

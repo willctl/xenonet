@@ -12,12 +12,10 @@
 //! - `POST frames`: the up batch; each frame's signature is checked
 //!   against the roster before it's queued, a frame id seen in the last
 //!   week is accepted again without being queued again, and each link may
-//!   send 600 frames and 60 messages a minute. The map's relay frames and
-//!   services' svc frames go in batches of their own (`?relay=1`), each
-//!   kind in a bucket of its own (120 relay and 600 svc frames a minute).
-//!   They're never written to the store: they're handed to the host's
-//!   link in memory, and dropped when it isn't linked, since a svc frame
-//!   may carry a service's own credential.
+//!   send 600 frames and 60 messages a minute. The map's relay frames go
+//!   in batches of their own (`?relay=1`), in a bucket of their own (120
+//!   a minute). They're never written to the store: they're handed to the
+//!   host's link in memory, and dropped when it isn't linked.
 //! - `GET roster?from=n`, and `POST roster`, an entry from a host, which
 //!   the roster's own rules decide.
 //!
@@ -56,9 +54,6 @@ const FRAMES_A_MINUTE: f64 = 600.0;
 const MESSAGES_A_MINUTE: f64 = 60.0;
 /// The map's relay frames a link sends, in a bucket of their own.
 const RELAY_A_MINUTE: f64 = 120.0;
-/// Services' requests and answers a link sends, in a bucket of their own:
-/// a host lets each caller make 300 requests a minute to each service.
-const SVC_A_MINUTE: f64 = 600.0;
 /// A relay frame on the wire, at most: a body of `node::RELAY_BODY`, sealed
 /// and in base64url, with its head.
 pub const RELAY_FRAME_LIMIT: usize = 12 << 20;
@@ -158,7 +153,7 @@ struct Live {
     /// Its open streams, oldest first, each with what ends it.
     open: std::collections::VecDeque<(u64, Arc<Notify>)>,
     next: u64,
-    /// Relay and svc frames for it, in memory only, until its link reads
+    /// Relay frames for it, in memory only, until its link reads
     /// them: their lines, and when each came.
     held: std::collections::VecDeque<(std::time::Instant, String)>,
     held_bytes: usize,
@@ -175,10 +170,10 @@ impl Live {
     }
 }
 
-/// Relay and svc frames held in memory for one host's link, at most: room
+/// Relay frames held in memory for one host's link, at most: room
 /// for two of the largest.
 const HELD_BYTES: usize = 32 << 20;
-/// How long a relay or svc frame waits in memory for a host's link: a host
+/// How long a relay frame waits in memory for a host's link: a host
 /// drops one older than this (node.rs, RELAY_MS) anyway.
 const HELD_FOR: Duration = Duration::from_secs(120);
 
@@ -211,22 +206,16 @@ impl Bucket {
 }
 
 /// A link's rates: its frames, its messages among them, and the map's relay
-/// frames and services' svc frames apart.
+/// frames apart.
 struct Rates {
     frames: Bucket,
     messages: Bucket,
     relay: Bucket,
-    svc: Bucket,
 }
 
 impl Rates {
     fn full(now: f64) -> Rates {
-        Rates {
-            frames: Bucket::full(FRAMES_A_MINUTE, now),
-            messages: Bucket::full(MESSAGES_A_MINUTE, now),
-            relay: Bucket::full(RELAY_A_MINUTE, now),
-            svc: Bucket::full(SVC_A_MINUTE, now),
-        }
+        Rates { frames: Bucket::full(FRAMES_A_MINUTE, now), messages: Bucket::full(MESSAGES_A_MINUTE, now), relay: Bucket::full(RELAY_A_MINUTE, now) }
     }
 }
 
@@ -370,8 +359,8 @@ impl Gateway {
         self.live.locked().get(host).is_some_and(|l| l.linked(now))
     }
 
-    /// Hands a relay or svc frame's line to `host`'s link, in memory only,
-    /// never the store: a svc frame may carry a service's own credential.
+    /// Hands a relay frame's line to `host`'s link, in memory only,
+    /// never the store.
     /// false, and the frame dropped, when the host isn't linked.
     fn hand_over(&self, host: &str, line: &str, now: f64) -> bool {
         let mut live = self.live.locked();
@@ -401,7 +390,7 @@ impl Gateway {
         std::mem::take(&mut l.held).into_iter().filter(|(t, _)| t.elapsed() <= HELD_FOR).map(|(_, line)| line).collect()
     }
 
-    /// How many relay and svc frames wait in memory for `host`'s link.
+    /// How many relay frames wait in memory for `host`'s link.
     pub fn held(&self, host: &str) -> usize {
         self.live.locked().get(host).map_or(0, |l| l.held.len())
     }
@@ -720,17 +709,17 @@ impl Gateway {
                 continue;
             }
             if f.in_relay_batch() != relay_ok {
-                refuse("bad-kind", "relay and svc frames go in a relay batch of their own, and only they do");
+                refuse("bad-kind", "relay frames go in a relay batch of their own, and only they do");
                 continue;
             }
-            // A frame but a relay or svc one is small: presence, a message,
+            // A frame but a relay one is small: presence, a message,
             // a claim.
             if !relay_ok && v.to_string().len() > SMALL_LIMIT {
-                refuse("too-big", "a frame is at most 64 KiB, but a relay or svc frame");
+                refuse("too-big", "a frame is at most 64 KiB, but a relay frame");
                 continue;
             }
             if relay_ok && v.to_string().len() > RELAY_FRAME_LIMIT {
-                refuse("too-big", "a relay or svc frame is at most 12 MiB");
+                refuse("too-big", "a relay frame is at most 12 MiB");
                 continue;
             }
             if f.to == host || view.member(&f.to).is_none() {
@@ -753,9 +742,7 @@ impl Gateway {
                 // watching a busy host can't spend what the engine sends.
                 let mut rates = self.rates.locked();
                 let r = rates.entry(host.clone()).or_insert_with(|| Rates::full(now));
-                let over = if f.kind == "svc" {
-                    r.svc.take(SVC_A_MINUTE, now).err()
-                } else if relay_ok {
+                let over = if relay_ok {
                     r.relay.take(RELAY_A_MINUTE, now).err()
                 } else {
                     let mut over = r.frames.take(FRAMES_A_MINUTE, now).err();
@@ -767,7 +754,6 @@ impl Gateway {
                 if let Some(wait) = over {
                     retry_ms = retry_ms.max(wait);
                     let why = match f.kind.as_str() {
-                        "svc" => "a link sends at most 600 svc frames a minute",
                         "relay" => "a link sends at most 120 relay frames a minute",
                         _ => "a link sends at most 600 frames and 60 messages a minute",
                     };

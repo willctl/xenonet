@@ -503,7 +503,7 @@ impl Machine {
         o.timing = timing();
         o.caps = Caps { frames: 64, bytes: 1 << 20, keep_ms: xenonet_net::gwstore::WEEK_MS };
         o.outbox = o.caps;
-        let node = Node::open(o, Arc::new(SinkSlot::new(caught.clone()))).expect("the node");
+        let node = xenonet_net::nodes::Nodes::open(o, Arc::new(SinkSlot::new(caught.clone()))).expect("the node").first();
         let gateway =
             (host == STUDIO).then(|| Gateway::new(Arc::downgrade(node.shared()), GwStore::open(&files.file(GATEWAY_DB)).expect("the gateway's store")).expect("the gateway"));
         Machine { dir, node, caught, gateway }
@@ -629,14 +629,6 @@ pub fn body_for(kind: &str, c: &mut Choices<'_>) -> Value {
         "gap" => json!({ "lost": c.u8(), "at": now }),
         "roster" => json!({ "entries": [], "proposals": [], "asks": [] }),
         "removed" => json!({ "network": NET, "host": "laptop", "by": ["studio"], "at": now, "n": c.below(8) }),
-        "svc" => {
-            let id = format!("svq_{:032x}", u128::from(c.u16()));
-            if c.bool() {
-                json!({ "schema": "network/svc/v1", "op": "request", "id": id, "name": "files", "method": *c.pick(&["GET", "POST", "TRACE"]), "path": *c.pick(&["/sync/v1/x?a=1", "/sync/v1/../x", "/mcp"]), "headers": [["authorization", "Bearer t"]], "body": "" })
-            } else {
-                json!({ "schema": "network/svc/v1", "op": "answer", "id": id, "status": *c.pick(&[200, 404, 101]), "headers": [["set-cookie", "a=b"]], "body": "aGk" })
-            }
-        }
         _ => json!({}),
     };
     let over = c.value();

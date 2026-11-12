@@ -1063,12 +1063,12 @@ async fn the_maps_relay_frames_cross_in_batches_and_a_bucket_of_their_own() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn relay_and_svc_frames_never_touch_the_gateways_store() {
-    // A svc frame may carry a service's own credential, sealed: the
-    // gateway hands relay and svc frames to the host's link in memory, and
+async fn relay_frames_never_touch_the_gateways_store() {
+    // The gateway hands relay frames to the host's link in memory, and
     // drops them when the host isn't linked, rather than writing them to
     // its store, where a stream that ended before its ack would leave them
-    // for a week.
+    // for a week. A svc frame is no frame kind any more: services go on
+    // svc/2 between the two machines.
     let [port] = common::free_ports();
     let (a, b, c) = network("held", port, Caps::default(), [0.0; 3]).await;
     let heard = Arc::new(Relays::default());
@@ -1090,10 +1090,10 @@ async fn relay_and_svc_frames_never_touch_the_gateways_store() {
     let stored = || {
         let db =
             rusqlite::Connection::open_with_flags(a.dir.join("state").join("network").join(&net.id).join("gateway.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        db.query_row("SELECT count(*) FROM queue WHERE kind IN ('relay', 'svc')", [], |r| r.get::<_, i64>(0)).unwrap()
+        db.query_row("SELECT count(*) FROM queue WHERE kind = 'relay'", [], |r| r.get::<_, i64>(0)).unwrap()
     };
-    let answer = gw.handle(post(&[frame("relay", 1), frame("svc", 0), frame("relay", 2)])).await.body_json();
-    assert_eq!(answer["accepted"].as_array().unwrap().len(), 3, "{answer}");
+    let answer = gw.handle(post(&[frame("relay", 1), frame("relay", 2)])).await.body_json();
+    assert_eq!(answer["accepted"].as_array().unwrap().len(), 2, "{answer}");
     assert_eq!(stored(), 0, "nothing in the store");
     until("laptop's link read what was held for it", 10, || heard.got.lock().unwrap().len() == 2).await;
     assert_eq!(gw.held("laptop"), 0);
@@ -1101,8 +1101,9 @@ async fn relay_and_svc_frames_never_touch_the_gateways_store() {
     // laptop's link goes: what comes for it is dropped, never kept.
     b.svc.stop();
     until("laptop unlinked at the gateway", 10, || !gw.linked(now_ms()).contains(&"laptop".to_string())).await;
-    let answer = gw.handle(post(&[frame("svc", 0), frame("relay", 3)])).await.body_json();
-    assert_eq!(answer["accepted"].as_array().unwrap().len(), 2, "taken, as live frames are: {answer}");
+    let answer = gw.handle(post(&[frame("relay", 3), frame("svc", 0)])).await.body_json();
+    assert_eq!(answer["accepted"].as_array().unwrap().len(), 1, "taken, as live frames are: {answer}");
+    assert_eq!(answer["refused"].as_array().unwrap().len(), 1, "a svc frame isn't one: {answer}");
     assert_eq!((gw.held("laptop"), stored()), (0, 0), "and dropped");
 }
 

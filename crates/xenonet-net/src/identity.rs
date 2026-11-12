@@ -269,6 +269,24 @@ impl Identity {
         Ok((device.signer.public().id(), sig))
     }
 
+    /// This device's signature over `msg` for `purpose`, as the person: its
+    /// device id and the signature. For what the person's device certifies
+    /// once and a key of its own then signs (`Purpose::WINDOW`). A
+    /// biometric key asks: only from the window.
+    pub fn sign_as_person(&self, at_window: bool, purpose: Purpose, msg: &[u8], reason: &str) -> R<(String, Vec<u8>)> {
+        if !at_window {
+            return Err(not_at_window("acting as you"));
+        }
+        if !self.can_act() {
+            return Err(no_person());
+        }
+        let device = self.device_key()?.ok_or_else(no_device)?;
+        let mut out = None;
+        self.vault()?.asking(reason, &mut || out = Some(device.signer.sign(purpose, msg)));
+        let sig = out.unwrap_or_else(|| Err(xenonet_id::IdError::internal("the vault didn't ask"))).map_err(refused)?;
+        Ok((device.signer.public().id(), sig))
+    }
+
     /// Founds the person here, when there's none: a root key, sealed to
     /// this device, pairs this device under its own presence. Asks once.
     pub fn found(&self, at_window: bool, label: &str, now: i64) -> R<()> {

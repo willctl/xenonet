@@ -11,7 +11,7 @@ use crate::cores::CoreError;
 use crate::gateway::control::GatewayControl;
 use crate::gateway::network::NetService;
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use xenonet_http::parts::{self, NetChange, NetResult, SvcAnswer, SvcCall};
@@ -249,5 +249,16 @@ impl parts::Network for NetService {
         };
         let a = node.shared().svc_call(host, name, svc::Call { method, path, headers, body }).await;
         SvcAnswer { status: a.status, headers: a.headers, body: a.body }
+    }
+    async fn window_read(&self, host: &str, path: &str) -> Option<(u16, Value)> {
+        let holding: Vec<_> = self.nodes().nodes().into_iter().filter(|n| n.shared().roster().view_ref().is_some_and(|v| v.member(host).is_some())).collect();
+        let node = match holding.as_slice() {
+            [one] => one.clone(),
+            [] => return None,
+            _ => return Some((409, json!({ "error": format!("{host} names a machine in more than one of this machine's networks"), "code": "which-network" }))),
+        };
+        let a = node.shared().window_read(host, path).await?;
+        let body = serde_json::from_slice::<Value>(&a.body).unwrap_or_else(|_| json!({ "error": "that machine answered with something that isn't JSON" }));
+        Some((a.status, body))
     }
 }

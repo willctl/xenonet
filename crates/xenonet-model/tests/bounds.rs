@@ -506,10 +506,9 @@ fn the_networks_known_answers_read_as_the_model_types() {
     fn of<T: serde::de::DeserializeOwned>(v: &serde_json::Value) -> Result<(), String> {
         serde_json::from_value::<T>(v.clone()).map(|_| ()).map_err(|e| e.to_string())
     }
-    for f in ["frame", "svcFrame", "gatewayFrame"] {
+    for f in ["frame", "gatewayFrame"] {
         read(f, of::<network::Frame>(&k[f]["frame"]));
     }
-    read("svcFrame.body", of::<network::Svc>(&k["svcFrame"]["body"]));
     read("frame.body", of::<network::Message>(&k["frame"]["body"]));
     read("frame.body.entry.body", of::<network::SendBody>(&k["frame"]["body"]["entry"]["body"]));
     let roster = k["roster"].as_array().unwrap();

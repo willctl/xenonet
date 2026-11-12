@@ -206,4 +206,11 @@ pub trait Network: Send + Sync {
     /// A call to the service `name` that `host` publishes, in the network
     /// `host` is in.
     async fn svc_call(&self, host: &str, name: &str, call: SvcCall) -> SvcAnswer;
+    /// The window's read of `path` (a session's transcript or stats) on
+    /// `host`, over svc/2 under the window's key: its status and JSON, or
+    /// None when this machine reads other machines some other way (its
+    /// endpoint isn't running). Only the window reaches this.
+    async fn window_read(&self, _host: &str, _path: &str) -> Option<(u16, Value)> {
+        None
+    }
 }

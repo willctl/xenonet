@@ -38,9 +38,6 @@ pub enum Kind {
     Operator,
     /// The map, between a console and the host it shows: never the engine's.
     Relay,
-    /// A request to a service another host published, or its answer:
-    /// never the engine's either.
-    Svc,
     /// An intent the person made here, or their cancel of one.
     Intent,
     /// The maker's machine giving an intent to the machine it names.
@@ -50,8 +47,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Self; 11] =
-        [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay, Self::Svc, Self::Intent, Self::Assign, Self::Report];
+    pub const ALL: [Self; 10] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay, Self::Intent, Self::Assign, Self::Report];
 
     /// Its name, and the schema's folder; the frame kind on the wire for
     /// what isn't a feed entry.
@@ -64,7 +60,6 @@ impl Kind {
             Self::Handoff => "handoff",
             Self::Operator => "operator",
             Self::Relay => "relay",
-            Self::Svc => "svc",
             Self::Intent => "intent",
             Self::Assign => "assign",
             Self::Report => "report",
@@ -77,11 +72,9 @@ impl Kind {
 
     /// Whether a gateway keeps it for a host that's away. Presence isn't
     /// kept: a full set goes when the host is back. Nor is the map: a
-    /// console asks for a fresh snapshot. Nor is a service's request,
-    /// which may carry the service's own credential and is answered now or
-    /// not at all.
+    /// console asks for a fresh snapshot.
     pub fn queued(self) -> bool {
-        !matches!(self, Self::Presence | Self::Relay | Self::Svc)
+        !matches!(self, Self::Presence | Self::Relay)
     }
 
     /// Whether it travels as an entry of this machine's feed: a message
@@ -349,7 +342,6 @@ pub enum Op {
     Handoff(crate::network::Handoff),
     Operator(crate::network::Operator),
     Relay(crate::network::Relay),
-    Svc(crate::network::Svc),
 }
 
 impl Op {
@@ -362,7 +354,6 @@ impl Op {
             Op::Handoff(_) => Kind::Handoff,
             Op::Operator(_) => Kind::Operator,
             Op::Relay(_) => Kind::Relay,
-            Op::Svc(_) => Kind::Svc,
         }
     }
 }
@@ -378,7 +369,7 @@ mod tests {
             assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{}\"", k.as_str()));
         }
         assert!(Kind::Message.queued() && Kind::Handoff.queued() && Kind::Claims.queued() && Kind::Operator.queued() && Kind::Receipt.queued());
-        assert!(!Kind::Presence.queued() && !Kind::Relay.queued() && !Kind::Svc.queued());
+        assert!(!Kind::Presence.queued() && !Kind::Relay.queued());
         assert!(Kind::Message.fed() && Kind::Receipt.fed() && Kind::Handoff.fed() && Kind::Claims.fed() && Kind::Intent.fed() && Kind::Assign.fed() && Kind::Report.fed());
         assert!(!Kind::Presence.fed() && !Kind::Operator.fed() && !Kind::Relay.fed());
         assert_eq!(Kind::parse("frame"), None);

@@ -2,7 +2,7 @@
 //! `/api/svc/<host>/<name>/<path>` (docs/design/network.md, "Services
 //! through the network"). Any program on this machine may call it, with
 //! any method a service takes, as it would call the service on its own
-//! machine: the request goes to `<host>` sealed in a `svc` frame, and the
+//! machine: the request goes to `<host>` on a svc/2 stream, and the
 //! service's answer comes back as this route's answer.
 //!
 //! It's on this local API only, never under `/net/v1/`, which the front
@@ -42,7 +42,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, rest: &str) -> Reply {
     let Some(net) = ctx.net.get().cloned() else { return reply(SvcAnswer::refused(503, "no-network", "the network isn't available in this XenoNet")) };
     let body = match req.bytes(SVC_REQUEST_BODY).await {
         Ok(b) => b,
-        Err(e) if e == TOO_BIG => return reply(SvcAnswer::refused(413, "too-big", "a request's body is at most 1 MiB")),
+        Err(e) if e == TOO_BIG => return reply(SvcAnswer::refused(413, "too-big", "a request's body is at most 8 MiB")),
         Err(_) => return reply(SvcAnswer::refused(400, "bad-request", "the request's body didn't all come")),
     };
     let call = SvcCall { method: req.method.clone(), path, headers: req.headers.clone(), body };

@@ -33,7 +33,7 @@
 //!
 //! What link/2 doesn't carry yet: a message whose act rests on an
 //! authority (the envelope has no place for it beside the entry yet), so
-//! those go through the gateway alone; svc/2 and the map's relay; and
+//! those go through the gateway alone; the map's relay; and
 //! Compacted answers, which are set aside (a holder's counts as "don't
 //! have", so the next holder or the author is asked).
 //!
@@ -152,7 +152,7 @@ impl Shared {
     }
 
     /// The member whose transport key is `peer`'s endpoint id.
-    fn member_at(&self, peer: PeerId) -> Option<Member> {
+    pub(crate) fn member_at(&self, peer: PeerId) -> Option<Member> {
         self.roster().view_ref()?.members.values().find(|m| m.keys.sign == peer.0).cloned()
     }
 
@@ -854,6 +854,10 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
         let f = f.clone();
         links.hand_others(Arc::new(move |link| f.incoming(link)));
     }
+    let served: Arc<dyn crate::svc2::Served> = Arc::new(super::svc2n::NodeServed(c.clone()));
+    links.hand_services(Arc::new(move |link| {
+        tokio::spawn(crate::svc2::serve(link, served.clone()));
+    }));
     let t = Arc::new(Transport2 {
         dial,
         mesh,

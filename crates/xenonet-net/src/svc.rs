@@ -3,31 +3,31 @@
 //! and any program on another host in the network reaches it through its
 //! own XenoNet's local API, at `/api/svc/<host>/<name>/<path>`. XenoNet
 //! knows nothing of what the service is: it carries the request and the
-//! answer between the two hosts in `svc` frames, sealed like every host
-//! frame, and checks them at both ends.
+//! answer between the two hosts on svc/2 (`svc2`), one QUIC stream for
+//! each, and checks them at both ends.
 //!
 //! - **Publishing** is the owner's (`xenonet svc publish`): a name, a
 //!   target that is a loopback IP literal and a port over plain http, the
 //!   path prefixes callers may reach, and, if the owner narrows it, the
-//!   hosts that may call. It's kept with the network (`Persist`), and goes
-//!   with it.
-//! - **The caller's host** sends a request (`network/svc/v1`, op
-//!   `request`) only while its own link is live and the gateway last said
-//!   the target host is linked, since the gateway takes a live frame for a
-//!   host that's away and drops it. It waits for the answer by the
-//!   request's id, 90 s at most.
-//! - **The publishing host** checks the name, the caller, its rate (300 a
-//!   minute for each caller and service), the method, the path once
-//!   normalized against the allowlist, and the body's size. It rebuilds the
-//!   request with four of the caller's headers, `Host`, and a `Forwarded`
-//!   naming the caller as the frame's signature proved it, and passes it to
-//!   the target with no proxy and no redirects followed.
+//!   hosts that may call. It's kept with the network it's published in
+//!   (`Persist`), and answers members of that network alone.
+//! - **The caller's host** opens a stream to the publishing host's
+//!   endpoint and waits on it for the answer, 90 s at most.
+//! - **The publishing host** takes the caller to be the member whose
+//!   endpoint id the connection authenticated, in the network the request
+//!   names, by its own chain. It checks the name, the caller, a request id
+//!   it hasn't seen from that caller (a stream sent again is answered 409
+//!   and goes nowhere), its rate (300 a minute for each caller and
+//!   service), the method, the path once normalized against the
+//!   allowlist, and the body's size. It rebuilds the request with four of
+//!   the caller's headers, `Host`, and a `Forwarded` naming the caller,
+//!   and passes it to the target with no proxy and no redirects followed.
 //! - **The answer** comes back without `Set-Cookie` and hop-by-hop headers.
 //!
 //! The service's own credential (`Authorization`) passes untouched, and
 //! nothing here logs a header.
 
-use crate::codec::{b64, random, unb64};
+use crate::codec::random;
 use crate::gateway::Bucket;
 use crate::persist::Persist;
 use crate::{NetError, R};
@@ -38,28 +38,29 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
-use tokio::sync::oneshot;
 use xenonet_os::sync::{Locked, ReadWrite};
 
-pub const SCHEMA: &str = "network/svc/v1";
+pub const SCHEMA: &str = "network/svc/v2";
 /// A request's body, at most.
 pub const REQUEST_BODY: usize = xenonet_model::network::SVC_REQUEST_BODY;
 /// An answer's body, at most.
-pub const ANSWER_BODY: usize = 4 << 20;
+pub const ANSWER_BODY: usize = 8 << 20;
 /// Requests a caller host may make to one service in a minute.
 pub const A_MINUTE: f64 = 300.0;
-/// How long a caller waits for the answer. A host on the long-poll
-/// fallback can add 25 s a hop, so this leaves room for two of them and
-/// the service's own time.
+/// How long a caller waits for the answer.
 pub const TIMEOUT_MS: u64 = 90_000;
 /// How long the publishing host waits on its target: under the caller's
 /// wait, so the caller hears why.
 const TARGET_MS: u64 = 75_000;
+/// How long a request id is remembered from its caller: a stream that
+/// names one again in that time is a replay.
+pub const SEEN_MS: f64 = 15.0 * 60e3;
+const SEEN_MAX: usize = 65_536;
 /// Requests a host forwards to its services at once, at most, and from one
 /// caller host: no one host holds every slot.
 const IN_FLIGHT: usize = 32;
 const IN_FLIGHT_EACH: usize = 8;
-/// Requests a host waits on at once, at most, and from one host: one that
+/// Requests a host waits on at once, at most, and to one host: one that
 /// never answers holds a quarter of them at most, for 90 s each.
 const WAITING: usize = 256;
 const WAITING_EACH: usize = 64;
@@ -370,7 +371,7 @@ fn pairs_json(h: &[(String, String)]) -> Value {
     Value::Array(h.iter().map(|(k, v)| json!([k, v])).collect())
 }
 
-// ---------- the bodies ----------
+// ---------- the heads ----------
 
 /// What a program on the caller's host asked for: the path is the part
 /// after `/api/svc/<host>/<name>`, with its query.
@@ -382,7 +383,8 @@ pub struct Call {
     pub body: Vec<u8>,
 }
 
-/// A request in a frame (`network/svc/v1`, op `request`).
+/// A request on a svc/2 stream (`network/svc/v2`, op `request`): its head,
+/// then `length` bytes of body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub id: String,
@@ -394,20 +396,24 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn to_json(&self) -> Value {
+    /// The head that goes before the body, in `network`.
+    pub fn head(&self, network: &str) -> Value {
         json!({
             "schema": SCHEMA,
             "op": "request",
+            "network": network,
             "id": self.id,
             "name": self.name,
             "method": self.method,
             "path": self.path,
             "headers": pairs_json(&self.headers),
-            "body": b64(&self.body),
+            "length": self.body.len(),
         })
     }
 
-    pub fn parse(v: &Value) -> Result<Request, String> {
+    /// A request's head: the request with no body yet, and the body's
+    /// length, which is at most `REQUEST_BODY`.
+    pub fn parse_head(v: &Value) -> Result<(Request, usize), String> {
         let text = |k: &str| v.get(k).and_then(Value::as_str);
         if text("schema") != Some(SCHEMA) || text("op") != Some("request") {
             return Err("that isn't a service's request".into());
@@ -417,14 +423,19 @@ impl Request {
         let method = text("method").filter(|m| !m.is_empty() && m.len() <= 16 && m.bytes().all(|b| b.is_ascii_uppercase())).ok_or("a request's method is a word in capitals")?;
         let path = text("path").filter(|p| p.len() <= PATH_MAX).ok_or("a request's path is at most 4 KiB")?;
         let headers = pairs(v.get("headers"))?;
-        let body = text("body").and_then(unb64).ok_or("a request's body is base64url")?;
-        Ok(Request { id: id.into(), name: name.into(), method: method.into(), path: path.into(), headers, body })
+        let length = length_of(v)?;
+        Ok((Request { id: id.into(), name: name.into(), method: method.into(), path: path.into(), headers, body: Vec::new() }, length))
     }
 }
 
-/// The id of a request in a frame, when it has one that could be answered.
-pub fn id_of(v: &Value) -> Option<String> {
-    v.get("id").and_then(Value::as_str).filter(|i| is_request_id(i)).map(str::to_string)
+/// The body length a head names: a whole number of bytes.
+fn length_of(v: &Value) -> Result<usize, String> {
+    v.get("length").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).ok_or_else(|| "a head's length is a whole number of bytes".to_string())
+}
+
+/// The network a svc/2 head names.
+pub fn network_of(v: &Value) -> Option<&str> {
+    v.get("network").and_then(Value::as_str).filter(|n| crate::codec::is_network_id(n))
 }
 
 /// A service's answer, or XenoNet's refusal (with its `code`).
@@ -444,19 +455,24 @@ impl Answer {
         Answer { status, headers, body, code: Some(code.into()) }
     }
 
+    /// A JSON answer, as a window read's is.
+    pub fn json(status: u16, body: &Value) -> Answer {
+        Answer { status, headers: vec![("content-type".into(), "application/json; charset=utf-8".into())], body: body.to_string().into_bytes(), code: None }
+    }
+
     /// The words of a refusal, for the log.
     pub fn message(&self) -> String {
         serde_json::from_slice::<Value>(&self.body).ok().and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string)).unwrap_or_default()
     }
 
-    pub fn to_json(&self, id: &str) -> Value {
+    /// The head that goes before the body.
+    pub fn head(&self) -> Value {
         let mut v = json!({
             "schema": SCHEMA,
             "op": "answer",
-            "id": id,
             "status": self.status,
             "headers": pairs_json(&self.headers),
-            "body": b64(&self.body),
+            "length": self.body.len(),
         });
         if let Some(c) = &self.code {
             v["code"] = json!(c);
@@ -464,22 +480,18 @@ impl Answer {
         v
     }
 
-    /// An answer from a frame: its request's id, and the answer as it may
-    /// reach a program here, cleaned again.
-    pub fn parse(v: &Value) -> Result<(String, Answer), String> {
+    /// An answer's head, as it may reach a program here, cleaned again,
+    /// with no body yet, and the body's length.
+    pub fn parse_head(v: &Value) -> Result<(Answer, usize), String> {
         let text = |k: &str| v.get(k).and_then(Value::as_str);
         if text("schema") != Some(SCHEMA) || text("op") != Some("answer") {
             return Err("that isn't a service's answer".into());
         }
-        let id = id_of(v).ok_or("an answer's id is svq_ and 32 hex digits")?;
         let status = v.get("status").and_then(Value::as_u64).filter(|s| (200..=599).contains(s)).ok_or("an answer's status is 200 to 599")? as u16;
         let headers = answer_headers(&pairs(v.get("headers"))?);
-        let body = text("body").and_then(unb64).ok_or("an answer's body is base64url")?;
-        if body.len() > ANSWER_BODY {
-            return Ok((id, Answer::refused(413, "answer-too-big", "the service's answer is over 4 MiB")));
-        }
+        let length = length_of(v)?;
         let code = text("code").filter(|c| c.len() <= 32 && c.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')).map(str::to_string);
-        Ok((id, Answer { status, headers, body, code }))
+        Ok((Answer { status, headers, body: Vec::new(), code }, length))
     }
 }
 
@@ -577,59 +589,58 @@ impl Limiter {
 
 // ---------- the services of this host ----------
 
-struct Waiting {
-    host: String,
-    frame: String,
-    tx: oneshot::Sender<Answer>,
-}
-
-/// This host's services: what it published, and the requests it waits on.
+/// This host's services: what it published, and the requests it makes and
+/// serves.
 pub struct Services {
     persist: Arc<dyn Persist>,
     /// The network the services are published to, while there's one.
     network: RwLock<Option<String>>,
     published: RwLock<Vec<Published>>,
-    waiting: Mutex<HashMap<String, Waiting>>,
     limiter: Limiter,
     /// Requests being forwarded, by caller host.
     in_flight: Mutex<HashMap<String, usize>>,
+    /// Requests this host waits on, by the host asked.
+    waiting: Mutex<HashMap<String, usize>>,
+    /// The request ids each caller sent lately, and when.
+    seen: Mutex<HashMap<(String, String), f64>>,
     client: OnceLock<Result<reqwest::Client, String>>,
     /// When each refusal was last logged, so a busy caller can't fill the
     /// log.
     said: Mutex<HashMap<String, f64>>,
 }
 
-/// One request being forwarded for a caller host, counted while it lasts.
-struct Flight<'a> {
-    services: &'a Services,
-    caller: String,
+/// One request counted while it lasts, by host: one being forwarded for a
+/// caller, or one this host waits on.
+pub struct Flight<'a> {
+    counts: &'a Mutex<HashMap<String, usize>>,
+    host: String,
 }
 
 impl Drop for Flight<'_> {
     fn drop(&mut self) {
-        let mut all = self.services.in_flight.locked();
-        if let Some(n) = all.get_mut(&self.caller) {
+        let mut all = self.counts.locked();
+        if let Some(n) = all.get_mut(&self.host) {
             *n -= 1;
             if *n == 0 {
-                all.remove(&self.caller);
+                all.remove(&self.host);
             }
         }
     }
 }
 
-/// A request this host waits on: it stops waiting when this goes, however
-/// the call ends. Its answer, its timeout, or the program that asked going
-/// away, which drops the call and this with it.
-pub struct Wait<'a> {
-    services: &'a Services,
-    id: String,
-    pub answer: oneshot::Receiver<Answer>,
-}
-
-impl Drop for Wait<'_> {
-    fn drop(&mut self) {
-        self.services.forget_request(&self.id);
+/// A slot in `counts` for `host`, while there are fewer than `all` in all
+/// and `each` for it; the refusal says which (`words(true)`: all of them).
+fn slot<'a>(counts: &'a Mutex<HashMap<String, usize>>, host: &str, all: usize, each: usize, words: impl Fn(bool) -> String) -> Result<Flight<'a>, Answer> {
+    let mut c = counts.locked();
+    if c.values().sum::<usize>() >= all {
+        return Err(Answer::refused(503, "busy", words(true)));
     }
+    let n = c.entry(host.to_string()).or_insert(0);
+    if *n >= each {
+        return Err(Answer::refused(503, "busy", words(false)));
+    }
+    *n += 1;
+    Ok(Flight { counts, host: host.to_string() })
 }
 
 impl Services {
@@ -639,9 +650,10 @@ impl Services {
             persist,
             network: RwLock::new(None),
             published: RwLock::new(Vec::new()),
-            waiting: Mutex::new(HashMap::new()),
             limiter: Limiter::new(A_MINUTE),
             in_flight: Mutex::new(HashMap::new()),
+            waiting: Mutex::new(HashMap::new()),
+            seen: Mutex::new(HashMap::new()),
             client: OnceLock::new(),
             said: Mutex::new(HashMap::new()),
         };
@@ -705,71 +717,45 @@ impl Services {
 
     // ---------- the caller's side ----------
 
-    /// Waits for the answer to request `id`, which goes to `host` in the
-    /// frame `frame`, until the `Wait` goes.
-    pub fn wait(&self, id: &str, host: &str, frame: &str) -> Result<Wait<'_>, Answer> {
-        let mut waiting = self.waiting.locked();
-        if waiting.len() >= WAITING {
-            return Err(Answer::refused(503, "busy", format!("this machine waits on {WAITING} services' answers already")));
-        }
-        if waiting.values().filter(|w| w.host == host).count() >= WAITING_EACH {
-            return Err(Answer::refused(503, "busy", format!("this machine waits on {WAITING_EACH} answers from {host} already")));
-        }
-        let (tx, rx) = oneshot::channel();
-        waiting.insert(id.to_string(), Waiting { host: host.to_string(), frame: frame.to_string(), tx });
-        Ok(Wait { services: self, id: id.to_string(), answer: rx })
-    }
-
-    /// Stops waiting on `id`.
-    pub fn forget_request(&self, id: &str) {
-        self.waiting.locked().remove(id);
-    }
-
-    /// An answer from `from`: false when nothing here waits on it from that
-    /// host, which only the host asked may answer.
-    pub fn answered(&self, from: &str, id: &str, answer: Answer) -> bool {
-        let w = {
-            let mut waiting = self.waiting.locked();
-            match waiting.get(id) {
-                Some(w) if w.host == from => waiting.remove(id),
-                _ => None,
+    /// A slot to wait on an answer from `host` in, while there's one.
+    pub fn wait(&self, host: &str) -> Result<Flight<'_>, Answer> {
+        slot(&self.waiting, host, WAITING, WAITING_EACH, |all| {
+            if all {
+                format!("this machine waits on {WAITING} services' answers already")
+            } else {
+                format!("this machine waits on {WAITING_EACH} answers from {host} already")
             }
-        };
-        w.is_some_and(|w| w.tx.send(answer).is_ok())
-    }
-
-    fn fail_where(&self, which: impl Fn(&Waiting) -> bool, answer: &Answer) {
-        let gone: Vec<Waiting> = {
-            let mut waiting = self.waiting.locked();
-            let ids: Vec<String> = waiting.iter().filter(|(_, w)| which(w)).map(|(id, _)| id.clone()).collect();
-            ids.iter().filter_map(|id| waiting.remove(id)).collect()
-        };
-        for w in gone {
-            let _ = w.tx.send(answer.clone());
-        }
-    }
-
-    /// The request in frame `frame` won't arrive: the gateway refused it,
-    /// or it didn't reach the gateway.
-    pub fn fail_frame(&self, frame: &str, answer: &Answer) {
-        self.fail_where(|w| w.frame == frame, answer);
-    }
-
-    /// `host` went offline: its answers won't come.
-    pub fn fail_host(&self, host: &str, answer: &Answer) {
-        self.fail_where(|w| w.host == host, answer);
-    }
-
-    /// This host's link dropped: no answer will come.
-    pub fn fail_all(&self, answer: &Answer) {
-        self.fail_where(|_| true, answer);
+        })
     }
 
     pub fn waiting(&self) -> usize {
-        self.waiting.locked().len()
+        self.waiting.locked().values().sum()
     }
 
     // ---------- the publishing host's side ----------
+
+    /// Takes one of `caller`'s requests to `name` this minute, or says when
+    /// there's one (the window's reads count here too, as `window`).
+    pub fn rate(&self, caller: &str, name: &str, now: f64) -> Result<(), Answer> {
+        self.limiter.take(caller, name, now).map_err(|wait| {
+            Answer::refused(429, "rate", format!("at most {} requests a minute from {caller} to {name}: try again in {} s", A_MINUTE as u32, (wait / 1000.0).ceil()))
+        })
+    }
+
+    /// Whether `caller` sent request `id` in the last 15 minutes: it's
+    /// taken as sent now when it didn't.
+    fn replayed(&self, caller: &str, id: &str, now: f64) -> bool {
+        let mut seen = self.seen.locked();
+        if seen.len() >= SEEN_MAX {
+            seen.retain(|_, at| now - *at < SEEN_MS);
+        }
+        let key = (caller.to_string(), id.to_string());
+        if seen.get(&key).is_some_and(|at| now - *at < SEEN_MS) {
+            return true;
+        }
+        seen.insert(key, now);
+        false
+    }
 
     /// Whether to log a refusal of `key` now: once a minute at most.
     pub fn say(&self, key: &str, now: f64) -> bool {
@@ -792,13 +778,10 @@ impl Services {
         if !p.allows(caller) {
             return Err(Answer::refused(403, "not-allowed", format!("{caller} may not reach {} on this host", p.name)));
         }
-        if let Err(wait) = self.limiter.take(caller, &p.name, now) {
-            return Err(Answer::refused(
-                429,
-                "rate",
-                format!("at most {} requests a minute from {caller} to {}: try again in {} s", A_MINUTE as u32, p.name, (wait / 1000.0).ceil()),
-            ));
+        if self.replayed(caller, &req.id, now) {
+            return Err(Answer::refused(409, "replayed", format!("{caller} sent request {} before: it goes to {} once", req.id, p.name)));
         }
+        self.rate(caller, &p.name, now)?;
         if !METHODS.contains(&req.method.as_str()) {
             return Err(Answer::refused(405, "method", format!("{} isn't passed on: a service is reached with {}", req.method, METHODS.join(", "))));
         }
@@ -807,7 +790,7 @@ impl Services {
             return Err(Answer::refused(403, "path-refused", format!("{} is reached at {} only", p.name, p.paths.join(", "))));
         }
         if req.body.len() > REQUEST_BODY {
-            return Err(Answer::refused(413, "too-big", "a request's body is at most 1 MiB"));
+            return Err(Answer::refused(413, "too-big", "a request's body is at most 8 MiB"));
         }
         Ok((p, n))
     }
@@ -828,9 +811,9 @@ impl Services {
             .map_err(Clone::clone)
     }
 
-    /// A request from `caller` (the frame's sender, whose signature was
-    /// checked), checked and passed to its target: the target's answer, or
-    /// why there's none.
+    /// A request from `caller` (the member whose endpoint id the
+    /// connection authenticated), checked and passed to its target: the
+    /// target's answer, or why there's none.
     pub async fn serve(&self, caller: &str, req: Request, now: f64) -> Answer {
         let (p, n) = match self.check(caller, &req, now) {
             Ok(x) => x,
@@ -845,16 +828,13 @@ impl Services {
 
     /// A slot to forward a request from `caller` in, while there's one.
     fn fly(&self, caller: &str) -> Result<Flight<'_>, Answer> {
-        let mut all = self.in_flight.locked();
-        if all.values().sum::<usize>() >= IN_FLIGHT {
-            return Err(Answer::refused(503, "busy", format!("this host passes {IN_FLIGHT} requests to its services at once, at most")));
-        }
-        let n = all.entry(caller.to_string()).or_insert(0);
-        if *n >= IN_FLIGHT_EACH {
-            return Err(Answer::refused(503, "busy", format!("this host passes {IN_FLIGHT_EACH} requests from {caller} to its services at once, at most")));
-        }
-        *n += 1;
-        Ok(Flight { services: self, caller: caller.to_string() })
+        slot(&self.in_flight, caller, IN_FLIGHT, IN_FLIGHT_EACH, |all| {
+            if all {
+                format!("this host passes {IN_FLIGHT} requests to its services at once, at most")
+            } else {
+                format!("this host passes {IN_FLIGHT_EACH} requests from {caller} to its services at once, at most")
+            }
+        })
     }
 
     async fn forward(&self, p: &Published, caller: &str, req: &Request, n: &Normal) -> Answer {
@@ -890,7 +870,7 @@ impl Services {
             match res.chunk().await {
                 Ok(Some(c)) => {
                     if body.len() + c.len() > ANSWER_BODY {
-                        return Answer::refused(413, "answer-too-big", format!("{}'s answer is over 4 MiB", p.name));
+                        return Answer::refused(413, "answer-too-big", format!("{}'s answer is over 8 MiB", p.name));
                     }
                     body.extend_from_slice(&c);
                 }
@@ -1060,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn bodies_cross_and_are_checked() {
+    fn heads_cross_and_are_checked() {
         let req = Request {
             id: request_id().unwrap(),
             name: "xenolith".into(),
@@ -1069,25 +1049,25 @@ mod tests {
             headers: h(&[("authorization", "Bearer t")]),
             body: b"{\"a\":1}".to_vec(),
         };
-        assert_eq!(Request::parse(&req.to_json()).unwrap(), req);
-        for (k, v) in [("id", json!("svq_x")), ("name", json!("Bad")), ("method", json!("get")), ("headers", json!([["a"]])), ("body", json!("a+b")), ("op", json!("answer"))] {
-            let mut bad = req.to_json();
+        let head = req.head("net_00112233445566778899aabbccddeeff");
+        assert_eq!(network_of(&head), Some("net_00112233445566778899aabbccddeeff"));
+        let (back, length) = Request::parse_head(&head).unwrap();
+        assert_eq!((Request { body: req.body.clone(), ..back }, length), (req.clone(), 7));
+        for (k, v) in [("id", json!("svq_x")), ("name", json!("Bad")), ("method", json!("get")), ("headers", json!([["a"]])), ("length", json!(-1)), ("op", json!("answer"))] {
+            let mut bad = head.clone();
             bad[k] = v;
-            assert!(Request::parse(&bad).is_err(), "{k}");
+            assert!(Request::parse_head(&bad).is_err(), "{k}");
         }
         let a = Answer { status: 201, headers: h(&[("content-type", "text/plain"), ("set-cookie", "x=1")]), body: b"made".to_vec(), code: None };
-        let (id, back) = Answer::parse(&a.to_json(&req.id)).unwrap();
-        assert_eq!(id, req.id);
-        assert_eq!((back.status, back.headers, back.body), (201, h(&[("content-type", "text/plain")]), b"made".to_vec()), "cleaned again on the way in");
-        let mut bad = a.to_json(&req.id);
+        let (back, length) = Answer::parse_head(&a.head()).unwrap();
+        assert_eq!((back.status, back.headers, length), (201, h(&[("content-type", "text/plain")]), 4), "cleaned again on the way in");
+        let mut bad = a.head();
         bad["status"] = json!(101);
-        assert!(Answer::parse(&bad).is_err(), "no switching protocols");
-        let mut big = a.to_json(&req.id);
-        big["body"] = json!(b64(&vec![b'x'; ANSWER_BODY + 1]));
-        assert_eq!(Answer::parse(&big).unwrap().1.status, 413);
+        assert!(Answer::parse_head(&bad).is_err(), "no switching protocols");
         let r = Answer::refused(503, "offline", "studio is offline");
-        let (_, back) = Answer::parse(&r.to_json(&req.id)).unwrap();
-        assert_eq!((back.code.as_deref(), back.message().as_str()), (Some("offline"), "studio is offline"));
+        let (back, _) = Answer::parse_head(&r.head()).unwrap();
+        assert_eq!(back.code.as_deref(), Some("offline"));
+        assert_eq!(r.message(), "studio is offline");
         assert!(back.headers.contains(&(REFUSED_HEADER.to_string(), "offline".to_string())));
     }
 
@@ -1156,20 +1136,15 @@ mod tests {
     }
 
     #[test]
-    fn a_caller_hears_only_from_the_host_it_asked() {
+    fn a_request_id_goes_to_the_service_once_from_each_caller() {
         let s = Services::open(in_a_network(), Some("net_0".into()));
-        let mut w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
-        assert!(!s.answered("desk", "svq_00000000000000000000000000000001", Answer::refused(200, "x", "x")), "another host can't answer it");
-        assert!(w.answer.try_recv().is_err());
-        assert!(s.answered("studio", "svq_00000000000000000000000000000001", Answer::refused(201, "x", "x")));
-        assert_eq!(w.answer.try_recv().unwrap().status, 201);
-        let mut a = s.wait("svq_00000000000000000000000000000002", "studio", "frm_2").unwrap();
-        let mut b = s.wait("svq_00000000000000000000000000000003", "desk", "frm_3").unwrap();
-        s.fail_frame("frm_3", &Answer::refused(429, "rate", "x"));
-        assert_eq!(b.answer.try_recv().unwrap().status, 429);
-        s.fail_host("studio", &Answer::refused(503, "offline", "x"));
-        assert_eq!(a.answer.try_recv().unwrap().status, 503);
-        assert_eq!(s.waiting(), 0);
+        s.publish(Published::new("xenolith", "http://127.0.0.1:4790", &["/sync/v1/".into()], &[], 0).unwrap()).unwrap();
+        let req = Request { id: request_id().unwrap(), name: "xenolith".into(), method: "GET".into(), path: "/sync/v1/x".into(), headers: Vec::new(), body: Vec::new() };
+        assert!(s.check("laptop", &req, 0.0).is_ok());
+        let again = s.check("laptop", &req, 1000.0).err().unwrap();
+        assert_eq!((again.status, again.code.as_deref()), (409, Some("replayed")));
+        assert!(s.check("desk", &req, 1000.0).is_ok(), "another caller's id is its own");
+        assert_eq!(s.check("laptop", &req, SEEN_MS + 1.0).err().map(|a| a.status), None, "forgotten after 15 minutes");
     }
 
     #[test]
@@ -1177,15 +1152,15 @@ mod tests {
         let s = Services::open(in_a_network(), Some("net_0".into()));
         // The program that asked went away: its call, and the wait in it,
         // are dropped before any answer.
-        let w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
+        let w = s.wait("studio").unwrap();
         assert_eq!(s.waiting(), 1);
         drop(w);
         assert_eq!(s.waiting(), 0);
         // One host that never answers holds a quarter of the waits at most.
-        let held: Vec<Wait<'_>> = (0..WAITING_EACH).map(|i| s.wait(&format!("svq_{i:032x}"), "studio", "frm_1").unwrap()).collect();
-        let refused = s.wait("svq_ffffffffffffffffffffffffffffffff", "studio", "frm_1").err().unwrap();
+        let held: Vec<Flight<'_>> = (0..WAITING_EACH).map(|_| s.wait("studio").ok().unwrap()).collect();
+        let refused = s.wait("studio").err().unwrap();
         assert_eq!((refused.status, refused.code.as_deref()), (503, Some("busy")));
-        assert!(s.wait("svq_fffffffffffffffffffffffffffffffe", "desk", "frm_2").is_ok(), "another host still answers");
+        assert!(s.wait("desk").is_ok(), "another host still answers");
         drop(held);
         assert_eq!(s.waiting(), 0);
     }

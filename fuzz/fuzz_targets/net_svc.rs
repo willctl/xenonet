@@ -2,27 +2,30 @@
 
 // Services through the network (docs/design/network.md, "Services
 // through the network"): what a publishing host reads of another host's
-// request before it passes it to a service, and what a caller's host reads
-// of the answer. The first byte picks the input's shape:
+// svc/2 stream before it passes it to a service, and what a caller's host
+// reads of the answer. The first byte picks the input's shape:
 //
 // - 0: a path after /api/svc/<host>/<name>, normalized against an
 //   allowlist.
-// - 1: a request body (network/svc/v1), the schema's own with the input's
+// - 1: a request head (network/svc/v2), the schema's own with the input's
 //   fields over it, or the input's JSON alone.
-// - 2: an answer body, the same way.
+// - 2: an answer head, the same way.
 // - 3: a published service's address.
 // - 4: headers, as the caller and the service send them.
+// - 5: a window read's head, and the path a window may read.
 //
 // Nothing may panic. A path that passes never holds what a server could
 // read as another path, and normalizing it again changes nothing; the
 // service is sent only the caller's four headers, its Host and one
 // Forwarded; an answer never carries Set-Cookie or a hop-by-hop header;
-// and an address that passes is this machine's, over http.
+// an address that passes is this machine's, over http; and a window reads
+// a session's transcript or stats alone.
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use xenonet_fuzz::net::{overlay, Choices};
 use xenonet_net::svc::{answer_headers, normalize, request_headers, Answer, Published, Request, Target, PASSED};
+use xenonet_net::svc2::{window_path, WindowRead};
 
 fn path(text: &str) {
     let Ok(n) = normalize(text) else { return };
@@ -40,19 +43,34 @@ fn path(text: &str) {
 }
 
 fn request(v: &Value) {
-    let Ok(r) = Request::parse(v) else { return };
-    assert_eq!(Request::parse(&r.to_json()).as_ref(), Ok(&r), "a request reads back as another");
+    let Ok((r, length)) = Request::parse_head(v) else { return };
+    let r = Request { body: vec![0; length.min(1 << 16)], ..r };
+    let (back, n) = Request::parse_head(&r.head("net_00112233445566778899aabbccddeeff")).expect("a request's own head parses");
+    assert_eq!((Request { body: r.body.clone(), ..back }, n), (r.clone(), r.body.len()), "a request reads back as another");
 }
 
 fn answer(v: &Value) {
-    let Ok((id, a)) = Answer::parse(v) else { return };
+    let Ok((a, length)) = Answer::parse_head(v) else { return };
     assert!((200..=599).contains(&a.status), "{a:?}");
     for (k, _) in &a.headers {
         assert!(!matches!(k.as_str(), "set-cookie" | "set-cookie2" | "connection" | "keep-alive" | "transfer-encoding" | "upgrade" | "te" | "trailer" | "content-length"), "{k}");
     }
     assert_eq!(answer_headers(&a.headers), a.headers, "cleaning twice changed it");
-    let (id2, b) = Answer::parse(&a.to_json(&id)).expect("an answer's own JSON parses");
-    assert_eq!((id2, b), (id, a), "an answer reads back as another");
+    let a = Answer { body: vec![0; length.min(1 << 16)], ..a };
+    let (b, n) = Answer::parse_head(&a.head()).expect("an answer's own head parses");
+    assert_eq!((Answer { body: a.body.clone(), ..b }, n), (a.clone(), a.body.len()), "an answer reads back as another");
+}
+
+fn window(v: &Value, titles_only: bool) {
+    if let Ok(r) = WindowRead::parse(v) {
+        assert_eq!(WindowRead::parse(&r.head()).as_ref(), Ok(&r), "a window read reads back as another");
+    }
+    let Some(path) = v.get("path").and_then(Value::as_str) else { return };
+    let Ok(p) = window_path(path, titles_only) else { return };
+    assert!(p.starts_with("/api/session/") && p.split('/').nth(3).is_some_and(|s| s.contains(':')), "{p}");
+    assert!(p.ends_with("/stats") || p.contains("/transcript"), "{p}");
+    assert!(!(titles_only && p.contains("/transcript")), "{p}");
+    assert!(!p.contains("..") && !p.contains('%') && !p.contains('#'), "{p}");
 }
 
 fn target(text: &str) {
@@ -93,14 +111,14 @@ fn headers(c: &mut Choices<'_>) {
 
 fuzz_target!(|data: &[u8]| {
     let mut c = Choices::new(data);
-    let shape = c.u8() % 5;
+    let shape = c.u8() % 6;
     match shape {
         0 => path(&String::from_utf8_lossy(c.rest())),
         1 | 2 => {
             let base = if shape == 1 {
-                json!({ "schema": "network/svc/v1", "op": "request", "id": "svq_000102030405060708090a0b0c0d0e0f", "name": "files", "method": "GET", "path": "/sync/v1/x", "headers": [["authorization", "Bearer t"]], "body": "" })
+                json!({ "schema": "network/svc/v2", "op": "request", "network": "net_00112233445566778899aabbccddeeff", "id": "svq_000102030405060708090a0b0c0d0e0f", "name": "files", "method": "GET", "path": "/sync/v1/x", "headers": [["authorization", "Bearer t"]], "length": 0 })
             } else {
-                json!({ "schema": "network/svc/v1", "op": "answer", "id": "svq_000102030405060708090a0b0c0d0e0f", "status": 200, "headers": [["content-type", "text/plain"]], "body": "aGk" })
+                json!({ "schema": "network/svc/v2", "op": "answer", "status": 200, "headers": [["content-type", "text/plain"]], "length": 2 })
             };
             let v = if c.bool() {
                 let over = c.value();
@@ -115,6 +133,12 @@ fuzz_target!(|data: &[u8]| {
             }
         }
         3 => target(&String::from_utf8_lossy(c.rest())),
+        5 => {
+            let titles_only = c.bool();
+            let base = json!({ "schema": "network/svc/v2", "op": "window", "network": "net_00112233445566778899aabbccddeeff", "path": "/api/session/claude:abc/transcript?limit=120", "nonce": "AAAAAAAAAAAAAAAAAAAAAAAA", "at": 0, "cert": {}, "sig": "", "length": 0 });
+            let over = c.value();
+            window(&overlay(base, over, &mut c), titles_only);
+        }
         _ => headers(&mut c),
     }
 });

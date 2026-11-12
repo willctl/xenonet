@@ -1,12 +1,11 @@
-// A request to a published service is passed on once, however it comes
-// back (docs/design/network.md, section 14). studio publishes a made-up
-// HTTP service; laptop's svc request, dated four minutes ahead as a
-// gateway could let it be, reaches studio's node. It's sent again three
-// minutes later, when a host that kept ids only two minutes from their
-// arrival would take it as new, and again after the gateway sets studio's
-// clock back. The service is called once. And a svc frame from a batch
-// the gateway refused for this host's time goes again only while its own
-// date is right.
+// A request to a published service goes to it once, however often its
+// stream is sent (docs/design/network.md, "Services through the
+// network"). studio's node runs svc/2 on its endpoint, on loopback, and
+// publishes a made-up HTTP service; laptop is a bare endpoint with
+// laptop's host key, a member by studio's chain. The same request on a
+// second stream, and on a new connection, is answered 409 and the service
+// is called once; a new request id goes; and a stream naming a network
+// studio doesn't share with laptop is refused before any service is read.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
@@ -14,17 +13,19 @@ use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use xenonet_net::codec::frame_id;
+use xenonet_net::admission::Admission;
+use xenonet_net::dial::{Alpn, Close, Dial, Mesh};
+use xenonet_net::endpoint::{peer_id, IrohDial, LanLookup, Relays, Settings};
 use xenonet_net::files::{Dir, NetFile, Pin, KEY};
-use xenonet_net::frame::{host_frame, Draft};
 use xenonet_net::identity::Identity;
 use xenonet_net::keys::HostKey;
-use xenonet_net::node::{Batch, Node, Options};
+use xenonet_net::node::{Node, Options};
 use xenonet_net::nodes::Nodes;
 use xenonet_net::persist::{Memory, Persist};
 use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster, ADMIT};
 use xenonet_net::sink::{LogSink, SinkSlot};
 use xenonet_net::svc::{request_id, Request};
+use xenonet_net::svc2;
 
 const NET: &str = "net_00112233445566778899aabbccddeeff";
 const T0: i64 = 1_792_512_000_000;
@@ -66,7 +67,7 @@ async fn counting_service(hits: Arc<AtomicUsize>) -> u16 {
 
 /// studio's node, in a network with laptop, on a clock the test sets:
 /// its folder, the node, the clock, and both hosts' keys.
-fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey, HostKey) {
+fn studio(tag: &str) -> (std::path::PathBuf, Arc<Nodes>, Arc<Node>, Arc<AtomicI64>, HostKey, HostKey) {
     let dir = std::env::temp_dir().join(format!("xenonet-svc-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -106,24 +107,49 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey,
     let clock = Arc::new(AtomicI64::new(T0 + 10 * MIN));
     let mut o = Options::new(dir.join("network"), kept, "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));
     o.vault = Some(vault);
+    o.link = true;
+    o.bind = Some("127.0.0.1:0".parse().unwrap());
+    o.lan = LanLookup::Off;
     let c = clock.clone();
     o.clock = Arc::new(move || c.load(Ordering::SeqCst) as f64);
     let nodes = Nodes::open(o, Arc::new(SinkSlot::new(Arc::new(LogSink::new(Arc::new(|_: &str, _: &str| {})))))).unwrap();
     let node = nodes.first();
-    (dir, node, clock, studio, laptop)
+    (dir, nodes, node, clock, studio, laptop)
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_svc_request_is_passed_on_once_however_it_comes_back() {
-    let (dir, node, clock, studio, laptop) = studio("replay");
-    let n = node.shared();
+const OTHER: &str = "net_ffeeddccbbaa99887766554433221100";
 
+fn loopback() -> Settings {
+    Settings { relays: Relays::None, lan: LanLookup::Off, bind: Some("127.0.0.1:0".parse().unwrap()), roots: Vec::new() }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_svc_request_is_passed_on_once_however_often_its_stream_is_sent() {
+    let (dir, nodes, node, _clock, studio, laptop) = studio("replay");
+    let n = node.shared();
     let hits = Arc::new(AtomicUsize::new(0));
     let port = counting_service(hits.clone()).await;
     n.svc_publish("files", &format!("http://127.0.0.1:{port}"), &["/pay/".into()], &[], true).unwrap();
+    nodes.start().unwrap();
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    let t = loop {
+        if let Some(t) = n.link2() {
+            break t;
+        }
+        assert!(std::time::Instant::now() < end, "studio's endpoint started");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
 
-    // laptop's request: a POST with its bearer, dated four minutes ahead.
-    let now = T0 + 10 * MIN;
+    // laptop: its own key's endpoint, studio a member of NET by its chain,
+    // and of another network studio isn't in with it.
+    let admission = Arc::new(Admission::new());
+    let dial = Arc::new(IrohDial::bind(&laptop, &loopback(), admission.clone()).await.unwrap());
+    let mesh = Mesh::new(dial.clone(), admission);
+    let at = peer_id(studio.public());
+    mesh.set_members(NET, [at]);
+    mesh.set_members(OTHER, [at]);
+    dial.addresses().put(at, &t.dial.direct_addrs(), None, Duration::from_secs(60)).unwrap();
+
     let req = Request {
         id: request_id().unwrap(),
         name: "files".into(),
@@ -132,72 +158,46 @@ async fn a_svc_request_is_passed_on_once_however_it_comes_back() {
         headers: vec![("authorization".into(), "Bearer t".into())],
         body: b"5 EUR".to_vec(),
     };
-    let d = Draft { network: NET, id: frame_id().unwrap(), kind: "svc", from: "laptop", to: "studio", at: now + 4 * MIN };
-    let f = host_frame(&d, &laptop, studio.public(), &req.to_json(), None).unwrap();
+    let wait = Duration::from_secs(10);
+    let a = svc2::call(&mesh, at, NET, &req.head(NET), &req.body, wait).await;
+    assert_eq!((a.status, a.body.as_slice()), (200, b"ok".as_slice()), "{}", a.message());
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
 
-    let _ = n.frame(&f);
-    let end = std::time::Instant::now() + Duration::from_secs(10);
-    while hits.load(Ordering::SeqCst) == 0 {
-        assert!(std::time::Instant::now() < end, "the first request reached the service");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    // Three minutes on: past two minutes from its arrival, still within
-    // its own time.
-    clock.store(now + 3 * MIN, Ordering::SeqCst);
-    let _ = n.frame(&f);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(hits.load(Ordering::SeqCst), 1, "three minutes on");
+    // The same request on a second stream.
+    let a = svc2::call(&mesh, at, NET, &req.head(NET), &req.body, wait).await;
+    assert_eq!((a.status, a.code.as_deref()), (409, Some("replayed")));
+    // And on a new connection.
+    mesh.link(at, Alpn::Svc).unwrap().close(Close::Done);
+    let a = svc2::call(&mesh, at, NET, &req.head(NET), &req.body, wait).await;
+    assert_eq!((a.status, a.code.as_deref()), (409, Some("replayed")));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(hits.load(Ordering::SeqCst), 1, "the service was called once");
 
-    // Ten minutes on it's stale; then the gateway sets studio's clock back
-    // to when it came.
-    clock.store(now + 10 * MIN, Ordering::SeqCst);
-    let _ = n.frame(&f);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(hits.load(Ordering::SeqCst), 1, "ten minutes on");
-    n.learn_offset((now + 4 * MIN) as f64);
-    assert_eq!(n.gateway_now() as i64, now + 4 * MIN);
-    let _ = n.frame(&f);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(hits.load(Ordering::SeqCst), 1, "with the clock set back");
+    // A new request goes.
+    let again = Request { id: request_id().unwrap(), ..req.clone() };
+    let a = svc2::call(&mesh, at, NET, &again.head(NET), &again.body, wait).await;
+    assert_eq!(a.status, 200);
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
 
-    // The clock right again, a new request goes.
-    n.learn_offset((now + 10 * MIN) as f64);
-    let req2 = Request { id: request_id().unwrap(), ..req };
-    let d = Draft { network: NET, id: frame_id().unwrap(), kind: "svc", from: "laptop", to: "studio", at: now + 10 * MIN };
-    let _ = n.frame(&host_frame(&d, &laptop, studio.public(), &req2.to_json(), None).unwrap());
-    let end = std::time::Instant::now() + Duration::from_secs(10);
-    while hits.load(Ordering::SeqCst) == 1 {
-        assert!(std::time::Instant::now() < end, "a new request reached the service");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    drop(node);
-    let _ = std::fs::remove_dir_all(dir);
-}
+    // A stream naming a network studio's chains don't share with laptop,
+    // over the connection the two share: refused at studio.
+    let other = Request { id: request_id().unwrap(), ..req.clone() };
+    let a = svc2::call(&mesh, at, OTHER, &other.head(OTHER), &other.body, wait).await;
+    assert_eq!((a.status, a.code.as_deref()), (403, Some("not-in-network")), "{}", a.message());
+    // A head that says nothing it should: refused, and nothing read.
+    let a = svc2::call(&mesh, at, NET, &serde_json::json!({ "schema": "network/svc/v2", "op": "request", "network": NET }), &[], wait).await;
+    assert_eq!(a.status, 400);
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
 
-#[test]
-fn a_svc_frame_dated_by_a_wrong_clock_isnt_sent_again() {
-    // The gateway refused this host's time, and it learned the right one:
-    // a svc frame from the refused batch goes again only while its own
-    // date, sealed in, is within a minute of that time.
-    let (dir, node, _clock, studio, laptop) = studio("clock");
-    let n = node.shared();
-    let now = T0 + 10 * MIN;
-    let answer = |at: i64| {
-        let d = Draft { network: NET, id: frame_id().unwrap(), kind: "svc", from: "studio", to: "laptop", at };
-        host_frame(&d, &studio, laptop.public(), &serde_json::json!({ "op": "answer" }), None).unwrap()
-    };
-    let batch = |f| Batch { ids: Vec::new(), body: String::new(), relay: true, svc: Some(f) };
-    let off = answer(now - 10 * MIN);
-    let mut w = n.services().wait("svq_00000000000000000000000000000001", "laptop", &off.id).unwrap();
-    n.batch_failed(&batch(off), "", true);
-    let a = w.answer.try_recv().unwrap();
-    assert_eq!((a.status, a.code.as_deref()), (503, Some("clock")));
-    assert!(n.next_batch().is_none(), "not sent again");
-    let right = answer(now - 20_000);
-    let id = right.id.clone();
-    n.batch_failed(&batch(right), "", true);
-    assert_eq!(n.next_batch().and_then(|b| b.svc).map(|f| f.id), Some(id), "sent again");
-    drop(w);
+    // laptop is no window host, and has no device of the person's: its
+    // window reads are refused.
+    let key = svc2::WindowKey::make(dial.me(), "prs_x", "xns1_x", T0, |_| Ok(vec![0; 64])).unwrap();
+    let read = key.read(NET, at, "/api/session/claude:abc/transcript", xenonet_net::node::now_ms() as i64).unwrap();
+    let a = svc2::call(&mesh, at, NET, &read.head(), &[], wait).await;
+    assert_eq!((a.status, a.code.as_deref()), (403, Some("not-window")), "{}", a.message());
+
+    mesh.close().await;
+    nodes.stop();
     drop(node);
     let _ = std::fs::remove_dir_all(dir);
 }

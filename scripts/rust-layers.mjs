@@ -88,6 +88,7 @@ const XENOLITH = { dir: "xenolith/rust", may: new Set(["xenonet-id", "xenonet-lo
 // exact text on the line, and why. Add one only where the word means
 // something other than the app; never for a branch on the app.
 const NOT_AN_APP = [
+  { file: "crates/xenonet-net/src/svc2.rs", text: `"cursor" => (1..=200)`, why: "a transcript page's cursor parameter in a window read" },
   { file: "crates/xenonet-integrations/src/mcp_info.rs", text: `"cursor": self.state.get("cursor")`, why: "the MCP status listing's page cursor" },
   { file: "crates/xenonet-integrations/src/mcp_info.rs", text: `c.state.insert("cursor".into(), Value::Null);`, why: "the MCP status listing's page cursor" },
   { file: "crates/xenonet-integrations/src/mcp_info.rs", text: `let cursor = c.state.get("cursor").cloned();`, why: "the MCP status listing's page cursor" },

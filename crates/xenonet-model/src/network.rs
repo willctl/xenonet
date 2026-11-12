@@ -188,7 +188,6 @@ pub enum FrameKind {
     Message,
     Relay,
     Operator,
-    Svc,
 }
 
 crate::tag!(pub Everyone = "*");
@@ -1129,10 +1128,10 @@ impl Document for State {
     const DESCRIPTION: &'static str = "GET /api/net/state: the network this machine is in, its gateway and link, the other hosts, and what waits.";
 }
 
-// ---- network/svc/v1
+// ---- network/svc/v2
 
 /// A svc request's body, at most.
-pub const SVC_REQUEST_BODY: usize = 1 << 20;
+pub const SVC_REQUEST_BODY: usize = 8 << 20;
 /// The header XenoNet's own refusals of a svc call carry, with their code,
 /// so a caller can tell them from the service's answers.
 pub const SVC_REFUSED_HEADER: &str = "x-xenonet-refused";
@@ -1144,8 +1143,9 @@ pub fn svc_refusal(code: &str, message: &str) -> (Vec<(String, String)>, Vec<u8>
     (headers, serde_json::json!({ "error": message, "code": code }).to_string().into_bytes())
 }
 
-crate::tag!(pub SvcTag = "network/svc/v1");
+crate::tag!(pub SvcTag = "network/svc/v2");
 crate::tag!(pub SvcRequestOp = "request");
+crate::tag!(pub SvcWindowOp = "window");
 crate::tag!(pub SvcAnswerOp = "answer");
 
 crate::pattern! {
@@ -1187,12 +1187,15 @@ crate::pattern! {
     pub struct SvcCode(r"^[a-z-]{1,32}$");
 }
 
-// A request to a published service.
+// A request to a published service: the head on its svc/2 stream, before
+// its body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SvcRequest {
     pub schema: SvcTag,
     /// From the calling host
     pub op: SvcRequestOp,
+    /// The network the service was published in: the connection carries it, and the caller is the member whose endpoint id the connection authenticated in its chain
+    pub network: NetworkId,
     pub id: SvcId,
     /// The service, as its host published it
     pub name: ServiceName,
@@ -1202,39 +1205,79 @@ pub struct SvcRequest {
     pub path: Text<0, 4096>,
     /// Only the caller's Authorization, Content-Type, Accept and User-Agent cross; the publishing host adds Host and Forwarded itself
     pub headers: Bounded<Header, 0, 64>,
-    /// The request's body, at most 1 MiB
-    pub body: Base64Bytes,
+    /// The bytes of body after the head, at most 8 MiB
+    pub length: Ranged<0, 8388608>,
 }
 
-// The service's answer, or XenoNet's.
+// The person's device's word that a window key reads for them, from one
+// machine's endpoint.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WindowCert {
+    pub person: Text<1, 128>,
+    /// The device's key id, in the person's chain
+    pub device: Text<1, 128>,
+    /// The window key
+    pub key: PublicKey,
+    /// The endpoint id of the machine whose window it is, in hex
+    pub endpoint: Text<64, 64>,
+    /// When it was certified (ms)
+    pub at: Int,
+    /// When it lapses (ms), 12 hours after at, at most
+    pub until: Int,
+    /// The device's signature
+    pub sig: Base64Bytes,
+}
+
+// A read of the answering machine's own API for the person's window on
+// another machine: a session's transcript or stats.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SvcWindow {
+    pub schema: SvcTag,
+    pub op: SvcWindowOp,
+    pub network: NetworkId,
+    /// /api/session/<id>/transcript (with cursor and limit) or /api/session/<id>/stats
+    pub path: Text<1, 4096>,
+    /// Taken once
+    pub nonce: Text<16, 64>,
+    /// When it was made (ms): within two minutes of the answering machine's clock
+    pub at: Int,
+    pub cert: WindowCert,
+    /// The window key's signature over the network, both endpoint ids, the nonce, the time and the path
+    pub sig: Base64Bytes,
+    /// No body follows
+    pub length: Ranged<0, 0>,
+}
+
+// The service's answer, or XenoNet's: the head on the stream, before its
+// body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SvcAnswer {
     pub schema: SvcTag,
     /// From the publishing host
     pub op: SvcAnswerOp,
-    pub id: SvcId,
     pub status: Ranged<200, 599>,
     /// The service's answer's headers, without Set-Cookie and hop-by-hop headers
     pub headers: Bounded<Header, 0, 64>,
-    /// The answer's body, at most 4 MiB
-    pub body: Base64Bytes,
-    /// Set when XenoNet answered rather than the service: not-published, not-allowed, rate, path-refused, too-big, timeout…
+    /// The bytes of body after the head, at most 8 MiB
+    pub length: Ranged<0, 8388608>,
+    /// Set when XenoNet answered rather than the service: not-published, not-allowed, replayed, rate, path-refused, too-big, timeout…
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub code: Opt<SvcCode>,
 }
 
-/// A service between hosts.
+/// A head on a svc/2 stream.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Svc {
     Request(SvcRequest),
+    Window(SvcWindow),
     Answer(SvcAnswer),
 }
 
 impl Document for Svc {
-    const ID: &'static str = "network/svc/v1";
-    const TITLE: &'static str = "A service between hosts";
-    const DESCRIPTION: &'static str = "A request to a service another host published to the network, and its answer, sealed between the two hosts.";
+    const ID: &'static str = "network/svc/v2";
+    const TITLE: &'static str = "A head on a svc/2 stream";
+    const DESCRIPTION: &'static str = "One stream per request between members of a network (xenonet/svc/2): a request to a service another host published, or the window's read of another machine's transcript, and the answer, each a head and then its body.";
 }
 
 /// The documents this module writes.
