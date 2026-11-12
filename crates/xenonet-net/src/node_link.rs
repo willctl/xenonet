@@ -31,11 +31,15 @@
 //! what authors of its networks hand it for their other members, on its
 //! store's tables, and hands it over when the member connects.
 //!
-//! What link/2 doesn't carry yet: a message whose act rests on an
-//! authority (the envelope has no place for it beside the entry yet), so
-//! those go through the gateway alone; the map's relay; and
-//! Compacted answers, which are set aside (a holder's counts as "don't
-//! have", so the next holder or the author is asked).
+//! **An act's authority** (the person's presence, a grant, a delegation)
+//! goes sealed beside its message's entry in the envelope, for the one
+//! recipient, and is decided there as every act is. One that carries the
+//! person's presence goes only to a recipient that's connected, never to
+//! a mailbox (`mailbox::route`).
+//!
+//! What link/2 doesn't carry yet: the map's relay; and Compacted answers,
+//! which are set aside (a holder's counts as "don't have", so the next
+//! holder or the author is asked).
 //!
 //! **Finding members.** Each machine signs an address record (its endpoint
 //! id and direct addresses, under its machine signing key) and puts it in
@@ -213,13 +217,10 @@ impl Shared {
     }
 
     /// An entry of this machine's feed on link/2 as well, to each of `to`
-    /// that is connected. An act that rests on an authority goes through
-    /// the gateway alone, since an envelope has no place for it yet.
+    /// that is connected, with what its act rests on (`authority`) sealed
+    /// beside it for its recipient.
     pub(super) fn link2_entry(&self, net: &NetFile, e: &FeedEntry, to: &[String], authority: Option<&Value>) {
         let Some(t) = self.link2() else { return };
-        if authority.is_some_and(|a| a.as_object().is_none_or(|o| !o.is_empty())) {
-            return;
-        }
         let members: Vec<Member> = {
             let r = self.roster();
             let Some(v) = r.view_ref() else { return };
@@ -227,7 +228,7 @@ impl Shared {
         };
         let view = self.roster().view();
         for m in members {
-            let env = match Envelope::seal_entry(e, &m.machine.id(), &m.keys, None) {
+            let env = match Envelope::seal_act(e, &m.machine.id(), &m.keys, None, authority) {
                 Ok(env) => env,
                 Err(err) => {
                     self.log("net.link2", &format!("an entry for {} wasn't sealed: {}", m.id, err.message));
@@ -612,7 +613,9 @@ impl Machine for NodeMachine {
         // it here, and lets it go.
         let from_mailbox = from_holder && view.is_mailbox(&m.id);
         let out: Vec<Out> = from_mailbox.then(|| Out::Control(Control::Took { network: env.network.clone(), ids: vec![env.id.clone()] })).into_iter().collect();
-        let v = match env.open_entry(&Recipient { machine: &me, key: &key }, &view) {
+        let me_r = Recipient { machine: &me, key: &key };
+        // The entry, and what its act rests on, which opens only beside it.
+        let v = match env.open_entry(&me_r, &view).and_then(|v| Ok((v, env.open_authority(&me_r)?))) {
             Ok(v) => v,
             Err(e) => {
                 n.log("net.link2", &format!("an envelope from {} was refused: {}", m.id, e.message));
@@ -623,8 +626,9 @@ impl Machine for NodeMachine {
                 return out;
             }
         };
+        let (v, authority) = v;
         if !from_holder {
-            n.take_entry(m.id, v, json!({}), window, Via::Link);
+            n.take_entry(m.id, v, authority, window, Via::Link);
             return out;
         }
         // Another member's entry, which `m` holds or kept as a mailbox,
@@ -635,7 +639,10 @@ impl Machine for NodeMachine {
             n.log("net.link2", &format!("{} sent a message of another member's feed, which was refused: messages come from their authors or a mailbox", m.id));
             return out;
         };
-        n.take_entry(author.id.clone(), v, json!({}), view.is_window(&author.id), Via::Link);
+        // A holder serves kept entries, which rest on no authority; a
+        // mailbox hands on the one sealed beside a message.
+        let authority = if from_mailbox { authority } else { json!({}) };
+        n.take_entry(author.id.clone(), v, authority, view.is_window(&author.id), Via::Link);
         out
     }
 

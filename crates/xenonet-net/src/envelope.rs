@@ -35,6 +35,17 @@
 //! around the same signed entry, which is why the head carries no
 //! signature of its own.
 //!
+//! **An act's authority.** A message whose act rests on more than its
+//! machine's word (the person's answer with their presence, a grant's
+//! token, a delegation) carries what it rests on beside the entry, as
+//! `network/message/v3`'s `authority`: sealed for the same recipient on
+//! its own, with the sealing head and the line `authority` as associated
+//! data, so it opens only with the envelope it came in, and a mailbox
+//! that keeps the envelope can't read, swap or move it. Dropping it is
+//! all a mailbox can do, which leaves the act refused at the receiver.
+//! The receiver decides the act on its own facts, as it decides every
+//! act (xenonet-authz). A holder serves kept entries, which carry none.
+//!
 //! **A space's entries** (a group that is a space, `spc_…`: Xenolith's
 //! sync/2) go unsealed: a space has no mailboxes, and its entries travel
 //! only over authenticated QUIC between members its chain admits. Such an
@@ -150,6 +161,9 @@ pub struct Envelope {
     /// The text a space's unsealed entry names by hash, carried beside it;
     /// None on everything else.
     pub attach: Option<Vec<u8>>,
+    /// What a sealed message's act rests on, sealed for the same
+    /// recipient (`authority_head`); None when it rests on nothing more.
+    pub authority: Option<Vec<u8>>,
 }
 
 /// This machine as a recipient: its machine signing key's id and its
@@ -193,6 +207,12 @@ impl Envelope {
         )
     }
 
+    /// What an act's authority is sealed under: the sealing head, then
+    /// `authority`, so it opens only beside this envelope's entry.
+    pub fn authority_head(&self) -> String {
+        format!("{}\nauthority", self.sealing_head())
+    }
+
     /// The whole head, with the body's hash: what a mailbox's receipt or
     /// a holder's index names it by.
     pub fn head(&self) -> String {
@@ -203,6 +223,17 @@ impl Envelope {
     /// recipient's machine signing key id) with its transport keys
     /// `to_keys`. `eph` fixes the ephemeral key, for known-answer tests.
     pub fn seal_entry(entry: &FeedEntry, to: &str, to_keys: &PublicKeys, eph: Option<[u8; 32]>) -> R<Envelope> {
+        Envelope::seal_act(entry, to, to_keys, eph, None)
+    }
+
+    /// `seal_entry`, with what the act rests on (`authority`, a JSON
+    /// object) sealed beside it for the same recipient. An empty object
+    /// or None is no authority.
+    pub fn seal_act(entry: &FeedEntry, to: &str, to_keys: &PublicKeys, eph: Option<[u8; 32]>, authority: Option<&Value>) -> R<Envelope> {
+        let authority = authority.filter(|a| a.as_object().is_some_and(|o| !o.is_empty()));
+        if authority.is_some() && entry.class() != feed::Class::Loose {
+            return Err(bad("authority"));
+        }
         entry.well_formed().map_err(|e| NetError::bad(e.message))?;
         let to = To::parse(to).filter(|t| *t != To::All).ok_or_else(|| bad("recipient"))?;
         let mut env = Envelope {
@@ -217,6 +248,7 @@ impl Envelope {
             sealed: true,
             body: Vec::new(),
             attach: None,
+            authority: None,
         };
         let head = env.sealing_head();
         let plain = entry.encode();
@@ -224,6 +256,9 @@ impl Envelope {
             Some(e) => seal_with(e, to_keys, &head, &plain)?,
             None => seal(to_keys, &head, &plain)?,
         };
+        if let Some(a) = authority {
+            env.authority = Some(seal(to_keys, &env.authority_head(), a.to_string().as_bytes())?);
+        }
         env.well_formed()?;
         Ok(env)
     }
@@ -249,6 +284,7 @@ impl Envelope {
             sealed: false,
             body: entry.encode(),
             attach: attach.map(<[u8]>::to_vec),
+            authority: None,
         };
         env.well_formed()?;
         Ok(env)
@@ -270,6 +306,7 @@ impl Envelope {
             sealed: false,
             body: bytes,
             attach: None,
+            authority: None,
         };
         env.well_formed()?;
         Ok(env)
@@ -294,7 +331,7 @@ impl Envelope {
                 if !LIVE_KINDS.contains(&self.kind.as_str()) {
                     return Err(bad("kind"));
                 }
-                if self.sealed || self.pos.is_some() || self.attach.is_some() {
+                if self.sealed || self.pos.is_some() || self.attach.is_some() || self.authority.is_some() {
                     return Err(bad("class"));
                 }
                 // Not forwarded, so the id is the body's, checked here.
@@ -314,6 +351,10 @@ impl Envelope {
                 }
                 if self.sealed && self.attach.is_some() {
                     return Err(bad("attach"));
+                }
+                // Only a sealed message carries an act's authority.
+                if self.authority.is_some() && (!self.sealed || self.class != Class::Loose) {
+                    return Err(bad("authority"));
                 }
                 if self.pos.is_none_or(|p| p.inc == 0 || p.seq == 0) {
                     return Err(bad("pos"));
@@ -341,6 +382,9 @@ impl Envelope {
         m.insert("body".into(), json!(b64(&self.body)));
         if let Some(a) = &self.attach {
             m.insert("attach".into(), json!(b64(a)));
+        }
+        if let Some(a) = &self.authority {
+            m.insert("authority".into(), json!(b64(a)));
         }
         Value::Object(m)
     }
@@ -378,6 +422,10 @@ impl Envelope {
             attach: match v.get("attach") {
                 None => None,
                 Some(a) => Some(a.as_str().and_then(unb64).ok_or_else(|| bad("attach"))?),
+            },
+            authority: match v.get("authority") {
+                None => None,
+                Some(a) => Some(a.as_str().and_then(unb64).ok_or_else(|| bad("authority"))?),
             },
         };
         env.well_formed()?;
@@ -426,6 +474,24 @@ impl Envelope {
         let entry = FeedEntry::decode(&plain).map_err(|e| NetError::bad(e.message))?;
         self.matches(&entry)?;
         entry.verify(author).map_err(|e| NetError::new(403, "refused", e.message))
+    }
+
+    /// What the act this envelope carries rests on, for `me`: the
+    /// authority sealed beside its entry, or an empty object when it
+    /// carries none. Call it once the entry opened: it is read only with
+    /// the entry it came with, and decided at this machine as every act is.
+    pub fn open_authority(&self, me: &Me<'_>) -> R<Value> {
+        let Some(sealed) = &self.authority else { return Ok(json!({})) };
+        if self.to != To::Machine(me.machine.into()) {
+            return Err(NetError::new(403, "wrong-recipient", "that envelope is for another machine"));
+        }
+        let plain =
+            open(me.key, &self.authority_head(), sealed).map_err(|_| NetError::new(400, "unsealed", "that act's authority wasn't sealed for this machine, or was changed"))?;
+        let v: Value = serde_json::from_slice(&plain).map_err(|_| bad("authority"))?;
+        if !v.is_object() {
+            return Err(bad("authority"));
+        }
+        Ok(v)
     }
 
     /// The entry a space's unsealed envelope carries, for `me` (the

@@ -308,3 +308,43 @@ fn a_spaces_entry_goes_unsealed_with_its_text_beside_it_and_a_networks_never_doe
     assert!(Envelope::parse(&v).is_err(), "a sealed envelope with a text beside it");
     assert!(sealed_for(&claim, &n.laptop).open_plain_by(&n.laptop.key_id(), &n.studio.signer.public()).is_err());
 }
+
+#[test]
+fn an_acts_authority_opens_only_for_its_recipient_beside_its_own_entry() {
+    let n = net();
+    let view = n.view();
+    let (claim, message) = entries(&n.studio);
+    let authority = json!({ "presence": { "what": "answer", "sig": "c2ln" } });
+    let env = Envelope::seal_act(&message, &n.laptop.key_id(), n.laptop.transport.public(), None, Some(&authority)).unwrap();
+    // It travels in the envelope's JSON, sealed: a mailbox reads its head
+    // and keeps it whole, but sees nothing of what the act rests on.
+    let back = Envelope::decode(&env.encode()).unwrap();
+    assert_eq!(back, env);
+    assert!(!String::from_utf8_lossy(&env.encode()).contains("answer"));
+    let (id, key) = n.laptop.me();
+    let me = Me { machine: &id, key };
+    open_as(&back, &n.laptop, &view).unwrap();
+    assert_eq!(back.open_authority(&me).unwrap(), authority);
+    // None reads as an empty object, and carries no field.
+    let bare = sealed_for(&message, &n.laptop);
+    assert_eq!(bare.open_authority(&me).unwrap(), json!({}));
+    assert!(bare.to_json().get("authority").is_none());
+    // Moved onto another envelope for the same recipient, it doesn't open:
+    // the seal binds it to its own head.
+    let mut stolen = sealed_for(&entries(&n.desk).1, &n.laptop);
+    stolen.authority = env.authority.clone();
+    assert_eq!(stolen.open_authority(&me).unwrap_err().code, "unsealed", "another entry's authority");
+    // Another machine can't open it, and only a message carries one.
+    let (did, dkey) = n.desk.me();
+    assert_eq!(env.open_authority(&Me { machine: &did, key: dkey }).unwrap_err().code, "wrong-recipient");
+    assert!(Envelope::seal_act(&claim, &n.laptop.key_id(), n.laptop.transport.public(), None, Some(&authority)).is_err(), "a kept entry rests on no authority");
+    let mut j = sealed_for(&claim, &n.laptop).to_json();
+    j["authority"] = env.to_json()["authority"].clone();
+    assert!(Envelope::parse(&j).is_err(), "on a kept entry");
+    let mut j = bare.to_json();
+    j["authority"] = json!("!!");
+    assert!(Envelope::parse(&j).is_err(), "not base64url");
+    // An empty authority is none.
+    let empty = Envelope::seal_act(&message, &n.laptop.key_id(), n.laptop.transport.public(), None, Some(&json!({}))).unwrap();
+    assert!(empty.authority.is_none());
+}
