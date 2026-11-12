@@ -9,18 +9,19 @@
 //   one included. Each has at most three internal dependencies besides the
 //   base crates.
 // - Composition crates (COMPOSITION): each holds a domain's runtime and
-//   wires several domains together, on its way to dissolving in the phase
-//   of docs/design/direction.md's order of work its entry names. Each has a
-//   ceiling at its count when the ceilings were set: the check fails when
-//   it goes over, and when it drops below without its ceiling being
-//   lowered here, so a ceiling only ever comes down.
+//   wires several domains together. Each has a ceiling at its count when
+//   the ceilings were set, tagged with the phase of docs/design/
+//   direction.md's order of work it's to come down in and why it needs
+//   that many: the check fails when it goes over, and when it drops below
+//   without its ceiling being lowered here, so a ceiling only ever comes
+//   down.
 // - Surfaces (SURFACES): xenonet-http, xenonet-mcp and xenonet-console
 //   import xenonet-api and the base crates and nothing else. What else a
 //   surface needs, the root gives it (a trait or the data it reads), or it
 //   asks the xenonet binary.
 // - The composition root (ROOT): xenonet-service (compose/, with the
 //   engine's runtime, remote actors' cores and the integrations; serve.rs,
-//   the gateway, A2A and the other servers) and xenonet-cli (the binary,
+//   the actor gateway, A2A and the other servers) and xenonet-cli (the binary,
 //   whose `serve()` composes). No limit, and no other crate depends on
 //   either.
 //
@@ -60,10 +61,11 @@ import path from "node:path";
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const report = process.argv.includes("--report");
 const BASE = new Set(["xenonet-text", "xenonet-os", "xenonet-model"]);
-// The composition crates' ceilings, and the phase each dissolves in.
+// The composition crates' ceilings, the phase each is to come down in, and
+// why it needs that many now.
 const COMPOSITION = {
-  "xenonet-state": { ceiling: 7, phase: 4, why: "the map's state goes into the one store" },
-  "xenonet-doctor": { ceiling: 7, phase: 5, why: "it runs the checks the crates and adapters expose, through the registry" },
+  "xenonet-state": { ceiling: 7, phase: 7, why: "the map's runtime drives the readers, the store, the saved state, the blocks, the components and the demo's world beside the map's data" },
+  "xenonet-doctor": { ceiling: 7, phase: 7, why: "its verdicts read the components, the engine, the network, the sources and the registry's checks" },
 };
 // The surfaces: xenonet-api and the base crates alone.
 const SURFACES = {

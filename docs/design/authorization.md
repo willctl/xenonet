@@ -1,6 +1,7 @@
 # Authorization: who may do what
 
-Status: built, phase 3 of the rewrite ([direction.md](direction.md),
+Status: built in phase 3 of the rewrite, with spaces of shared context,
+forwards and outbound actors from phase 6 ([direction.md](direction.md),
 "Order of work"). This is how XenoNet decides who may do what, as the code
 stands. The goals it answers to are in [goals.md](goals.md); the network it
 runs over is in [network.md](network.md).
@@ -37,7 +38,7 @@ runs over is in [network.md](network.md).
 | Crate | Holds | Depends on |
 |---|---|---|
 | `xenonet-id` | Keys and signatures bound to a purpose, the `Signer`, `KeyStore` and `Vault` traits, presence blocks and their check, did:key | nothing of XenoNet's |
-| `xenonet-log` | `Chain<P: Policy>`, the network policy (`xenonet-roster/2`) and the person policy (`xenonet-person/1`) | `xenonet-id` |
+| `xenonet-log` | `Chain<P: Policy>`, the network policy (`xenonet-roster/2`), the person policy (`xenonet-person/1`) and a space's policy (`xenolith-space/1`) | `xenonet-id` |
 | `xenonet-authz` | `decide`, `Request` and its vocabulary, `Ground`, tokens and their roots, `Information<T>` | `xenonet-id` |
 | `xenonet-keys` | The platform keys and checks: the Secure Enclave and Touch ID, Windows Hello, polkit and a passphrase, and `Fake` | `xenonet-id`, `xenonet-os` |
 
@@ -250,7 +251,19 @@ exactly these facts, and parsing refuses any other:
 - `network(id)`: the one network it may act in, or none for any network
   this machine is in;
 - one `right(action)` for each action it may do;
-- `expires(date)`, with the check that the time is before it.
+- `expires(date)`, with the check that the time is before it;
+- at most once each, where the grant's schema has room for them:
+  `key(id)`, the context key the actor speaks with (a Xenolith's
+  `xns1_…`), honoured only over its own machine's connection
+  (`Token::key_over`), and `forward(alpn)`, the ALPN XenoNet carries for
+  it ([Forward grants](#the-actor-grant), below).
+
+What a grant may hold is a `Schema`: XenoNet's actor grants are
+`Schema::XENONET`; Xenolith's own grants, for its clients, are
+`Schema::XENOLITH`, the four ctx rights and `key(id)` and nothing else,
+under Xenolith's own token root (certified by its context key, not a
+machine signing key) and written as `xenolith_grant_…`. Both go through
+the same parser, roots and revocations (`Token::parse_with`).
 
 Rights are read from the authority block alone, so a block a holder
 appends can only narrow. XenoNet keeps a token's revocation id and the
@@ -268,6 +281,7 @@ once, travels as `Authorization: Bearer`, and never goes in a URL.
 | `edit-repos` | `claim` |
 | `answer-prompts` | `answer`, which lets it Deny; what it may Allow is its allow scope |
 | a gateway token | `use-gateway` too |
+| Xenolith's forward grant | `ctx-read`, `ctx-append` and `ctx-write`, with `key(id)` and `forward(xenolith/sync/2)` (the root registers which actor and rights each forwardable ALPN has, in `compose/forward.rs`) |
 
 Other words (running commands, browsing…) say what an actor does
 elsewhere; they allow nothing in XenoNet but reporting it.
@@ -429,7 +443,8 @@ started yet.
 
 `decide(token, request, ground, presence) -> Allow | Hold | Refuse`
 (`crates/xenonet-authz/src/decide.rs`). A request is a closed struct:
-principal, resource (a machine, a network, a run, a session here), act,
+principal, resource (a machine, a network, a run, a session here, a space,
+an outbound actor, an intent), act,
 door (local, network, gateway, A2A), time and the network its envelope
 named. The action is the act's, so the two can't disagree. `Ground` is the
 facts the receiver holds: members and admins, each machine's settings, the
@@ -444,7 +459,8 @@ answer:
 
 1. **The resource** fits the action and is this machine's: a machine or
    run here, a network this machine is in, a session here, a prompt
-   waiting here.
+   waiting here, a space whose chain this machine holds, an outbound actor
+   registered here, an intent to be worked here or one this machine holds.
 2. **The door.** At a local door, only this machine's principals and the
    person. From the network, a member of the network the envelope names,
    never this machine itself. At the gateway and A2A, only this machine's
@@ -473,6 +489,11 @@ answer:
   register-actor -         -         reach     presence
   use-gateway    -         -         reach     -
   revoke         -         -         -         presence
+  delegate       -         delegate  -         delegate
+  ctx-read       ctx       ctx       ctx       ctx
+  ctx-append     ctx       ctx       ctx       ctx
+  ctx-write      ctx       ctx       ctx       ctx
+  ctx-admin      ctx       -         ctx       ctx
   intend         -         -         -         intend
   report         report    report    report    report
 ```
@@ -487,6 +508,8 @@ answer:
 | `read` | the map: reach. Transcripts, search and state: here, an agent process-checked at least; from another machine, an admin member, never an unchecked agent |
 | `presence` | the person, with a presence block for this act from the device that signed it; a weaker device is allowed and the decision says so. `register-actor` is issuing an actor's grant or widening it; narrowing and revoking need no act |
 | `answer` | A Deny only narrows, so it needs no presence: the person; this machine for its own window; a window host (an admin) relaying its window's; an actor whose token has the right. An Allow widens, and never for a run whose agent is unchecked: the person, with a presence block for it; an actor, inside its allow scope here; this machine itself, for a run started under a delegation of the person's that answers that kind of prompt and names this machine's device and the device the run was started from |
+| `delegate` | Handing work to an outbound actor (an agent this machine calls over A2A) registered here, through this machine's local door only: the person; an agent inside the scope the person registered it with (its id, or its project as this machine's map holds it), never an unchecked one, until the scope ends. No other machine's principal and no actor calls one, so another machine's work never goes out under this machine's bearer |
+| `ctx` | An act on a space (`Resource::Space`, `Act::Ctx(level)`): this machine's own copy of the space's chain gives the principal at least the level the act needs (`Ground::space_level`: its shares, unshares and curator), and an actor's token also has the act's ctx right. An unchecked agent reads and appends only on its own machine, and writes nowhere. `ctx-admin` widens, so the person does it only with a presence block for it. A share never gives more than its level |
 | `intend` | An intent worked here (named for this machine, or for `@any` and given to it by its arbiter), made by the person's device signature (the delegation it names took their presence), before its `until`: start `off` refuses it, and the delegation it names, that one and no other, must be unended, cover starts and name this machine's device and the device that signed it |
 | `report` | On an intent this machine holds, still open: a cancel is the person's alone; a start, a note or done comes from the machine it's worked on, or there, at its own door, from the agent working it (process-checked at least) or an actor whose grant names it (`grant_intents`; a note or done, never a start) |
 
@@ -508,7 +531,7 @@ window (Network settings › Publish a service); `xenonet svc publish` says
 so and does nothing. Taking a service off needs nothing.
 
 **How it's tested** (`crates/xenonet-authz/tests/authz/`): an exhaustive
-matrix of 86,400 decisions (every action by every kind of principal, here
+matrix of 102,400 decisions (every action by every kind of principal, here
 and from another machine in every role, under every start and wake
 setting, consent, delegation and governance age) against a separately
 written statement of the rules; property tests that a
@@ -516,7 +539,11 @@ narrowed token never allows what its parent refuses, that a revocation
 holds once it's held, and that an allow scope is never decided wider than
 it is; and token and presence cases: a changed or cut token, a root
 that isn't held, certified or in its time, a presence for another act or
-device, a Deny without one. `xenonet-id`'s own tests hold that a block
+device, a Deny without one. `spaces.rs` decides every ctx act by every
+kind of principal, here and from another member, at every level a chain
+may give, and checks that a grant's context key binds only over its own
+machine's connection and that Xenolith's schema refuses `forward`;
+`delegate.rs` covers handing work to an outbound actor. `xenonet-id`'s own tests hold that a block
 approves the one act it names, once and for a minute.
 
 ## `Information<T>` and the compile-fail tests
@@ -654,6 +681,11 @@ check that the window called, so no prompt starts from anywhere else.
 - **Governance freshness** is per network: a machine is in contact while
   it holds a link/2 connection to a member, or exchanged chain heads with
   one within ten minutes.
+- **Xenolith's keys are files.** Its context key and its grant are files
+  on its machine, so `key(id)` binds a context key to a machine only over
+  that machine's own connection, and a copy used from another binds
+  nothing. A space its standalone owner key owns is weaker: it shares into
+  no network and moves only to a person.
 - **Hardware keys** (FIDO2) for the widest acts aren't built.
 
 ## Alignment check

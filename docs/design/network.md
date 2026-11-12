@@ -672,7 +672,8 @@ as data (`crates/xenonet-service/src/compose/forward.rs`: only
 among them.
 
 - **The grant.** An actor attaches on an owner-only socket in the runtime
-  folder with a token whose `forward(<alpn>)` names exactly that ALPN, in
+  folder (`forward-<port>.sock`, mode 0600, and a peer of another account
+  is refused) with a token whose `forward(<alpn>)` names exactly that ALPN, in
   its time and not revoked; one actor per ALPN at a time. An actor with no
   grant collects one: it proves its key by signing XenoNet's challenge
   (`Purpose::FORWARD_COLLECT`), the ask shows at the window, and the
@@ -693,6 +694,15 @@ among them.
   decides again on what it receives: Xenolith on its space chains and its
   signed hello. `chains` hands it copies of this machine's chains, which
   it verifies from genesis itself.
+- **Its word.** On its session the actor can `say` something to the
+  composition root, which decides nothing by it. Xenolith says which spaces
+  it curates; the window offers what the person can sign for each, and
+  signs a draft Xenolith makes only when it does exactly that act
+  (`space_sign.rs`; [authorization.md](authorization.md), "Forward
+  grants"). What each network sees of this machine's projects is told to
+  it the same way (`sharing`).
+- **Unix only.** The socket is a Unix socket. On Windows it would be a
+  named pipe, which isn't built, so nothing is forwarded there.
 
 Xenolith's sync/2 runs `link2.rs`'s engine (`Protocol`, with spaces as its
 groups) over a `Mesh` with its own `Admission`, on its own endpoint or
@@ -702,7 +712,9 @@ through this forward ([xenolith/README.md](../../xenolith/README.md)).
 
 The engine reaches the networks through `xenonet_model::ops::{Net, Sink}`:
 it sends bodies naming a network or a host and receives them. It knows
-nothing of envelopes or keys. On a machine in no network nothing is
+nothing of envelopes or keys. The composition root's runtime drives it
+(`crates/xenonet-service/src/compose/runtime/network.rs`), and that's
+where text from another machine becomes `Information` as it comes in. On a machine in no network nothing is
 behind it, so every local path is unchanged.
 
 **Ids.**

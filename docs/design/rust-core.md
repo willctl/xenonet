@@ -100,7 +100,7 @@ Each crate has one job. "Depends on" lists the XenoNet crates it uses
 | `xenonet-engine` | Which process sent a request (`procs`, `verify`), messages, claims and views, the index of the agents it knows, live delivery, and the network's side of them; what it keeps goes through the `Store` trait it defines (`store`), and it depends on no store: the root's runtime implements it over the store's tables | adapter, model, os, text |
 | `xenonet-actors` | The programs you allow in XenoNet: their registry, registration, reports, wakes, remote connections and tokens; the cloud assistants among them (`assistant`, [cloud-assistants.md](cloud-assistants.md)): the projection a grant sees, the six reads and their checks, the audit, grant credentials on disk and the tunnels; and the secret stores | adapter, api, authz, model, os, text |
 | `xenonet-store` | The one store, `<state>/xenonet.sqlite`: one writer in WAL mode, the schema's hash as its `user_version` (another version, or an `engine.sqlite` from before it, is left on disk and refused: set the machine up again), one store order (`meta.stored`) every chain and feed entry is numbered in, and the chains' entries; the domains' tables come as each moves in (`engine`: messages, claims, actors, grants, the network's presence and handoffs; `net`: the networks by id, their links' status and published services, the people this machine holds, presence blocks taken and token roots, with rosters and person chains as chain entries; `state`: what XenoNet saves for you, the layout, acks, marks, your settings and each app's, the projects folder's rules and what you said of identities, which xenonet-saved's Store core serves; `delivery`: the policy's settings and consent, the wake budget, the bounded audit log, the runs and the sessions started under a delegation; `a2a`: A2A's tasks; `projects`: projects and their checkouts on each machine, minted ids found from session folders and the roots the person names, a candidate joining its project only when the person confirms it, or, for a linked worktree, when its main checkout is confirmed and shares its git common dir; `agents`: each session's `agt_` id with the app's own id, pending rows for the sessions XenoNet starts, and other machines' agents by the machine that first named them; `feed`: where this machine writes its feed in each network, the kept entries it wrote and each member's ack, and what it applied and holds of the other members' feeds, a `FeedStore` whose calls join the transaction the engine applies an entry in). The file is the owner's alone. SQLite's types stay inside it | id, log, model, os, text |
-| `xenonet-net` | One network across machines ([network.md](network.md)): a host's keys, signed and sealed frames, the roster chain, tickets, the gateway's routes and queues, a host's link to its gateway, services through the network, and what a machine keeps of its network and person, through its `Persist` trait (the composition root's, in `compose::net`, is the store); beside the gateway, the iroh endpoint with admission, the `xenonet-net/2` envelope and joining over `xenonet/join/2` | id, log, authz, keys, model, os, text |
+| `xenonet-net` | The networks across machines ([network.md](network.md)), on iroh with no gateway: a host's keys, sealing, the `xenonet-net/2` envelope, the roster chain, tickets and joining over `xenonet/join/2`, the endpoint with admission, `xenonet/link/2` (generic over its admission and groups, so Xenolith's sync/2 runs on it too), holders, mailboxes, presence, services and window reads over `xenonet/svc/2`, an actor's own protocol over `forward(alpn)`, the check of a space entry the window signs (`space_sign`), and what a machine keeps of its networks and person, through its `Persist` trait (the composition root's, in `compose::net`, is the store) | id, log, authz, keys, model, os, text |
 | `xenonet-components` | XenoNet's install: the command on PATH, the service's settings, the version, the Service and Tools packages (checked, unpacked, switched, rolled back), starting the service at login, and the launcher | os, text |
 | `xenonet-saved` | What XenoNet saves for you, as the routes and the map ask it (the Store core): the store's `state` domain with what each change does to it, and the checkouts it keeps, as the registry's version control finds them. Its own crate because it joins the api's trait, the store's tables and the registry, none of which the store depends on, and the map's tests run on it | adapter, api, model, os, store, text |
 | `xenonet-door` | This machine's local door (`LocalDoor`, which the rules table asks before a route's handler runs), decided through `xenonet-authz` with no network. Its own crate because the api can't take authz within its limit and authz can't see the api | api, authz, id |
@@ -194,9 +194,9 @@ The rules, from goal 6. Every crate in `crates/` is in one class:
   crates.
 - **Composition crates**: `xenonet-state` and `xenonet-doctor` each hold
   a domain's runtime and wire several domains together. Each has a
-  ceiling at its count when the ceilings were set, with the phase of
-  [direction.md](direction.md#order-of-work) it dissolves in (state in
-  phase 4, doctor in phase 5).
+  ceiling of 7, its count when the ceilings were set, tagged with phase 7
+  of [direction.md](direction.md#order-of-work), the next one, and why it
+  needs that many.
 - **Surfaces**: `xenonet-http`, `xenonet-mcp` and `xenonet-console`
   import `xenonet-api` and the base crates and nothing else. What else a
   surface needs the root gives it, as a trait or the data it reads, or it
@@ -387,8 +387,9 @@ schema key for key, and refused calls, in each kind of session.
 - **Process checks.** The server runs as a child of the agent and opens
   its own connections, so the engine's process check can trace it to its
   session. It never daemonizes, which would cut it loose.
-- **No XenoNet.** With no XenoNet answering, the doctor tool runs the
-  doctor's checks in the server, as `xenonet doctor` does.
+- **No XenoNet.** With no XenoNet answering, the doctor tool runs
+  `xenonet doctor --json` and answers with what it says, so the surface
+  needs nothing but `xenonet-api`.
 
 ### Claude Code channels
 
@@ -580,8 +581,7 @@ lists what XenoNet holds to now, not a promise for every release.
   again); an `engine.sqlite` from an earlier build is left on disk and
   refused, and the doctor says so. `search.sqlite`, in the cache folder,
   is an index (FTS5 with `porter unicode61 remove_diacritics 2`, its own
-  `user_version`), re-indexed where its version moves on. The gateway's
-  queues are `<state>/network/gateway.sqlite`.
+  `user_version`), re-indexed where its version moves on.
 - **State files.** `drift.json`, `doctor.json`, the logs
   (`log/entry/v1`), the refusals, the assistant's credentials and
   tombstones, and the runtime descriptors. What XenoNet saves for you

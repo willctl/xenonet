@@ -139,11 +139,12 @@ readers.
 
 ## Machines on different versions
 
-A machine's map merges what other machines of its network send and keeps
-it only as its own schemas declare it
-(`crates/xenonet-runtime/src/remote/`). An app a newer machine knows and
-an older one doesn't is dropped there. Registry changes are additive, and
-nothing a machine knows changes shape.
+Another machine's sessions arrive as its presence, and a machine keeps
+each agent only as the fields it declares, each clipped to its bound
+(`declared` in `crates/xenonet-service/src/compose/runtime/network.rs`).
+An agent's app is kept as its id, as text, so a session of an app a newer
+machine knows and an older one doesn't still shows there, by that id.
+Registry changes are additive, and nothing a machine knows changes shape.
 
 ## Adding an app
 
