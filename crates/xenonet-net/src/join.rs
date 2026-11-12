@@ -37,7 +37,10 @@
 //! order and the five wrong codes are the same for whatever is joined; what
 //! differs is a `JoinTarget`: the ALPN, the invite's prefix, the label the
 //! proofs start with (so a proof for one is none for another), the records'
-//! schema, and how the invite carries the target's id. XenoNet's is
+//! schema, how the invite carries the target's id, and how long a code is
+//! (Xenolith's join/1 asks for 26 characters, 130 bits, where a pasted
+//! invite could be a fake inviter's and a short code would fall to an
+//! offline guess at the joiner's proof). XenoNet's is
 //! `NETWORK`; Xenolith's join/1 brings its own (`xenolith/join/1`, its own
 //! prefix, the Share entry it asks for as the `add`). What the inviter
 //! signs once a code checks is its `Admit`'s, and what the joiner checks
@@ -88,6 +91,12 @@ pub struct JoinTarget {
     pub target_of: fn(&[u8]) -> Option<String>,
     /// Whether an invite may name `url` as its relay.
     pub relay_ok: fn(&str) -> bool,
+    /// A code as it was typed, to the characters its hash is taken of;
+    /// None when it can't be one. XenoNet's is `ticket::normalize` (ten
+    /// characters); another target may ask for a longer one.
+    pub code: fn(&str) -> Option<String>,
+    /// What a code looks like, for the error a mistyped one gets.
+    pub code_shape: &'static str,
 }
 
 /// XenoNet's join/2, to a network: its id's 16 bytes.
@@ -102,6 +111,8 @@ pub const NETWORK: JoinTarget = JoinTarget {
     target_bytes: |network| Some(hex_bytes(network.strip_prefix("net_").unwrap_or("")).unwrap_or_default().to_vec()),
     target_of: |bytes| Some(format!("net_{}", xenonet_id::codec::hex(bytes))),
     relay_ok: crate::roster::is_relay_url,
+    code: ticket::normalize,
+    code_shape: "a code is 10 letters and digits, as KX7Q-49MZ-T2",
 };
 
 impl JoinTarget {
@@ -549,7 +560,7 @@ pub async fn ask(mesh: &Mesh, invite: &Invite, code: &str, add: &str) -> R<Answe
 
 /// `ask`, to `target`: on its ALPN, with its schema and proofs.
 pub async fn ask_to(target: &JoinTarget, mesh: &Mesh, invite: &Invite, code: &str, add: &str) -> R<Answer> {
-    let code = ticket::normalize(code).ok_or_else(|| NetError::bad("a code is 10 letters and digits, as KX7Q-49MZ-T2"))?;
+    let code = (target.code)(code).ok_or_else(|| NetError::bad(target.code_shape))?;
     mesh.begin_join(invite.inviter);
     let out = ask_once(target, mesh, invite, &code, add).await;
     mesh.end_join(&invite.inviter);

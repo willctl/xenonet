@@ -80,6 +80,8 @@ const OTHER: JoinTarget = JoinTarget {
     target_bytes: |id| id.is_empty().then(Vec::new),
     target_of: |_| Some(String::new()),
     relay_ok: crate::roster::is_relay_url,
+    code: ticket::normalize,
+    code_shape: "a code",
 };
 
 #[test]
