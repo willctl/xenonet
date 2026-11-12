@@ -218,15 +218,17 @@ impl Drop for Host {
     }
 }
 
-/// `founder` makes a network named `name`; `joiner` joins it as `host`.
-async fn network(founder: &Host, joiner: &Host, name: &str, me: &str, host: &str, port: u16) -> String {
-    let (s, v) = founder.call("POST", "/api/net/create", json!({ "name": name, "host": me, "lan": format!("127.0.0.1:{port}") })).await;
+/// `founder` makes a network named `name`; `joiner` joins it as `host`
+/// with an invite from the founder's window, finding it at the invite's
+/// door on loopback.
+async fn network(founder: &Host, joiner: &Host, name: &str, me: &str, host: &str) -> String {
+    let (s, v) = founder.call("POST", "/api/net/create", json!({ "name": name, "host": me })).await;
     assert_eq!(s, 200, "{v}");
     let id = v["networks"].as_array().unwrap().iter().find(|n| n["name"] == name).unwrap()["id"].as_str().unwrap().to_string();
-    let (s, t) = founder.call("POST", "/api/net/ticket", json!({ "host": host, "network": name })).await;
+    let (s, t) = founder.call("POST", "/api/net/invite", json!({ "host": host, "network": name })).await;
     assert_eq!(s, 200, "{t}");
-    let ticket = t["line"].as_str().unwrap().rsplit(' ').next().unwrap().to_string();
-    let (s, v) = joiner.call("POST", "/api/net/join", json!({ "address": format!("127.0.0.1:{port}"), "ticket": ticket })).await;
+    let at = t["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
+    let (s, v) = joiner.call("POST", "/api/net/join", json!({ "invite": t["invite"], "code": t["code"], "at": at })).await;
     assert_eq!(s, 200, "{v}");
     id
 }
@@ -336,12 +338,11 @@ fn page(title: &str, body: &str) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_space_shared_into_one_network_reaches_its_members_alone_and_a_grant_without_its_key_binds_nothing() {
-    let [p1, p2] = common::free_ports();
     let studio = Host::new("studio").await;
     let laptop = Host::new("laptop").await;
     let desk = Host::new("desk").await;
-    let n1 = network(&laptop, &studio, "home", "laptop", "studio", p1).await;
-    let n2 = network(&laptop, &desk, "work", "laptop", "desk", p2).await;
+    let n1 = network(&laptop, &studio, "home", "laptop", "studio").await;
+    let n2 = network(&laptop, &desk, "work", "laptop", "desk").await;
     let (person, _) = laptop.person();
     // link/2 up between laptop and each of the others, by a direct path: the
     // endpoint the forwards ride knows where they are.

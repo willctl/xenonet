@@ -1,9 +1,8 @@
 // Several networks on one machine, end to end (phase 5, commit 13): studio
-// founds N1 and desk founds N2, each a LAN-only gateway on 127.0.0.1, and
-// laptop joins both, so laptop is the one machine in two networks. Each
-// service runs in this process with its own state folder and link/2 beside
-// the gateway's link, and a test Sink stands in for each engine, keeping
-// the network each body came in.
+// founds N1 and desk founds N2, and laptop joins both with invites, so
+// laptop is the one machine in two networks. Each service runs in this
+// process with its own state folder, on link/2 over loopback, and a test
+// Sink stands in for each engine, keeping the network each body came in.
 //
 // The gate: nothing of N1 alone reaches a machine in N2 alone, presence
 // included, and laptop removed from N1 while in N2 keeps N2 flowing.
@@ -156,16 +155,16 @@ async fn until(what: &str, secs: u64, mut ok: impl FnMut() -> bool) {
     }
 }
 
-/// `founder` makes a network named `name` at `port`; `joiner` joins it as
-/// `host` with a ticket from the founder's window. The network's id.
-async fn network(founder: &Host, joiner: &Host, name: &str, me: &str, host: &str, port: u16) -> String {
-    let (s, v) = founder.call("POST", "/api/net/create", json!({ "name": name, "host": me, "lan": format!("127.0.0.1:{port}") })).await;
+/// `founder` makes a network named `name`; `joiner` joins it as `host`
+/// with an invite from the founder's window. The network's id.
+async fn network(founder: &Host, joiner: &Host, name: &str, me: &str, host: &str) -> String {
+    let (s, v) = founder.call("POST", "/api/net/create", json!({ "name": name, "host": me })).await;
     assert_eq!(s, 200, "{v}");
     let id = v["networks"].as_array().unwrap().iter().find(|n| n["name"] == name).unwrap()["id"].as_str().unwrap().to_string();
-    let (s, t) = founder.call("POST", "/api/net/ticket", json!({ "host": host, "network": name })).await;
+    let (s, t) = founder.call("POST", "/api/net/invite", json!({ "host": host, "network": name })).await;
     assert_eq!(s, 200, "{t}");
-    let ticket = t["line"].as_str().unwrap().rsplit(' ').next().unwrap().to_string();
-    let (s, v) = joiner.call("POST", "/api/net/join", json!({ "address": format!("127.0.0.1:{port}"), "ticket": ticket })).await;
+    let at = t["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
+    let (s, v) = joiner.call("POST", "/api/net/join", json!({ "invite": t["invite"], "code": t["code"], "at": at })).await;
     assert_eq!(s, 200, "{v}");
     id
 }
@@ -175,7 +174,9 @@ fn presence(counter: u64) -> Value {
         "schema": "network/presence/v1",
         "counter": counter,
         "full": true,
-        "agents": [{ "id": "claude:web", "projectKey": "prj_web" }, { "id": "claude:api", "projectKey": "prj_api" }],
+        // Each a change, so each goes: presence on link/2 goes only when
+        // something changed.
+        "agents": [{ "id": "claude:web", "projectKey": "prj_web", "status": format!("v{counter}") }, { "id": "claude:api", "projectKey": "prj_api", "status": format!("v{counter}") }],
         "removed": [],
         "you": false,
         "roster": "",
@@ -188,13 +189,12 @@ fn message(text: &str) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_machine_in_two_networks_keeps_them_apart_and_one_goes_on_without_the_other() {
-    let [p1, p2] = common::free_ports();
     let studio = Host::new("apart", "studio").await;
     let desk = Host::new("apart", "desk").await;
     let laptop = Host::new("apart", "laptop").await;
-    let n1 = network(&studio, &laptop, "home", "studio", "laptop", p1).await;
+    let n1 = network(&studio, &laptop, "home", "studio", "laptop").await;
     // laptop goes by another host id in N2: each network has its own.
-    let n2 = network(&desk, &laptop, "work", "desk", "lap", p2).await;
+    let n2 = network(&desk, &laptop, "work", "desk", "lap").await;
 
     // laptop lists both, each with its own host id, members and gateway.
     let st = laptop.state().await;
@@ -209,7 +209,7 @@ async fn a_machine_in_two_networks_keeps_them_apart_and_one_goes_on_without_the_
     // What acts on one network says which, in two.
     let (s, v) = laptop.call("POST", "/api/net/leave", json!({})).await;
     assert_eq!((s, v["code"].as_str()), (409, Some("which-network")), "{v}");
-    let (s, v) = laptop.call("POST", "/api/net/ticket", json!({ "host": "vm1", "network": "nowhere" })).await;
+    let (s, v) = laptop.call("POST", "/api/net/invite", json!({ "host": "vm1", "network": "nowhere" })).await;
     assert_eq!((s, v["code"].as_str()), (404, Some("no-network")), "{v}");
 
     for h in [&studio, &desk, &laptop] {
@@ -307,10 +307,9 @@ fn futures_lite(f: impl std::future::Future<Output = Value>) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_self_hosted_relay_goes_into_the_chain_and_one_of_this_machines_own_into_its_endpoint() {
-    let [p1] = common::free_ports();
     let studio = Host::new("relay", "studio").await;
     // The network is made with the person's own relay.
-    let (s, v) = studio.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{p1}"), "relay": "https://relay.example.net" })).await;
+    let (s, v) = studio.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "relay": "https://relay.example.net" })).await;
     assert_eq!(s, 200, "{v}");
     assert!(v.get("relayRefused").is_none(), "{v}");
     assert_eq!(v["networks"][0]["relays"], json!(["https://relay.example.net"]));

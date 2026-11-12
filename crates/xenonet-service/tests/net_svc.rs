@@ -1,9 +1,9 @@
 // Services through the network (docs/design/network.md, "Services through
 // the network"): three services in this process, each with its own state
-// folder and its own iroh endpoint on loopback. hub founds the network and
-// is its LAN-only gateway (joining still goes through it); studio and
-// laptop join. Requests go on svc/2 between the two machines, never
-// through the gateway. studio publishes a made-up HTTP service, and
+// folder and its own iroh endpoint on loopback. hub founds the network,
+// which runs on link/2 alone; studio and laptop join with invites from its
+// window. Requests go on svc/2 between the two machines, never through
+// hub. studio publishes a made-up HTTP service, and
 // laptop's programs reach it at /api/svc/studio/<name>/… on laptop's own
 // API: an allowlisted path passes and one outside it is refused; the
 // service is sent laptop's id in Forwarded, as the connection
@@ -212,12 +212,10 @@ async fn until<F: std::future::Future<Output = bool>>(what: &str, secs: u64, mut
 }
 
 async fn join(h: &Host, maker: &Host) {
-    let (s, t) = maker.window("POST", "/api/net/ticket", json!({ "host": h.name, "window": false })).await;
+    let (s, t) = maker.window("POST", "/api/net/invite", json!({ "host": h.name, "window": false })).await;
     assert_eq!(s, 200, "{t}");
-    let line = t["line"].as_str().unwrap().to_string();
-    let mut parts = line.rsplitn(3, ' ');
-    let (code, address) = (parts.next().unwrap().to_string(), parts.next().unwrap().to_string());
-    let (s, v) = h.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
+    let at = t["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
+    let (s, v) = h.window("POST", "/api/net/join", json!({ "invite": t["invite"], "code": t["code"], "at": at })).await;
     assert_eq!(s, 200, "{} joins: {v}", h.name);
 }
 
@@ -298,9 +296,8 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let root = std::env::temp_dir().join(format!("xenonet-net-svc-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
-    let [lan] = common::free_ports();
     let gw = Host::open("hub", root.join("hub"), 47995).await;
-    let (s, v) = gw.window("POST", "/api/net/create", json!({ "name": "home", "host": "hub", "lan": format!("127.0.0.1:{lan}") })).await;
+    let (s, v) = gw.window("POST", "/api/net/create", json!({ "name": "home", "host": "hub" })).await;
     assert_eq!(s, 200, "{v}");
     let a = Host::open("studio", root.join("studio"), 47996).await;
     join(&a, &gw).await;
@@ -309,12 +306,7 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     for h in [&gw, &a, &b] {
         live(h, 3).await;
     }
-    // Each finds the others' endpoints, from the address records in their
-    // presence (the engine's, sent here by hand), and connects on link/2.
-    for (i, h) in [&gw, &a, &b].into_iter().enumerate() {
-        let body = json!({ "schema": "network/presence/v1", "counter": i + 1, "full": true, "agents": [], "removed": [], "you": false, "roster": "" });
-        h.svc.net().send(xenonet_model::ops::Outgoing::new(xenonet_model::ops::To::All, xenonet_model::ops::Kind::Presence, body)).unwrap();
-    }
+    // Each found the others by the address records hub passed on.
     until("link/2 between all three", 20, || async { [&gw, &a, &b].iter().all(|h| h.svc.node().shared().link2().is_some_and(|t| t.links.peers().len() == 2)) }).await;
 
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -391,12 +383,6 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     }
     // And its answer comes back without its cookie or hop-by-hop headers.
     assert_eq!((header(&h, "x-kept"), header(&h, "set-cookie"), header(&h, "keep-alive")), (Some("yes"), None, None), "{h:?}");
-    // The gateway never carried it.
-    let gw_db = root.join("hub").join("state").join("network");
-    for f in ["gateway.sqlite", "gateway.sqlite-wal"] {
-        let bytes = std::fs::read(gw_db.join(f)).unwrap_or_default();
-        assert!(!bytes.windows(TOKEN.len()).any(|w| w == TOKEN.as_bytes()), "{f} holds the bearer");
-    }
 
     // A large answer crosses whole.
     let (s, _, body) = b.call("GET", "/api/svc/studio/files/sync/v1/large", None, &[]).await;

@@ -1,9 +1,9 @@
 // One network across machines with the real engine on every host
 // (docs/design/network.md): three services in this process, each with its
 // own state folder, its own git clones and the binary's engine driver
-// plugged into its link as `xenonet serve` plugs it. studio founds the
-// network and is its LAN-only gateway on a loopback port the OS picks;
-// laptop and desk join with tickets as the window makes them. Agents call
+// plugged into the network as `xenonet serve` plugs it. studio founds the
+// network, which runs on link/2 alone, on iroh over loopback; laptop and
+// desk join with invites as the window makes them. Agents call
 // the engine's API with their own header, as hooks and the MCP server do,
 // and the person calls /api/net and /api/actors/you/message as the window
 // does.
@@ -16,6 +16,7 @@
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
 mod common;
+mod ports;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -229,11 +230,14 @@ fn options(dir: &Path, who: &str, kept: Arc<dyn xenonet_net::persist::Persist>) 
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = Caps::default();
+    // link/2's and join/2's endpoints on loopback alone.
+    o.bind = Some("127.0.0.1:0".parse().unwrap());
+    o.link = true;
     o
 }
 
 /// One machine: its service as `xenonet serve` puts it together, with the
-/// map made up and the engine, the network and, on the gateway's host, the
+/// map made up and the engine, the network and, on the founder, the
 /// actor gateway with A2A, as they are.
 struct Host {
     name: &'static str,
@@ -251,7 +255,7 @@ impl Host {
         Host::open_with(name, dir, sessions, door, actors).await
     }
 
-    /// A machine with actors on or off; the gateway's always has them.
+    /// A machine with actors on or off; the founder always has them.
     async fn open_with(name: &'static str, dir: PathBuf, sessions: Vec<Sess>, door: Option<u16>, actors: bool) -> Host {
         let home = dir.join("home").to_string_lossy().into_owned();
         let state = dir.join("state").to_string_lossy().into_owned();
@@ -313,7 +317,7 @@ impl Host {
             plug(&*svc);
         }
         let _ = ctx.net.set(svc.clone());
-        // The gateway's host: its actor gateway, with A2A, on the port of
+        // The founder: its actor gateway, with A2A, on the port of
         // its own that a tunnel would forward to.
         let door = match door {
             Some(port) => {
@@ -331,7 +335,6 @@ impl Host {
                     None,
                     "0.0.0-test",
                 );
-                g.set_net(svc.nodes().clone());
                 let a2a = A2a::new(A2aParts {
                     cores: A2aCores { engine: c.engine.clone(), actors: c.actors.clone().unwrap() },
                     db: xenonet_service::serve::store_of(&ctx.cores),
@@ -442,25 +445,25 @@ async fn until<F: std::future::Future<Output = bool>>(what: &str, secs: u64, mut
     }
 }
 
-/// A ticket made at `maker`'s window for `host`, and the line's parts.
-async fn ticket(maker: &Host, host: &str, window: bool) -> (String, String) {
-    let (s, t) = maker.window("POST", "/api/net/ticket", json!({ "host": host, "window": window })).await;
-    assert_eq!(s, 200, "a ticket at {}: {t}", maker.name);
+/// An invite made at `maker`'s window for `host`: the invite, its code,
+/// and the loopback address of the invite's door, which the person gives
+/// the joining machine.
+async fn invite(maker: &Host, host: &str, window: bool) -> (String, String, String) {
+    let (s, t) = maker.window("POST", "/api/net/invite", json!({ "host": host, "window": window })).await;
+    assert_eq!(s, 200, "an invite at {}: {t}", maker.name);
     assert_eq!((t["host"].as_str(), t["window"].as_bool()), (Some(host), Some(window)), "{t}");
-    let line = t["line"].as_str().unwrap().to_string();
-    let mut parts = line.rsplitn(3, ' ');
-    let code = parts.next().unwrap().to_string();
-    let address = parts.next().unwrap().to_string();
-    (address, code)
+    let at = t["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
+    (t["invite"].as_str().unwrap().to_string(), t["code"].as_str().unwrap().to_string(), at)
 }
 
-/// Joins as the window does, again while the join waits on the ticket's
-/// maker.
-async fn join(h: &Host, address: &str, code: &str) {
+/// Joins with an invite as the window does, again while the join waits
+/// for an approval.
+async fn join(h: &Host, inv: &(String, String, String)) {
     let end = std::time::Instant::now() + Duration::from_secs(20);
     loop {
-        let (s, v) = h.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
+        let (s, v) = h.window("POST", "/api/net/join", json!({ "invite": inv.0, "code": inv.1, "at": inv.2 })).await;
         if s == 202 && v["waiting"] == true && std::time::Instant::now() < end {
+            tokio::time::sleep(Duration::from_millis(200)).await;
             continue;
         }
         assert_eq!(s, 200, "{} joins: {v}", h.name);
@@ -498,23 +501,23 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let laptop_home = root.join("laptop/home").to_string_lossy().into_owned();
     let mut asking = sess(L2, "Pick the redirect", &laptop_notes.to_string_lossy());
     asking.live = json!({ "needsYou": "question", "question": format!("Keep the old query string in {laptop_home}/notes/redirect.md?"), "lastMessage": "The redirect works; one choice is left." });
-    let [lan, door_port] = common::free_ports();
+    let [door_port] = ports::free_ports();
 
-    // studio founds the network: a LAN-only gateway on loopback.
+    // studio founds the network, with the actor gateway's front door.
     let a = Host::open("studio", root.join("studio"), vec![sess(S1, "Add partial refunds", &studio_atlas)], Some(door_port)).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio" })).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!((v["self"]["founder"].clone(), v["self"]["window"].clone()), (json!(true), json!(true)));
-    // laptop joins with a ticket from the gateway's own window, as a window
-    // host; desk with one from laptop's window, as a server.
-    let (address, code) = ticket(&a, "laptop", true).await;
-    assert_eq!(address, format!("127.0.0.1:{lan}"));
+    // laptop joins with an invite from studio's window, as a window host;
+    // desk with one from laptop's window, as a server, and reaches studio
+    // by the address record laptop passes on.
+    let inv = invite(&a, "laptop", true).await;
     let b = Host::open("laptop", root.join("laptop"), vec![sess(L1, "Fix the login form", &laptop_atlas), asking], None).await;
-    join(&b, &address, &code).await;
+    join(&b, &inv).await;
     live(&b, 2).await;
-    let (address, code) = ticket(&b, "desk", false).await;
+    let inv = invite(&b, "desk", false).await;
     let c = Host::open("desk", root.join("desk"), vec![sess(D1, "Ledger fixtures", &desk_ledger), sess(D2, "Release notes", &desk_atlas)], None).await;
-    join(&c, &address, &code).await;
+    join(&c, &inv).await;
     for h in [&a, &b, &c] {
         live(h, 3).await;
     }
@@ -713,15 +716,14 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let (_, v) = rpc(other).await.unwrap();
     assert_eq!(v["result"]["task"]["status"]["state"], "TASK_STATE_REJECTED", "{v}");
 
-    // The gateway goes, mid-stream; what laptop sends meanwhile waits in its
-    // outbox, and arrives once when the gateway is back.
-    let a = {
-        a.svc.stop();
-        until("laptop offline", 15, || async { b.state().await["gateway"]["link"] != "live" }).await;
-        b.agent(L1, "send", json!({ "to": format!("@desk:{D1}"), "text": "m2 while the gateway was down" })).await;
-        b.agent(L1, "send", json!({ "to": format!("@desk:{D1}"), "text": "m3 while the gateway was down" })).await;
-        assert!(b.state().await["outbox"]["frames"].as_u64().unwrap() >= 2);
-        a.restart().await
+    // desk goes away; what laptop sends meanwhile waits at laptop, and
+    // arrives once when desk is back.
+    let c = {
+        c.svc.stop();
+        until("desk offline at laptop", 15, || async { row_of(&b.state().await, "desk")["online"] == false }).await;
+        b.agent(L1, "send", json!({ "to": format!("@desk:{D1}"), "text": "m2 while desk was away" })).await;
+        b.agent(L1, "send", json!({ "to": format!("@desk:{D1}"), "text": "m3 while desk was away" })).await;
+        c.restart().await
     };
     let mut heard = Vec::new();
     let end = std::time::Instant::now() + Duration::from_secs(20);
@@ -732,7 +734,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     }
     tokio::time::sleep(Duration::from_millis(1500)).await;
     heard.extend(texts(&c.ctx.cores.engine.inbox(D1, Duration::ZERO).await.unwrap()));
-    assert_eq!(heard, ["m2 while the gateway was down", "m3 while the gateway was down"], "no loss and no repeats");
+    assert_eq!(heard, ["m2 while desk was away", "m3 while desk was away"], "no loss and no repeats");
     // laptop sent desk's ledger session four: the question, you, m2 and m3,
     // each seen there now.
     until("their receipts at laptop", 10, || async {
@@ -752,31 +754,25 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     }
     until("desk knows it was removed", 10, || async { c.state().await["gateway"]["link"] == "removed" }).await;
 
-    // laptop adds den as a window host while laptop is away: den's join
-    // waits for it, and says so; once laptop has signed den in, it waits
-    // for the founder's approval, as the roster's rules say.
-    let (s, t) = b.window("POST", "/api/net/ticket", json!({ "host": "den", "window": true })).await;
+    // laptop invites den as a window host: once laptop has signed den in,
+    // den's join waits for the founder's approval, as the chain's rules say.
+    let (s, t) = b.window("POST", "/api/net/invite", json!({ "host": "den", "window": true })).await;
     assert_eq!((s, t["approval"].clone()), (200, json!(true)), "{t}");
-    let (address, code) = (t["line"].as_str().unwrap().split(' ').nth(3).unwrap().to_string(), t["ticket"].as_str().unwrap().to_string());
-    assert_eq!(b.state().await["tickets"][0]["host"], "den", "the maker lists its ticket");
-    b.svc.stop();
+    let at = t["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).unwrap().to_string();
+    let inv = (t["invite"].as_str().unwrap().to_string(), t["code"].as_str().unwrap().to_string(), at);
     let e = Host::open("den", root.join("den"), vec![], None).await;
-    let (s, v) = e.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
+    let (s, v) = e.window("POST", "/api/net/join", json!({ "invite": inv.0, "code": inv.1, "at": inv.2 })).await;
     assert_eq!((s, v["waiting"].clone()), (202, json!(true)), "{v}");
-    assert!(v["message"].as_str().unwrap().contains("laptop made this ticket and signs den in, and it's offline"), "{v}");
-    b.svc.start().await.unwrap();
+    assert!(v["message"].as_str().unwrap().contains("needs the founder or a second window host"), "{v}");
     let st = until_value("den's add waiting for approval at studio", 20, || async {
         let st = a.state().await;
         st["proposals"].as_array().is_some_and(|p| !p.is_empty()).then_some(st)
     })
     .await;
     assert_eq!((st["proposals"][0]["op"].clone(), st["proposals"][0]["host"].clone(), st["proposals"][0]["signers"].clone()), (json!("add"), json!("den"), json!(["laptop"])));
-    let (s, v) = e.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
-    assert_eq!((s, v["waiting"].clone()), (202, json!(true)), "{v}");
-    assert!(v["message"].as_str().unwrap().contains("needs the founder or a second window host"), "{v}");
     let (s, v) = a.window("POST", "/api/net/approve", json!({ "id": st["proposals"][0]["id"] })).await;
     assert_eq!(s, 200, "{v}");
-    join(&e, &address, &code).await;
+    join(&e, &inv).await;
     live(&e, 3).await;
     let st = a.state().await;
     assert_eq!(row(&st, "den")["window"], true, "{st}");
@@ -802,13 +798,12 @@ async fn actors_reach_actors_on_other_machines() {
     let root = root.canonicalize().unwrap();
     // studio founds the network, laptop joins as a window host; both have
     // actors.
-    let [lan] = common::free_ports();
     let a = Host::open_with("studio", root.join("studio"), vec![], None, true).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio" })).await;
     assert_eq!(s, 200, "{v}");
-    let (address, code) = ticket(&a, "laptop", true).await;
+    let inv = invite(&a, "laptop", true).await;
     let b = Host::open_with("laptop", root.join("laptop"), vec![], None, true).await;
-    join(&b, &address, &code).await;
+    join(&b, &inv).await;
     for h in [&a, &b] {
         live(h, 2).await;
     }
@@ -874,21 +869,21 @@ async fn actors_reach_actors_on_other_machines() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// studio founds a network on `lan` (a window host and the gateway),
-/// laptop joins as a window host and desk as a server, each with
-/// `sessions`; all three linked.
-async fn three(root: &Path, lan: u16, sessions: [Vec<Sess>; 3]) -> (Host, Host, Host) {
+/// studio founds a network (a window host), laptop joins as a window host
+/// and desk as a server, each with `sessions`, with invites from studio's
+/// window; all three connected on link/2.
+async fn three(root: &Path, sessions: [Vec<Sess>; 3]) -> (Host, Host, Host) {
     let [sa, sb, sc] = sessions;
     let a = Host::open("studio", root.join("studio"), sa, None).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio" })).await;
     assert_eq!(s, 200, "{v}");
-    let (address, code) = ticket(&a, "laptop", true).await;
+    let inv = invite(&a, "laptop", true).await;
     let b = Host::open("laptop", root.join("laptop"), sb, None).await;
-    join(&b, &address, &code).await;
+    join(&b, &inv).await;
     live(&b, 2).await;
-    let (address, code) = ticket(&a, "desk", false).await;
+    let inv = invite(&a, "desk", false).await;
     let c = Host::open("desk", root.join("desk"), sc, None).await;
-    join(&c, &address, &code).await;
+    join(&c, &inv).await;
     for h in [&a, &b, &c] {
         live(h, 3).await;
     }
@@ -906,9 +901,8 @@ async fn a_device_revoked_from_another_machine_signs_nothing_desk_takes() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("desk/home")).unwrap();
     let root = root.canonicalize().unwrap();
-    let [lan] = common::free_ports();
     let desk_home = root.join("desk/home").to_string_lossy().into_owned();
-    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &desk_home)]]).await;
+    let (a, b, c) = three(&root, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &desk_home)]]).await;
     // laptop's device is the person's, and every machine lists it.
     let lost = b.state().await["person"]["device"].as_str().unwrap().to_string();
     let listed = |st: &Value| st["person"]["devices"].as_array().unwrap().iter().find(|d| d["id"] == lost.as_str()).cloned().unwrap_or(Value::Null);
@@ -924,7 +918,7 @@ async fn a_device_revoked_from_another_machine_signs_nothing_desk_takes() {
     let as_you = |mid: &str, text: &str| {
         let body = json!({ "schema": "network/send/v1", "mid": mid, "sender": xenonet_model::ids::YOU, "senderKind": "person", "target": D1, "body": text, "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now_ms() });
         let e = b.svc.node().shared().write_entry(xenonet_net::feed::Kind::Message, body).unwrap();
-        c.svc.node().shared().frame(&hand(&b, &c, &xenonet_net::node::entry_body(&e, Some(&authority))));
+        hand(&b, &c, &e, Some(&authority));
     };
     let inbox = || async { texts(&c.agent(D1, "inbox", json!({})).await) };
     as_you("msg_0123456789abcdef01", "Before the laptop was lost");
@@ -957,12 +951,15 @@ async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
-    let [lan] = common::free_ports();
-    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![]]).await;
+    let (a, b, c) = three(&root, [vec![], vec![], vec![]]).await;
     let st = c.state().await;
     assert_eq!((st["start"].clone(), st["wake"].clone()), (json!("you"), json!("consent")), "you, and your consent, by default");
     // Each host's presence says what it is set to and what it takes.
-    until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["reach"]["start"] == "you" }).await;
+    until("desk's reach and what it takes at studio", 10, || async {
+        let r = row_of(&a.state().await, "desk");
+        r["reach"]["start"] == "you" && r["can"] == json!(["start", "answer"])
+    })
+    .await;
     assert_eq!(row_of(&a.state().await, "desk")["can"], json!(["start", "answer"]));
     let desk = || async { c.state().await };
 
@@ -1069,8 +1066,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     // would answer with a copy.
     let mut idle = sess(ASKER, "Fix the login form", &at("laptop"));
     idle.live = json!({ "status": "idle", "lastEventAt": now_ms() - 200e3 });
-    let [lan] = common::free_ports();
-    let (a, b, c) = three(&root, lan, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![idle], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
+    let (a, b, c) = three(&root, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![idle], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
     // The founder lets the network wake laptop's sessions.
     let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "laptop", "wake": "network" })).await;
     assert_eq!(s, 200, "{v}");
@@ -1224,7 +1220,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let _ = studio.next("start", 15, |d| d["state"] == "started").await;
     let refusal = json!({ "schema": "network/receipt/v1", "mid": mid, "agent": "xenonet:start", "state": "refused", "reason": "no session or actor here has that id", "at": now_ms() as i64 });
     let e = b.svc.node().shared().write_entry(xenonet_net::feed::Kind::Receipt, refusal).unwrap();
-    a.svc.node().shared().frame(&hand(&b, &a, &xenonet_net::node::entry_body(&e, None)));
+    hand(&b, &a, &e, None);
     let old = studio.next("start", 10, |d| d["state"] == "refused").await;
     assert_eq!(old["reason"], "laptop's XenoNet is too old to start sessions: update it there", "{old}");
 
@@ -1254,8 +1250,7 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     ended.live = json!({ "lastEventAt": t - 200e3, "endedAt": t - 100e3 });
     let mut open = sess(OPEN, "Release notes", &work.to_string_lossy());
     open.live = json!({ "status": "idle", "lastEventAt": t - 200e3 });
-    let [lan] = common::free_ports();
-    let (a, b, c) = three(&root, lan, [vec![], vec![sess(L1, "Fix the login form", &root.to_string_lossy())], vec![ended, open]]).await;
+    let (a, b, c) = three(&root, [vec![], vec![sess(L1, "Fix the login form", &root.to_string_lossy())], vec![ended, open]]).await;
     let mut desk = Stream::of(&c);
     // The founder lets the network wake desk's sessions: no allowance per
     // session.
@@ -1316,8 +1311,7 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
     std::fs::create_dir_all(root.join("desk").join("home")).unwrap();
-    let [lan] = common::free_ports();
-    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &root.to_string_lossy())]]).await;
+    let (a, b, c) = three(&root, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &root.to_string_lossy())]]).await;
     until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
     // You start a session on desk, a server, from studio's console.
     let mut studio = Stream::of(&a);
@@ -1420,8 +1414,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
         std::fs::create_dir_all(root.join(h).join("home").join("work")).unwrap();
     }
     let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
-    let [lan] = common::free_ports();
-    let (a, b, c) = three(&root, lan, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![]]).await;
+    let (a, b, c) = three(&root, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![]]).await;
     until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
 
     // The founder puts desk on delegate, from studio's console; desk keeps
@@ -1543,14 +1536,15 @@ fn offer(n: u32) -> Value {
     })
 }
 
-/// A message frame of `body` from `from` to `to`, signed and sealed as the
-/// link sends it, for `to`'s node to take as the stream hands it on.
-fn hand(from: &Host, to: &Host, body: &Value) -> xenonet_net::frame::Frame {
-    let n = from.svc.node().shared().clone();
-    let net = n.network().unwrap();
-    let keys = *to.svc.node().shared().key().unwrap().public();
-    let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "message", from: from.name, to: to.name, at: n.gateway_now() as i64 };
-    xenonet_net::frame::host_frame(&d, &n.key().unwrap(), &keys, body, None).unwrap()
+/// `e`, an entry of `from`'s feed (with what its act rests on), sealed for
+/// `to` as link/2 sends it, and handed to `to`'s node as `from`'s
+/// connection would hand it on.
+fn hand(from: &Host, to: &Host, e: &xenonet_net::feed::FeedEntry, authority: Option<&Value>) {
+    let n = to.svc.node().shared().clone();
+    let machine = n.identity().machine_key().unwrap().public().id();
+    let keys = *n.key().unwrap().public();
+    let env = xenonet_net::envelope::Envelope::seal_act(e, &machine, &keys, None, authority).unwrap();
+    n.envelope_from(from.name, env);
 }
 
 fn has_handoff(h: &Host, n: u32) -> bool {
@@ -1561,13 +1555,11 @@ fn has_handoff(h: &Host, n: u32) -> bool {
 async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_on_a_fork() {
     use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
     use xenonet_net::feed::{FeedEntry, Kind as EntryKind, Link, Writer};
-    use xenonet_net::node::entry_body;
     let root = std::env::temp_dir().join(format!("xenonet-net-feeds-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
-    let [lan] = common::free_ports();
-    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![]]).await;
+    let (a, b, c) = three(&root, [vec![], vec![], vec![]]).await;
     let net = b.svc.node().shared().network().unwrap();
     let laptop = b.svc.node().shared().clone();
     let desk = c.svc.node().shared().clone();
@@ -1577,11 +1569,11 @@ async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_o
     // and applies both, in order.
     let e1 = laptop.write_entry(EntryKind::Handoff, offer(1)).unwrap();
     let e2 = laptop.write_entry(EntryKind::Handoff, offer(2)).unwrap();
-    desk.frame(&hand(&b, &c, &entry_body(&e2, None)));
+    hand(&b, &c, &e2, None);
     until("desk filled the gap from laptop", 20, || async { has_handoff(&c, 1) && has_handoff(&c, 2) }).await;
-    // The same frames again, as a gateway that resends would: applied once.
+    // The same entries again, as a member that sends again would: applied once.
     for e in [&e2, &e1, &e2] {
-        desk.frame(&hand(&b, &c, &entry_body(e, None)));
+        hand(&b, &c, e, None);
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(c.world.store.with(|s| s.open_handoffs_from("laptop", now_ms()).unwrap()), 2.0, "each once");
@@ -1591,10 +1583,10 @@ async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_o
     let stranger = SeedSigner::from_seed(&[9; 32], KeyHome::File).unwrap();
     let mut w = Writer::start(stranger.public().id(), net.id.as_str(), now_ms() as u64);
     let foreign = w.write(&stranger, EntryKind::Handoff, now_ms() as u64, offer(3)).unwrap();
-    desk.frame(&hand(&b, &c, &entry_body(&foreign, None)));
+    hand(&b, &c, &foreign, None);
     let mut forged = FeedEntry { seq: 3, prev: Some(Link::to(e2.pos(), e2.hash())), body: offer(4), ..e2.clone() };
     forged.sig = stranger.sign(xenonet_id::sign::Purpose::FEED, b"another entry").unwrap();
-    desk.frame(&hand(&b, &c, &entry_body(&forged, None)));
+    hand(&b, &c, &forged, None);
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(!has_handoff(&c, 3) && !has_handoff(&c, 4), "neither taken");
     assert_eq!(c.state().await["frozen"], json!([]), "a forged entry freezes nothing");
@@ -1615,7 +1607,7 @@ async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_o
     let mut fork = e2.clone();
     fork.body = offer(6);
     fork.sign(key.as_ref()).unwrap();
-    desk.frame(&hand(&b, &c, &entry_body(&fork, None)));
+    hand(&b, &c, &fork, None);
     until("laptop frozen at desk", 10, || async { c.state().await["frozen"][0]["host"] == "laptop" }).await;
     let frozen = c.state().await["frozen"][0].clone();
     assert_eq!((frozen["author"].clone(), frozen["at"]["seq"].clone()), (json!(key.public().id()), json!(2)));
@@ -1627,7 +1619,7 @@ async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_o
     // While it's frozen nothing from laptop is taken.
     let laptop = b.svc.node().shared().clone();
     let e7 = laptop.write_entry(EntryKind::Handoff, offer(7)).unwrap();
-    desk.frame(&hand(&b, &c, &entry_body(&e7, None)));
+    hand(&b, &c, &e7, None);
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(!has_handoff(&c, 7) && !has_handoff(&c, 6));
     // Unfreezing is the person's at the window: never from a terminal or
@@ -1645,7 +1637,7 @@ async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_o
     // one desk dropped while frozen), which laptop fills; the fork's entry
     // never lands, the one desk had stays.
     let e8 = laptop.write_entry(EntryKind::Handoff, offer(8)).unwrap();
-    desk.frame(&hand(&b, &c, &entry_body(&e8, None)));
+    hand(&b, &c, &e8, None);
     until("desk took laptop's feed again", 20, || async { has_handoff(&c, 7) && has_handoff(&c, 8) }).await;
     assert!(has_handoff(&c, 2) && !has_handoff(&c, 6));
     let _ = std::fs::remove_dir_all(&root);
@@ -1662,11 +1654,11 @@ const DLG: &str = "dlg_0123456789abcdef";
 
 /// The three machines, each with a session in its clone of acme/atlas; the
 /// project's id once laptop and desk both hold a confirmed checkout of it.
-async fn three_in_atlas(root: &Path, lan: u16) -> (Host, Host, Host, String) {
+async fn three_in_atlas(root: &Path) -> (Host, Host, Host, String) {
     let s = clone(&root.join("studio/home/src/atlas"), "git@github.com:acme/atlas.git", "main");
     let l = clone(&root.join("laptop/home/work/atlas"), "https://github.com/acme/atlas", "main");
     let d = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "main");
-    let (a, b, c) = three(root, lan, [vec![sess(S1, "Add partial refunds", &s)], vec![sess(L1, "Fix the login form", &l)], vec![sess(D2, "Release notes", &d)]]).await;
+    let (a, b, c) = three(root, [vec![sess(S1, "Add partial refunds", &s)], vec![sess(L1, "Fix the login form", &l)], vec![sess(D2, "Release notes", &d)]]).await;
     let project = until_value("laptop and desk hold a checkout of acme/atlas", 20, || async {
         let (on_b, on_c) = (projects(&b).await, projects(&c).await);
         on_b.iter().find(|p| on_c.contains(p)).map(|p| json!(p))
@@ -1754,7 +1746,7 @@ fn signed_intent_by(b: &Host, goal: &str, target: &str, project: &str, delegatio
 /// An entry of `from`'s feed, written now and handed to `to` alone.
 fn entry_to(from: &Host, to: &Host, kind: xenonet_net::feed::Kind, body: Value) {
     let e = from.svc.node().shared().write_entry(kind, body).unwrap();
-    to.svc.node().shared().frame(&hand(from, to, &xenonet_net::node::entry_body(&e, None)));
+    hand(from, to, &e, None);
 }
 
 fn assign(id: &str, target: &str) -> Value {
@@ -1789,8 +1781,7 @@ async fn an_intent_made_on_one_machine_is_worked_on_the_one_it_names_and_reports
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
-    let [lan] = common::free_ports();
-    let (a, b, c, project) = three_in_atlas(&root, lan).await;
+    let (a, b, c, project) = three_in_atlas(&root).await;
     // A delegation naming laptop's and desk's devices, not studio's.
     delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
     let made = json!({ "goal": "hold-on: make the build green", "target": "desk", "project": project, "delegation": DLG, "hours": 1 });
@@ -1882,8 +1873,7 @@ async fn an_intent_for_any_machine_goes_to_one_taker_by_its_arbiter_alone() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
-    let [lan] = common::free_ports();
-    let (a, b, c, project) = three_in_atlas(&root, lan).await;
+    let (a, b, c, project) = three_in_atlas(&root).await;
     // laptop's and desk's devices, not studio's.
     delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
 
@@ -1921,7 +1911,8 @@ async fn an_intent_for_any_machine_goes_to_one_taker_by_its_arbiter_alone() {
 
     // Two takers, one assign: laptop and desk both confirmed, desk the
     // arbiter. Each takes it, and desk gives it to the first take it
-    // holds, its own; one run in all.
+    // holds (its own, or laptop's when that came first over link/2); every
+    // machine agrees, and one run in all.
     confirm(&b, &project);
     confirm(&c, &project);
     let (b_runs, c_runs) = (fake_runs(&b).len(), fake_runs(&c).len());
@@ -1929,17 +1920,20 @@ async fn an_intent_for_any_machine_goes_to_one_taker_by_its_arbiter_alone() {
         b.window("POST", "/api/intents", json!({ "goal": "hold-on: whoever's free", "target": "any", "arbiter": "desk", "project": project, "delegation": DLG, "hours": 1 })).await;
     assert_eq!((s, v["state"].clone(), v["target"].clone()), (200, json!("made"), json!("any")), "{v}");
     let id = v["id"].as_str().unwrap().to_string();
-    for h in [&a, &b, &c] {
-        until(&format!("{} sees it given to desk", h.name), 20, || async { intent(h, &id).await["workedOn"] == "desk" }).await;
+    let given = until_value("desk gives it out", 20, || async { intent(&c, &id).await["workedOn"].as_str().map(|w| json!(w)) }).await;
+    for h in [&a, &b] {
+        until(&format!("{} sees it given to {given}", h.name), 20, || async { intent(h, &id).await["workedOn"] == given }).await;
     }
-    let _ = ran(&c, c_runs + 1).await;
-    until("laptop and desk both took it, at desk", 10, || async {
+    until("laptop and desk both took it, at desk, the first given it", 10, || async {
         let t = intent(&c, &id).await["takes"].clone();
-        t.as_array().is_some_and(|l| l.len() == 2 && l[0] == "desk")
+        t.as_array().is_some_and(|l| l.len() == 2 && l[0] == given)
     })
     .await;
+    let (worker, had) = if given == "desk" { (&c, c_runs) } else { (&b, b_runs) };
+    let _ = ran(worker, had + 1).await;
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert_eq!((fake_runs(&b).len(), fake_runs(&c).len()), (b_runs, c_runs + 1), "one run, on desk");
+    let runs = if given == "desk" { (b_runs, c_runs + 1) } else { (b_runs + 1, c_runs) };
+    assert_eq!((fake_runs(&b).len(), fake_runs(&c).len()), runs, "one run, where it was given");
     // An arbiter the delegation doesn't name can't be named.
     let (s, v) = b.window("POST", "/api/intents", json!({ "goal": "x", "target": "any", "arbiter": "studio", "project": project, "delegation": DLG })).await;
     assert_eq!(s, 400, "{v}");
@@ -1967,8 +1961,7 @@ async fn an_intents_run_survives_its_machine_restarting_and_a_cancel_stops_it_th
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
-    let [lan] = common::free_ports();
-    let (a, b, c, project) = three_in_atlas(&root, lan).await;
+    let (a, b, c, project) = three_in_atlas(&root).await;
     delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
     let make = |goal: &str| json!({ "goal": goal, "target": "desk", "project": project, "delegation": DLG, "hours": 1 });
 
@@ -2006,7 +1999,7 @@ async fn an_intents_run_survives_its_machine_restarting_and_a_cancel_stops_it_th
     let compact = b.svc.node().shared().compact_entry(|_| false).unwrap();
     let live_set = compact.compact().unwrap().live;
     assert!(live_set.len() >= 4, "the intents, their assigns and the cancel stay live until they end: {live_set:?}");
-    c.svc.node().shared().frame(&hand(&b, &c, &xenonet_net::node::entry_body(&compact, None)));
+    hand(&b, &c, &compact, None);
     tokio::time::sleep(Duration::from_millis(3000)).await;
     assert_eq!((intent(&c, &id).await["state"].clone(), fake_runs(&c).len()), (json!("cancelled"), 2));
     assert_eq!(intent(&a, &id).await["state"], "cancelled");

@@ -1,14 +1,14 @@
-// Other machines' maps through the network (docs/design/network.md,
-// section 7): three services in this process, each with its own state
-// folder, its made-up sessions, and the binary's hub and relay as `xenonet
-// serve` plugs them in. studio founds the network and is its LAN-only
-// gateway on a loopback port the OS picks; laptop joins as a window host
-// and desk as a server. studio's console sees laptop's map under @laptop:,
-// and opens a transcript of laptop's through the window; an agent on
-// studio can't, a host that shares titles only keeps its transcripts, a
-// gap brings a fresh snapshot, and laptop's relay stops once studio's
-// subscription lapses. Each machine's load comes with its map, unless it
-// stops sharing it.
+// Other machines on the map (docs/design/network.md, section 7): three
+// services in this process, each with its own state folder and its
+// made-up sessions, on link/2 over loopback. studio founds the network;
+// laptop joins as a window host and desk as a server, with invites. The
+// page draws another machine's sessions as cards from its presence, so
+// studio's state counts laptop's sessions from what laptop's presence
+// says. A remote session's transcript and stats open through the window,
+// on svc/2's window-read service, read on laptop as any local program
+// reads its API: an agent on studio is refused, desk (no window host) is
+// refused at laptop, and a machine that shares titles only keeps its
+// transcripts.
 //
 // NET_TEST_LOG=1 prints what each host logs.
 
@@ -22,15 +22,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-use xenonet_api::cores::{self, Cores, HubNet, SelfApi, State, R};
-use xenonet_api::wire::Emitter;
-use xenonet_model::ops::Sink as _;
+use xenonet_api::cores::{self, Cores, SelfApi, State, R};
+use xenonet_model::ops::{Kind, Outgoing, To};
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
 use xenonet_os::log::Log;
-use xenonet_runtime::remote::runtime::hub::{HostHub, HubCore, HubParts};
-use xenonet_runtime::remote::runtime::relay::Timing as RelayTiming;
-use xenonet_runtime::remote::runtime::schemas::HostSchemas;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
 use xenonet_service::gateway::network::NetService;
@@ -129,8 +125,8 @@ impl State for Map {
     }
 }
 
-/// The service's own API, in-process: what the relay reads, kept, each as
-/// any local program would ask it, with no key.
+/// The service's own API, in-process: what a window read from another
+/// machine reads, kept, each as any local program would ask it.
 #[derive(Default)]
 struct OwnApi {
     ctx: Mutex<Weak<Ctx>>,
@@ -149,41 +145,6 @@ impl SelfApi for OwnApi {
     }
 }
 
-fn timing() -> Timing {
-    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
-}
-
-fn relay_timing() -> RelayTiming {
-    RelayTiming {
-        frame_ms: 50.0,
-        graph_ms: 100.0,
-        live_ms: 50.0,
-        lapse_ms: 3000.0,
-        ping_ms: 1000.0,
-        watch_ms: 200,
-        get_ms: 5000.0,
-        renew_ms: 500.0,
-        roster_ms: 300,
-        system_ms: 200.0,
-    }
-}
-
-/// Each host's load: the demo's, with as many threads as `threads`, so
-/// each machine is told apart.
-struct Load {
-    threads: u32,
-}
-
-#[async_trait]
-impl cores::SystemStats for Load {
-    async fn read(&self) -> R<Value> {
-        let mut r = xenonet_os::stats::demo_reading(now_ms());
-        r["cpu"]["threads"] = json!(self.threads);
-        r["hardware"] = xenonet_os::stats::hardware_of(&r);
-        Ok(r)
-    }
-}
-
 fn options(dir: &Path, who: &str) -> Options {
     let who = who.to_string();
     let mut o = Options::new(
@@ -197,10 +158,13 @@ fn options(dir: &Path, who: &str) -> Options {
             }
         }),
     );
-    o.timing = timing();
+    o.timing = Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 };
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = Caps::default();
+    // link/2's and join/2's endpoints on loopback alone.
+    o.bind = Some("127.0.0.1:0".parse().unwrap());
+    o.link = true;
     o
 }
 
@@ -208,7 +172,6 @@ struct Host {
     name: &'static str,
     ctx: Arc<Ctx>,
     svc: Arc<NetService>,
-    hub: Arc<HostHub>,
     own: Arc<OwnApi>,
     peers: Arc<Peers>,
 }
@@ -222,51 +185,19 @@ impl Host {
         let config = Config::from(&[], &get);
         let mut cores = Cores::pending(false, false);
         xenonet_service::serve::wire_root(&mut cores);
-        let map = Arc::new(Map { home: home.clone(), sessions });
-        cores.state = map.clone();
+        cores.state = Arc::new(Map { home, sessions });
         let peers = Arc::new(Peers::default());
         cores.verify = peers.clone();
-        cores.system = Arc::new(Load {
-            threads: match name {
-                "studio" => 24,
-                "laptop" => 12,
-                _ => 32,
-            },
-        });
-        let schemas = Arc::new(HostSchemas::new(xenonet_state::graph::activity_of));
-        let emitter = Emitter::new();
-        let hub = HostHub::new(HubParts {
-            schemas,
-            state: map,
-            store: Arc::new(cores::Pending),
-            cache_dir: state.clone(),
-            root: dir.to_string_lossy().into_owned(),
-            home: home.clone(),
-            demo: false,
-            windows: json!({ "activeWindowMs": 600000, "recentWindowMs": 86400000, "projectActiveMs": 3600000 }),
-            emitter: emitter.clone(),
-            aliases: xenonet_state::identities::parse_ssh_aliases,
-            relay: relay_timing(),
-        });
-        cores.hub = Some(Arc::new(HubCore(hub.clone())));
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
         let svc = NetService::open(options(&dir, name)).unwrap();
         let _ = ctx.net.set(svc.clone());
         let own = Arc::new(OwnApi::default());
         *own.ctx.lock().unwrap() = Arc::downgrade(&ctx);
-        // As serve.rs plugs it, with the API in-process.
-        ctx.cores.hub.as_ref().unwrap().plug_net(HubNet {
-            net: svc.net(),
-            sinks: svc.sinks().clone(),
-            events: ctx.events.clone(),
-            api: own.clone(),
-            home,
-            version: "0.0.0-test".into(),
-            platform: "linux".into(),
-            demo: false,
-        });
+        // As serve.rs plugs it: window reads from other machines read this
+        // service's own API.
+        svc.nodes().common().set_reads(Arc::new(xenonet_service::serve::SelfReads(own.clone())));
         svc.start().await.unwrap();
-        Host { name, ctx, svc, hub, own, peers }
+        Host { name, ctx, svc, own, peers }
     }
 
     async fn call(&self, method: &str, path: &str, body: Value, headers: &[(&str, &str)]) -> (u16, Value) {
@@ -285,22 +216,10 @@ impl Host {
     async fn state(&self) -> Value {
         self.window("GET", "/api/net/state", Value::Null).await.1
     }
-
-    /// The map the console draws: this machine's, with the others' in it.
-    async fn graph(&self) -> Value {
-        self.call("GET", "/api/graph", Value::Null, &[]).await.1
-    }
-
-    fn snapshots_read(&self) -> usize {
-        self.own.read.lock().unwrap().iter().filter(|p| *p == "/api/graph?hosts=0").count()
-    }
 }
 
 impl Drop for Host {
     fn drop(&mut self) {
-        if let Some(h) = &self.ctx.cores.hub {
-            h.stop();
-        }
         self.svc.stop();
     }
 }
@@ -314,31 +233,16 @@ async fn until<F: std::future::Future<Output = bool>>(what: &str, secs: u64, mut
 }
 
 async fn join(h: &Host, maker: &Host, window: bool) {
-    let (s, t) = maker.window("POST", "/api/net/ticket", json!({ "host": h.name, "window": window })).await;
+    let (s, t) = maker.window("POST", "/api/net/invite", json!({ "host": h.name, "window": window })).await;
     assert_eq!(s, 200, "{t}");
-    let line = t["line"].as_str().unwrap().to_string();
-    let mut parts = line.rsplitn(3, ' ');
-    let (code, address) = (parts.next().unwrap().to_string(), parts.next().unwrap().to_string());
-    let (s, v) = h.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
+    let at = t["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
+    let (s, v) = h.window("POST", "/api/net/join", json!({ "invite": t["invite"], "code": t["code"], "at": at })).await;
     assert_eq!(s, 200, "{} joins: {v}", h.name);
 }
 
-async fn live(h: &Host, hosts: usize) {
-    until(&format!("{} live with {hosts} hosts", h.name), 20, || async {
-        let s = h.state().await;
-        s["gateway"]["link"] == "live" && s["hosts"].as_array().map_or(0, Vec::len) == hosts && s["hosts"].as_array().unwrap().iter().all(|x| x["online"] == true)
-    })
-    .await;
-}
-
-fn node(g: &Value, id: &str) -> Option<Value> {
-    g["nodes"].as_array().into_iter().flatten().find(|n| n["id"] == id).cloned()
-}
-
-/// When the latest load from `host` was read, in an answer of GET
-/// /api/system?hosts=1.
-fn of_now(v: &Value, host: &str) -> f64 {
-    v["hosts"].as_array().into_iter().flatten().find(|r| r["host"] == host).and_then(|r| r["at"].as_f64()).unwrap_or(0.0)
+/// The row of `of` in `h`'s state.
+async fn row(h: &Host, of: &str) -> Value {
+    h.state().await["hosts"].as_array().unwrap().iter().find(|x| x["id"] == of).cloned().unwrap_or(Value::Null)
 }
 
 fn enc(s: &str) -> String {
@@ -346,117 +250,69 @@ fn enc(s: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-async fn a_window_host_sees_another_hosts_map_and_opens_its_transcripts_from_the_window() {
+async fn other_machines_show_from_presence_and_their_transcripts_open_through_the_window() {
     let root = std::env::temp_dir().join(format!("xenonet-net-map-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
-    let [lan] = common::free_ports();
     let a = Host::open("studio", root.join("studio"), vec![(S1, "Add partial refunds")]).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio" })).await;
     assert_eq!(s, 200, "{v}");
     let b = Host::open("laptop", root.join("laptop"), vec![(L1, "Fix the login form")]).await;
     join(&b, &a, true).await;
     let c = Host::open("desk", root.join("desk"), vec![]).await;
     join(&c, &a, false).await;
     for h in [&a, &b, &c] {
-        live(h, 3).await;
+        until(&format!("{} with every member online", h.name), 20, || async {
+            let s = h.state().await;
+            s["hosts"].as_array().map_or(0, Vec::len) == 3 && s["hosts"].as_array().unwrap().iter().all(|x| x["online"] == true)
+        })
+        .await;
     }
 
-    // No console open at studio: nothing subscribes, and laptop's map isn't
-    // drawn; its sessions are presence's to draw, on the page.
-    tokio::time::sleep(Duration::from_millis(800)).await;
-    assert_eq!(b.hub.relay_server().unwrap().subscribed(), Vec::<(String, String)>::new());
-    assert!(node(&a.graph().await, &format!("@laptop:{L1}")).is_none());
+    // laptop's presence says what sessions it has: studio and desk count
+    // them on its row, which is what the page draws its cards from.
+    let presence = json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [{ "id": L1, "title": "Fix the login form", "waitsOnYou": true }], "removed": [], "you": false, "roster": "" });
+    b.svc.net().send(Outgoing::new(To::All, Kind::Presence, presence)).unwrap();
+    for h in [&a, &c] {
+        until(&format!("laptop's session at {}", h.name), 10, || async {
+            let r = row(h, "laptop").await;
+            r["agents"] == 1 && r["waitsOnYou"] == 1
+        })
+        .await;
+    }
 
-    // studio's console opens: laptop's snapshot is drawn under @laptop:, as
-    // a network host's, with the home folder as ~.
-    a.ctx.cores.hub.as_ref().unwrap().console(Some("shown"), 1);
+    // The transcript and stats, through the window, on svc/2: laptop reads
+    // its own API as a local client does.
     let remote = format!("@laptop:{L1}");
-    until("laptop's session on studio's map", 20, || async { node(&a.graph().await, &remote).is_some() }).await;
-    let g = a.graph().await;
-    let n = node(&g, &remote).unwrap();
-    assert_eq!((n["host"].clone(), n["network"].clone(), n["title"].clone()), (json!("laptop"), json!("relay"), json!("Fix the login form")), "{n}");
-    assert_eq!(n["cwd"], "~/atlas", "the home folder as ~: {n}");
-    assert!(node(&g, S1).is_some(), "studio's own, beside it");
-    assert_eq!(b.hub.relay_server().unwrap().subscribed().iter().map(|(h, _)| h.as_str()).collect::<Vec<_>>(), ["studio"], "one subscription, studio's");
-    // desk isn't a window host: it subscribes to no one.
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert!(a.hub.relay_server().unwrap().subscribed().iter().all(|(h, _)| h != "desk"), "{:?}", a.hub.relay_server().unwrap().subscribed());
-
-    // Each machine's load comes with its map, for the Machines panel:
-    // laptop's and desk's, each its own, with no history or cores.
-    let loads = || async {
-        let (s, v) = a.call("GET", "/api/system?hosts=1", Value::Null, &[]).await;
-        assert_eq!(s, 200, "{v}");
-        v
-    };
-    until("laptop's and desk's load at studio", 10, || async {
-        let v = loads().await;
-        ["laptop", "desk"].iter().all(|h| v["hosts"].as_array().unwrap().iter().any(|r| r["host"] == *h))
-    })
-    .await;
-    let v = loads().await;
-    assert_eq!(v["cpu"]["threads"], 24, "studio's own");
-    let of = |h: &str| v["hosts"].as_array().unwrap().iter().find(|r| r["host"] == h).cloned().unwrap();
-    assert_eq!((of("laptop")["cpu"]["threads"].clone(), of("desk")["cpu"]["threads"].clone()), (json!(12), json!(32)));
-    assert!(of("laptop").get("history").is_none() && of("laptop")["cpu"].get("cores").is_none());
-    assert_eq!(of("laptop")["hardware"]["cpu"]["threads"], 12);
-    assert_eq!(a.call("GET", "/api/system", Value::Null, &[]).await.1.get("hosts"), None, "only when asked");
-    // laptop stops sharing its load: what studio has of it stops there.
-    let (s, st) = b.window("PUT", "/api/net/settings", json!({ "shareLoad": false })).await;
-    assert_eq!((s, st["shareLoad"].clone()), (200, json!(false)), "{st}");
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    let at = of_now(&loads().await, "laptop");
-    tokio::time::sleep(Duration::from_millis(800)).await;
-    assert_eq!(of_now(&loads().await, "laptop"), at, "no newer reading");
-    assert!(of_now(&loads().await, "desk") > of("desk")["at"].as_f64().unwrap(), "desk's goes on");
-    b.window("PUT", "/api/net/settings", json!({ "shareLoad": true })).await;
-
-    // The transcript and stats, through the window.
     let path = format!("/api/session/{}/transcript", enc(&remote));
     let (s, t) = a.window("GET", &path, Value::Null).await;
     assert_eq!(s, 200, "{t}");
-    assert_eq!((t["host"].clone(), t["id"].clone()), (json!("laptop"), Value::Null));
-    assert_eq!(t["entries"][0]["text"], "fix the form in ~/atlas", "{t}");
+    assert_eq!(t["host"], "laptop", "{t}");
+    assert!(t["entries"][0]["text"].as_str().unwrap().starts_with("fix the form in "), "{t}");
     let (s, st) = a.window("GET", &format!("/api/session/{}/stats", enc(&remote)), Value::Null).await;
     assert_eq!((s, st["calls"].clone()), (200, json!(3)), "{st}");
     let read = b.own.read.lock().unwrap().clone();
-    assert!(read.contains(&format!("/api/session/{L1}/transcript")), "laptop read it as a local client: {read:?}");
+    assert!(read.iter().any(|p| p.starts_with(&format!("/api/session/{L1}/transcript"))), "laptop read it as a local client: {read:?}");
     // From an agent on studio, never: without the window's key, or with an
     // actor's token beside it.
     a.peers.agent.store(true, Ordering::SeqCst);
     let key = a.ctx.window_key.reveal().to_string();
     for headers in [vec![("x-xenonet-agent", S1)], vec![], vec![("x-xenonet-window", key.as_str()), ("authorization", "Bearer xnt_wren")]] {
         let (s, v) = a.call("GET", &path, Value::Null, &headers).await;
-        assert_eq!((s, v["code"].clone()), (403, json!("window")), "{headers:?}: {v}");
+        assert_eq!(s, 403, "{headers:?}: {v}");
     }
     a.peers.agent.store(false, Ordering::SeqCst);
-    // Collisions and MCP servers' details over the network come later.
-    let (s, v) = a.window("GET", &format!("/api/collision?a={}&b={}", enc(&remote), enc(&format!("@laptop:{L1}"))), Value::Null).await;
-    assert_eq!(s, 403, "{v}");
-    assert!(v["error"].as_str().unwrap().contains("come later"), "{v}");
-
-    // A gap at studio: every map it watches sends a fresh snapshot.
-    let before = b.snapshots_read();
-    a.svc.sinks().gap();
-    until("a fresh snapshot from laptop", 10, || async { b.snapshots_read() > before }).await;
+    // desk is no window host: laptop refuses its window.
+    let (s, v) = c.window("GET", &path, Value::Null).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("not-window")), "{v}");
 
     // laptop shares titles only: its transcripts stay on it, its stats go.
     let (s, v) = b.window("PUT", "/api/net/settings", json!({ "titlesOnly": true })).await;
     assert_eq!(s, 200, "{v}");
     let (s, v) = a.window("GET", &path, Value::Null).await;
     assert_eq!(s, 403, "{v}");
-    assert!(v["error"].as_str().unwrap().contains("titles only"), "{v}");
     let (s, _) = a.window("GET", &format!("/api/session/{}/stats", enc(&remote)), Value::Null).await;
     assert_eq!(s, 200);
-    b.window("PUT", "/api/net/settings", json!({ "titlesOnly": false })).await;
-
-    // studio's console stops renewing without a word: laptop's relay lets
-    // the subscription lapse, and stops.
-    a.hub.stop_renewing();
-    until("laptop's relay stopped", 15, || async { b.hub.relay_server().unwrap().subscribed().is_empty() }).await;
-    // The map stays on studio's, from what laptop sent last.
-    assert!(node(&a.graph().await, &remote).is_some());
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }
