@@ -122,42 +122,41 @@ rustup component add llvm-tools --toolchain 1.99.1  # the channel rust-toolchain
 
 The instrumented builds go to `target/llvm-cov-target`, apart from the usual ones, so `cargo test` and `npm run lint:rust` don't build again after a run. From nothing, a run took about two and a half minutes on a 16-core Mac. llvm-cov counts the `#[cfg(test)]` modules in a crate's own files among its lines. The table has a row for each crate in `crates/`, and one row for all of `adapters/`.
 
-Last measured on 2026-11-11, the tests ran this share of each crate's lines:
+Last measured on 2026-11-12, the tests ran this share of each crate's lines:
 
 | Crate | Lines | Run |
 | --- | --- | --- |
-| adapters (all fourteen) | 11,410 | 75.1% |
-| xenonet-actors | 6,772 | 60.5% |
-| xenonet-adapter | 4,206 | 75.7% |
-| xenonet-api | 1,808 | 59.2% |
-| xenonet-assistant | 3,716 | 54.6% |
-| xenonet-authz | 1,273 | 90.3% |
+| adapters (all fifteen) | 12,248 | 74.9% |
+| xenonet-actors | 8,481 | 58.7% |
+| xenonet-adapter | 4,221 | 75.6% |
+| xenonet-api | 2,157 | 64.0% |
+| xenonet-authz | 1,413 | 90.2% |
 | xenonet-blocks | 856 | 86.4% |
-| xenonet-cli | 7,442 | 25.8% |
-| xenonet-components | 4,100 | 86.6% |
-| xenonet-console | 2,307 | 53.7% |
+| xenonet-cli | 8,009 | 29.4% |
+| xenonet-components | 4,076 | 86.5% |
+| xenonet-console | 2,245 | 53.0% |
 | xenonet-demo | 780 | 94.5% |
-| xenonet-doctor | 2,490 | 63.9% |
-| xenonet-engine | 6,564 | 83.8% |
-| xenonet-http | 6,256 | 66.6% |
-| xenonet-id | 702 | 94.0% |
-| xenonet-integrations | 3,761 | 60.5% |
+| xenonet-doctor | 2,490 | 65.0% |
+| xenonet-door | 90 | 55.6% |
+| xenonet-engine | 6,542 | 83.9% |
+| xenonet-http | 6,521 | 67.0% |
+| xenonet-id | 702 | 93.6% |
 | xenonet-keys | 1,020 | 62.5% |
-| xenonet-log | 3,103 | 90.5% |
-| xenonet-mcp | 3,647 | 56.2% |
-| xenonet-model | 2,020 | 85.6% |
-| xenonet-net | 8,077 | 88.4% |
-| xenonet-os | 3,289 | 81.1% |
-| xenonet-runtime | 12,587 | 72.6% |
-| xenonet-schema | 1,603 | 75.9% |
-| xenonet-service | 6,211 | 73.1% |
-| xenonet-sources | 6,978 | 88.0% |
-| xenonet-state | 10,568 | 84.4% |
-| xenonet-store | 3,312 | 89.6% |
+| xenonet-log | 3,189 | 91.1% |
+| xenonet-mcp | 3,287 | 58.7% |
+| xenonet-model | 1,976 | 85.9% |
+| xenonet-net | 10,421 | 88.3% |
+| xenonet-os | 3,292 | 81.1% |
+| xenonet-saved | 245 | 89.8% |
+| xenonet-schema | 1,603 | 76.0% |
+| xenonet-service | 20,385 | 69.7% |
+| xenonet-sources | 7,059 | 88.5% |
+| xenonet-state | 10,579 | 84.5% |
+| xenonet-store | 3,960 | 90.9% |
 | xenonet-text | 1,634 | 93.6% |
-| All | 128,492 | 73.1% |
+| All | 129,481 | 73.9% |
 
-The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-console`, `xenonet-assistant`, `xenonet-mcp`, `xenonet-api` and `xenonet-actors`. Rerun `npm run coverage:rust` after a large change and replace the table.
+The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-console`, `xenonet-door`, `xenonet-actors`, `xenonet-mcp` and `xenonet-keys`. Rerun `npm run coverage:rust` after a large change and replace the table.
 
 ## Fuzzing
 
