@@ -14,7 +14,7 @@ npm run drive -- launch shot:overview  # drive XenoNet Dev from a terminal (see 
 npm run lab -- status  # macOS: the VM lab, Linux VMs to try other machines in (see below)
 npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
 npm run lint:rust   # the layering check, formatting, clippy, docs and the dependency checks
-npm run cargo -- test --workspace  # the Rust tests, golden files included, on the pinned toolchain
+npm run cargo -- test --workspace  # the Rust tests, golden files included, on the pinned toolchain (build xenolith/rust's xenolith-cli and xenolith-service first for the service's Xenolith test)
 npm run coverage:rust  # how much of the Rust core the tests run, crate by crate (see Coverage)
 npm run formal    # the Quint model of feed delivery: scenarios, random runs, seeded bugs (formal/README.md)
 ```

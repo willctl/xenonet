@@ -65,10 +65,19 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: rust-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+            xenolith/rust/target/
+          key: rust-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'xenolith/rust/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
       # The toolchain rust-toolchain.toml pins, with clippy and rustfmt.
       - run: rustup toolchain install
+      # Xenolith's two programs, without the tray, for the service's
+      # Xenolith test (tests/xenolith.rs), which fails rather than skips
+      # when they're missing.
+      - name: Xenolith's programs
+        working-directory: xenolith/rust
+        run: |
+          rustup toolchain install
+          cargo build --locked -p xenolith-cli -p xenolith-service
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Every crate's tests, so one run shows every failure.
       - run: cargo test --workspace --locked --no-fail-fast

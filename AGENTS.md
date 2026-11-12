@@ -26,7 +26,9 @@ answer the alignment check in `goals.md` in the design doc or the PR.
 
 - `npm run cargo -- test --workspace` runs the Rust tests, the golden
   files included, on the pinned toolchain (a plain `cargo` may be an older
-  Rust). `npm test` runs the page's, Desktop's and the scripts' unit tests.
+  Rust). The service's Xenolith test needs Xenolith's programs built first:
+  `cargo build -p xenolith-cli -p xenolith-service` in `xenolith/rust`, with
+  its pinned toolchain first on the PATH. `npm test` runs the page's, Desktop's and the scripts' unit tests.
   Run both after every change, and `npm run lint:rust` before a commit
   that touches `crates/` or `adapters/`. It runs the layering check first
   (`scripts/rust-layers.mjs`), which fails when a core crate depends on a
