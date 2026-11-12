@@ -33,13 +33,27 @@ export const ALONE = Object.freeze({
 
 const list = (v) => (Array.isArray(v) ? v : []);
 
+// The networks a state lists (a machine can be in several), each with
+// this machine's host id in it, what it shares into it and its relays.
+export function networksOf(raw) {
+  return list(raw?.networks)
+    .filter((n) => n && typeof n.id === "string")
+    .map((n) => ({ ...n, name: typeof n.name === "string" ? n.name : n.id, host: typeof n.host === "string" ? n.host : null, relays: list(n.relays).filter((r) => typeof r === "string"), sharing: n.sharing === "all" ? "all" : list(n.sharing).filter((p) => typeof p === "string") }));
+}
+
 // The state as the page uses it: a network/state/v1 answer, or a machine on
-// its own for anything else (no answer, an older service, an error).
-export function stateOf(raw) {
-  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], tickets: [], proposals: [], frozen: [], rosterMismatch: [] };
+// its own for anything else (no answer, an older service, an error). With
+// `chosen`, a network's id, that network's part of it, as the first's is
+// at the top of the answer; else the first network's.
+export function stateOf(raw, chosen = null) {
+  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], tickets: [], proposals: [], frozen: [], rosterMismatch: [], networks: [] };
+  const networks = networksOf(raw);
+  const pick = networks.find((n) => n.id === chosen) ?? null;
+  if (pick) raw = { ...raw, ...pick, network: { id: pick.id, name: pick.name } };
   return {
     ...ALONE,
     ...raw,
+    networks,
     hosts: list(raw.hosts).filter((x) => x && typeof x.id === "string"),
     tickets: list(raw.tickets),
     proposals: list(raw.proposals).filter((p) => p && typeof p.id === "string" && typeof p.host === "string"),

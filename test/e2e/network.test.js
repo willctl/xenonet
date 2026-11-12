@@ -673,6 +673,57 @@ test("the message box writes to a session as you, from the Network panel and fro
   await s.driver("select", null);
 }));
 
+test("a machine in two networks: each listed with its own host id, one shown at a time, its sharing and relays its own", { timeout: limit(60000) }, shoot("network-several", async () => {
+  await simulate("net-founder", { b: "networks" }, (n) => n.networks?.length === 2);
+  const raw = await served();
+  assert.deepEqual(raw.networks.map((x) => [x.name, x.host]), [["home", "studio"], ["work", "studio"]]);
+  let { network: n } = await s.driver("network", "open");
+  assert.deepEqual(n.networks.map((x) => [x.name, x.current, x.sharing]), [["home", true, "all"], ["work", false, []]], "the first is shown, and a later one sees nothing yet");
+  assert.match(n.text, /Networks\s*2.*home.*this machine is studio.*work/i);
+  // work, shown: its own machines and gateway.
+  n = (await s.driver("network", "pick", { network: n.networks[1].id })).network;
+  assert.equal(n.network, "work");
+  assert.deepEqual(n.hosts.map((x) => x.id).sort(), ["lab", "studio"]);
+  assert.equal(n.gateway.address, "10.0.0.9:47851");
+  assert.match(n.text, /What work sees/i);
+  // Everything shared into work, then a relay of the person's own: each
+  // control scrolled into view, where a click reaches it.
+  const shown = async (selector, key) => {
+    await s.eval(`return (document.querySelector('#modal ${selector}').scrollIntoView({ block: "center" }), true)`);
+    await s.driver("settled");
+    return (await network()).at[key];
+  };
+  await clickAt(await shown("[data-net-share-all]", "shareAll"), "All of this machine's projects");
+  n = await until(async () => {
+    const got = await network();
+    return got.networks.find((x) => x.name === "work")?.sharing === "all" ? got : null;
+  });
+  assert.ok(n, "work sees all now");
+  assert.equal(n.networks.find((x) => x.name === "home").sharing, "all", "home as it was");
+  await clickAt(await shown("[data-net-relay-url]", "relayUrl"), "the relay's URL");
+  await s.input({ text: "https://relay.example.net" });
+  await clickAt(await shown("[data-net-relay-add]", "relayAdd"), "Add to work");
+  n = await until(async () => {
+    const got = await network();
+    return got.networks.find((x) => x.name === "work")?.relays.includes("https://relay.example.net") ? got : null;
+  });
+  assert.ok(n, "work lists the relay");
+  assert.deepEqual(n.networks.find((x) => x.name === "home").relays, [], "home lists none");
+  assert.deepEqual(n.relaysHere.every, [], "no relay every network lists, so none is home");
+  assert.match(n.text, /no relay this machine has/);
+  await s.screenshot({ name: "e2e-network-several", inline: false });
+  await s.driver("network", "close");
+}));
+
+test("Start a network names its relay: none, the person's own iroh-relay, or n0's, named as n0's", { timeout: limit(60000) }, shoot("network-relay-choice", async () => {
+  await simulate("net-none", {}, (n) => !n.inNetwork);
+  await s.driver("network", "start");
+  const text = (await network()).text;
+  assert.match(text, /Relay\s*None: the LAN and direct paths only\s*Your own iroh-relay\s*n0.s public relays \(rate-limited, run by n0\)/i);
+  assert.match(text, /Your relay.s URL/i);
+  await s.driver("network", "close");
+}));
+
 test("clear ends the made-up network, and no page errors along the way", { timeout: limit(30000) }, async () => {
   await s.simulate("clear");
   assert.ok(await until(async () => !(await network()).inNetwork && !(await network()).simulated), "on its own again");

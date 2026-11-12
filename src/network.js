@@ -28,12 +28,12 @@
 // removing, replacing and the setting go through the window's own calls,
 // with its key: they're yours, and marked so (data-yours). A machine on its
 // own never sees any of this outside this panel and Add a machine.
-import { escapeHtml as h } from "./format.js";
+import { escapeHtml as h, tildePath } from "./format.js";
 import { hostOfId } from "./hosts.js";
 import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
 import { personOf, servicesOf, devicesHtml, servicesHtml, publishHtml, publishBody } from "./network-person.js";
-import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
+import { stateOf, networksOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 // What a session starts as, in the Start a session box.
@@ -69,6 +69,12 @@ const addrHtml = (text) => `<span class="addr-real">${h(text)}</span><span class
 // where the gateway's address is set; `onChange(view)` hears each new read.
 export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {}, onChange = () => {}, message = () => {}, gateway = () => {}, projects = () => [], request = (...a) => globalThis.fetch(...a) }) {
   let state = stateOf(null);
+  // The network the panel shows, by id, when this machine is in several:
+  // the first until you pick another.
+  let chosen = null;
+  // This machine's confirmed checkouts' projects, for what's shared into
+  // each network.
+  let shareable = [];
   let agents = [];
   // What this machine publishes to the network (GET /api/net/svc).
   let services = [];
@@ -116,16 +122,39 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     return Array.isArray(at) ? at : list;
   }
 
+  // A call to the network's routes for the network the panel shows: what
+  // acts on one network names it, since a machine may be in several.
+  const MACHINE_ROUTES = new Set(["/api/net/state", "/api/net/create", "/api/net/join", "/api/net/devices/revoke"]);
+  function netCall(method, path, body = {}) {
+    const named = path.startsWith("/api/net/") && !MACHINE_ROUTES.has(path) && state.network?.id && body && typeof body === "object" && !("network" in body);
+    return calls.call(method, path, named ? { ...body, network: state.network.id } : body);
+  }
+
+  // The projects of this machine's confirmed checkouts, by id.
+  async function projectsHere() {
+    const r = await getJson("/api/checkouts").catch(() => null);
+    const seen = new Map();
+    for (const c of Array.isArray(r?.checkouts) ? r.checkouts : []) {
+      if (c && typeof c.project === "string" && c.project.startsWith("prj_") && c.confirmed !== false && !c.gone && !seen.has(c.project)) seen.set(c.project, { id: c.project, path: typeof c.path === "string" ? c.path : c.project });
+    }
+    return [...seen.values()];
+  }
+
   // The state and other machines' agents, read again.
   async function refresh() {
     const n = ++seq;
-    const next = stateOf(await getJson("/api/net/state").catch(() => null));
+    const raw = await getJson("/api/net/state").catch(() => null);
+    if (chosen && !networksOf(raw).some((x) => x.id === chosen)) chosen = null;
+    const next = stateOf(raw, chosen);
     const list = inNetwork(next) ? await engineAgents() : [];
-    const published = inNetwork(next) ? servicesOf(await getJson("/api/net/svc").catch(() => null)) : [];
+    const svcPath = next.network?.id ? `/api/net/svc?network=${encodeURIComponent(next.network.id)}` : "/api/net/svc";
+    const published = inNetwork(next) ? servicesOf(await getJson(svcPath).catch(() => null)) : [];
+    const projects = next.networks.length ? await projectsHere() : [];
     if (n !== seq) return state;
     state = next;
     agents = remoteAgents(list);
     services = published;
+    shareable = projects;
     read = true;
     schedule();
     onChange(viewOf());
@@ -268,10 +297,48 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       ${state.start === "delegate" ? `<p class="pj-note" data-net-delegation="${h(state.self?.id ?? "")}">${h(delegationWords(state.delegated ? { by: state.delegated.by, at: state.delegated.at } : null))}</p>` : ""}
       <p class="pj-note">Who may start a session on this machine: nobody, you from a window host's console, the network, which adds the sessions and actors on window hosts, or delegated: the network, and what its sessions and actors start here runs on your standing delegation, within the limits above. Who may wake a session here to take a message at once: the sessions you allowed with <code>xenonet live allow</code>, or anyone in the network, within the wake budget. A window host can narrow these from its console; widening to the network from another machine takes the founder or a second window host.</p>
       ${selfWidens()}
+      ${networksHtml()}
       ${devicesHtml(personOf(state), view.confirmDevice)}
       ${servicesHtml(services)}
       ${errorHtml(view.error)}
-      <div class="m-foot"><span class="grow"></span><button class="act primary" data-net-go="add">Add a machine…</button></div>`;
+      <div class="m-foot"><button class="act" data-net-go="start" data-net-another>Start another network…</button><button class="act" data-net-go="join">Join another…</button><span class="grow"></span><button class="act primary" data-net-go="add">Add a machine…</button></div>`;
+  }
+
+  // The networks this machine is in, the one shown picked; what the shown
+  // one sees of this machine (its projects' sessions); its relays, and
+  // this machine's own; how the home relay stands.
+  function networksHtml() {
+    const nets = state.networks;
+    if (!nets.length) return "";
+    const here = state.relaysHere ?? {};
+    const list = nets
+      .map((n) => {
+        const shown = n.id === state.network?.id;
+        const sees = n.sharing === "all" ? "all of this machine's projects" : n.sharing.length ? `${n.sharing.length} project${n.sharing.length === 1 ? "" : "s"}` : "none of this machine's projects";
+        const pick = shown ? `<span class="tick">shown</span>` : `<button class="act" data-net-pick="${h(n.id)}">Show</button>`;
+        return `<li data-net-network="${h(n.id)}"><b>${h(n.name)}</b> · this machine is ${h(n.host ?? "?")} · ${(n.hosts ?? []).length} machine${(n.hosts ?? []).length === 1 ? "" : "s"} · sees ${h(sees)} ${pick}</li>`;
+      })
+      .join("");
+    const sharing = state.sharing === "all" ? "all" : Array.isArray(state.sharing) ? state.sharing : [];
+    const projects = shareable
+      .map((p) => `<label class="net-check"><input type="checkbox" data-net-share="${h(p.id)}" data-yours ${sharing === "all" || sharing.includes(p.id) ? "checked" : ""} ${sharing === "all" ? "disabled" : ""}> ${h(tildePath(p.path))}</label>`)
+      .join("");
+    const relays = (state.relays ?? []).map((u) => `<li data-net-relay="${h(u)}"><code>${h(u)}</code> <button class="act" data-net-relay-remove="${h(u)}" data-yours>Remove</button></li>`).join("");
+    const own = (here.own ?? []).map((u) => `<li data-net-own-relay="${h(u)}"><code>${h(u)}</code> <button class="act" data-net-own-remove="${h(u)}" data-yours>Remove</button></li>`).join("");
+    const direct = (here.directOnly ?? []).map((id) => nets.find((n) => n.id === id)?.name ?? id);
+    const home = here.url ? `This machine's home relay is ${here.url}.` : "This machine has no home relay: the others reach it on the LAN, by a direct path, or when it dials them.";
+    return `<div class="panel-title sub"><span>Networks</span><span class="tick">${nets.length}</span></div>
+      <ul class="net-tickets" data-net-networks>${list}</ul>
+      <div class="panel-title sub"><span>What ${h(state.network?.name ?? "this network")} sees</span></div>
+      <label class="net-check"><input type="checkbox" data-net-share-all data-yours ${sharing === "all" ? "checked" : ""}> All of this machine's projects</label>
+      ${projects || (sharing === "all" ? "" : `<p class="pj-note">No project here has a confirmed checkout yet.</p>`)}
+      <p class="pj-note" data-net-sharing>Its members see the sessions in these projects' checkouts on this machine, and nothing of the others. The first network this machine is in sees all of them; one after it starts with none.</p>
+      <div class="panel-title sub"><span>Relays</span></div>
+      <ul class="net-tickets" data-net-relays>${relays || `<li class="dim">None: ${h(state.network?.name ?? "the network")}'s machines reach each other on the LAN and by direct paths.</li>`}</ul>
+      <div class="ac-form"><label class="ac-field"><span class="ac-k">Add a relay</span><input class="ac-input" data-net-relay-url placeholder="https://relay.example.net, or n0" spellcheck="false" autocomplete="off"></label></div>
+      <p class="net-relay-actions"><button class="act" data-net-relay-add data-yours>Add to ${h(state.network?.name ?? "the network")}</button><button class="act" data-net-own-add data-yours>Add as this machine's own</button></p>
+      ${own ? `<p class="pj-note">This machine's own relays, for its own dials, in no network's list:</p><ul class="net-tickets" data-net-own-relays>${own}</ul>` : ""}
+      <p class="pj-note" data-net-home>A relay is your own iroh-relay, or n0's public ones (rate-limited, run by n0). Adding one to a network asks you, and takes the founder or a second window host. ${h(home)}${direct.length > 1 || (direct.length && nets.length > 1) ? ` ${h(direct.join(", "))} list${direct.length === 1 ? "s" : ""} no relay this machine has.` : ""}</p>`;
   }
 
   function startHtml() {
@@ -280,8 +347,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <div class="ac-form">
         <label class="ac-field"><span class="ac-k">Its name</span><input class="ac-input" data-net-name value="home" maxlength="64" spellcheck="false" autocomplete="off"></label>
         <label class="ac-field"><span class="ac-k">This machine's id</span><input class="ac-input" data-net-self placeholder="studio" maxlength="32" spellcheck="false" autocomplete="off"></label>
+        <label class="ac-field"><span class="ac-k">Relay</span><select class="ac-input" data-net-relay-kind><option value="">None: the LAN and direct paths only</option><option value="own">Your own iroh-relay</option><option value="n0">n0's public relays (rate-limited, run by n0)</option></select></label>
+        <label class="ac-field"><span class="ac-k">Your relay's URL</span><input class="ac-input" data-net-relay-own placeholder="https://relay.example.net" spellcheck="false" autocomplete="off"></label>
       </div>
-      <p class="pj-note">The id is what every console calls this machine: lowercase letters, digits and dashes. Pick a name, since XenoNet never uses the machine's own. This machine is the network's founder, whose key is its root, and its gateway. The other machines reach the gateway at an address, a tunnel or this machine's address on your LAN, which you set next. In a terminal: <code>xenonet net create --name &lt;name&gt; --host &lt;id&gt;</code></p>
+      <p class="pj-note">The id is what every console calls this machine: lowercase letters, digits and dashes. Pick a name, since XenoNet never uses the machine's own. This machine is the network's founder, whose key is its root, and its gateway. The other machines reach the gateway at an address, a tunnel or this machine's address on your LAN, which you set next. In a terminal: <code>xenonet net create --name &lt;name&gt; --host &lt;id&gt; [--relay &lt;url|n0&gt;]</code>. With no relay, the network's machines reach each other on the LAN and by direct paths.</p>
       ${errorHtml(view.error)}
       <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-create data-yours>Start the network</button></div>`;
   }
@@ -504,7 +573,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const problem = hostIdProblem(host, state);
     if (problem) return failed({ status: 400, error: problem });
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/ticket", { host, window });
+      const r = await netCall("POST", "/api/net/ticket", { host, window });
       return r.ok ? showLine(r, host, window) : failed(r, `xenonet net add-machine ${host}${window ? " --window" : ""}`);
     });
   }
@@ -512,14 +581,14 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   async function replace(host) {
     const x = state.hosts.find((y) => y.id === host);
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/replace", { host, window: !!x?.window });
+      const r = await netCall("POST", "/api/net/replace", { host, window: !!x?.window });
       return r.ok ? showLine(r, host, !!x?.window, host) : failed(r);
     });
   }
 
   async function remove(host) {
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/remove", { host });
+      const r = await netCall("POST", "/api/net/remove", { host });
       if (!r.ok) return failed(r, `xenonet net remove ${host}`);
       sfx("success");
       toast(`${host} is out of the network. Its frames are refused from now on.`);
@@ -551,7 +620,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const sent = publishBody(draft);
     if (!sent.name || !sent.target || !sent.paths.length) return failed({ status: 400, error: "Give its name, its address and the paths other machines may reach." });
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/svc/publish", sent);
+      const r = await netCall("POST", "/api/net/svc/publish", sent);
       if (!r.ok) return failed(r);
       sfx("success");
       toast(`${sent.name} is published: other machines reach it through their own XenoNet.`);
@@ -564,7 +633,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   // Takes a service off the network: it asks nothing.
   async function unpublish(name) {
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/svc/unpublish", { name });
+      const r = await netCall("POST", "/api/net/svc/unpublish", { name });
       if (!r.ok) return failed(r, `xenonet svc unpublish ${name}`);
       sfx("success");
       toast(`${name} is off the network.`);
@@ -576,13 +645,18 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   async function create() {
     const name = body().querySelector("[data-net-name]").value.trim();
     const host = body().querySelector("[data-net-self]").value.trim();
+    const kind = body().querySelector("[data-net-relay-kind]")?.value ?? "";
+    const relay = kind === "n0" ? "n0" : kind === "own" ? (body().querySelector("[data-net-relay-own]")?.value.trim() ?? "") : "";
     if (!name) return failed({ status: 400, error: "Give the network a name." });
     const problem = hostIdProblem(host, null);
     if (problem) return failed({ status: 400, error: problem });
+    if (kind === "own" && !/^https?:\/\/\S+$/.test(relay)) return failed({ status: 400, error: "Give your relay's URL, as https://relay.example.net." });
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/create", { name, host });
-      if (!r.ok) return failed(r, `xenonet net create --name ${name} --host ${host}`);
+      const r = await calls.call("POST", "/api/net/create", { name, host, ...(relay ? { relay } : {}) });
+      if (!r.ok) return failed(r, `xenonet net create --name ${name} --host ${host}${relay ? ` --relay ${relay}` : ""}`);
       sfx("success");
+      chosen = networksOf(r.data).find((x) => x.name === name)?.id ?? chosen;
+      if (r.data?.relayRefused) toast(`The network ${name} is started, without its relay: ${r.data.relayRefused}`, true);
       await refresh();
       toast(state.gateway ? `The network ${name} is started.` : `The network ${name} is started. Set the gateway's address next.`);
       go({ name: "main" });
@@ -610,6 +684,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       if (r.ok && r.data?.waiting) return failed({ status: 409, error: r.data.message ?? "The ticket lapsed while the join waited." });
       if (!r.ok) return failed(r, "xenonet net join <address> <ticket>");
       sfx("success");
+      // The network joined is the last the state lists: the panel shows it.
+      chosen = networksOf(r.data).at(-1)?.id ?? chosen;
       await refresh();
       toast(inNetwork(state) ? `This machine is in ${state.network.name} now.` : "Joined.");
       go({ name: "main" });
@@ -620,7 +696,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   async function unfreeze(author) {
     const f = state.frozen.find((x) => x.author === author);
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/feeds/unfreeze", { author });
+      const r = await netCall("POST", "/api/net/feeds/unfreeze", { author });
       if (!r.ok) return failed(r);
       sfx("success");
       toast(`${f?.host ?? author}'s feed is taken again.`);
@@ -632,7 +708,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   async function approve(id) {
     const p = state.proposals.find((x) => x.id === id);
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/approve", { id });
+      const r = await netCall("POST", "/api/net/approve", { id });
       if (!r.ok) return failed(r, p ? `xenonet net approve ${p.host} --op ${p.op}` : null);
       sfx("success");
       toast(p ? `Approved: ${proposalWords(p)}.` : "Approved.");
@@ -647,7 +723,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const [setting, value] = String(sv).split(":");
     const words = (setting === "start" ? START_WORDS : WAKE_WORDS)[value] ?? value;
     return busyWith(async () => {
-      const r = await calls.call("PUT", "/api/net/settings", { ...(host ? { host } : {}), [setting]: value });
+      const r = await netCall("PUT", "/api/net/settings", { ...(host ? { host } : {}), [setting]: value });
       if (!r.ok) return failed(r, `xenonet net set${host ? ` --on ${host}` : ""} --${setting} ${value}`);
       sfx("toggle");
       const what = setting === "start" ? "start sessions" : "wake sessions";
@@ -665,7 +741,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   // window host's approval, sent to that machine.
   async function approveWiden(host, id) {
     return busyWith(async () => {
-      const r = await calls.call("PUT", "/api/net/settings", { host, approve: id });
+      const r = await netCall("PUT", "/api/net/settings", { host, approve: id });
       if (!r.ok) return failed(r, `xenonet net set --on ${host} --approve ${id}`);
       sfx("success");
       toast(`Approved, and sent to ${host}.`);
@@ -680,8 +756,47 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     return (mine?.pending ?? []).map((w) => `<p class="net-warn" data-net-widen="${h(w.id)}">${h(widenWords(w, "this machine"))}. Another window host approves it, or set it here.</p>`).join("");
   }
 
+  // What the shown network sees of this machine: all its projects, or the
+  // ones ticked.
+  async function share() {
+    const all = body().querySelector("[data-net-share-all]")?.checked;
+    const ticked = [...body().querySelectorAll("[data-net-share]")].filter((b) => b.checked).map((b) => b.dataset.netShare);
+    const sharing = all ? "all" : ticked;
+    const r = await netCall("PUT", "/api/net/sharing", { sharing });
+    if (!r.ok) {
+      failed(r, `xenonet net share ${all ? "all" : ticked.join(",") || "none"} --network ${state.network?.id ?? ""}`);
+      return refresh();
+    }
+    sfx("toggle");
+    toast(all ? `${state.network?.name} sees all of this machine's projects.` : ticked.length ? `${state.network?.name} sees ${ticked.length} of this machine's projects.` : `${state.network?.name} sees none of this machine's projects.`);
+    return refresh();
+  }
+
+  // A relay into the shown network's list, or this machine's own (`mine`);
+  // or out of it.
+  async function relay(url, add, mine) {
+    if (!url) return failed({ status: 400, error: "Give a relay's URL, or n0 for n0's public relays." });
+    return busyWith(async () => {
+      const r = await netCall("POST", "/api/net/relays", { url, add, mine });
+      if (!r.ok) return failed(r, `xenonet net relay ${add ? "add" : "remove"} ${url}${mine ? " --mine" : ` --network ${state.network?.id ?? ""}`}`);
+      sfx("success");
+      toast(r.data?.proposed ? "Asked: the founder or another window host approves the relay." : add ? (mine ? "This machine dials through that relay too now." : `${state.network?.name} lists that relay now.`) : "That relay is out.");
+      await refresh();
+      return { ok: true };
+    });
+  }
+
+  // The panel shows another of this machine's networks.
+  async function pickNetwork(id) {
+    if (!state.networks.some((x) => x.id === id)) throw new Error(`This machine isn't in ${id}.`);
+    chosen = id;
+    drawn = "";
+    await refresh();
+    return driverState();
+  }
+
   async function titlesOnly(on) {
-    const r = await calls.call("PUT", "/api/net/settings", { titlesOnly: on });
+    const r = await netCall("PUT", "/api/net/settings", { titlesOnly: on });
     if (!r.ok) {
       failed(r);
       return refresh();
@@ -692,7 +807,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   }
 
   async function shareLoad(on) {
-    const r = await calls.call("PUT", "/api/net/settings", { shareLoad: on });
+    const r = await netCall("PUT", "/api/net/settings", { shareLoad: on });
     if (!r.ok) {
       failed(r);
       return refresh();
@@ -717,6 +832,11 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (t.closest("[data-net-gateway-setup]")) return gateway();
     if (t.closest("[data-net-make]")) return make();
     if (t.closest("[data-net-create]")) return create();
+    if (d.netPick) return pickNetwork(d.netPick);
+    if (t.closest("[data-net-relay-add]")) return relay(body().querySelector("[data-net-relay-url]")?.value.trim(), true, false);
+    if (t.closest("[data-net-own-add]")) return relay(body().querySelector("[data-net-relay-url]")?.value.trim(), true, true);
+    if (d.netRelayRemove) return relay(d.netRelayRemove, false, false);
+    if (d.netOwnRemove) return relay(d.netOwnRemove, false, true);
     if (t.closest("[data-net-join]")) return join();
     if (d.netMessage) return message(d.netMessage);
     if (d.netRemove) return go({ name: "main", confirm: d.netRemove });
@@ -764,6 +884,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       panel.addEventListener("change", (e) => {
         if (e.target.matches("[data-net-titles]")) void titlesOnly(e.target.checked);
         if (e.target.matches("[data-net-load]")) void shareLoad(e.target.checked);
+        if (e.target.matches("[data-net-share], [data-net-share-all]")) void share();
       });
       panel.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" || !e.target.matches?.("input")) return;
@@ -830,7 +951,13 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       inNetwork: inNetwork(state),
       simulated: !!state.simulated,
       network: state.network?.name ?? null,
+      networkId: state.network?.id ?? null,
       self: state.self?.id ?? null,
+      // Every network this machine is in, each with its host id here, what
+      // it sees of this machine and its relays; the one shown is `current`.
+      networks: state.networks.map((x) => ({ id: x.id, name: x.name, host: x.host, current: x.id === state.network?.id, hosts: (x.hosts ?? []).length, sharing: x.sharing, relays: x.relays, inContact: x.inContact ?? null })),
+      relaysHere: state.relaysHere ?? null,
+      shareable,
       gateway: g ? { address: g.address, kind: g.kind, link: g.link, words: linkWords(g).word, since: g.since ?? null, reason: g.reason ?? null, skewMs: g.skewMs ?? null } : null,
       hosts: state.hosts.map((x) => ({
         id: x.id,
@@ -886,7 +1013,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]") } : null,
     };
   }
 
@@ -928,6 +1055,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       return isOpen();
     },
     driverState,
+    pickNetwork,
     // GET /api/net/state as this window reads it, with its key: what the
     // service serves, before the page reads it leniently.
     served: () => getJson("/api/net/state"),

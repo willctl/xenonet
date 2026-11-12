@@ -1,16 +1,27 @@
-One XenoNet network across your machines. One machine is the network's
-gateway; the others link to it over HTTP(S), so no machine opens a port
-and nothing needs SSH keys. Frames between machines are signed by the one
-that sent them and sealed for the one they're for: the gateway passes them
-on and can't read them.
+XenoNet networks across your machines. A machine can be in several, with
+a host id of its own in each. One machine is each network's gateway; the
+others link to it over HTTP(S), so no machine opens a port and nothing
+needs SSH keys. Frames between machines are signed by the one that sent
+them and sealed for the one they're for: the gateway passes them on and
+can't read them.
+
+What acts on one network takes --network <id|name>. A machine in one
+network needs no --network; one in several is asked which.
 
   xenonet net create --name <name> --host <id> [--lan <ip:port>]
-                                   makes a network, with this machine as its
-                                   founder and gateway. Other machines reach
-                                   the gateway through the actor gateway's
+                     [--relay <url|n0>]
+                                   makes a network, beside any this machine
+                                   is in, with this machine as its founder
+                                   and gateway. Other machines reach the
+                                   gateway through the actor gateway's
                                    tunnel (xenonet gateway on --tunnel …), or
                                    on your LAN at --lan, an address this
-                                   machine has (never 0.0.0.0)
+                                   machine has (never 0.0.0.0). --relay
+                                   names the network's relay: your own
+                                   iroh-relay's URL, or n0 for n0's public
+                                   relays (rate-limited, run by n0). With
+                                   none, machines reach each other on the
+                                   LAN and by direct paths only
   xenonet net invite <id> [--window] [--mdns]
                                    an invite for a new machine, and its code
                                    apart: give it the invite, and tell it the
@@ -27,9 +38,10 @@ on and can't read them.
                                    the network's relay when it has one. The
                                    line Add a machine shows (an address and
                                    a ticket) joins through the gateway
-  xenonet net status [--json]      the network, this machine, the gateway and
-                                   the link, and what waits to be sent
-  xenonet net hosts [--json]       the machines in the network
+  xenonet net status [--json]      each network, this machine in it, the
+                                   gateway and the link, and what waits to
+                                   be sent
+  xenonet net hosts [--json]       the machines in each network
   xenonet net add-machine <id> [--window]
                                    a ticket for a new machine, and the line to
                                    run there. --window when you'll use a
@@ -43,7 +55,27 @@ on and can't read them.
   xenonet net replace <id>         takes a reinstalled machine's old keys out,
                                    and makes a ticket for it to join again
   xenonet net leave [--force]      asks to be taken out, then forgets the
-                                   network here; this XenoNet carries on alone
+                                   network here; the others this machine is
+                                   in carry on as they were
+  xenonet net share all|none|<prj_…,…>
+                                   which projects' sessions the network sees
+                                   of this machine. The first network sees
+                                   all; one after it starts with none.
+                                   Sharing more is XenoNet's window's, since
+                                   another network's members then see it
+  xenonet net relay [add|remove] <url|n0> [--mine]
+                                   the network's relays: your own
+                                   iroh-relay's URL, or n0 for n0's public
+                                   relays. Adding one widens the network, so
+                                   it's done from XenoNet's window and takes
+                                   the founder or a second window host;
+                                   taking one out is done at once. With
+                                   --mine, a relay of this machine's own, in
+                                   no network's chain, for its own dials.
+                                   This machine's home relay is one every
+                                   network it's in lists; with none such,
+                                   one of its own. With no word, the
+                                   relays as they stand
   xenonet net set [--titles-only | --no-titles-only]
                   [--share-load | --no-share-load] [--lan <ip:port>]
                   [--start off|you|network|delegate] [--wake consent|network]

@@ -59,6 +59,94 @@ struct Sim {
     asks: Vec<Value>,
     /// The services this machine publishes, as `xenonet svc list` has them.
     services: Vec<Value>,
+    /// The other networks this machine is in (variant "networks"), as
+    /// `networks` lists them after the first.
+    others: Vec<Value>,
+    /// The relays this machine adds of its own.
+    own: Vec<String>,
+}
+
+/// The state as a simulation serves it: every network in `networks`, the
+/// first being the one at the top, and how the relays stand.
+fn served(sim: &Sim) -> Value {
+    let mut out = sim.state.clone();
+    let s = &sim.state;
+    let mut nets = Vec::new();
+    if s["network"].is_object() {
+        let mut first = json!({ "id": s["network"]["id"], "name": s["network"]["name"], "host": s["self"]["id"], "relays": [], "sharing": "all", "inContact": true });
+        for k in [
+            "self",
+            "gateway",
+            "hosts",
+            "tickets",
+            "outbox",
+            "rosterHead",
+            "rosterMismatch",
+            "frozen",
+            "titlesOnly",
+            "shareLoad",
+            "start",
+            "wake",
+            "proposals",
+            "relays",
+            "sharing",
+        ] {
+            if let Some(v) = s.get(k) {
+                first[k] = v.clone();
+            }
+        }
+        nets.push(first);
+        nets.extend(sim.others.iter().cloned());
+    }
+    let lists: Vec<Vec<Value>> = nets.iter().map(|n| n["relays"].as_array().cloned().unwrap_or_default()).collect();
+    let every: Vec<Value> = lists.first().map(|f| f.iter().filter(|u| lists.iter().all(|l| l.contains(u))).cloned().collect()).unwrap_or_default();
+    let direct: Vec<Value> =
+        nets.iter().filter(|n| !n["relays"].as_array().is_some_and(|l| l.iter().any(|u| every.contains(u) || sim.own.iter().any(|o| u == o)))).map(|n| n["id"].clone()).collect();
+    out["networks"] = Value::Array(nets);
+    out["relaysHere"] = json!({ "url": every.first(), "every": every, "own": sim.own, "choose": [], "directOnly": direct });
+    out
+}
+
+/// A second network this machine is in, for variant "networks": work, a
+/// machine there it alone shares with you, and nothing shared into it yet.
+fn other_network(state: &Value) -> Value {
+    let me = state["self"]["id"].as_str().unwrap_or("studio");
+    let mut mine = state["hosts"].as_array().and_then(|h| h.iter().find(|x| x["self"] == json!(true)).cloned()).unwrap_or_else(|| json!({ "id": me }));
+    mine["founder"] = json!(false);
+    mine["gateway"] = json!(false);
+    let mut lab = mine.clone();
+    for (k, v) in [
+        ("id", json!("lab")),
+        ("keyId", json!(key_id("lab"))),
+        ("self", json!(false)),
+        ("gateway", json!(true)),
+        ("founder", json!(true)),
+        ("agents", json!(0)),
+        ("waitsOnYou", json!(0)),
+        ("you", json!(false)),
+    ] {
+        lab[k] = v;
+    }
+    json!({
+        "id": "net_7c0ffee000000000000000000000beef",
+        "name": "work",
+        "host": me,
+        "self": { "id": me, "keyId": key_id(me), "window": false, "founder": false, "gateway": false },
+        "gateway": { "address": "10.0.0.9:47851", "keyId": key_id("lab"), "kind": "lan", "link": "live", "since": null, "reason": null, "skewMs": null },
+        "hosts": [mine, lab],
+        "tickets": [],
+        "outbox": { "frames": 0, "bytes": 0, "oldest": null },
+        "rosterMismatch": [],
+        "frozen": [],
+        "proposals": [],
+        "titlesOnly": false,
+        "shareLoad": true,
+        "start": "you",
+        "wake": "consent",
+        "relays": [],
+        "sharing": [],
+        "inContact": true,
+    })
 }
 
 fn sims() -> &'static Mutex<HashMap<usize, Sim>> {
@@ -97,7 +185,7 @@ pub fn simulated_net_state(ctx: &Ctx) -> Option<Value> {
     if let Some(t) = sim.state["tickets"].as_array_mut() {
         t.retain(|t| t["expires"].as_f64().is_some_and(|e| e > now));
     }
-    Some(sim.state.clone())
+    Some(served(sim))
 }
 
 /// The simulated hosts' agents, as the engine lists other hosts' agents
@@ -137,7 +225,8 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         Some("ask-env") => vec![made_up_ask(ctx.now(), true)],
         _ => Vec::new(),
     };
-    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new() });
+    let others = if variant == Some("networks") && state["network"].is_object() { vec![other_network(&state)] } else { Vec::new() };
+    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new() });
     for a in &asks {
         ctx.broadcast("ask", a);
     }
@@ -234,9 +323,10 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             | "/api/net/devices/revoke"
             | "/api/net/feeds/unfreeze"
             | "/api/net/svc/publish"
-            | "/api/net/svc/unpublish",
+            | "/api/net/svc/unpublish"
+            | "/api/net/relays",
         )
-        | ("PUT", "/api/net/settings") => {
+        | ("PUT", "/api/net/settings" | "/api/net/sharing") => {
             if !req.by.window {
                 return Ok(Some(Reply::coded(403, "yours", req.by.not_window.clone())));
             }
@@ -877,6 +967,56 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             Reply::json(200, json!({ "host": me, "services": sim.services }))
         }
+        "/api/net/sharing" | "/api/net/relays" => {
+            if !in_network {
+                return outside();
+            }
+            // The network named, the first when none is.
+            let named = body.get("network").and_then(Value::as_str).unwrap_or("");
+            let first = named.is_empty() || sim.state["network"]["id"] == named || sim.state["network"]["name"] == named;
+            let at = sim.others.iter().position(|n| n["id"] == named || n["name"] == named);
+            if !first && at.is_none() {
+                return fail(404, "no-network", format!("this machine isn't in a network named {named}"));
+            }
+            if path == "/api/net/sharing" {
+                let sharing = body.get("sharing").cloned().unwrap_or(Value::Null);
+                let ok = sharing == "all" || sharing.as_array().is_some_and(|a| a.iter().all(|p| p.as_str().is_some_and(|p| p.starts_with("prj_"))));
+                if !ok {
+                    return fail(400, "bad-request", "sharing is \"all\" or a list of project ids (prj_…)");
+                }
+                match at.filter(|_| !first) {
+                    Some(i) => sim.others[i]["sharing"] = sharing,
+                    None => sim.state["sharing"] = sharing,
+                }
+                return Reply::json(200, served(sim));
+            }
+            let url = body.get("url").and_then(Value::as_str).unwrap_or("").trim().trim_end_matches('/').to_string();
+            if !(url == "n0" || url.starts_with("https://") || url.starts_with("http://")) || url.contains(char::is_whitespace) {
+                return fail(400, "bad-request", format!("{url} isn't a relay's URL: give an iroh-relay's https:// address, or n0 for n0's public relays"));
+            }
+            let add = body.get("add") != Some(&Value::Bool(false));
+            let edit = |list: &mut Vec<Value>| {
+                list.retain(|u| u.as_str() != Some(url.as_str()));
+                if add {
+                    list.push(json!(url));
+                }
+            };
+            if body.get("mine") == Some(&Value::Bool(true)) {
+                sim.own.retain(|u| *u != url);
+                if add {
+                    sim.own.push(url.clone());
+                }
+            } else {
+                let target = match at.filter(|_| !first) {
+                    Some(i) => &mut sim.others[i]["relays"],
+                    None => &mut sim.state["relays"],
+                };
+                let mut list = target.as_array().cloned().unwrap_or_default();
+                edit(&mut list);
+                *target = Value::Array(list);
+            }
+            Reply::json(200, served(sim))
+        }
         "/api/net/settings" => {
             if !in_network {
                 return outside();
@@ -1288,7 +1428,7 @@ mod tests {
 
     fn sim(kind: &str) -> Sim {
         let (state, agents) = made_up(kind, None, 1.8e12).unwrap();
-        Sim { state, agents, asks: Vec::new(), services: Vec::new() }
+        Sim { state, agents, asks: Vec::new(), services: Vec::new(), others: Vec::new(), own: Vec::new() }
     }
 
     #[test]
@@ -1338,6 +1478,29 @@ mod tests {
         let id = reach(&m, "studio")["pending"][0]["id"].as_str().unwrap().to_string();
         apply(&mut m, "/api/net/settings", &json!({ "host": "studio", "approve": id }), now);
         assert_eq!((reach(&m, "studio")["wake"].clone(), reach(&m, "studio")["pending"].clone()), (json!("network"), json!([])));
+    }
+
+    #[test]
+    fn a_second_network_is_listed_and_its_sharing_and_relays_are_its_own() {
+        let mut s = sim("net-founder");
+        s.others.push(other_network(&s.state));
+        let st = served(&s);
+        let nets = st["networks"].as_array().unwrap();
+        assert_eq!((nets.len(), nets[0]["sharing"].clone(), nets[1]["sharing"].clone()), (2, json!("all"), json!([])));
+        // Sharing into work, by name, leaves the first as it was.
+        let st = apply(&mut s, "/api/net/sharing", &json!({ "network": "work", "sharing": ["prj_web"] }), 0.0).body_json();
+        assert_eq!((st["networks"][0]["sharing"].clone(), st["networks"][1]["sharing"].clone()), (json!("all"), json!(["prj_web"])));
+        assert_eq!(apply(&mut s, "/api/net/sharing", &json!({ "sharing": ["web"] }), 0.0).status, 400, "a project is a prj_ id");
+        assert_eq!(apply(&mut s, "/api/net/sharing", &json!({ "network": "elsewhere", "sharing": "all" }), 0.0).status, 404);
+        // A relay into the first network: it's no relay every network lists.
+        let st = apply(&mut s, "/api/net/relays", &json!({ "url": "https://relay.example.net" }), 0.0).body_json();
+        assert_eq!(st["networks"][0]["relays"], json!(["https://relay.example.net"]));
+        assert_eq!(st["relaysHere"]["every"], json!([]));
+        let st = apply(&mut s, "/api/net/relays", &json!({ "url": "https://relay.example.net", "network": "work" }), 0.0).body_json();
+        assert_eq!(st["relaysHere"]["every"], json!(["https://relay.example.net"]), "both list it now");
+        let st = apply(&mut s, "/api/net/relays", &json!({ "url": "https://mine.example.net", "mine": true }), 0.0).body_json();
+        assert_eq!((st["relaysHere"]["own"].clone(), st["networks"][0]["relays"].as_array().map(Vec::len)), (json!(["https://mine.example.net"]), Some(1)));
+        assert_eq!(apply(&mut s, "/api/net/relays", &json!({ "url": "relay.example.net" }), 0.0).status, 400);
     }
 
     #[test]

@@ -33,6 +33,19 @@ test("anything but a network/state/v1 answer is a machine on its own, and the an
   assert.deepEqual(stateOf({ ...founder(), hosts: "nope", rosterMismatch: [5, "rack"] }).rosterMismatch, ["rack"]);
 });
 
+test("a machine in several networks: each listed, the first at the top, and the one picked in its place", () => {
+  const work = { id: `net_${"e".repeat(32)}`, name: "work", host: "studio-w", hosts: [host("studio-w"), host("lab")], gateway: { address: "10.0.0.9:47851", keyId: `xnk1_${"c".repeat(32)}`, kind: "lan", link: "live", since: NOW, reason: null, skewMs: 0 }, self: { id: "studio-w", keyId: `xnk1_${"d".repeat(32)}`, window: false, founder: false, gateway: false }, sharing: ["prj_web", 5], relays: ["https://relay.example.net", null] };
+  const raw = { ...founder(), sharing: "all", networks: [{ id: founder().network.id, name: "home", host: "studio", hosts: founder().hosts, sharing: "all", relays: [] }, work, { name: "no id" }] };
+  const first = stateOf(raw);
+  assert.deepEqual(first.networks.map((n) => [n.name, n.host]), [["home", "studio"], ["work", "studio-w"]], "one with no id isn't listed");
+  assert.deepEqual([first.network.name, first.self.id, first.hosts.length], ["home", "studio", 3]);
+  const picked = stateOf(raw, work.id);
+  assert.deepEqual([picked.network, picked.self.id, picked.hosts.map((x) => x.id), picked.gateway.address], [{ id: work.id, name: "work" }, "studio-w", ["studio-w", "lab"], "10.0.0.9:47851"]);
+  assert.deepEqual([picked.sharing, picked.relays], [["prj_web"], ["https://relay.example.net"]], "read leniently");
+  assert.equal(stateOf(raw, "net_gone").network.name, "home", "a network that isn't there any more: the first");
+  parse("network/state/v1", picked);
+});
+
 test("the link to the gateway in a word, with since when and why", () => {
   assert.equal(linkWords(null).state, "none");
   assert.match(linkWords(null).sub, /Set up… in the Actors panel/);

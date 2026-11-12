@@ -560,7 +560,8 @@ export function createDriver(app) {
     // ticket). "open" shows the panel, "start" and "join" its forms, "add"
     // Add a machine with { host, window } filled in, "publish" Publish a
     // service with { name, target, paths, hosts } filled in, "devices" and
-    // "services" the panel scrolled to Your devices or Services, and
+    // "services" the panel scrolled to Your devices or Services, "pick"
+    // shows another of this machine's networks ({ network }: its id), and
     // "close" closes it;
     // "refresh" reads it again, and "served" gives GET /api/net/state as
     // the window reads it. Making the line, starting, joining,
@@ -585,8 +586,9 @@ export function createDriver(app) {
       else if (action === "add") st = await act(() => n.addMachine({ host: arg?.host ?? "", window: !!arg?.window }), opts);
       else if (action === "publish") st = await act(() => n.publishService(arg ?? {}), opts);
       else if (action === "devices" || action === "services") st = await act(() => n.reveal(action), opts);
+      else if (action === "pick") st = await act(() => n.open().then(() => n.pickNetwork(arg?.network ?? arg)), opts);
       else if (action === "close") st = await act(() => n.close(), opts);
-      else throw new Error("Use read, refresh, served, open, start, join, add, publish, devices, services or close.");
+      else throw new Error("Use read, refresh, served, open, start, join, add, publish, devices, services, pick or close.");
       return { ...st, network: n.driverState() };
     },
     // Start a session (network.js): the box, on a machine (`host`, this one

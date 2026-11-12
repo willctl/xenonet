@@ -82,7 +82,7 @@ const TAKES_VALUE: &[&str] = &[
 // Flags that take a value in one command only, because another command
 // reads the same name as a switch: xenonet net set --start network, but
 // a switch anywhere else.
-const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start"])];
+const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start", "network", "relay"])];
 const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
 
 /// The flags given, by name: what JS's `flags` object holds.

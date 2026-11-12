@@ -96,7 +96,7 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "net",
         "One network across your machines: create or join one, add a machine, see the hosts",
-        Some("[create|join|invite|status|hosts|add-machine|remove|leave|set|approve|gateway]"),
+        Some("[create|join|invite|status|hosts|add-machine|remove|leave|set|share|relay|approve|gateway] [--network <id|name>]"),
     ),
     cmd("svc", "Publish a local HTTP service to the network, for programs on its other machines", Some("[publish|unpublish|list]")),
     cmd("start", "Start a session here or on another machine, with a first prompt", Some("[--on <machine>] \"<prompt>\"")),

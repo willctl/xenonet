@@ -172,7 +172,8 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     assert_eq!(code, 0);
     let hosts: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(hosts.as_array().unwrap().len(), 1);
-    let (code, _, err) = s.run(&["net", "create", "--name", "again", "--host", "studio"]);
+    // A second network is made beside the first, but not by the same name.
+    let (code, _, err) = s.run(&["net", "create", "--name", "home", "--host", "studio"]);
     assert_eq!(code, 1);
     assert!(err.contains("already"), "{err}");
     // Services: publishing is the window's (crates/xenonet-service/tests/

@@ -1,5 +1,7 @@
-//! xenonet net (docs/design/network.md, "The wire"): one network across
+//! xenonet net (docs/design/network.md, "The wire"): the networks across
 //! the person's machines, through the local service's /api/net routes.
+//! What acts on one network takes `--network <id|name>`, which a machine
+//! in one network needs no more than its list does.
 //! Creating, joining and leaving are the person's: the service refuses
 //! them from under an agent, as it does `xenonet service install`. What
 //! asks the person (a ticket, a widening, setting up their identity with
@@ -134,6 +136,56 @@ fn show_hosts(st: &Value) {
     }
 }
 
+/// One network's part of the state, as `show_status` and `show_hosts`
+/// read it: its entry in `networks`, with `network` beside it.
+fn view_of(entry: &Value) -> Value {
+    let mut v = entry.clone();
+    v["network"] = json!({ "id": entry["id"], "name": entry["name"] });
+    v
+}
+
+/// The networks the state lists, or the one `which` names (its id or
+/// name).
+fn views(st: &Value, which: Option<&str>) -> Result<Vec<Value>, Fail> {
+    let all = list(st, "networks");
+    match which {
+        None => Ok(all.iter().map(view_of).collect()),
+        Some(w) => {
+            let found: Vec<&Value> = all.iter().filter(|n| str(n, "id") == Some(w) || str(n, "name") == Some(w)).collect();
+            match found.as_slice() {
+                [one] => Ok(vec![view_of(one)]),
+                [] => Err(Fail::new(format!("this machine isn't in a network named {w}: xenonet net status lists the ones it's in"), 1)),
+                _ => Err(Fail::new(format!("two networks here are named {w}: say which by its id"), 2)),
+            }
+        }
+    }
+}
+
+/// The relays as they stand: each network's, and this machine's own and
+/// home relay.
+fn show_relays(st: &Value) {
+    for n in list(st, "networks") {
+        let relays: Vec<&str> = list(n, "relays").iter().filter_map(Value::as_str).collect();
+        print(format!("{}  {}", c::bold(t(n, "name")), if relays.is_empty() { c::dim("no relay: the LAN and direct paths only") } else { relays.join(", ") }));
+    }
+    let here = st.get("relaysHere").cloned().unwrap_or(Value::Null);
+    let own: Vec<&str> = list(&here, "own").iter().filter_map(Value::as_str).collect();
+    if !own.is_empty() {
+        print(format!("  {}  {}", c::dim("this machine's own"), own.join(", ")));
+    }
+    match str(&here, "url") {
+        Some(u) => print(format!("  {}  {u}", c::dim("home relay        "))),
+        None => print(format!("  {}  {}", c::dim("home relay        "), c::dim("none"))),
+    }
+    let direct: Vec<&str> = list(&here, "directOnly").iter().filter_map(Value::as_str).collect();
+    if !direct.is_empty() && list(st, "networks").len() > 1 {
+        print(c::yellow(format!(
+            "  ! no relay every network lists: {} reach this machine by direct paths only, unless you add one of its own (xenonet net relay add <url> --mine)",
+            direct.join(", ")
+        )));
+    }
+}
+
 fn arg(args: &[String], i: usize, what: &str) -> Result<String, Fail> {
     args.get(i).filter(|a| !a.is_empty()).cloned().ok_or_else(|| Fail::new(format!("say {what}: xenonet net --help"), 2))
 }
@@ -150,6 +202,14 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         return Err(Fail::new("Revoking a device is XenoNet's window's, since it asks you: Network settings › Your devices, then Revoke on the lost machine's device", 1));
     }
     let s = need(flags)?;
+    let network = flags.text("network");
+    // A body for the network `--network` names, when it names one.
+    let within = |mut body: Value| {
+        if let Some(n) = &network {
+            body["network"] = json!(n);
+        }
+        body
+    };
     let out = |v: &Value, show: &dyn Fn(&Value)| {
         if flags.on("json") {
             json(v);
@@ -159,15 +219,83 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         Ok(0)
     };
     match what {
-        "status" => out(&call(&s, "GET", "/api/net/state", None)?, &show_status),
+        "status" => {
+            let st = call(&s, "GET", "/api/net/state", None)?;
+            if network.is_none() {
+                return out(&st, &|st| {
+                    let all = views(st, None).unwrap_or_default();
+                    if all.is_empty() {
+                        show_status(st);
+                    }
+                    for (i, v) in all.iter().enumerate() {
+                        if i > 0 {
+                            print("");
+                        }
+                        show_status(v);
+                    }
+                });
+            }
+            let v = views(&st, network.as_deref())?.remove(0);
+            out(&v, &show_status)
+        }
         "hosts" => {
             let st = call(&s, "GET", "/api/net/state", None)?;
+            let all = views(&st, network.as_deref())?;
             if flags.on("json") {
-                json(st.get("hosts").unwrap_or(&Value::Null));
+                match all.as_slice() {
+                    [one] => json(&one["hosts"]),
+                    _ => json(&Value::Array(all.iter().map(|v| json!({ "network": v["network"], "host": v["host"], "hosts": v["hosts"] })).collect())),
+                }
                 return Ok(0);
             }
-            show_hosts(&st);
+            if all.is_empty() {
+                show_hosts(&st);
+            }
+            for v in &all {
+                if all.len() > 1 {
+                    print(format!("{} {} as {}", c::bold(t(&v["network"], "name")), c::dim("·"), t(v, "host")));
+                }
+                show_hosts(v);
+            }
             Ok(0)
+        }
+        "share" => {
+            let given = arg(args, 1, "what the network sees: all, none, or project ids (prj_…), comma-separated")?;
+            let sharing = match given.as_str() {
+                "all" => json!("all"),
+                "none" => json!([]),
+                ids => json!(ids.split(',').map(str::trim).filter(|p| !p.is_empty()).collect::<Vec<_>>()),
+            };
+            let st = call(&s, "PUT", "/api/net/sharing", Some(&within(json!({ "sharing": sharing }))))?;
+            out(&st, &|st| {
+                for v in views(st, network.as_deref()).unwrap_or_default() {
+                    let words = match &v["sharing"] {
+                        Value::String(a) if a == "all" => "every project's sessions".to_string(),
+                        Value::Array(p) if p.is_empty() => "no sessions".to_string(),
+                        Value::Array(p) => p.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "),
+                        _ => "?".to_string(),
+                    };
+                    print(format!("{} {} sees {words}", c::green("✓"), c::bold(t(&v["network"], "name"))));
+                }
+            })
+        }
+        "relay" => {
+            let verb = args.get(1).map(String::as_str);
+            if verb.is_none() {
+                return out(&call(&s, "GET", "/api/net/state", None)?, &show_relays);
+            }
+            let add = match verb {
+                Some("add") => true,
+                Some("remove") => false,
+                _ => return Err(Fail::new("xenonet net relay add <url|n0>, or xenonet net relay remove <url|n0>", 2)),
+            };
+            let url = arg(args, 2, "the relay: your own iroh-relay's URL, or n0 for n0's public relays")?;
+            let st = call(&s, "POST", "/api/net/relays", Some(&within(json!({ "url": url, "add": add, "mine": flags.on("mine") }))))?;
+            if on(&st, "proposed") && !flags.on("json") {
+                print(format!("{} asked: the founder or another window host approves it", c::green("✓")));
+                return Ok(0);
+            }
+            out(&st, &show_relays)
         }
         "create" => {
             let name = flags.text("name").ok_or_else(|| Fail::new("say the network's name: xenonet net create --name <name> --host <id>", 2))?;
@@ -178,11 +306,18 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             if let Some(lan) = flags.text("lan") {
                 body.insert("lan".into(), json!(lan));
             }
+            if let Some(relay) = flags.text("relay") {
+                body.insert("relay".into(), json!(relay));
+            }
             let st = call(&s, "POST", "/api/net/create", Some(&Value::Object(body)))?;
             out(&st, &|st| {
-                print(format!("{} made the network {}, with this machine as {}", c::green("✓"), c::bold(t(&st["network"], "name")), t(&st["self"], "id")));
-                if str(&st["gateway"], "address").is_none_or(str::is_empty) {
+                let made = list(st, "networks").iter().find(|n| str(n, "name") == Some(name.as_str())).map_or_else(|| st.clone(), view_of);
+                print(format!("{} made the network {}, with this machine as {}", c::green("✓"), c::bold(t(&made["network"], "name")), t(&made["self"], "id")));
+                if str(&made["gateway"], "address").is_none_or(str::is_empty) {
                     print(c::yellow("  The gateway has no address yet: xenonet net set --lan <ip:port>, with this machine's tailnet or LAN address."));
+                }
+                if let Some(why) = str(st, "relayRefused") {
+                    print(c::yellow(format!("  The relay wasn't added: {why}. Add it from XenoNet's window, Network settings.")));
                 }
                 print(c::dim("  Add a machine: xenonet net invite <id> on macOS, or Add a machine in XenoNet's window."));
             })
@@ -222,13 +357,15 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 std::thread::sleep(std::time::Duration::from_secs(3));
             };
             out(&st, &|st| {
-                print(format!("{} joined {} as {}", c::green("✓"), c::bold(t(&st["network"], "name")), t(&st["self"], "id")));
-                print(format!("  {}  {}", c::dim("gateway key"), t(&st["gateway"], "keyId")));
+                // The network joined is the last the state lists.
+                let joined = list(st, "networks").last().map_or_else(|| st.clone(), view_of);
+                print(format!("{} joined {} as {}", c::green("✓"), c::bold(t(&joined["network"], "name")), t(&joined["self"], "id")));
+                print(format!("  {}  {}", c::dim("gateway key"), t(&joined["gateway"], "keyId")));
             })
         }
         "invite" => {
             let host = arg(args, 1, "the new machine's id: xenonet net invite <id>")?;
-            let r = call(&s, "POST", "/api/net/invite", Some(&json!({ "host": host, "window": flags.on("window"), "lan": flags.on("mdns") })))?;
+            let r = call(&s, "POST", "/api/net/invite", Some(&within(json!({ "host": host, "window": flags.on("window"), "lan": flags.on("mdns") }))))?;
             out(&r, &|r| {
                 print(format!("Give {} this invite. It works once, for ten minutes:", c::bold(t(r, "host"))));
                 print(format!("\n  {}\n", t(r, "invite")));
@@ -246,7 +383,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "add-machine" => {
             let host = arg(args, 1, "the new machine's id: xenonet net add-machine <id>")?;
-            let r = call(&s, "POST", "/api/net/ticket", Some(&json!({ "host": host, "window": flags.on("window") })))?;
+            let r = call(&s, "POST", "/api/net/ticket", Some(&within(json!({ "host": host, "window": flags.on("window") }))))?;
             out(&r, &|r| {
                 print(format!("Run this on {} within ten minutes. It works once.", c::bold(t(r, "host"))));
                 print(format!("\n  {}\n", t(r, "line")));
@@ -254,7 +391,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "remove" | "replace" => {
             let host = arg(args, 1, "which machine: its id in the network")?;
-            let r = call(&s, "POST", &format!("/api/net/{what}"), Some(&json!({ "host": host })))?;
+            let r = call(&s, "POST", &format!("/api/net/{what}"), Some(&within(json!({ "host": host }))))?;
             out(&r, &|r| {
                 if what == "replace" {
                     print(format!("{} {}'s old keys are out. Run this on it within ten minutes:", c::green("✓"), host));
@@ -265,7 +402,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             })
         }
         "leave" => {
-            let r = call(&s, "POST", "/api/net/leave", Some(&json!({ "force": flags.on("force") })))?;
+            let r = call(&s, "POST", "/api/net/leave", Some(&within(json!({ "force": flags.on("force") }))))?;
             out(&r, &|r| {
                 // The founder never asks to be removed: its key is the root, so the
                 // network has no founder after it.
@@ -276,7 +413,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 } else {
                     " (the gateway didn't hear it ask: a window host can remove it)"
                 };
-                print(format!("{} left {}{asked}; this XenoNet carries on alone", c::green("✓"), t(r, "left")));
+                print(format!("{} left {}{asked}; this machine's other networks carry on as they were", c::green("✓"), t(r, "left")));
             })
         }
         "set" => {
@@ -311,7 +448,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 }
                 body.insert("host".into(), json!(host));
             }
-            let st = call(&s, "PUT", "/api/net/settings", Some(&Value::Object(body)))?;
+            let st = call(&s, "PUT", "/api/net/settings", Some(&within(Value::Object(body))))?;
+            let st = match &network {
+                Some(_) => views(&st, network.as_deref())?.remove(0),
+                None => st,
+            };
             if let Some(host) = on {
                 if !flags.on("json") {
                     print(format!("{} set for {host}: a change to network or delegate waits for the founder or another window host", c::green("✓")));
@@ -325,6 +466,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             // names, by its host (and op) or its id, shown before it's signed.
             let which = arg(args, 1, "which machine the waiting entry is about, or the entry's id")?;
             let st = call(&s, "GET", "/api/net/state", None)?;
+            let st = match views(&st, network.as_deref())?.as_slice() {
+                [one] => one.clone(),
+                [] => st,
+                _ => return Err(Fail::new("this machine is in several networks: say which with --network <id|name>", 2)),
+            };
             let op = flags.text("op");
             let found: Vec<Value> = list(&st, "proposals")
                 .iter()
@@ -342,7 +488,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             if !flags.on("json") {
                 print(format!("Approving: {}", proposal_words(&p)));
             }
-            out(&call(&s, "POST", "/api/net/approve", Some(&json!({ "id": t(&p, "id") })))?, &show_status)
+            out(&call(&s, "POST", "/api/net/approve", Some(&within(json!({ "id": t(&p, "id") }))))?, &show_status)
         }
         "gateway" => match args.get(1).map(String::as_str) {
             Some("take") => {
@@ -350,7 +496,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 if let Some(lan) = flags.text("lan") {
                     body.insert("lan".into(), json!(lan));
                 }
-                let st = call(&s, "POST", "/api/net/gateway/take", Some(&Value::Object(body)))?;
+                let st = call(&s, "POST", "/api/net/gateway/take", Some(&within(Value::Object(body))))?;
                 if on(&st, "proposed") && !flags.on("json") {
                     print(format!("{} asked: the founder or another window host approves it with xenonet net approve {}", c::green("✓"), t(&st["self"], "id")));
                     return Ok(0);
@@ -359,10 +505,13 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             Some("set") => {
                 let address = arg(args, 2, "the gateway's new address")?;
-                out(&call(&s, "POST", "/api/net/gateway/set", Some(&json!({ "address": address })))?, &show_status)
+                out(&call(&s, "POST", "/api/net/gateway/set", Some(&within(json!({ "address": address }))))?, &show_status)
             }
             _ => Err(Fail::new("xenonet net gateway take, or xenonet net gateway set <address>", 2)),
         },
-        w => Err(Fail::new(format!("xenonet net doesn't know {w}: create, join, invite, status, hosts, add-machine, remove, replace, leave, set, approve or gateway"), 2)),
+        w => Err(Fail::new(
+            format!("xenonet net doesn't know {w}: create, join, invite, status, hosts, add-machine, remove, replace, leave, set, share, relay, approve or gateway"),
+            2,
+        )),
     }
 }
