@@ -322,7 +322,8 @@ mod tests {
         let held = roots(&paths);
         assert_eq!(held.len(), 2);
         assert!(held.contains(a.certificate()) && held.contains(b.certificate()));
-        if cfg!(unix) {
+        #[cfg(unix)]
+        {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(roots_file(&paths)).unwrap().permissions().mode() & 0o777, 0o600);
         }
