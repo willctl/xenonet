@@ -35,8 +35,18 @@ fn entries(k: &SeedSigner) -> Vec<(&'static str, FeedEntry)> {
     let day = "# 2026-11-11\n\n- 09:00 · curator · Filed [[db]]\n";
     let mut e = |kind, n: u64, body| w.write(k, kind, T + n, body).unwrap();
     vec![
-        ("a note for the curator", e(Kind::CtxNote, 1, json!({ "id": "2026-11-11_09-00-00-000-abc123", "kind": "log", "app": "codex", "source": "agent", "title": "Atlas moves to Postgres 17", "tags": [], "pages": ["db"], "text": text("Logical replication.") }))),
-        ("a replace against the version the member had", e(Kind::CtxPropose, 2, json!({ "slug": "db", "mode": "replace", "base": "0123456789abcdef", "title": "Atlas database", "text": text(page) }))),
+        (
+            "a note for the curator",
+            e(
+                Kind::CtxNote,
+                1,
+                json!({ "id": "2026-11-11_09-00-00-000-abc123", "kind": "log", "app": "codex", "source": "agent", "title": "Atlas moves to Postgres 17", "tags": [], "pages": ["db"], "text": text("Logical replication.") }),
+            ),
+        ),
+        (
+            "a replace against the version the member had",
+            e(Kind::CtxPropose, 2, json!({ "slug": "db", "mode": "replace", "base": "0123456789abcdef", "title": "Atlas database", "text": text(page) })),
+        ),
         ("a page's version", e(Kind::CtxPage, 3, json!({ "slug": "db", "epoch": 0, "n": 1, "base": "none", "version": "0123456789abcdef", "text": text(page) }))),
         ("a page removed", e(Kind::CtxRemove, 4, json!({ "slug": "old", "epoch": 0, "base": "fedcba9876543210" }))),
         ("a day of the log", e(Kind::CtxLog, 5, json!({ "date": "2026-11-11", "epoch": 0, "version": "00112233aabbccdd", "text": text(day) }))),
