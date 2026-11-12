@@ -55,7 +55,7 @@ plans, as on the Mac.
 | `clone vm1\|vm2` | Clones a working VM, starts it, puts made-up repos in `~/Projects`, and starts its two XenoNets |
 | `up [vm…]` / `down [vm…]` | Starts or stops working VMs |
 | `push [vm…] [--ref R]` | Pushes XenoNet at git ref R into running VMs, rebuilds it, and restarts its services |
-| `check [vm…] [--only C,…]` | Each VM's checks, then the transport checks across vm1 and vm2 (below). `--only` runs just the transport checks named |
+| `check [vm…] [--only C,…]` | Each VM's checks, then the transport checks across vm1 and vm2, then Xenolith's (below). `--only` runs just the transport or Xenolith checks named |
 | `teardown [--yes]` | Deletes the lab's VMs, by name |
 
 ## What's in each VM
@@ -257,6 +257,93 @@ network: your terminal, the first time you run `--only mac-udp` (which
 `check` skips unless it's named, so an agent's run never opens that
 window), and XenoNet when its endpoint first uses the LAN. Both are yours
 to allow.
+
+## Xenolith in the lab
+
+After the transport checks, `check` runs Xenolith's (`xenolith.mjs`, with
+the steps inside a VM in `xenolith.sh`). They print the same five words.
+A check waits (`wait`) until the history the VM was built from has the
+commit that lands what it needs, found by its subject (`XLANDS` in
+`xenolith.mjs`): `feat(xenolith): … upgrade …`, `… sync/2 …`, `… join/1 …`,
+`… holding …` (holders), `feat(xenolith,…): … shared mode …`, and one that
+isn't built yet, the commit that lets XenoNet mint Xenolith's grant
+(`key(id)` and `forward(xenolith/sync/2)`), whose subject names
+"Xenolith's grant".
+
+**How Xenolith gets into a VM.** As XenoNet does: from the checkout `push`
+put in `~/xenonet`. The first Xenolith check builds `xenolith` and
+`xenolith-service` in `~/xenonet/xenolith/rust` (debug, without the tray),
+once per commit; the first build takes several minutes. Nothing is
+installed. Each lab Xenolith has its own home and folder in
+`~/.local/share/xenonet-lab/xenolith/<name>/` (`curator` in vm1, `member` in
+vm2, `holder` in vm3) and runs as a transient user service,
+`xenonet-lab-xenolith-<name>`, on a free port of 127.0.0.1, with sync/2 on
+UDP 47851 of every address, no relay and no mDNS. Its curator never runs, so
+a note waits in the inbox for the check to read.
+
+**The code.** A join's code is typed by whoever joins. The lab stands in
+for that person: it carries the code from vm1's `xenolith invite` to vm2's
+`xenolith join` on standard input, never in an argument or in what it
+prints. When vm1's invite is refused, the check says `owner` and what you
+run instead.
+
+| Check | What it shows | Needs | You set up | An agent uses instead | What it changes |
+|---|---|---|---|---|---|
+| `xenolith-join` | vm2 joins vm1's `project:atlas-api` in own mode, by `xenolith invite` on vm1 and `xenolith join` on vm2, and vm1's page reaches vm2; vm1's share names vm2's endpoint at write | vm1, vm2; sync/2, join/1 | nothing, unless the invite is refused | `crates/net/tests/join.rs`, `xenolith/test/join.mjs` | a new curator in vm1 and member in vm2, which stay for the next checks |
+| `xenolith-notes` | a note left on vm2 reaches vm1's inbox by sync, stamped `key:<vm2's key>`, source `agent`; the page vm1 files comes back to vm2 | as above | as above | `xenolith/test/sync.mjs` | a note and a page in vm1, which stay |
+| `xenolith-offline` | vm2's Xenolith stopped while vm1's page changes catches up when it's back; a note left on vm2 with vm1 stopped reaches vm1 when it's back | as above | as above | `xenolith/test/sync.mjs` | stops vm2's Xenolith, then vm1's, and starts both again |
+| `xenolith-holder` | with vm1's Xenolith stopped, vm2 fills its gap from vm3's holder copy | vm1, vm2, vm3; holders | a third VM: the lab has none, so this skips | `crates/net/tests/holders.rs` | a member in vm3 at read; stops vm2's, then vm1's, and starts both again |
+| `xenolith-shared` | with both VMs in a XenoNet network and Xenolith's grant in each, a space shared into the network reaches vm2 over XenoNet's forward, vm1 a bound, connected peer | vm1, vm2; shared mode, Xenolith's grant | the network, the grants, the share (below) | `crates/xenonet-service/tests/xenolith.rs` | the lab's Xenoliths, when the checks before haven't made them |
+| `xenolith-rehearsal` | the cutover's rehearsal: a 1.x curator and satellite with a queued note, 2.0's `upgrade --run`, `upgrade --undo`, and 1.x syncing again | vm1; the upgrade gate | 1.10.0's tag in this checkout | the upgrade tests in `xenolith/test/spaces.mjs` | builds 1.10.0 in `~/xenolith-1x`; two Xenoliths on vm1's 127.0.0.1, deleted afterwards |
+
+**The rehearsal** (phase 6's revision 33, step g) runs in vm1 alone,
+since 1.x serves only on 127.0.0.1. `check` pushes the tag
+`xenolith-v1.10.0` to the branch `xenolith-1x` in vm1, builds it in a
+worktree of its own, `~/xenolith-1x`, and then, in
+`~/.local/share/xenonet-lab/xenolith-rehearsal/`, one line a stage:
+
+1. `built`: both builds are there;
+2. `1x-synced`: a 1.x curator ("inix", HTTP on 127.0.0.1:47863) with a page,
+   and a 1.x satellite ("neo", 47864) paired with `pair offer` and
+   `pair join`, holding the page;
+3. `queued`: inix stopped, a note left on neo waits in its inbox;
+4. `upgraded`: both stopped and copied (folder, config and state), 2.0
+   started on each (sync on 127.0.0.1:47861 and 47862), its dry run says
+   the upgrade waits and the folders are untouched, `upgrade --run` on
+   inix then neo; inix's space has its marker, and neo's copy is moved aside
+   with the queued note in it;
+5. `rolledback`: the written rollback order, `upgrade --undo` on both with
+   2.0 running, 2.0 stopped, the config and state put back from the copy;
+   both folders are as 1.x left them, byte for byte;
+6. `1x-again`: 1.x started again on both, and neo's queued note reaches
+   inix.
+
+The first FAIL ends it. Everything it made is deleted afterwards; the
+worktree and its build stay for the next run.
+
+### What you set up for Xenolith
+
+- **1.10.0, for the rehearsal.** The rehearsal says `owner` when this
+  checkout has no tag `xenolith-v1.10.0`: run
+  `git fetch origin tag xenolith-v1.10.0`, then
+  `npm run lab -- check --only xenolith-rehearsal`.
+- **A join by hand**, only when vm1's invite is refused. In vm1
+  (`limactl shell xenonet-vm1`), with the lab curator's home and folder,
+  `XENOLITH_HOME=~/.local/share/xenonet-lab/xenolith/curator/home XENOLITH_DIR=~/.local/share/xenonet-lab/xenolith/curator/wiki ~/xenonet/xenolith/rust/target/debug/xenolith invite project:atlas-api --level write`.
+  In vm2, the same with `member` for `curator`:
+  `… xenolith join <the invite> --at <vm1's lima0 address>:47851`, and type
+  the code vm1 showed when it asks. The code works once, for ten minutes.
+- **Shared mode**, once the grant's minting is built (the check waits until
+  then). The VMs in one network with this Mac, as host ids vm1 and vm2
+  (step 1 of "Setting up the network"); Xenolith's grant for each VM's lab
+  Xenolith, approved in the Mac's XenoNet window and piped into
+  `xenolith sync grant` in that VM, with that Xenolith's home and folder as
+  above; then `project:atlas-api` shared into the network: vm1's curator
+  drafts the entry (`xenolith spaces draft`), a device of yours signs it
+  with your presence in the Mac's window, and the curator sequences it
+  (`xenolith spaces sequence`). The check says which of these is missing.
+- **A third VM**, for `xenolith-holder`. The lab has two; the check skips
+  until `config.mjs` has a `vm3` and it runs.
 
 ## Signing in (the owner, after the VMs are built)
 

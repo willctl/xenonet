@@ -27,11 +27,13 @@ import { fileURLToPath } from "node:url";
 import { BASES, VMS, LAB_INSTANCES, DEMO_PORT, REAL_PORT, LAN_DEV, labPaths, envFileText, guestScript, newPassword, sha512crypt, shq } from "./config.mjs";
 import { reposScript } from "./fixtures.mjs";
 import { CHECKS, HEAL, UDP_PORT, addrsOf, nonce, runCheck } from "./transport.mjs";
+import { XCHECKS, runXCheck, xenolithOps } from "./xenolith.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
 const VERSIONS = JSON.parse(fs.readFileSync(path.join(HERE, "versions.json"), "utf8"));
 const GUEST = fs.readFileSync(path.join(HERE, "guest.sh"), "utf8");
+const XGUEST = fs.readFileSync(path.join(HERE, "xenolith.sh"), "utf8");
 const paths = labPaths();
 const home = os.homedir();
 
@@ -118,11 +120,12 @@ function later(instance, name, vars = {}) {
 
 // XenoNet's code reaches a VM by git push over Lima's channel, so a VM needs
 // no GitHub access. The VM's checkout takes it on its own branch, and its
-// files follow (receive.denyCurrentBranch updateInstead).
-function pushXenoNet(instance, ref) {
+// files follow (receive.denyCurrentBranch updateInstead). Another branch (Xenolith 1.x's, for
+// the rehearsal) is only a ref there.
+function pushXenoNet(instance, ref, branch = "lab") {
   const sha = run("git", ["rev-parse", "--verify", `${ref}^{commit}`], { capture: true, cwd: REPO }).stdout.trim();
   const config = path.join(paths.instanceDir(instance), "ssh.config");
-  run("git", ["push", "--quiet", "--force", "--no-verify", `lima-${instance}:xenonet`, `${sha}:refs/heads/lab`], {
+  run("git", ["push", "--quiet", "--force", "--no-verify", `lima-${instance}:xenonet`, `${sha}:refs/heads/${branch}`], {
     cwd: REPO,
     env: { ...process.env, GIT_SSH_COMMAND: `ssh -F ${shq(config)} -o LogLevel=ERROR` },
   });
@@ -436,7 +439,8 @@ const WORDS = { ok: "ok  ", FAIL: "FAIL", wait: "wait", owner: "owner", skip: "s
 
 async function check(ids, flags) {
   const only = flags.only ? String(flags.only).split(",").filter(Boolean) : null;
-  for (const id of only ?? []) if (!CHECKS.some((c) => c.id === id)) fail(`no check "${id}": ${CHECKS.map((c) => c.id).join(", ")}`);
+  const names = [...CHECKS, ...XCHECKS].map((c) => c.id);
+  for (const id of only ?? []) if (!names.includes(id)) fail(`no check "${id}": ${names.join(", ")}`);
   const tally = { ok: 0, FAIL: 0, wait: 0, owner: 0, skip: 0 };
   const line = (status, what, detail = "") => {
     tally[status]++;
@@ -465,6 +469,18 @@ async function check(ids, flags) {
     const r = c.optIn && !only ? { status: "skip", detail: `only when named: ${c.optIn}` } : await runCheck(c, ctx);
     line(r.status, c.what, r.detail);
     if (r.status === "owner" && c.standIn) say(`      an agent looks at it in XenoNet Dev instead: ${c.standIn}`);
+  }
+  // Xenolith's (xenolith.mjs), each in the VMs it needs.
+  step("Across the VMs: Xenolith (phase 6's plan, commit 27)");
+  const has = (id) => Boolean(VMS[id]) && vms.includes(id) && all[VMS[id].instance]?.status === "Running";
+  const hasRef = (ref) => run("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: REPO, capture: true, allowFail: true }).status === 0;
+  const xguest = (id, name, vars = {}, opts = {}) => limaSsh(VMS[id].instance, ["bash", "-s"], { capture: true, allowFail: true, ...opts, input: guestScript(name, vars, XGUEST) });
+  const push = (id, ref, branch) => (hasRef(ref) ? (pushXenoNet(VMS[id].instance, ref, branch), true) : null);
+  const xctx = Object.assign(ctx, { has, x: xenolithOps({ guest: xguest, push, hasRef }) });
+  for (const c of XCHECKS.filter((c) => !only || only.includes(c.id))) {
+    const r = await runXCheck(c, xctx);
+    line(r.status, c.what, r.detail);
+    if (r.status === "owner" && c.standIn) say(`      an agent looks at it instead: ${c.standIn}`);
   }
   const parts = [`${tally.ok} ok`, tally.FAIL && `${tally.FAIL} failed`, tally.wait && `${tally.wait} not in this build yet`, tally.owner && `${tally.owner} need the owner`, tally.skip && `${tally.skip} skipped`].filter(Boolean);
   step(parts.join(", "));
@@ -506,7 +522,9 @@ function help() {
   check [vm…] [--only C,…]       each VM's checks (health, the loopback block, names, root),
                                  then the transport checks across vm1 and vm2:
                                  ${CHECKS.map((c) => c.id).join(", ")}
-                                 --only runs just the transport checks named
+                                 then Xenolith's across the VMs:
+                                 ${XCHECKS.map((c) => c.id).join(", ")}
+                                 --only runs just the checks named
   teardown [--yes]               delete the lab's VMs, by name
 
 A transport check that waits on phase 5 code says "not in this build yet",

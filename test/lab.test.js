@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { BASES, VMS, LAB_INSTANCES, HOST_ID, LAN_DEV, labPaths, envFileText, guestScript, shq, sha512crypt, randomSalt, newPassword } from "../scripts/lab/config.mjs";
 import { CHECKS, LANDS, OWNER, RELAY_CHECKS, metric, missing, relayRow, runCheck, rules, addrsOf, networksOf, sharedNetwork } from "../scripts/lab/transport.mjs";
 import { REPOS, reposFor, reposScript } from "../scripts/lab/fixtures.mjs";
+import { XCHECKS, XLANDS, XOWNER, NAMES, OLD_TAG, REHEARSAL, SPACE, folderPath, rehearsalVerdict, runXCheck, xenolithOps, xmissing } from "../scripts/lab/xenolith.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const lab = (...p) => path.join(root, "scripts", "lab", ...p);
@@ -335,4 +336,254 @@ test("guest.sh parses, and so does each Node script it runs in a VM", { skip: !b
   for (const step of ["vm", "facts", "subjects", "lanaddrs", "netstate", "standin", "relay", "relayoff", "relayca", "trustca", "ownrelay", "relaymetrics", "udpsend", "udplisten", "answering"]) assert.match(text, new RegExp(`^${step}\\(\\) \\{`, "m"), step);
   assert.ok(!/authorized_keys\.new|hosts self|relay --port/.test(text), "nothing of the retired SSH hosts");
   assert.ok(!/iroh-relay"? --dev/.test(text), "the lab's relays are real ones, with TLS, never --dev");
+});
+
+// ---------- Xenolith in the lab ----------
+
+// The subjects of the commits on main that land Xenolith's pieces, and the one the grant's
+// minting will need (not built yet).
+const XLANDED = ["feat(xenolith): upgrade gate", "feat(xenolith): sync/2 on Xenolith's own endpoint", "feat(xenolith): join/1 replaces pairing", "feat(xenolith): fetch the curator's feed from any member holding it", "feat(xenolith,service): shared mode over the forward"];
+const XGRANT = "feat(service): mint Xenolith's grant in the window";
+
+test("a Xenolith check waits on the commits it needs, found by their subjects, the grant's minting among them", () => {
+  assert.deepEqual(xmissing(Object.keys(XLANDS), XLANDED), ["Xenolith's grant"]);
+  assert.deepEqual(xmissing(Object.keys(XLANDS), [...XLANDED, XGRANT]), []);
+  assert.deepEqual(xmissing(Object.keys(XLANDS), ["docs(xenolith): sync/2 and join/1, the upgrade, holders, shared mode", "feat(net): link/2"]), Object.keys(XLANDS), "only a feat commit lands a piece");
+  assert.deepEqual(xmissing(["shared mode"], ["feat(service): shared mode for XenoNet"]), ["shared mode"], "shared mode is Xenolith's");
+});
+
+test("the Xenolith checks: each names its VMs, what it needs, the owner's step, an agent's stand-in and what it changes", () => {
+  const ids = XCHECKS.map((c) => c.id);
+  assert.deepEqual(ids, ["xenolith-join", "xenolith-notes", "xenolith-offline", "xenolith-holder", "xenolith-shared", "xenolith-rehearsal"]);
+  assert.deepEqual(ids.filter((id) => CHECKS.some((c) => c.id === id)), [], "--only can name either kind");
+  for (const c of XCHECKS) {
+    assert.ok(c.what && c.changes && c.owner && c.standIn && typeof c.run === "function", c.id);
+    for (const n of c.needs) assert.ok(XLANDS[n], `${c.id} needs ${n}`);
+    for (const vm of c.vms) assert.ok(NAMES[vm], `${c.id} runs in ${vm}`);
+  }
+  const by = Object.fromEntries(XCHECKS.map((c) => [c.id, c]));
+  assert.deepEqual(by["xenolith-holder"].vms, ["vm1", "vm2", "vm3"]);
+  assert.deepEqual(by["xenolith-rehearsal"].vms, ["vm1"], "1.x serves on 127.0.0.1 only, so both 1.x Xenoliths are in vm1");
+  assert.ok(by["xenolith-shared"].needs.includes("Xenolith's grant"));
+  assert.match(XOWNER.old, /git fetch origin tag xenolith-v1\.10\.0/);
+});
+
+// A made-up lab of Xenoliths in vm1, vm2 and vm3 that behaves as sync/2 does: a member running
+// beside a running curator holds the curator's pages and sends its notes, stamped as its key; with
+// the curator stopped, a member takes the pages another running member holds.
+function fakeXenolith({ subjects = [...XLANDED, XGRANT], vm3 = true, running = {}, network = true, attached = true, shared = true, tag = true, ...o } = {}) {
+  let now = 0;
+  const vms = ["vm1", "vm2", ...(vm3 ? ["vm3"] : [])];
+  const at = Object.fromEntries(vms.map((vm) => [vm, { made: false, up: false, files: new Map(), held: new Map(), outbox: [], member: false, level: null, wasDown: false }]));
+  const lab = { at, invites: new Map(), founded: false, notes: 0, codeInArgs: false, resets: 0 };
+  const dir = `spaces/${SPACE.replace(":", "/")}`;
+  const members = () => vms.filter((v) => v !== "vm1" && at[v].member);
+  const sync = () => {
+    const cur = at.vm1;
+    if (cur.up && lab.founded) {
+      const pages = [...cur.files].filter(([k]) => k.startsWith(`${dir}/pages/`));
+      for (const m of members()) {
+        if (!at[m].up || o.noSync || (o.noCatchUp && at[m].wasDown)) continue;
+        at[m].held = new Map(pages);
+        for (const [k, v] of pages) at[m].files.set(k, v);
+        for (const t of at[m].outbox.splice(0)) cur.files.set(`${dir}/inbox/n-${++lab.notes}.md`, `---\ntitle: ${t}\ntransport: sync\nby: "key:k-${m}"\nsource: ${o.stamp ?? "agent"}\n---\n${t}\n`);
+      }
+    } else if (!o.withhold) {
+      for (const m of members())
+        for (const h of members())
+          if (h !== m && at[m].up && at[h].up) for (const [k, v] of at[h].held) if (at[m].files.get(k) !== v) (at[m].files.set(k, v), at[m].held.set(k, v));
+    }
+  };
+  const status = (vm) => {
+    const a = at[vm];
+    const curated = [{ id: "spc_lab", address: SPACE, role: "curator", curator: "k-vm1", members: members().map((m) => ({ key: `k-${m}`, endpoint: o.wrongEndpoint && m === "vm2" ? "e-other" : `e-${m}`, level: at[m].level, connected: at[m].up })), networks: shared ? [{ network: "net-2", level: "read" }] : [] }];
+    const followed = a.member || (vm !== "vm1" && attached && shared) ? [{ id: "spc_lab", address: SPACE, role: "member", curator: "k-vm1" }] : [];
+    return { key: `k-${vm}`, endpointId: `e-${vm}`, spaces: vm === "vm1" ? (lab.founded ? curated : []) : followed, xenonet: { mode: attached ? "attached" : "waiting", peers: vm === "vm1" ? [] : [{ key: "k-vm1", machine: "vm1", connected: true }] } };
+  };
+  const cli = async (vm, name, args, input = "") => {
+    assert.equal(name, NAMES[vm]);
+    const a = at[vm];
+    if (!a.made || !a.up) return { code: 1, out: "", err: "xenolith sync: The Xenolith service on port 41234 is not answering (refused). Start it, then try again." };
+    sync();
+    if ([...lab.invites.values()].some((i) => args.includes(i.code))) lab.codeInArgs = true;
+    if (args[0] === "sync") return { code: 0, out: JSON.stringify({ sync: status(vm) }), err: "" };
+    if (args[0] === "invite") {
+      if (o.inviteRefused) return { code: 1, out: "", err: "xenolith sync: No running Xenolith service has left an owner key you can read (~/x). Start the service, then try again." };
+      const invite = `xlj1_${lab.invites.size}`;
+      const code = `C0DE-${lab.invites.size}-XYZW`;
+      lab.invites.set(invite, { code, level: args[3], used: false });
+      return { code: 0, out: JSON.stringify({ invite, code, level: args[3], offer: { spaces: [{ space: "spc_lab", address: SPACE }] } }), err: "" };
+    }
+    if (args[0] === "join") {
+      const inv = lab.invites.get(args[1]);
+      if (o.joinRefused || !inv || inv.used || input.trim() !== inv.code) return { code: 1, out: "", err: "xenolith sync: the code doesn't match the invite: 4 tries left (wrong-code)" };
+      if (args[3] !== "192.168.64.2:47851") return { code: 1, out: "", err: `xenolith sync: couldn't reach ${args[3]}` };
+      Object.assign(inv, { used: true });
+      Object.assign(a, { member: true, level: inv.level });
+      sync();
+      return { code: 0, out: JSON.stringify({ followed: [{ space: "spc_lab", address: SPACE }], level: inv.level }), err: "" };
+    }
+    if (args[0] === "note") {
+      if (!a.member) return { code: 1, out: "", err: `xenolith note: No space "${SPACE}" here.` };
+      a.outbox.push(args[1]);
+      sync();
+      return { code: 0, out: "{}", err: "" };
+    }
+    return { code: 2, out: "", err: "usage" };
+  };
+  const x = {
+    hasRef: async (ref) => tag && ref === OLD_TAG,
+    build: async (vm) => (o.buildFails === vm ? { ok: false, why: "error: linking with `cc` failed" } : { ok: true }),
+    reset: async (vm, name, { space, page } = {}) => {
+      lab.resets++;
+      Object.assign(at[vm], { made: true, up: true, files: new Map(), held: new Map(), outbox: [], member: false, level: null, wasDown: false });
+      if (vm === "vm1") {
+        lab.founded = Boolean(space);
+        if (space) at.vm1.files.set(`${dir}/pages/lab.md`, page);
+      }
+    },
+    start: async (vm) => {
+      if (at[vm].made) at[vm].up = true;
+      sync();
+    },
+    stop: async (vm) => Object.assign(at[vm], { up: false, wasDown: true }),
+    cli,
+    read: async (vm, name, rel) => (sync(), at[vm].files.get(folderPath(rel)) ?? null),
+    write: async (vm, name, rel, text) => (at[vm].files.set(folderPath(rel), text), sync()),
+    find: async (vm, name, rel, needle) => (sync(), [...at[vm].files].filter(([k, v]) => k.startsWith(`${rel}/`) && v.includes(needle)).map(([, v]) => v)),
+    old: async () => (o.oldFails ? { ok: false, why: "error[E0599]: no method" } : { ok: true }),
+    rehearse: async () => o.rehearsal ?? REHEARSAL.map((s) => `stage=${s} ok ${s} went as planned`).join("\n"),
+  };
+  return {
+    lab,
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    },
+    has: (vm) => vms.includes(vm) && (running[vm] ?? true),
+    subjects: async () => subjects,
+    lanAddrs: async (vm) => (vm === "vm1" ? ["fe80::1", "192.168.64.2"] : ["192.168.64.3"]),
+    state: async () => (network ? { networks: [{ id: "net-2", hosts: [{ id: "vm1" }, { id: "vm2" }] }] } : { network: null, hosts: [] }),
+    x,
+  };
+}
+
+const xcheck = (id) => XCHECKS.find((c) => c.id === id);
+
+test("every Xenolith check passes on a lab that behaves; the code never goes into an argument, and what a check stops it starts again", async () => {
+  for (const c of XCHECKS) {
+    const ctx = fakeXenolith();
+    const r = await runXCheck(c, ctx);
+    assert.equal(r.status, "ok", `${c.id}: ${r.detail}`);
+    assert.equal(ctx.lab.codeInArgs, false, `${c.id}: the join's code went on stdin`);
+    for (const vm of ["vm1", "vm2", "vm3"]) if (ctx.lab.at[vm].made) assert.equal(ctx.lab.at[vm].up, true, `${c.id} leaves ${vm}'s Xenolith running`);
+  }
+  // In one run, the later checks use the join the first made.
+  const ctx = fakeXenolith();
+  for (const id of ["xenolith-join", "xenolith-notes", "xenolith-offline"]) assert.equal((await runXCheck(xcheck(id), ctx)).status, "ok", id);
+  assert.equal(ctx.lab.invites.size, 1, "one invite for the run");
+  assert.equal(ctx.lab.resets, 2, "vm1 and vm2 made once");
+});
+
+test("a Xenolith check skips without its VMs, waits on missing code, and says what the owner runs", async () => {
+  const skip = await runXCheck(xcheck("xenolith-join"), fakeXenolith({ running: { vm2: false }, subjects: XLANDED.slice(0, 1) }));
+  assert.equal(skip.status, "skip");
+  assert.match(skip.detail, /^needs vm1 and vm2 running; this checkout waits on sync\/2 \(phase 6 commit 13\), join\/1 \(phase 6 commit 14\)$/);
+  assert.deepEqual(await runXCheck(xcheck("xenolith-holder"), fakeXenolith({ vm3: false, subjects: XLANDED })), { status: "skip", detail: "the lab has no vm3 running" });
+  // The rehearsal needs vm1 alone.
+  assert.equal((await runXCheck(xcheck("xenolith-rehearsal"), fakeXenolith({ running: { vm2: false } }))).status, "ok");
+  // Shared mode waits on the grant's minting, which main hasn't built.
+  assert.deepEqual(await runXCheck(xcheck("xenolith-shared"), fakeXenolith({ subjects: XLANDED })), { status: "wait", detail: "not in this build yet: waits on Xenolith's grant (not built yet: XenoNet minting Xenolith's grant)" });
+  const shared = (o) => runXCheck(xcheck("xenolith-shared"), fakeXenolith(o));
+  assert.deepEqual(await shared({ network: false }), { status: "owner", detail: OWNER.join });
+  const detached = await shared({ attached: false });
+  assert.equal(detached.status, "owner");
+  assert.match(detached.detail, /^give the Xenolith in vm1 and in vm2 its grant .*\(not attached: vm1, vm2\)$/);
+  assert.deepEqual(await shared({ shared: false }), { status: "owner", detail: XOWNER.share });
+  // The invite needs the owner key the service left: without it, the owner's own steps.
+  assert.deepEqual(await runXCheck(xcheck("xenolith-join"), fakeXenolith({ inviteRefused: true })), { status: "owner", detail: XOWNER.join });
+  assert.match(XOWNER.join, /invite project:atlas-api --level write; in vm2, .* join <the invite> --at <vm1's lima0 address>:47851, and type the code/);
+  // No 1.10.0 here: how to get it.
+  assert.deepEqual(await runXCheck(xcheck("xenolith-rehearsal"), fakeXenolith({ tag: false })), { status: "owner", detail: XOWNER.old });
+  // A check that throws fails, with why.
+  const ctx = fakeXenolith();
+  ctx.x.reset = async () => {
+    throw new Error("vm1: the lab Xenolith curator didn't start (Xenolith curator didn't answer in 30 s)");
+  };
+  assert.deepEqual(await runXCheck(xcheck("xenolith-join"), ctx), { status: "FAIL", detail: "vm1: the lab Xenolith curator didn't start (Xenolith curator didn't answer in 30 s)" });
+});
+
+test("the Xenolith checks fail when a build, a join, sync, a note's stamp, a catch-up or a holder goes wrong", async () => {
+  const run = async (id, o) => runXCheck(xcheck(id), fakeXenolith(o));
+  assert.deepEqual(await run("xenolith-join", { buildFails: "vm2" }), { status: "FAIL", detail: "vm2: Xenolith didn't build (error: linking with `cc` failed)" });
+  assert.deepEqual(await run("xenolith-join", { joinRefused: true }), { status: "FAIL", detail: "vm2's join was refused: xenolith sync: the code doesn't match the invite: 4 tries left (wrong-code)" });
+  assert.deepEqual(await run("xenolith-join", { noSync: true }), { status: "FAIL", detail: "vm1's page didn't reach vm2 in 60 s" });
+  assert.match((await run("xenolith-join", { wrongEndpoint: true })).detail, /names e-other at write, not vm2's endpoint at write/);
+  assert.deepEqual(await run("xenolith-notes", { noSync: true }), { status: "FAIL", detail: "vm2's note didn't reach vm1's inbox in 30 s" });
+  assert.deepEqual(await run("xenolith-notes", { stamp: "user" }), { status: "FAIL", detail: "a peer's note speaks as the person in vm1's inbox" });
+  const behind = fakeXenolith({ noCatchUp: true });
+  assert.deepEqual(await runXCheck(xcheck("xenolith-offline"), behind), { status: "FAIL", detail: "vm2 didn't catch up on vm1's page in 60 s" });
+  assert.ok(behind.lab.at.vm1.up && behind.lab.at.vm2.up, "both started again");
+  const withheld = fakeXenolith({ withhold: true });
+  assert.deepEqual(await runXCheck(xcheck("xenolith-holder"), withheld), { status: "FAIL", detail: "vm2 didn't get the page from vm3 in 60 s with vm1 stopped" });
+  assert.ok(withheld.lab.at.vm1.up && withheld.lab.at.vm2.up, "both started again");
+  assert.deepEqual(await run("xenolith-rehearsal", { oldFails: true }), { status: "FAIL", detail: "vm1: Xenolith 1.10.0 didn't build (error[E0599]: no method)" });
+  assert.deepEqual(await run("xenolith-rehearsal", { rehearsal: "stage=built ok 1.x 1.10.0\nstage=1x-synced ok paired\nstage=queued ok waiting\nstage=upgraded FAIL neo's queued note isn't kept with its moved-aside copy" }), { status: "FAIL", detail: "upgraded: neo's queued note isn't kept with its moved-aside copy" });
+});
+
+test("the rehearsal's verdict: every stage ok, the first FAIL, or where it stopped", () => {
+  assert.deepEqual(REHEARSAL, ["built", "1x-synced", "queued", "upgraded", "rolledback", "1x-again"]);
+  const all = REHEARSAL.map((s) => `stage=${s} ok ${s} done`).join("\n");
+  assert.deepEqual(rehearsalVerdict(`noise\n${all}\n`), { status: "ok", detail: REHEARSAL.map((s) => `${s} done`).join("; ") });
+  assert.deepEqual(rehearsalVerdict("stage=built ok b\nstage=1x-synced FAIL inix's page didn't reach neo"), { status: "FAIL", detail: "1x-synced: inix's page didn't reach neo" });
+  assert.deepEqual(rehearsalVerdict("stage=built ok b\nstage=1x-synced ok s"), { status: "FAIL", detail: "the rehearsal stopped before queued, after 1x-synced" });
+  assert.deepEqual(rehearsalVerdict(""), { status: "FAIL", detail: "the rehearsal stopped before built" });
+});
+
+test("Xenolith's steps in a VM: the code on stdin, paths inside the folder, 1.10.0 only when this checkout has it", async () => {
+  const calls = [];
+  const answers = { xread: { status: 3, stdout: "" }, xbuild: { status: 101, stdout: "", stderr: "Compiling xenolith-core\nerror: could not compile `xenolith-net`" } };
+  const guest = async (vm, step, vars, opts) => (calls.push({ vm, step, vars, opts }), answers[step] ?? { status: 0, stdout: step === "xfind" ? '["a note"]' : "out", stderr: "" });
+  let pushed = 0;
+  const x = xenolithOps({ guest, push: async (vm, ref, branch) => (pushed++, ref === OLD_TAG && branch === "xenolith-1x" ? true : null), hasRef: async () => true });
+  const r = await x.cli("vm2", "member", ["join", "xlj1_abc", "--json"], "C0DE\n");
+  assert.deepEqual(r, { code: 0, out: "out", err: "" });
+  const c = calls.at(-1);
+  assert.deepEqual([c.step, c.vars.ARGS, c.vars.INPUT], ["xcli", '["join","xlj1_abc","--json"]', "C0DE\n"]);
+  assert.equal(await x.read("vm1", "curator", "spaces/project/atlas-api/pages/lab.md"), null, "a file that isn't there");
+  assert.deepEqual(await x.find("vm1", "curator", "spaces/project/atlas-api/inbox", "n"), ["a note"]);
+  await x.write("vm1", "curator", "spaces/project/atlas-api/pages/x.md", "é");
+  assert.equal(Buffer.from(calls.at(-1).vars.TEXT, "base64").toString("utf8"), "é");
+  await x.reset("vm1", "curator", { space: SPACE, page: "p" });
+  assert.deepEqual([calls.at(-1).vars.SPACE, calls.at(-1).vars.PAGE, calls.at(-1).vars.BIND], [SPACE, Buffer.from("p").toString("base64"), ""]);
+  assert.deepEqual(await x.build("vm1"), { ok: false, why: "error: could not compile `xenolith-net`" });
+  assert.deepEqual(await x.old("vm1"), { ok: true });
+  assert.equal(pushed, 1);
+  for (const bad of ["../home/runtime/owner.key", "/etc/passwd", "spaces//x", "spaces/$(id)"]) assert.throws(() => folderPath(bad), /not a path in the folder/, bad);
+  await assert.rejects(x.read("vm1", "curator", "../x"), /not a path in the folder/);
+  const none = xenolithOps({ guest, push: async () => null, hasRef: async () => false });
+  const before = calls.length;
+  assert.deepEqual(await none.old("vm1"), { ok: false, why: `no ${OLD_TAG} in this checkout` });
+  assert.equal(calls.length, before, "no build without the tag");
+});
+
+test("xenolith.sh parses, so does each Node script it runs, and it has every step xenolith.mjs runs", { skip: !bash && "Bash is required" }, () => {
+  const text = fs.readFileSync(lab("xenolith.sh"), "utf8");
+  assert.equal(runBash(["-n"], { input: guestScript("xcli", { NAME: "member", ARGS: "[]", INPUT: "" }, text) }).status, 0);
+  const scripts = [...text.matchAll(/node - [^\n]*<<'EOF'\n([\s\S]*?)\nEOF\n/g)].map((m) => m[1]);
+  assert.equal(scripts.length, 1, "xfind");
+  const dir = tmp();
+  scripts.forEach((s, i) => {
+    const file = path.join(dir, `xenolith-${i}.cjs`);
+    fs.writeFileSync(file, s);
+    const r = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  });
+  const mjs = fs.readFileSync(lab("xenolith.mjs"), "utf8");
+  const steps = [...mjs.matchAll(/(?:guest|must)\(vm, "(x[a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(steps)].sort(), ["xbuild", "xcli", "xfind", "xold", "xread", "xrehearse", "xreset", "xstart", "xstop", "xwrite"]);
+  for (const step of steps) assert.match(text, new RegExp(`^${step}\\(\\) \\{`, "m"), step);
+  // A join's code never goes into an argument, and nothing here installs Xenolith or uses port 47850.
+  assert.doesNotMatch(text, /pair join[^\n]*\$code|join[^\n]*"\$INPUT"/);
+  assert.doesNotMatch(text, /xenolith"? install\b|47850/);
 });
