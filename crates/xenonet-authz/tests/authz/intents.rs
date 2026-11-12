@@ -16,7 +16,16 @@ fn dlg(id: &str) -> DelegationId {
 }
 
 fn intend(delegation: &str, until: i64) -> Act {
-    Act::Intend { goal: [7; 32], project: project(), app: AppId::new("claude").unwrap(), delegation: dlg(delegation), until, network: network(), nonce: [1; 16] }
+    Act::Intend {
+        goal: [7; 32],
+        project: project(),
+        app: AppId::new("claude").unwrap(),
+        delegation: dlg(delegation),
+        until,
+        network: network(),
+        nonce: [1; 16],
+        arbiter: machine("m2"),
+    }
 }
 
 fn worked_here() -> Resource {
@@ -87,6 +96,35 @@ fn an_intent_is_the_persons_for_the_machine_it_names_until_it_ends() {
     let r = Request::new(p, worked_here(), act, Door::Network, NOW, Some(network()));
     f.world.settings.start = StartSetting::You;
     assert_eq!(why(&decide(None, &r, &f.world, None)), "person");
+}
+
+#[test]
+fn an_intent_for_any_machine_is_decided_by_one_its_delegation_names() {
+    let mut f = fixture();
+    let any = Resource::Intent { machine: MachineId::any(), id: None };
+    let act = intend("dlg_a", NOW + HOUR);
+    let made = |f: &Fixture| {
+        let p = as_person(&f.world, &weak_device(), &any, &act);
+        Request::new(p, any.clone(), act.clone(), Door::Network, NOW, Some(network()))
+    };
+    f.world.delegations = vec![delegation()];
+    assert!(decide(None, &made(&f), &f.world, None).is_allow(), "the delegation names this machine's device and the maker's");
+    // A delegation that names only the maker's device: this machine isn't
+    // one an any intent may be worked on.
+    f.world.delegations = vec![StandingGrant { devices: Set::Only(vec![device_id(&weak_device())]), ..delegation() }];
+    assert_eq!(why(&decide(None, &made(&f), &f.world, None)), "grant");
+    // The signature names `any`: the same act for one machine isn't it.
+    f.world.delegations = vec![delegation()];
+    let p = as_person(&f.world, &weak_device(), &worked_here(), &act);
+    assert_eq!(why(&decide(None, &Request::new(p, any.clone(), act.clone(), Door::Network, NOW, Some(network())), &f.world, None)), "person");
+    // Nor is the arbiter's name to be changed under it.
+    let mut other = act.clone();
+    if let Act::Intend { arbiter, .. } = &mut other {
+        *arbiter = machine("m3");
+    }
+    let p = as_person(&f.world, &weak_device(), &any, &act);
+    assert_eq!(why(&decide(None, &Request::new(p, any, other, Door::Network, NOW, Some(network())), &f.world, None)), "person");
+    assert!(MachineId::new(ANY_MACHINE).unwrap().is_any() && !machine("any").is_any());
 }
 
 #[test]

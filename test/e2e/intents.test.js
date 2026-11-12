@@ -30,6 +30,11 @@ test("the intents view lists the person's intents, drafts one, and leaves Make a
   st = (await s.driver("intents", "draft", { goal: "Tidy the docs", app: "codex", hours: 2 })).intents;
   assert.deepEqual([st.draft.goal, st.draft.app, st.draft.hours], ["Tidy the docs", "codex", 2]);
   assert.equal(await s.eval('return document.querySelector("[data-in-goal]").value'), "Tidy the docs");
+  // Any machine the delegation names is a target too.
+  st = (await s.driver("intents", "draft", { target: "any" })).intents;
+  assert.equal(st.draft.target, "any");
+  assert.equal(await s.eval('return document.querySelector("[data-in-target]").value'), "any");
+  assert.equal(await s.eval('return document.querySelector("[data-in-arbiter]") !== null'), true);
   await assert.rejects(s.driver("intents", "make"), /Unknown intents action/);
   await assert.rejects(s.driver("intents", "cancel", "int_x"), /Unknown intents action/);
   assert.equal(await s.eval('return document.querySelector("[data-in-make]").hasAttribute("data-yours")'), true);

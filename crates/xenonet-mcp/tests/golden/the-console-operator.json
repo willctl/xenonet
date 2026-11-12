@@ -863,7 +863,7 @@
           {
             "name": "intents",
             "title": "See the person's intents",
-            "description": "Opens the Intents view: the person's intents (work asked for on one machine, done on the one it names), each with how it stands, and the form for a new one. `refresh` reads them again, `select` shows one by its id, and `draft` fills in the form (goal, target machine, project, app, hours) without sending it. Making and cancelling an intent sign as the person, so this tool does neither: the person clicks Make or Cancel.",
+            "description": "Opens the Intents view: the person's intents (work asked for on one machine, done on the one it names or on any machine their delegation names), each with how it stands, who took it and on whom one not given out yet waits, and the form for a new one. `refresh` reads them again, `select` shows one by its id, and `draft` fills in the form (goal, target machine or any, arbiter, project, app, hours) without sending it. Making and cancelling an intent sign as the person, so this tool does neither: the person clicks Make or Cancel.",
             "inputSchema": {
               "type": "object",
               "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -890,7 +890,11 @@
                       "type": "string"
                     },
                     "target": {
-                      "description": "A machine of the network, by its host id.",
+                      "description": "A machine of the network, by its host id, or any: any machine the delegation names.",
+                      "type": "string"
+                    },
+                    "arbiter": {
+                      "description": "The machine that gives it out: this one, the default, or one the delegation names.",
                       "type": "string"
                     },
                     "project": {

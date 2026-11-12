@@ -25,7 +25,8 @@ pub trait Intents: Send + Sync {
     }
 
     /// The person's new intent (`{ goal, target, project, app?,
-    /// delegation?, hours? }`), signed by their device: at the window, the
+    /// delegation?, hours?, arbiter? }`; `target` may be `any`, any machine
+    /// the delegation names), signed by their device: at the window, the
     /// device's signature; anywhere else it needs their presence, which
     /// this machine asks only at the window. The intent as kept.
     fn make(&self, _body: Value, _at_window: bool) -> R<Value> {
@@ -42,6 +43,13 @@ pub trait Intents: Send + Sync {
     /// `step` is note or done.
     fn report(&self, _by: Reporter, _id: &str, _step: &str, _body: Value) -> R<Value> {
         pending(INTENTS)
+    }
+
+    /// The person confirmed this machine's checkout of `project` at the
+    /// window: their device signs that, the evidence this machine's takes
+    /// of intents for any machine carry. Err says why it wasn't signed.
+    fn confirmed(&self, _project: &str) -> Result<(), String> {
+        Ok(())
     }
 }
 

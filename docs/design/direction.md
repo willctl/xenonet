@@ -575,11 +575,14 @@ Will's step on inix and NEO-REX.
    chain ops for relays, mailboxes, rekey and address records, with the
    network chain signed by the machine signing key; the HLC; the Quint
    models of delivery and spaces; the engine's `Store` trait; retention
-   and compaction; the transport lab; `xenonet/join/2`. Left: `link/2`,
+   and compaction; the transport lab; `xenonet/join/2`; `link/2`,
    holders, mailboxes and their receipts, presence deltas, several
-   networks per machine, `svc/2`, intents for any machine, the
-   three-service tests on iroh, and deleting the gateway and the remote
-   relay.
+   networks per machine and self-hosted relays; `xenonet/svc/2` for
+   services and the window's reads of other machines (a per-launch window
+   key the person's device certifies); intents for any machine the
+   delegation names, taken with the person's signed checkout and given out
+   once by the arbiter the intent names. Left: the three-service tests on
+   iroh, and deleting the gateway and the remote relay.
 6. **Xenolith and the edges.** Xenolith adopts the libraries, never
    the app, and deletes its own pairing, tokens and crypto; spaces bind to
    model ids; the generic ACP adapter; A2A outbound; MCP 2026-07-28.

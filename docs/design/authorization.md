@@ -372,11 +372,22 @@ or actor is on.
   limits, for a year.
 
 The set is named as devices, not machines, so intents take the same
-grant: an intent, made on one device, names one delegation by its id and
-the machine to work it, and that machine decides it under that delegation
-alone (`crates/xenonet-runtime/src/intents.rs`). The run it starts keeps
-the delegation's id, so only that delegation answers its prompts, and
-revoking it stops what wasn't started yet.
+grant: an intent, made on one device, names one delegation by its id, the
+machine to work it or `any` (`@any` in the signed act: any machine whose
+device the delegation names), and its arbiter (the maker's machine by
+default, or one the delegation names), and the machine it's given to
+decides it under that delegation alone
+(`crates/xenonet-runtime/src/intents.rs`). For `any`, each machine whose
+device the delegation names and that holds a checkout of the project
+sends a take, with the person's device's signature confirming that
+checkout (`Purpose::CHECKOUT`, signed when the person confirms it at that
+machine's window), and the arbiter gives it to the first take it holds
+that checks; every receiver refuses a take from a device the delegation
+doesn't name or without that signature, and drops an assign that isn't
+the arbiter's. It's given once: a stuck one ends with the person's
+cancel. The run it starts keeps the delegation's id, so only that
+delegation answers its prompts, and revoking it stops what wasn't
+started yet.
 
 ## `decide` and its rule table
 
@@ -440,7 +451,7 @@ answer:
 | `read` | the map: reach. Transcripts, search and state: here, an agent process-checked at least; from another machine, an admin member, never an unchecked agent |
 | `presence` | the person, with a presence block for this act from the device that signed it; a weaker device is allowed and the decision says so. `register-actor` is issuing an actor's grant or widening it; narrowing and revoking need no act |
 | `answer` | A Deny only narrows, so it needs no presence: the person; this machine for its own window; a window host (an admin) relaying its window's; an actor whose token has the right. An Allow widens, and never for a run whose agent is unchecked: the person, with a presence block for it; an actor, inside its allow scope here; this machine itself, for a run started under a delegation of the person's that answers that kind of prompt and names this machine's device and the device the run was started from |
-| `intend` | An intent worked here, made by the person's device signature (the delegation it names took their presence), before its `until`: start `off` refuses it, and the delegation it names, that one and no other, must be unended, cover starts and name this machine's device and the device that signed it |
+| `intend` | An intent worked here (named for this machine, or for `@any` and given to it by its arbiter), made by the person's device signature (the delegation it names took their presence), before its `until`: start `off` refuses it, and the delegation it names, that one and no other, must be unended, cover starts and name this machine's device and the device that signed it |
 | `report` | On an intent this machine holds, still open: a cancel is the person's alone; a start, a note or done comes from the machine it's worked on, or there, at its own door, from the agent working it (process-checked at least) or an actor whose grant names it (`grant_intents`; a note or done, never a start) |
 
 5. **Hold.** Start, intend, answer, admit, widen and publish for another machine (a

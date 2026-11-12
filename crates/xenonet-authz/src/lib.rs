@@ -42,7 +42,7 @@ pub use proof::{PersonSigned, VerifiedPresence};
 pub use token::{is_alpn, ActorGrant, Bearer, Binding, Narrowing, RootCertificate, Schema, Token, TokenRoot, ACTOR_PREFIX, CURSOR_MS, GATEWAY_PREFIX};
 pub use vocab::{
     act_hash, Act, Action, ActorSlug, AgentId, AnswerDecision, AppId, AskId, Attestation, DelegationId, DeviceId, Door, Folder, IntentId, IntentStep, MachineId, NetworkId,
-    PersonId, Principal, ProjectId, PromptKind, ReadScope, Request, Resource, Revocation, ServiceId, SessionId, SpaceId, StartMode,
+    PersonId, Principal, ProjectId, PromptKind, ReadScope, Request, Resource, Revocation, ServiceId, SessionId, SpaceId, StartMode, ANY_MACHINE,
 };
 
 use std::fmt;

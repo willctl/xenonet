@@ -7,13 +7,28 @@
 //!
 //! - **intent.make** (an `intent` entry, op make): the person's device
 //!   signs `Act::Intend` (the goal's hash, the project, app, delegation,
-//!   until, network and a random nonce, on the machine it names); the id is
+//!   until, network, a random nonce and the arbiter, on the machine it
+//!   names or on `@any`, any machine its delegation names); the id is
 //!   that act's hash, so a repeat is the same intent. Only the window signs
 //!   one without presence: from anywhere else it needs the person's
 //!   presence, which XenoNet asks only at its window. A receiver takes it
 //!   only from the feed of the machine whose device signed it.
-//! - **intent.assign** (an `assign` entry): the maker's machine gives it to
-//!   the machine it names. Taken only from the maker's machine.
+//! - **The arbiter** is a machine the make names: the maker's by default,
+//!   or any the delegation names, so an intent made on a laptop that
+//!   sleeps can still be given out. Its assign alone counts.
+//! - **intent.take** (an `assign` entry, op take), for an intent for any
+//!   machine: sent by each machine whose device the delegation names and
+//!   that holds a checkout of the project the person confirmed there,
+//!   with the person's signed confirmation of that checkout as its
+//!   evidence (`confirm_signed`, `Purpose::CHECKOUT`). Every receiver
+//!   checks it; a take from a device the delegation doesn't name, or
+//!   without the confirmation, is refused.
+//! - **intent.assign** (an `assign` entry): the arbiter gives it to the
+//!   machine it names, or, for one for any machine, to the first take it
+//!   holds that checks, in its store's order. Taken only from the arbiter.
+//!   Never given again: a stuck one ends with the person's cancel. While
+//!   the arbiter is away, it stays made, and the list says on whom it
+//!   waits.
 //! - **The target** decides `Act::Intend` (xenonet-authz) under the
 //!   delegation the intent names, from the maker's device, then starts a
 //!   provider session in a checkout of the project the person confirmed
@@ -44,7 +59,7 @@ use xenonet_authz::{Act, AppId, DelegationId, Information, IntentId, IntentStep,
 use xenonet_id::codec::{b64, random, sha256, unb64_n};
 use xenonet_model::ops::{Kind, To};
 use xenonet_os::sync::Locked;
-use xenonet_store::intents::IntentRow;
+use xenonet_store::intents::{IntentRow, ANY};
 use xenonet_store::Db;
 use xenonet_text::time::now_ms;
 
@@ -95,14 +110,18 @@ fn clip(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
-/// An intent as the API and the page show it.
+/// An intent as the API and the page show it. `target` is `any` for one
+/// for any machine; `workedOn` is the machine it was given to.
 pub fn json_of(i: &IntentRow, here: Option<&str>) -> Value {
     json!({
         "id": i.id,
         "network": i.network,
         "maker": i.machine,
-        "target": i.target,
-        "here": here == Some(i.target.as_str()),
+        "target": if i.any() { "any" } else { i.target.as_str() },
+        "any": i.any(),
+        "arbiter": i.arbiter,
+        "workedOn": i.worked_on(),
+        "here": here.is_some() && here == i.worked_on(),
         "project": i.project,
         "app": i.app,
         "goal": i.goal,
@@ -130,6 +149,7 @@ pub fn intend_of(i: &IntentRow) -> Result<(Resource, Act), String> {
         until: i.until,
         network: NetworkId::new(&i.network).map_err(e)?,
         nonce,
+        arbiter: MachineId::new(&i.arbiter).map_err(e)?,
     };
     Ok((Resource::Intent { machine: MachineId::new(&i.target).map_err(e)?, id: None }, act))
 }
@@ -142,7 +162,7 @@ pub fn id_of(resource: &Resource, act: &Act) -> String {
 /// A report's act on the intent `i`, and what it's done to.
 fn report_of(i: &IntentRow, step: IntentStep) -> Result<(Resource, Act), String> {
     let id = IntentId::new(&i.id).map_err(|e| e.message)?;
-    let target = MachineId::new(&i.target).map_err(|e| e.message)?;
+    let target = MachineId::new(i.worked_on().unwrap_or(&i.target)).map_err(|e| e.message)?;
     Ok((Resource::Intent { machine: target, id: Some(id.clone()) }, Act::Report { intent: id, step }))
 }
 
@@ -165,7 +185,7 @@ fn signed(w: &Runtime, at_window: bool, resource: &Resource, act: &Act, reason: 
 
 /// The delegation of the person's an intent made here for `target` runs
 /// under: `named`, or the first unended one for starts naming this
-/// machine's device and `target`'s.
+/// machine's device and `target`'s (this machine's alone for any machine).
 fn pick_delegation(w: &Runtime, target: &str, named: Option<&str>) -> Result<String, CoreError> {
     let gov = ground::governance(w).ok_or_else(|| status(409, "this machine's governance isn't plugged in"))?;
     let facts = gov.facts();
@@ -174,11 +194,9 @@ fn pick_delegation(w: &Runtime, target: &str, named: Option<&str>) -> Result<Str
     let theirs = MachineId::new(target).ok().and_then(|m| xenonet_authz::Ground::device_of(&facts, &m)).map(|d| d.as_str().to_string());
     let chain = identity.chain();
     let person = chain.person().ok_or_else(|| status(409, "this machine has no identity of yours yet: make or join a network from XenoNet's window"))?;
-    let found = person
-        .delegations
-        .values()
-        .map(|(d, _)| d)
-        .find(|d| named.is_none_or(|n| d.id == n) && d.until > facts.now && d.covers("start") && d.devices.has(&here) && theirs.as_ref().is_some_and(|t| d.devices.has(t)));
+    let found = person.delegations.values().map(|(d, _)| d).find(|d| {
+        named.is_none_or(|n| d.id == n) && d.until > facts.now && d.covers("start") && d.devices.has(&here) && (target == ANY || theirs.as_ref().is_some_and(|t| d.devices.has(t)))
+    });
     match (found, named) {
         (Some(d), _) => Ok(d.id.clone()),
         (None, Some(n)) => Err(status(409, format!("your delegation {n} doesn't name this machine's device and {target}'s for starts, or it ended"))),
@@ -200,11 +218,12 @@ pub fn make(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
     if goal.chars().count() > GOAL_MAX {
         return Err(status(400, format!("a goal is at most {GOAL_MAX} characters")));
     }
-    let target = text(body, "target").unwrap_or_else(|| here.clone());
-    let known = target == here || facts.view.as_ref().is_some_and(|v| v.member(&target).is_some());
+    let target = text(body, "target").map_or_else(|| here.clone(), |t| if t == "any" { ANY.to_string() } else { t });
+    let known = target == here || target == ANY || facts.view.as_ref().is_some_and(|v| v.member(&target).is_some());
     if !known {
         return Err(status(400, format!("{target} isn't a machine in your network")));
     }
+    let arbiter = text(body, "arbiter").unwrap_or_else(|| here.clone());
     let project = text(body, "project").ok_or_else(|| status(400, "say which project it's worked in: a prj_ id"))?;
     xenonet_model::ids::ProjectId::parse(&project).map_err(|_| status(400, format!("{project} isn't a project's id")))?;
     // The app as a start takes it: the registry's first when none is named.
@@ -214,6 +233,15 @@ pub fn make(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
         return Err(status(400, format!("an intent holds for more than no time and at most {MAX_HOURS} hours")));
     }
     let delegation = pick_delegation(w, &target, text(body, "delegation").as_deref())?;
+    // The arbiter: this machine, or one the delegation names.
+    if arbiter != here {
+        let device = facts.view.as_ref().and_then(|v| v.member(&arbiter)).map(|m| m.device.clone());
+        let Some(device) = device else { return Err(status(400, format!("{arbiter} isn't a machine in your network"))) };
+        let named = device.is_some_and(|d| names_device(&gov.identity(), &gov.identity().person_id().unwrap_or_default(), &delegation, &d, facts.now));
+        if !named {
+            return Err(status(400, format!("{arbiter} can't be the arbiter: your delegation {delegation} doesn't name its device")));
+        }
+    }
     let now = facts.now;
     let nonce = random::<16>().map_err(|e| status(500, e.message))?;
     let mut row = IntentRow {
@@ -236,23 +264,26 @@ pub fn make(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
         authority: String::new(),
         made_at: now,
         ended_at: None,
+        arbiter: arbiter.clone(),
+        assigned: None,
     };
     let (resource, act) = intend_of(&row).map_err(|e| status(400, e))?;
-    let authority = signed(w, at_window, &resource, &act, &format!("ask {target} to work an intent of yours"))?;
+    let whom = if row.any() { "any machine your delegation names".to_string() } else { target.clone() };
+    let authority = signed(w, at_window, &resource, &act, &format!("ask {whom} to work an intent of yours"))?;
     row.id = id_of(&resource, &act);
     row.device = authority["person"]["device"].as_str().unwrap_or_default().to_string();
     row.authority = authority.to_string();
     let db = db(w).map_err(|e| status(500, e))?;
     db.put_intent(&row).map_err(|e| status(500, e.message))?;
     send(w, To::All, Kind::Intent, make_body(&row, &authority));
-    // The maker's machine gives it to the machine it names.
-    if target != here {
-        send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "assign", "intent": row.id, "target": target, "until": row.until }));
-    }
-    let _ = db.move_intent(&row.id, &["made"], "assigned", now);
-    w.log("info", "intent", &format!("you made {} for {target}", row.id));
-    if target == here {
-        work_soon(w, &row.id);
+    w.log("info", "intent", &format!("you made {} for {whom}", row.id));
+    if arbiter == here && !row.any() {
+        // This machine is its arbiter: it gives it to the machine it names.
+        give(w, &db, &row, &target);
+    } else if row.any() {
+        // This machine may take it too, and as its arbiter gives it out.
+        offer(w, &db, &row.id);
+        arbitrate(w, &db, &row.id);
     }
     changed(w);
     let kept = db.intent(&row.id).map_err(|e| status(500, e.message))?.unwrap_or(row);
@@ -264,8 +295,20 @@ pub fn make_body(i: &IntentRow, authority: &Value) -> Value {
     json!({
         "schema": SCHEMA, "op": "make", "id": i.id, "goal": i.goal, "project": i.project, "app": i.app,
         "target": i.target, "delegation": i.delegation, "until": i.until, "network": i.network,
-        "nonce": i.nonce, "at": i.made_at, "authority": authority,
+        "nonce": i.nonce, "arbiter": i.arbiter, "at": i.made_at, "authority": authority,
     })
+}
+
+/// The arbiter gives a named intent to its target: kept, told to the
+/// network (every member holds who works it, this machine too), and
+/// worked when the target is this machine.
+fn give(w: &Runtime, db: &Db, i: &IntentRow, target: &str) {
+    let Some(here) = me(w) else { return };
+    send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "assign", "intent": i.id, "target": target, "until": i.until }));
+    let _ = db.move_intent(&i.id, &["made"], "assigned", now_ms() as i64);
+    if target == here {
+        work_soon(w, &i.id);
+    }
 }
 
 /// The person's cancel of an intent, from this machine's window: kept,
@@ -281,7 +324,7 @@ pub fn cancel(w: &Runtime, id: &str, at_window: bool) -> R<Value> {
     let now = now_ms() as i64;
     db.move_intent(id, &["made", "assigned", "running"], "cancelled", now).map_err(|e| status(500, e.message))?;
     send(w, To::All, Kind::Intent, json!({ "schema": SCHEMA, "op": "cancel", "intent": id, "until": i.until, "authority": authority }));
-    if me(w).as_deref() == Some(i.target.as_str()) {
+    if me(w).is_some_and(|m| i.worked_on() == Some(m.as_str())) {
         stop_run(w, id);
     }
     w.log("info", "intent", &format!("you cancelled {id}"));
@@ -290,13 +333,30 @@ pub fn cancel(w: &Runtime, id: &str, at_window: bool) -> R<Value> {
     Ok(json_of(&kept, me(w).as_deref()))
 }
 
-/// The intents this machine keeps, and what a new one may name: the
+/// The intents this machine keeps (with who took each one for any machine,
+/// and on whom one not given out waits), and what a new one may name: the
 /// machines (this one first), the person's delegations for starts, and
 /// the projects with a checkout here they confirmed.
 pub fn list(w: &Runtime) -> R<Value> {
     let db = db(w).map_err(|e| status(500, e))?;
     let here = me(w);
-    let intents: Vec<Value> = db.intents().map_err(|e| status(500, e.message))?.iter().map(|i| json_of(i, here.as_deref())).collect();
+    let online: Vec<String> = net(w).hosts().into_iter().filter(|h| h.online).map(|h| h.id).collect();
+    let intents: Vec<Value> = db
+        .intents()
+        .map_err(|e| status(500, e.message))?
+        .iter()
+        .map(|i| {
+            let mut v = json_of(i, here.as_deref());
+            v["takes"] = json!(db.takes(&i.id).unwrap_or_default().into_iter().map(|t| t.machine).collect::<Vec<_>>());
+            // Not given out yet: on whom it waits, and whether that machine
+            // is there to give it.
+            if i.state == "made" {
+                let there = here.as_deref() == Some(i.arbiter.as_str()) || online.contains(&i.arbiter);
+                v["waiting"] = json!({ "on": i.arbiter, "online": there });
+            }
+            v
+        })
+        .collect();
     let gov = ground::governance(w);
     let mut machines: Vec<String> = here.iter().cloned().collect();
     if let Some(v) = gov.as_ref().and_then(|g| g.facts().view) {
@@ -311,8 +371,18 @@ pub fn list(w: &Runtime) -> R<Value> {
         .filter(|d| d.until > now && d.covers("start"))
         .map(|d| json!({ "id": d.id, "until": d.until, "devices": match &d.devices { xenonet_net::identity::person::DeviceSet::All => json!("all"), xenonet_net::identity::person::DeviceSet::Only(l) => json!(l) } }))
         .collect();
-    let projects: Vec<Value> =
-        db.confirmed_projects(None).unwrap_or_default().iter().map(|p| json!({ "id": p.as_str(), "name": db.project(p).ok().flatten().map(|x| x.name) })).collect();
+    // `signed`: the person's device confirmed this machine's checkout of
+    // it (`checkout`, which the window confirms again to sign it), so this
+    // machine takes intents for any machine in it.
+    let projects: Vec<Value> = db
+        .confirmed_projects(None)
+        .unwrap_or_default()
+        .iter()
+        .map(|p| {
+            let checkout = db.confirmed_checkouts_of(p).ok().and_then(|l| l.into_iter().next()).map(|c| c.id.as_str().to_string());
+            json!({ "id": p.as_str(), "name": db.project(p).ok().flatten().map(|x| x.name), "checkout": checkout, "signed": db.confirmation(p.as_str()).ok().flatten().is_some() })
+        })
+        .collect();
     Ok(json!({ "here": here, "intents": intents, "machines": machines, "delegations": delegations, "projects": projects }))
 }
 
@@ -357,6 +427,8 @@ fn make_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
         authority: String::new(),
         made_at: b.get("at").and_then(Value::as_i64).unwrap_or(0),
         ended_at: None,
+        arbiter: field("arbiter")?,
+        assigned: None,
     };
     if row.goal.chars().count() > GOAL_MAX {
         return Err("a goal longer than an intent's".into());
@@ -381,9 +453,12 @@ fn make_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     if on_host.as_deref() != Some(device.as_str()) {
         return Err(format!("{} was signed by a device that isn't {host}'s, so {host} doesn't speak for it", row.id));
     }
-    let known = g.facts.view.as_ref().is_some_and(|v| v.member(&row.target).is_some());
+    let known = row.any() || g.facts.view.as_ref().is_some_and(|v| v.member(&row.target).is_some());
     if !known {
         return Err(format!("{} names {}, which isn't in the network", row.id, row.target));
+    }
+    if g.facts.view.as_ref().is_none_or(|v| v.member(&row.arbiter).is_none()) {
+        return Err(format!("{} names {} as its arbiter, which isn't in the network", row.id, row.arbiter));
     }
     let Principal::Person(signed) = ground::person(w, &g, Some(host), &carried, &resource, &act)? else {
         return Err("an intent is the person's".into());
@@ -396,28 +471,217 @@ fn make_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
         return Ok(());
     }
     db.put_intent(&row).map_err(|e| e.message)?;
+    // Assigns that came before it, decided now as they would have been.
+    for (from, target) in db.take_held_assigns(&row.id).unwrap_or_default() {
+        let b = json!({ "schema": SCHEMA, "op": "assign", "intent": row.id, "target": target });
+        if let Err(why) = given_in(w, &from, &b) {
+            w.log("warn", "intent", &format!("an assign of {} held for it wasn't taken: {why}", row.id));
+        }
+    }
+    let here = me(w);
+    if here.as_deref() == Some(row.arbiter.as_str()) && !row.any() {
+        give(w, &db, &row, &row.target);
+    }
+    if row.any() {
+        offer(w, &db, &row.id);
+        arbitrate(w, &db, &row.id);
+    }
     changed(w);
     Ok(())
 }
 
-/// The maker's machine gave an intent to the machine it names: taken only
-/// from the maker's machine; worked when it names this one.
+/// An `assign` entry of `host`'s feed: a machine's take of an intent for
+/// any machine, or the arbiter giving one out.
 pub(crate) fn assign_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
+    match b.get("op").and_then(Value::as_str) {
+        Some("take") => take_in(w, host, b),
+        Some("assign") | None => given_in(w, host, b),
+        _ => Err("an assign entry is a take or an assign".into()),
+    }
+}
+
+/// The arbiter gave an intent to a machine: taken only from the arbiter,
+/// once; worked when it's this one.
+fn given_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let id = text(b, "intent").ok_or("an assign without its intent")?;
+    let target = text(b, "target").ok_or("an assign without its target")?;
     let db = db(w)?;
-    let i = db.intent(&id).map_err(|e| e.message)?.ok_or_else(|| format!("an assign of {id}, which this machine doesn't hold"))?;
-    if i.machine != host {
-        return Err(format!("an assign of {id} from {host}: only {}, where it was made, assigns it", i.machine));
+    let Some(i) = db.intent(&id).map_err(|e| e.message)? else {
+        // The arbiter's feed came before the maker's: held until the
+        // intent does.
+        db.hold_assign(&id, host, &target, now_ms() as i64).map_err(|e| e.message)?;
+        return Ok(());
+    };
+    if i.arbiter != host {
+        return Err(format!("an assign of {id} from {host}: only {}, its arbiter, assigns it", i.arbiter));
     }
-    if text(b, "target").as_deref() != Some(i.target.as_str()) {
-        return Err(format!("an assign of {id} to another machine than it names"));
+    let now = now_ms() as i64;
+    if i.any() {
+        // To a machine whose device the delegation names; and to one
+        // machine only, ever.
+        let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
+        let device = g.facts.view.as_ref().and_then(|v| v.member(&target)).and_then(|m| m.device.clone()).ok_or_else(|| format!("{target} has no device of the person's"))?;
+        let gov = ground::governance(w).ok_or("this machine's governance isn't plugged in")?;
+        if !names_device(&gov.identity(), &i.person, &i.delegation, &device, now) {
+            return Err(format!("an assign of {id} to {target}, whose device its delegation doesn't name"));
+        }
+        if !db.assign_intent(&id, &target, now).map_err(|e| e.message)? {
+            return match i.assigned {
+                Some(a) if a == target => Ok(()),
+                Some(a) => Err(format!("an assign of {id} to {target}: it was given to {a}, and is never given again")),
+                None => Err(format!("an assign of {id}, which is {} here", i.state)),
+            };
+        }
+    } else {
+        if target != i.target {
+            return Err(format!("an assign of {id} to another machine than it names"));
+        }
+        db.move_intent(&id, &["made"], "assigned", now).map_err(|e| e.message)?;
     }
-    db.move_intent(&id, &["made"], "assigned", now_ms() as i64).map_err(|e| e.message)?;
     changed(w);
-    if me(w).as_deref() == Some(i.target.as_str()) {
+    if me(w).as_deref() == Some(target.as_str()) {
         work_soon(w, &id);
     }
     Ok(())
+}
+
+// ---------- intents for any machine ----------
+
+/// The words the person's device signs to confirm this machine's checkout
+/// of `project` (`Purpose::CHECKOUT`).
+fn confirmation_words(person: &str, project: &str, device: &str, at: i64) -> Vec<u8> {
+    format!("{person}\n{project}\n{device}\n{at}").into_bytes()
+}
+
+/// The person confirmed a checkout of `project` here, at the window: their
+/// device signs it, and the signature is kept, the evidence this
+/// machine's takes carry.
+pub fn confirm_signed(w: &Runtime, project: &str) -> Result<(), String> {
+    let gov = ground::governance(w).ok_or("this machine isn't in a network: nothing to sign the checkout for")?;
+    let identity = gov.identity();
+    let person = identity.person_id().ok_or("this machine has no identity of yours")?;
+    let at = now_ms() as i64;
+    let device = identity.device_id().ok_or("this machine has no device of yours")?;
+    let (device, sig) = identity
+        .sign_as_person(
+            true,
+            xenonet_id::sign::Purpose::CHECKOUT,
+            &confirmation_words(&person, project, &device, at),
+            "confirm this checkout is yours, so it can take your intents",
+        )
+        .map_err(|e| e.message)?;
+    db(w)?.put_confirmation(&xenonet_store::intents::Confirmation { project: project.to_string(), device, at, sig: b64(&sig) }).map_err(|e| e.message)
+}
+
+/// Whether the person's delegation `delegation` names `device`, covers
+/// starts, and holds at `now`.
+fn names_device(identity: &xenonet_net::identity::Identity, person: &str, delegation: &str, device: &str, now: i64) -> bool {
+    identity
+        .chain_of(person)
+        .and_then(|c| c.person().and_then(|p| p.delegations.get(delegation).map(|(d, _)| d.until > now && d.covers("start") && d.devices.has(device))))
+        .unwrap_or(false)
+}
+
+/// Whether `host`'s take of `i`, with `evidence`, stands: the intent is
+/// for any machine and open, the delegation names `host`'s device (as
+/// the network's chain has it), and the evidence is the person's
+/// confirmation of `host`'s checkout of the project, signed by that
+/// device.
+fn check_take(w: &Runtime, i: &IntentRow, host: &str, evidence: &Value) -> Result<(), String> {
+    if !i.any() || !i.open() {
+        return Err(format!("{} isn't an open intent for any machine", i.id));
+    }
+    let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
+    let device = g.facts.view.as_ref().and_then(|v| v.member(host)).and_then(|m| m.device.clone()).ok_or_else(|| format!("{host} has no device of the person's"))?;
+    let gov = ground::governance(w).ok_or("this machine's governance isn't plugged in")?;
+    let identity = gov.identity();
+    if !names_device(&identity, &i.person, &i.delegation, &device, g.facts.now) {
+        return Err(format!("a take of {} from {host}, whose device the delegation {} doesn't name", i.id, i.delegation));
+    }
+    let no = || format!("a take of {} from {host} without the person's confirmation of a checkout of {} there", i.id, i.project);
+    let (project, by, at, sig) = (text(evidence, "project"), text(evidence, "device"), evidence.get("at").and_then(Value::as_i64), text(evidence, "sig"));
+    let (Some(project), Some(by), Some(at), Some(sig)) = (project, by, at, sig.and_then(|s| xenonet_id::codec::unb64(&s))) else { return Err(no()) };
+    if project != i.project || by != device {
+        return Err(no());
+    }
+    let key = identity.active_device(&i.person, &by).ok_or_else(no)?.key;
+    if !key.verify(xenonet_id::sign::Purpose::CHECKOUT, &confirmation_words(&i.person, &project, &by, at), &sig) {
+        return Err(no());
+    }
+    Ok(())
+}
+
+/// This machine takes the intent for any machine `id` when it may: its
+/// device is one the delegation names, and it holds a checkout of the
+/// project the person confirmed here, with their signature. Once.
+fn offer(w: &Runtime, db: &Db, id: &str) {
+    let (Some(here), Ok(Some(i))) = (me(w), db.intent(id)) else { return };
+    if !i.any() || i.state != "made" || i.assigned.is_some() {
+        return;
+    }
+    if db.takes(id).unwrap_or_default().iter().any(|t| t.machine == here) {
+        return;
+    }
+    let Some(gov) = ground::governance(w) else { return };
+    let identity = gov.identity();
+    let Some(device) = identity.device_id() else { return };
+    if !names_device(&identity, &i.person, &i.delegation, &device, now_ms() as i64) {
+        return;
+    }
+    let confirmed = db
+        .checkouts()
+        .unwrap_or_default()
+        .into_iter()
+        .any(|c| c.machine == xenonet_store::projects::LOCAL && c.project.as_str() == i.project && c.confirmed && c.gone_at.is_none());
+    let Some(c) = db.confirmation(&i.project).ok().flatten().filter(|c| confirmed && c.device == device) else { return };
+    let evidence = json!({ "project": c.project, "device": c.device, "at": c.at, "sig": c.sig });
+    if !db.add_take(id, &here, &evidence.to_string(), now_ms() as i64).unwrap_or(false) {
+        return;
+    }
+    send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "take", "intent": id, "until": i.until, "evidence": evidence }));
+    w.log("info", "intent", &format!("{here} took {id}"));
+}
+
+/// A machine's take of an intent for any machine: checked and kept, or
+/// refused; kept as it came when the intent hasn't reached this machine
+/// yet, and checked when the arbiter goes through it.
+fn take_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
+    let id = text(b, "intent").ok_or("a take without its intent")?;
+    let evidence = b.get("evidence").cloned().unwrap_or(Value::Null);
+    let db = db(w)?;
+    if let Some(i) = db.intent(&id).map_err(|e| e.message)? {
+        check_take(w, &i, host, &evidence)?;
+    }
+    db.add_take(&id, host, &evidence.to_string(), now_ms() as i64).map_err(|e| e.message)?;
+    arbitrate(w, &db, &id);
+    changed(w);
+    Ok(())
+}
+
+/// As the arbiter of an intent for any machine not given out yet: gives it
+/// to the first take it holds that checks, in its store's order.
+fn arbitrate(w: &Runtime, db: &Db, id: &str) {
+    let (Some(here), Ok(Some(i))) = (me(w), db.intent(id)) else { return };
+    if i.arbiter != here || !i.any() || i.state != "made" || i.assigned.is_some() {
+        return;
+    }
+    for t in db.takes(id).unwrap_or_default() {
+        let evidence = serde_json::from_str::<Value>(&t.evidence).unwrap_or(Value::Null);
+        if let Err(why) = check_take(w, &i, &t.machine, &evidence) {
+            w.log("info", "intent", &format!("a take of {id} was passed over: {why}"));
+            continue;
+        }
+        if !db.assign_intent(id, &t.machine, now_ms() as i64).unwrap_or(false) {
+            return;
+        }
+        send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "assign", "intent": id, "target": t.machine, "until": i.until }));
+        w.log("info", "intent", &format!("{here} gave {id} to {}", t.machine));
+        changed(w);
+        if t.machine == here {
+            work_soon(w, id);
+        }
+        return;
+    }
 }
 
 /// The person's cancel, signed by their device, from any of their
@@ -436,7 +700,7 @@ fn cancel_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let p = ground::person(w, &g, Some(host), &carried, &resource, &act)?;
     ground::judge(&g, &ground::remote(&g, p, resource, act), None)?;
     db.move_intent(&id, &["made", "assigned", "running"], "cancelled", now_ms() as i64).map_err(|e| e.message)?;
-    if me(w).as_deref() == Some(i.target.as_str()) {
+    if me(w).is_some_and(|m| i.worked_on() == Some(m.as_str())) {
         stop_run(w, &id);
     }
     w.log("info", "intent", &format!("you cancelled {id} at {host}"));
@@ -531,7 +795,7 @@ fn work_now(w: &Runtime, id: &str) -> Result<(), Worked> {
     let db = db(w).map_err(failed)?;
     let Some(i) = db.intent(id).map_err(|e| Worked::Failed(e.message))? else { return Ok(()) };
     let Some(here) = me(w) else { return Ok(()) };
-    if i.state != "assigned" || i.target != here {
+    if i.state != "assigned" || i.worked_on() != Some(here.as_str()) {
         return Ok(());
     }
     // Decided under the delegation it names, from the maker's device.
@@ -650,8 +914,8 @@ pub fn report(w: &Runtime, by: Reporter, id: &str, step: &str, body: &Value) -> 
     let db = db(w).map_err(|e| status(500, e))?;
     let i = db.intent(id).map_err(|e| status(500, e.message))?.ok_or_else(|| status(404, format!("this machine holds no intent {id}")))?;
     let here = me(w).unwrap_or_default();
-    if i.target != here {
-        return Err(status(409, format!("{id} is worked on {}: its reports are made there", i.target)));
+    if i.worked_on() != Some(here.as_str()) {
+        return Err(status(409, format!("{id} is worked on {}: its reports are made there", i.worked_on().unwrap_or("no machine yet"))));
     }
     let g = ground::ground(w, None).ok_or_else(|| status(409, "this machine's governance isn't plugged in"))?;
     let (resource, act) = report_of(&i, step).map_err(|e| status(400, e))?;
@@ -701,7 +965,7 @@ pub fn tick(w: &Runtime) {
     let here = me(w);
     for i in db.intents_past(now).unwrap_or_default() {
         if db.move_intent(&i.id, &["made", "assigned", "running"], "expired", now).unwrap_or(false) {
-            if here.as_deref() == Some(i.target.as_str()) {
+            if here.is_some() && here.as_deref() == i.worked_on() {
                 stop_run(w, &i.id);
             }
             w.log("info", "intent", &format!("{} expired", i.id));
@@ -709,9 +973,16 @@ pub fn tick(w: &Runtime) {
         }
     }
     let Some(here) = here else { return };
-    for i in db.intents().unwrap_or_default().into_iter().filter(|i| i.state == "assigned" && i.target == here) {
-        if !w.intents.working.locked().contains(&i.id) {
+    for i in db.intents().unwrap_or_default() {
+        if i.state == "assigned" && i.worked_on() == Some(here.as_str()) && !w.intents.working.locked().contains(&i.id) {
             work_soon(w, &i.id);
+        }
+        // One for any machine not given out yet: a checkout confirmed
+        // since may let this machine take it, and as its arbiter, a take
+        // held may now be given it.
+        if i.any() && i.state == "made" {
+            offer(w, &db, &i.id);
+            arbitrate(w, &db, &i.id);
         }
     }
 }
@@ -746,6 +1017,9 @@ impl xenonet_api::cores::Intents for IntentsDriver {
     fn report(&self, by: Reporter, id: &str, step: &str, body: Value) -> R<Value> {
         report(&self.0, by, id, step, &body)
     }
+    fn confirmed(&self, project: &str) -> Result<(), String> {
+        confirm_signed(&self.0, project)
+    }
 }
 
 #[cfg(test)]
@@ -773,6 +1047,8 @@ mod tests {
             authority: "{}".into(),
             made_at: 1_000,
             ended_at: None,
+            arbiter: "laptop".into(),
+            assigned: None,
         }
     }
 
@@ -781,7 +1057,7 @@ mod tests {
         let (r, a) = intend_of(&row()).unwrap();
         let id = id_of(&r, &a);
         assert!(id.starts_with("int_"), "{id}");
-        let changed: [fn(&mut IntentRow); 8] = [
+        let changed: [fn(&mut IntentRow); 10] = [
             |i| i.goal.push('!'),
             |i| i.project = "prj_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
             |i| i.app = "codex".into(),
@@ -790,6 +1066,8 @@ mod tests {
             |i| i.network = "net_fedcba9876543210fedcba9876543210".into(),
             |i| i.nonce = b64(&[2; 16]),
             |i| i.target = "studio".into(),
+            |i| i.target = ANY.into(),
+            |i| i.arbiter = "desk".into(),
         ];
         for change in changed {
             let mut i = row();

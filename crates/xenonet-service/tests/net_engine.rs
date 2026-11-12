@@ -1712,8 +1712,13 @@ async fn intent_is(h: &Host, id: &str, state: &str) {
 }
 
 /// An intent signed by laptop's device at its window, as laptop makes one,
-/// but not sent: its row and intent.make's body.
+/// but not sent: its row and intent.make's body. laptop is its arbiter.
 fn signed_intent(b: &Host, goal: &str, target: &str, project: &str, delegation: &str) -> (xenonet_store::intents::IntentRow, Value) {
+    signed_intent_by(b, goal, target, project, delegation, "laptop")
+}
+
+/// The same, with `arbiter` as its arbiter.
+fn signed_intent_by(b: &Host, goal: &str, target: &str, project: &str, delegation: &str, arbiter: &str) -> (xenonet_store::intents::IntentRow, Value) {
     let identity = b.svc.node().shared().identity().clone();
     let now = now_ms() as i64;
     let mut row = xenonet_store::intents::IntentRow {
@@ -1736,6 +1741,8 @@ fn signed_intent(b: &Host, goal: &str, target: &str, project: &str, delegation: 
         authority: String::new(),
         made_at: now,
         ended_at: None,
+        arbiter: arbiter.into(),
+        assigned: None,
     };
     let (resource, act) = xenonet_runtime::intents::intend_of(&row).unwrap();
     row.id = xenonet_runtime::intents::id_of(&resource, &act);
@@ -1752,6 +1759,27 @@ fn entry_to(from: &Host, to: &Host, kind: xenonet_net::feed::Kind, body: Value) 
 
 fn assign(id: &str, target: &str) -> Value {
     json!({ "schema": "network/intent/v1", "op": "assign", "intent": id, "target": target, "until": now_ms() as i64 + 3_600_000 })
+}
+
+fn take(id: &str, evidence: Value) -> Value {
+    json!({ "schema": "network/intent/v1", "op": "take", "intent": id, "until": now_ms() as i64 + 3_600_000, "evidence": evidence })
+}
+
+/// `h`'s device's signed confirmation that its checkout of `project` is
+/// the person's, as a take carries it (what the window's Confirm signs).
+fn confirmation(h: &Host, project: &str) -> Value {
+    let identity = h.svc.node().shared().identity().clone();
+    let (person, device, at) = (identity.person_id().unwrap(), identity.device_id().unwrap(), now_ms() as i64);
+    let words = format!("{person}\n{project}\n{device}\n{at}");
+    let (device, sig) = identity.sign_as_person(true, xenonet_id::sign::Purpose::CHECKOUT, words.as_bytes(), "").unwrap();
+    json!({ "project": project, "device": device, "at": at, "sig": xenonet_id::codec::b64(&sig) })
+}
+
+/// The person confirms `h`'s checkout of `project` at its window (the
+/// confirm route's second half, which the store's route here doesn't
+/// run): its device signs it.
+fn confirm(h: &Host, project: &str) {
+    h.ctx.cores.intents.confirmed(project).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
@@ -1843,6 +1871,92 @@ async fn an_intent_made_on_one_machine_is_worked_on_the_one_it_names_and_reports
     let why = intent(&c, &row.id).await["outcome"].as_str().unwrap().to_string();
     assert!(why.contains(DLG2), "{why}");
     assert_eq!(fake_runs(&c).len(), runs, "nothing started under a revoked delegation");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_intent_for_any_machine_goes_to_one_taker_by_its_arbiter_alone() {
+    use xenonet_net::feed::Kind as EntryKind;
+    let root = std::env::temp_dir().join(format!("xenonet-net-intents-any-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let [lan] = common::free_ports();
+    let (a, b, c, project) = three_in_atlas(&root, lan).await;
+    // laptop's and desk's devices, not studio's.
+    delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
+
+    // Made on laptop, for any machine, with laptop its arbiter, and handed
+    // to desk alone. desk's checkout isn't signed yet, so it takes nothing.
+    let (row, body) = signed_intent_by(&b, "hold-on: any of you", "@any", &project, DLG, "laptop");
+    entry_to(&b, &c, EntryKind::Intent, body);
+    until("desk holds the intent", 10, || async { intent(&c, &row.id).await["state"] == "made" }).await;
+    let i = intent(&c, &row.id).await;
+    assert_eq!((i["target"].clone(), i["any"].clone(), i["arbiter"].clone(), i["workedOn"].clone()), (json!("any"), json!(true), json!("laptop"), Value::Null), "{i}");
+    assert_eq!(i["waiting"], json!({ "on": "laptop", "online": true }), "unassigned, and on whom it waits");
+    // A take from studio, whose device the delegation doesn't name, with
+    // a confirmation of its own: refused.
+    entry_to(&a, &c, EntryKind::Assign, take(&row.id, confirmation(&a, &project)));
+    // A take from laptop with no confirmation, or one of another project's
+    // checkout, or desk's confirmation as laptop's: refused.
+    entry_to(&b, &c, EntryKind::Assign, take(&row.id, Value::Null));
+    entry_to(&b, &c, EntryKind::Assign, take(&row.id, confirmation(&b, "prj_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")));
+    entry_to(&b, &c, EntryKind::Assign, take(&row.id, confirmation(&c, &project)));
+    // An assign from studio, which isn't its arbiter: dropped.
+    entry_to(&a, &c, EntryKind::Assign, assign(&row.id, "desk"));
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let i = intent(&c, &row.id).await;
+    assert_eq!((i["state"].clone(), i["takes"].clone(), i["workedOn"].clone()), (json!("made"), json!([]), Value::Null), "{i}");
+    // laptop's take with its device's confirmation is kept; the arbiter's
+    // assign gives it to laptop, and to laptop alone after.
+    let runs = fake_runs(&c).len();
+    entry_to(&b, &c, EntryKind::Assign, take(&row.id, confirmation(&b, &project)));
+    until("desk holds laptop's take", 10, || async { intent(&c, &row.id).await["takes"] == json!(["laptop"]) }).await;
+    entry_to(&b, &c, EntryKind::Assign, assign(&row.id, "laptop"));
+    until("desk sees it given to laptop", 10, || async { intent(&c, &row.id).await["workedOn"] == "laptop" }).await;
+    entry_to(&b, &c, EntryKind::Assign, assign(&row.id, "desk"));
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!((intent(&c, &row.id).await["workedOn"].clone(), fake_runs(&c).len()), (json!("laptop"), runs), "never given again");
+
+    // Two takers, one assign: laptop and desk both confirmed, desk the
+    // arbiter. Each takes it, and desk gives it to the first take it
+    // holds, its own; one run in all.
+    confirm(&b, &project);
+    confirm(&c, &project);
+    let (b_runs, c_runs) = (fake_runs(&b).len(), fake_runs(&c).len());
+    let (s, v) =
+        b.window("POST", "/api/intents", json!({ "goal": "hold-on: whoever's free", "target": "any", "arbiter": "desk", "project": project, "delegation": DLG, "hours": 1 })).await;
+    assert_eq!((s, v["state"].clone(), v["target"].clone()), (200, json!("made"), json!("any")), "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    for h in [&a, &b, &c] {
+        until(&format!("{} sees it given to desk", h.name), 20, || async { intent(h, &id).await["workedOn"] == "desk" }).await;
+    }
+    let _ = ran(&c, c_runs + 1).await;
+    until("laptop and desk both took it, at desk", 10, || async {
+        let t = intent(&c, &id).await["takes"].clone();
+        t.as_array().is_some_and(|l| l.len() == 2 && l[0] == "desk")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!((fake_runs(&b).len(), fake_runs(&c).len()), (b_runs, c_runs + 1), "one run, on desk");
+    // An arbiter the delegation doesn't name can't be named.
+    let (s, v) = b.window("POST", "/api/intents", json!({ "goal": "x", "target": "any", "arbiter": "studio", "project": project, "delegation": DLG })).await;
+    assert_eq!(s, 400, "{v}");
+
+    // desk, the arbiter, goes away: an intent for any machine it would
+    // give out stays made, and laptop's window says on whom it waits.
+    c.svc.stop();
+    until("laptop sees desk offline", 20, || async { b.state().await["hosts"].as_array().unwrap().iter().any(|x| x["id"] == "desk" && x["online"] == false) }).await;
+    let (s, v) = b
+        .window("POST", "/api/intents", json!({ "goal": "hold-on: when desk is back", "target": "any", "arbiter": "desk", "project": project, "delegation": DLG, "hours": 1 }))
+        .await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let i = intent(&b, &id).await;
+    assert_eq!((i["state"].clone(), i["waiting"].clone(), i["takes"].clone()), (json!("made"), json!({ "on": "desk", "online": false }), json!(["laptop"])), "{i}");
+    assert_eq!(fake_runs(&b).len(), b_runs, "laptop took it, and doesn't start what wasn't given it");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }

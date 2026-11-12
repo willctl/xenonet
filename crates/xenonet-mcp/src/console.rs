@@ -252,7 +252,7 @@ fn defs(installed: bool) -> Vec<Def> {
         def(
             "intents",
             "See the person's intents",
-            "Opens the Intents view: the person's intents (work asked for on one machine, done on the one it names), each with how it stands, and the form for a new one. `refresh` reads them again, `select` shows one by its id, and `draft` fills in the form (goal, target machine, project, app, hours) without sending it. Making and cancelling an intent sign as the person, so this tool does neither: the person clicks Make or Cancel.",
+            "Opens the Intents view: the person's intents (work asked for on one machine, done on the one it names or on any machine their delegation names), each with how it stands, who took it and on whom one not given out yet waits, and the form for a new one. `refresh` reads them again, `select` shows one by its id, and `draft` fills in the form (goal, target machine or any, arbiter, project, app, hours) without sending it. Making and cancelling an intent sign as the person, so this tool does neither: the person clicks Make or Cancel.",
             object(vec![
                 ("action", enumeration(&["open", "refresh", "select", "draft", "close"]).optional().describe("open, the default, shows the view.")),
                 ("id", string().optional().describe("For select: an intent's id (int_…).")),
@@ -260,7 +260,8 @@ fn defs(installed: bool) -> Vec<Def> {
                     "draft",
                     object(vec![
                         ("goal", string().optional()),
-                        ("target", string().optional().describe("A machine of the network, by its host id.")),
+                        ("target", string().optional().describe("A machine of the network, by its host id, or any: any machine the delegation names.")),
+                        ("arbiter", string().optional().describe("The machine that gives it out: this one, the default, or one the delegation names.")),
                         ("project", string().optional().describe("A project's id (prj_…).")),
                         ("app", string().optional()),
                         ("hours", number().optional()),

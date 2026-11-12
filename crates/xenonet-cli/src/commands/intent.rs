@@ -61,7 +61,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let goal = args[1..].join(" ");
             let mut body = Map::new();
             body.insert("goal".into(), json!(goal));
-            for (flag, key) in [("on", "target"), ("project", "project"), ("app", "app"), ("delegation", "delegation")] {
+            for (flag, key) in [("on", "target"), ("project", "project"), ("app", "app"), ("delegation", "delegation"), ("arbiter", "arbiter")] {
                 if let Some(v) = flags.text(flag) {
                     body.insert(key.into(), json!(v));
                 }

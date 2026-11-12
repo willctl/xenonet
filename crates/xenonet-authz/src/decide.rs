@@ -363,9 +363,13 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
         Resource::Actor(a) if ground.outbound(a).is_none() => return Err(Reason::new("resource", format!("{own} has no outbound actor {a}"))),
         Resource::Space(s) if !ground.holds_space(s) => return Err(Reason::new("resource", format!("this machine doesn't hold {s}"))),
         // An intent being made is decided by the machine it's to be worked
-        // on; a report, by a machine that holds the intent, worked where
-        // the report says.
-        Resource::Intent { machine, id: None } if machine != own => return Err(Reason::new("resource", format!("{machine} decides an intent worked there; this is {own}"))),
+        // on, or for one for any machine, by whichever machine its arbiter
+        // gave it to (the arbitration is the runtime's; the delegation
+        // still has to name this machine's device); a report, by a machine
+        // that holds the intent, worked where the report says.
+        Resource::Intent { machine, id: None } if machine != own && !machine.is_any() => {
+            return Err(Reason::new("resource", format!("{machine} decides an intent worked there; this is {own}")))
+        }
         Resource::Intent { machine, id: Some(id) } => match ground.intent(id) {
             None => return Err(Reason::new("intent", format!("this machine doesn't hold {id}"))),
             Some(held) if &held.target != machine => return Err(Reason::new("intent", format!("{id} is worked on {}, not {machine}", held.target))),

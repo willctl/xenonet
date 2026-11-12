@@ -1226,7 +1226,19 @@ fn checkouts(ctx: &Arc<Ctx>, req: &Req) -> Result<Reply, CoreError> {
     }
     let id = route.strip_prefix("/api/checkouts/").and_then(|r| r.strip_suffix("/confirm")).and_then(decode_uri_component);
     if let (Some(id), "POST") = (id, req.method.as_str()) {
-        let ch = ctx.cores.store.confirm_checkout(&id)?;
+        let mut ch = ctx.cores.store.confirm_checkout(&id)?;
+        // The person's device signs it too (the route is the window's), so
+        // this machine can show another that the checkout is theirs when it
+        // takes an intent for any machine.
+        if let Some(project) = ch.get("project").and_then(Value::as_str).map(str::to_string) {
+            match ctx.cores.intents.confirmed(&project) {
+                Ok(()) => ch["signed"] = json!(true),
+                Err(why) => {
+                    ch["signed"] = json!(false);
+                    ch["unsigned"] = json!(why);
+                }
+            }
+        }
         let c = ctx.clone();
         tokio::spawn(async move {
             let _ = c.cores.state.refresh_after_change().await;

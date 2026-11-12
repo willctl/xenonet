@@ -54,6 +54,22 @@ id!(
     MachineId,
     "a machine's id"
 );
+
+/// What an intent for any machine its delegation names has in place of the
+/// machine it's worked on. No host id has an `@` in it, so no machine is
+/// ever called this.
+pub const ANY_MACHINE: &str = "@any";
+
+impl MachineId {
+    /// The machine of an intent for any machine its delegation names.
+    pub fn any() -> MachineId {
+        MachineId(ANY_MACHINE.to_string())
+    }
+
+    pub fn is_any(&self) -> bool {
+        self.0 == ANY_MACHINE
+    }
+}
 id!(
     /// A network, by the id its chain gives it.
     NetworkId,
@@ -501,8 +517,11 @@ pub enum Act {
     /// Making an intent, as the person signs it: the hash of its goal (the
     /// goal itself is Information, beside the request), the project and app
     /// it's worked in, the delegation it runs under, when it ends, the
-    /// network it travels in and a random nonce, so two intents with the
-    /// same words are two. The machine it's worked on is its resource's.
+    /// network it travels in, a random nonce, so two intents with the
+    /// same words are two, and the arbiter: the machine whose assign alone
+    /// gives it to a machine. The machine it's worked on is its
+    /// resource's, or `MachineId::any()` for any machine its delegation
+    /// names.
     Intend {
         goal: [u8; 32],
         project: ProjectId,
@@ -511,6 +530,7 @@ pub enum Act {
         until: i64,
         network: NetworkId,
         nonce: [u8; 16],
+        arbiter: MachineId,
     },
     /// A report on the intent `intent`: its step decides who may make it (a
     /// cancel is the person's). A note's or an outcome's words are
@@ -717,9 +737,15 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         },
         Act::Delegate { project } => c.field(project.as_ref().map_or("", ProjectId::as_str)),
         Act::Ctx(level) => c.field(level.as_str()),
-        Act::Intend { goal, project, app, delegation, until, network, nonce } => {
-            c.bytes(goal).field(project.as_str()).field(app.as_str()).field(delegation.as_str()).field(&until.to_string()).field(network.as_str()).bytes(nonce)
-        }
+        Act::Intend { goal, project, app, delegation, until, network, nonce, arbiter } => c
+            .bytes(goal)
+            .field(project.as_str())
+            .field(app.as_str())
+            .field(delegation.as_str())
+            .field(&until.to_string())
+            .field(network.as_str())
+            .bytes(nonce)
+            .field(arbiter.as_str()),
         Act::Report { intent, step } => c.field(intent.as_str()).field(step.as_str()),
     };
     sha256(&c.0)
@@ -744,14 +770,22 @@ mod tests {
         assert_eq!(Action::ALL.map(|a| Action::parse(a.as_str())), Action::ALL.map(Some));
     }
 
-    type Intend = ([u8; 32], ProjectId, AppId, DelegationId, i64, NetworkId, [u8; 16]);
+    type Intend = ([u8; 32], ProjectId, AppId, DelegationId, i64, NetworkId, [u8; 16], MachineId);
 
     fn intend(change: impl Fn(&mut Intend)) -> Act {
-        let mut a: Intend =
-            ([0; 32], ProjectId::new("prj_a").unwrap(), AppId::new("claude").unwrap(), DelegationId::new("dlg_a").unwrap(), 1, NetworkId::new("net_a").unwrap(), [0; 16]);
+        let mut a: Intend = (
+            [0; 32],
+            ProjectId::new("prj_a").unwrap(),
+            AppId::new("claude").unwrap(),
+            DelegationId::new("dlg_a").unwrap(),
+            1,
+            NetworkId::new("net_a").unwrap(),
+            [0; 16],
+            MachineId::new("m2").unwrap(),
+        );
         change(&mut a);
-        let (goal, project, app, delegation, until, network, nonce) = a;
-        Act::Intend { goal, project, app, delegation, until, network, nonce }
+        let (goal, project, app, delegation, until, network, nonce, arbiter) = a;
+        Act::Intend { goal, project, app, delegation, until, network, nonce, arbiter }
     }
 
     fn intent_on(m: &str) -> Resource {
@@ -795,6 +829,8 @@ mod tests {
             act_hash(&intent_on("m1"), &intend(|a| a.4 += 1)),
             act_hash(&intent_on("m1"), &intend(|a| a.5 = NetworkId::new("net_b").unwrap())),
             act_hash(&intent_on("m1"), &intend(|a| a.6 = [1; 16])),
+            act_hash(&intent_on("m1"), &intend(|a| a.7 = MachineId::new("m3").unwrap())),
+            act_hash(&Resource::Intent { machine: MachineId::any(), id: None }, &intend(|_| {})),
             act_hash(&held("int_a"), &Act::Report { intent: IntentId::new("int_a").unwrap(), step: IntentStep::Note }),
             act_hash(&held("int_a"), &Act::Report { intent: IntentId::new("int_a").unwrap(), step: IntentStep::Cancel }),
             act_hash(&held("int_b"), &Act::Report { intent: IntentId::new("int_b").unwrap(), step: IntentStep::Cancel }),

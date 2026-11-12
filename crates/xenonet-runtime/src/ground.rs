@@ -122,7 +122,7 @@ impl Ground for EngineGround {
         let i = store.with(|s| s.db().intent(id.as_str())).ok().flatten()?;
         Some(xenonet_authz::HeldIntent {
             maker: MachineId::new(&i.machine).ok()?,
-            target: MachineId::new(&i.target).ok()?,
+            target: MachineId::new(i.worked_on().unwrap_or(&i.target)).ok()?,
             agent: i.agent.as_deref().and_then(|a| xenonet_authz::AgentId::new(a).ok()),
             open: i.open(),
         })

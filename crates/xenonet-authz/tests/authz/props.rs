@@ -61,6 +61,7 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
                 until: NOW + HOUR,
                 network: network(),
                 nonce: [0; 16],
+                arbiter: machine("m1"),
             },
         ),
         Action::Report => {

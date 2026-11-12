@@ -53,6 +53,10 @@ impl Purpose {
     pub const WINDOW: Purpose = Purpose("xenonet-window/1");
     /// One read by that window key.
     pub const WINDOW_READ: Purpose = Purpose("xenonet-window-read/1");
+    /// A person's device confirming that its machine's checkout of a
+    /// project is theirs, so another machine can tell it may take an
+    /// intent for any machine in that project.
+    pub const CHECKOUT: Purpose = Purpose("xenonet-checkout/1");
     /// A signature nothing verifies, which the doctor times a key with:
     /// its own tag, so it can't be taken for any other.
     pub const PROBE: Purpose = Purpose("xenonet-probe/1");

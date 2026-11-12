@@ -1,12 +1,13 @@
 An intent is work you ask for at one of your machines: a goal, the
-project it's in and the machine to do it. That machine checks it against
-your delegation, starts a session in a checkout of the project you
-confirmed there, and reports back: started, notes on the way, and what
-came of it.
+project it's in and the machine to do it, or any machine your delegation
+names. That machine checks it against your delegation, starts a session
+in a checkout of the project you confirmed there, and reports back:
+started, notes on the way, and what came of it.
 
   xenonet intent list [--json]     your intents and how each stands
-  xenonet intent make "<goal>" --on <machine> --project <prj_…>
+  xenonet intent make "<goal>" --on <machine>|any --project <prj_…>
       [--app claude|codex|grok] [--delegation <dlg_…>] [--hours <n>]
+      [--arbiter <machine>]
   xenonet intent cancel <int_…>    stops it, and its session
 
 Making and cancelling an intent sign as you, so they're done in
@@ -18,3 +19,9 @@ An intent runs under the one delegation of yours it names. Leave it out
 and XenoNet picks one that names both machines for starts. Revoking that
 delegation stops what wasn't started yet. An intent lasts a day unless
 you say otherwise (--hours), a month at most.
+
+With --on any, each machine your delegation names that has a checkout of
+the project you confirmed in its window offers to take it, and the
+arbiter gives it to the first: this machine, or --arbiter, a machine
+your delegation names, for when this one may be asleep. It's given once.
+Until the arbiter gives it out it waits, and the list says on whom.
