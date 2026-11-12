@@ -553,11 +553,11 @@ export function createDriver(app) {
     },
     // The network across machines (network.js): Network settings and Add
     // a machine. "read" (the default) says how it stands without opening
-    // anything: whether this machine is in a network, the gateway and its
-    // link, each machine with its agents, what waits on you, the tickets,
-    // the outbox, a roster mismatch and the titles-only setting, and, while
-    // the panel shows the join line, whether it shows masked (never the
-    // ticket). "open" shows the panel, "start" and "join" its forms, "add"
+    // anything: whether this machine is in a network and how it stands in
+    // it, each machine with its agents, what waits on you and what's held
+    // for it, the invites open, a roster mismatch and the titles-only
+    // setting, and, while the panel shows the join line, whether it shows
+    // masked (never the code). "open" shows the panel, "start" and "join" its forms, "add"
     // Add a machine with { host, window } filled in, "publish" Publish a
     // service with { name, target, paths, hosts } filled in, "devices" and
     // "services" the panel scrolled to Your devices or Services, "pick"

@@ -1,7 +1,7 @@
-//! core/doctor/index.js's check of the firewall in front of the network's
-//! gateway (docs/guide/network.md): on a LAN or tailnet address, other
-//! machines connect to it straight, and the firewalls of macOS and Windows
-//! let a program accept them by its path. On a Mac it asks socketfilterfw
+//! The check of the firewall in front of this machine's network endpoint
+//! (docs/guide/network.md): in a network, the other members connect to it
+//! straight on link/2 (QUIC, over UDP), and the firewalls of macOS and
+//! Windows let a program accept them by its path. On a Mac it asks socketfilterfw
 //! whether the firewall is on, blocks everything, or lets the service's
 //! program in; `--getappblocked` says "permitted" of any path, even one
 //! that isn't there, so the list of programs decides. On Windows,
@@ -21,7 +21,7 @@ use xenonet_text::text::display;
 use xenonet_text::text::truthy;
 
 /// The checks, in order: id, group and title.
-pub const CHECKS: [(&str, &str, &str); 1] = [("network.firewall", "Network", "Other machines can reach this gateway")];
+pub const CHECKS: [(&str, &str, &str); 1] = [("network.firewall", "Network", "Other machines can reach this one")];
 
 /// macOS's application firewall's command.
 pub const SOCKETFILTERFW: &str = "/usr/libexec/ApplicationFirewall/socketfilterfw";
@@ -264,14 +264,8 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
         Some(v) if !truthy(Some(&v)) => return Ok(skip("this machine isn't in a network")),
         Some(v) => v,
     };
-    if !truthy(net.get("gateway")) {
-        return Ok(skip("this machine isn't the network's gateway"));
-    }
-    match net.get("kind").and_then(Value::as_str) {
-        Some("lan") => {}
-        Some("loopback") => return Ok(skip("the gateway's address is on this computer alone, where no firewall stands in the way")),
-        Some(_) => return Ok(skip("other machines reach the gateway through its tunnel, which connects on this computer, where no firewall stands in the way")),
-        None => return Ok(skip("the gateway has no address yet")),
+    if !truthy(net.get("inNetwork")) {
+        return Ok(skip("this machine isn't in a network"));
     }
     let platform = c.f.platform();
     if platform != "darwin" && platform != "win32" {
@@ -358,15 +352,15 @@ mod tests {
     }
 
     #[test]
-    fn the_gateways_program_let_in_or_how_to() {
-        let gateway = json!({ "gateway": true, "address": "100.64.0.7:48850", "kind": "lan" });
-        let allowed = verdict(gateway.clone(), &format!("Total number of apps = 1 \n1 : {EXE} \n             (Allow incoming connections)\n"));
+    fn the_services_program_let_in_or_how_to() {
+        let member = json!({ "inNetwork": true });
+        let allowed = verdict(member.clone(), &format!("Total number of apps = 1 \n1 : {EXE} \n             (Allow incoming connections)\n"));
         assert_eq!(allowed["status"], json!("ok"), "{allowed}");
-        let unlisted = verdict(gateway, "Total number of apps = 0 \n");
+        let unlisted = verdict(member, "Total number of apps = 0 \n");
         assert_eq!(unlisted["status"], json!("warn"));
         let q = "\"$HOME/Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet\"";
         assert!(unlisted["fix"].as_str().unwrap().contains(&format!("sudo {SOCKETFILTERFW} --add {q} then sudo {SOCKETFILTERFW} --unblockapp {q}.")), "{unlisted}");
-        assert_eq!(verdict(json!({ "gateway": false, "kind": "lan" }), "")["status"], json!("skip"));
+        assert_eq!(verdict(json!({ "inNetwork": false }), "")["status"], json!("skip"));
     }
 
     #[test]

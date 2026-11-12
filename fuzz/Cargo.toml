@@ -17,7 +17,7 @@ members = ["."]
 
 # libfuzzer-sys is the only crate the workspace doesn't have already;
 # async-trait and tokio are for the service's routes and its stand-in cores.
-# The network's targets run xenonet-net's nodes and gateway, and the
+# The network's targets read xenonet-net's envelopes, chain and services, and the
 # engine's runtime (xenonet-runtime) for the bodies other hosts send.
 [dependencies]
 async-trait = "0.1"
@@ -161,13 +161,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "net_frame"
-path = "fuzz_targets/net_frame.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "net_envelope"
 path = "fuzz_targets/net_envelope.rs"
 test = false
@@ -182,22 +175,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "net_request"
-path = "fuzz_targets/net_request.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "net_bodies"
 path = "fuzz_targets/net_bodies.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "net_relay"
-path = "fuzz_targets/net_relay.rs"
 test = false
 doc = false
 bench = false

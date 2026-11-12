@@ -24,8 +24,8 @@ const reading = ({ host, at = NOW, cpu, threads, used, total, gpus = [], platfor
   hardware: { platform, arch: "x64", cpu: { model: "CPU", threads, ghz: 3 }, memory: { total: total * GB }, gpus: gpus.map((g) => ({ name: g.name ?? "GPU", memTotal: g.total == null ? null : g.total * GB, shared: !!g.shared })) },
 });
 
-const row = (id, extra = {}) => ({ id, keyId: "x", window: true, founder: false, gateway: false, online: true, seen: NOW, agents: 0, waitsOnYou: 0, you: false, platform: "linux", ...extra });
-const net = (hosts, self = "studio", window = true) => ({ schema: "network/state/v1", network: { id: "net_x", name: "home" }, self: { id: self, window, founder: true, gateway: true }, hosts });
+const row = (id, extra = {}) => ({ id, keyId: "x", window: true, founder: false, online: true, seen: NOW, agents: 0, waitsOnYou: 0, you: false, platform: "linux", ...extra });
+const net = (hosts, self = "studio", window = true) => ({ schema: "network/state/v1", network: { id: "net_x", name: "home" }, self: { id: self, window, founder: true }, hosts });
 
 // studio (here): 16 threads at 50%, 64 GB with 32 used, an NVIDIA card at
 // 80% with 8 of its 16 GB. laptop: an Apple chip, 8 threads at 25%, 32 GB

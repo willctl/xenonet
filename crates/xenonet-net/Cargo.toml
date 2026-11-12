@@ -11,15 +11,13 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-# A link's down stream, as the service's front door hands it to hyper.
-bytes.workspace = true
 # The transport between machines, and finding members on the LAN.
 iroh.workspace = true
 iroh-mdns-address-lookup.workspace = true
 # The mDNS lookup's answers, as a stream, with unlisted relays taken out.
 futures.workspace = true
 ring.workspace = true
-rusqlite.workspace = true
+# svc: a published service on this machine, called on behalf of another.
 reqwest.workspace = true
 rustls.workspace = true
 serde_json.workspace = true

@@ -6092,7 +6092,6 @@ dependencies = [
 name = "xenonet-net"
 version = "0.2.0"
 dependencies = [
- "bytes",
  "futures",
  "iroh",
  "iroh-mdns-address-lookup",
@@ -6100,7 +6099,6 @@ dependencies = [
  "rcgen",
  "reqwest",
  "ring",
- "rusqlite",
  "rustls",
  "serde_json",
  "tokio",

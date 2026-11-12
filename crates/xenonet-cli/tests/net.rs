@@ -4,8 +4,8 @@
 // a network and publishing a service are the person's, and making the
 // first network sets up their identity, which asks them, so from a
 // terminal it's refused, and the refusal is what's checked. (The network
-// made from the window, its LAN door and its services are the service's
-// own tests, crates/xenonet-service/tests/net*.rs.)
+// made from the window and its services are the service's own tests,
+// crates/xenonet-service/tests/net*.rs.)
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
@@ -116,11 +116,11 @@ fn status(addr: &str, method: &str, path: &str, headers: &[(&str, &str)]) -> u16
 
 #[test]
 fn net_makes_a_network_or_is_refused_from_under_an_agent() {
-    // The service's API, its actor gateway, and the network's LAN door.
-    let [port, gateway_port, lan] = free_ports();
+    // The service's API and its actor gateway.
+    let [port, gateway_port] = free_ports();
     let s = Service::start(port, gateway_port);
-    let lan = format!("127.0.0.1:{lan}");
-    let lan = lan.as_str();
+    let gateway = format!("127.0.0.1:{gateway_port}");
+    let gateway = gateway.as_str();
     let (code, out, err) = s.run(&["--help"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("net "), "the command is listed: {out}");
@@ -147,24 +147,21 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, _, err) = s.run(&["net", "revoke-device"]);
     assert_eq!(code, 1);
     assert!(err.contains("XenoNet's window"), "{err}");
-    let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--lan", lan, "--json"]);
+    let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--json"]);
     if code != 0 {
         // Under an agent, or (with no identity here yet, which making the
         // first network sets up and which asks the person) from any
         // terminal: that's XenoNet's window's.
         assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex") || err.contains("window"), "refused for what it is: {err}");
-        assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 0, "nothing listens");
         return;
     }
     let st: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(st["network"]["name"], "home");
     assert_eq!(st["self"]["id"], "studio");
-    assert_eq!(st["gateway"]["kind"], "loopback");
-    // The LAN door: the network's routes for its own address alone.
-    assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 401, "unsigned");
-    assert_eq!(status(lan, "GET", "/net/v1/roster", &[("Host", "evil.example")]), 421);
-    assert_eq!(status(lan, "GET", "/net/v1/roster", &[("Origin", "http://evil.example")]), 403);
-    assert_eq!(status(lan, "POST", "/mcp", &[]), 404);
+    assert_eq!(st["link"]["state"], "live");
+    assert!(st.get("gateway").is_none(), "no gateway: {st}");
+    // No door serves the network between machines: they meet on link/2.
+    assert_eq!(status(gateway, "GET", "/net/v1/roster", &[]), 404, "the actor gateway has no /net/v1");
     let (code, out, _) = s.run(&["net", "status"]);
     assert_eq!(code, 0);
     assert!(out.contains("home") && out.contains("studio"), "{out}");
@@ -195,10 +192,9 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
         assert!(err.contains("window"), "{err}");
     }
     let (code, _, err) = s.run(&["net", "leave"]);
-    assert_eq!(code, 1, "the founder and gateway leaves only with --force");
+    assert_eq!(code, 1, "the founder leaves only with --force");
     assert!(err.contains("--force"), "{err}");
     let (code, out, err) = s.run(&["net", "leave", "--force"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("left home"), "{out}");
-    assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 0, "the LAN door closed");
 }

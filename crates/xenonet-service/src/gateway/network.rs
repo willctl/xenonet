@@ -7,23 +7,17 @@
 //! sink that logs takes what arrives.
 
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use xenonet_model::ops::Net;
 use xenonet_net::node::{Node, Options};
 use xenonet_net::nodes::Nodes;
 use xenonet_net::persist::Persist;
 use xenonet_net::sink::{LogFn, LogSink, SinkSlot};
-use xenonet_net::{NetError, R};
-use xenonet_os::sync::Locked;
+use xenonet_net::R;
 
 pub struct NetService {
-    this: std::sync::Weak<NetService>,
     nodes: Arc<Nodes>,
-    /// Follows each network's gateway when it moves, by network id.
-    watchers: Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 impl NetService {
@@ -33,47 +27,7 @@ impl NetService {
         let log = opts.log.clone();
         let sinks = Arc::new(SinkSlot::new(Arc::new(LogSink::new(log))));
         let nodes = Nodes::open(opts, sinks)?;
-        Ok(Arc::new_cyclic(|this| NetService { this: this.clone(), nodes, watchers: Mutex::new(BTreeMap::new()) }))
-    }
-
-    /// When a network's gateway moves, its link starts again toward it: on
-    /// the host that took over, with its gateway and LAN listener; on the
-    /// one that gave it up, after a while, so the hosts linked to it hear
-    /// first. One watcher a network.
-    fn watch(&self) {
-        let mut watchers = self.watchers.locked();
-        let nodes = self.nodes.nodes();
-        let ids: Vec<String> = nodes.iter().filter_map(|n| n.shared().network().map(|f| f.id)).collect();
-        watchers.retain(|id, t| {
-            let keep = ids.contains(id);
-            if !keep {
-                t.abort();
-            }
-            keep
-        });
-        for node in nodes {
-            let Some(id) = node.shared().network().map(|f| f.id) else { continue };
-            if watchers.contains_key(&id) {
-                continue;
-            }
-            let weak = self.this.clone();
-            let task = tokio::spawn(async move {
-                loop {
-                    node.shared().relinked().await;
-                    let was = node.gateway().is_some();
-                    if was && !node.shared().is_gateway() {
-                        tokio::time::sleep(std::time::Duration::from_millis(node.shared().timing().handover_ms)).await;
-                    }
-                    if weak.upgrade().is_none() {
-                        return;
-                    }
-                    if let Err(e) = node.start() {
-                        node.shared().log("net.gateway", &format!("the link didn't start again after the gateway moved: {}", e.message));
-                    }
-                }
-            });
-            watchers.insert(id, task);
-        }
+        Ok(Arc::new(NetService { nodes }))
     }
 
     /// The service's own options: its state folder, where the networks are
@@ -82,9 +36,6 @@ impl NetService {
     pub fn options(state_dir: &str, persist: Arc<dyn Persist>, home: &str, version: &str, log: LogFn) -> Options {
         let mut o = Options::new(Path::new(state_dir).join("network"), persist, version, crate::borrowed::platform(), log);
         o.desktop = desktop_installed(home);
-        // link/2 beside the gateway's link (phase 5). mDNS stays off until
-        // the person answers its question at network setup.
-        o.link = true;
         o
     }
 
@@ -108,25 +59,12 @@ impl NetService {
         self.nodes.sink()
     }
 
-    /// Starts each network's link, the LAN listeners of the networks whose
-    /// LAN-only gateway this host is, and link/2, and follows each gateway
-    /// when it moves.
+    /// Starts each network's node on link/2.
     pub fn start(self: &Arc<Self>) -> impl std::future::Future<Output = R<()>> {
-        self.watch();
         std::future::ready(self.nodes.start())
     }
 
-    /// A network was made, joined or left: each gateway's move is followed,
-    /// and the LAN listeners are the gateways' here.
-    pub fn networks_changed(&self) {
-        self.watch();
-    }
-
     pub fn stop(&self) {
-        for (_, t) in std::mem::take(&mut *self.watchers.locked()) {
-            t.abort();
-        }
-
         self.nodes.stop();
     }
 
@@ -147,14 +85,6 @@ impl xenonet_api::cores::NetLink for NetService {
 
     fn governance(&self) -> Option<Arc<dyn xenonet_net::ground::Governance>> {
         Some(self.nodes.clone())
-    }
-}
-
-impl Drop for NetService {
-    fn drop(&mut self) {
-        for (_, t) in std::mem::take(&mut *self.watchers.locked()) {
-            t.abort();
-        }
     }
 }
 
@@ -183,12 +113,6 @@ pub fn desktop_installed(home: &str) -> bool {
     desktop_places(home).iter().any(|p| p.exists())
 }
 
-/// A LAN address as the person gives it (xenonet-http's net routes read it
-/// so too): an IP address this machine has and a port, never 0.0.0.0.
-pub fn parse_lan(text: &str) -> R<SocketAddr> {
-    xenonet_http::routes::net::parse_lan(text).map_err(NetError::bad)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,14 +126,5 @@ mod tests {
         std::fs::create_dir_all(home.join("Applications").join("XenoNet.app")).unwrap();
         assert!(desktop_installed(&home.to_string_lossy()), "in ~/Applications");
         let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn lan_addresses_are_this_machines() {
-        assert_eq!(parse_lan("192.168.1.5:47850").unwrap().to_string(), "192.168.1.5:47850");
-        assert!(parse_lan("0.0.0.0:47850").is_err());
-        assert!(parse_lan("[::]:47850").is_err());
-        assert!(parse_lan("192.168.1.5:0").is_err());
-        assert!(parse_lan("gw.example.net:1").is_err());
     }
 }

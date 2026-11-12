@@ -24,8 +24,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use xenonet_api::cores::{self, Cores, SelfApi, State, R};
 use xenonet_model::ops::{Kind, Outgoing, To};
-use xenonet_net::gwstore::Caps;
-use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_net::node::{now_ms, Options};
 use xenonet_os::log::Log;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
@@ -158,13 +157,10 @@ fn options(dir: &Path, who: &str) -> Options {
             }
         }),
     );
-    o.timing = Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 };
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
-    o.caps = Caps::default();
     // link/2's and join/2's endpoints on loopback alone.
     o.bind = Some("127.0.0.1:0".parse().unwrap());
-    o.link = true;
     o
 }
 

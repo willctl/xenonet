@@ -12,7 +12,6 @@ use crate::gateway::control::GatewayControl;
 use crate::gateway::network::NetService;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use xenonet_http::parts::{self, NetChange, NetResult, SvcAnswer, SvcCall};
 use xenonet_net::node::Change;
@@ -145,45 +144,14 @@ impl parts::Network for NetService {
     fn host(&self, network: Option<&str>) -> Option<String> {
         self.on(network).ok()?.shared().network().map(|n| n.host)
     }
-    fn is_gateway(&self, network: Option<&str>) -> bool {
-        self.on(network).is_ok_and(|n| n.shared().is_gateway())
-    }
-    // No LAN door: the machines of a network reach each other on link/2,
-    // which finds them on the LAN by itself.
-    async fn listen(&self, addr: SocketAddr) -> Result<(), CoreError> {
-        Err(refusal(NetError::bad(format!("XenoNet doesn't listen on {addr}: machines reach each other on link/2, which finds them on the LAN by itself"))))
-    }
-    fn unlisten(&self) {}
-    fn lans(&self) -> Vec<SocketAddr> {
-        Vec::new()
-    }
-    async fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, relay: Option<&str>, at_window: bool) -> NetResult {
-        let r = self.nodes().create(name, host, address, lan, relay, at_window).await;
-        self.networks_changed();
-        answered(r)
-    }
-    async fn join(&self, address: &str, ticket: &str) -> NetResult {
-        let r = self.nodes().join(address, ticket).await;
-        self.networks_changed();
-        answered(r)
+    async fn create(&self, name: &str, host: &str, relay: Option<&str>, at_window: bool) -> NetResult {
+        answered(self.nodes().create(name, host, relay, at_window).await)
     }
     async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult {
-        let r = self.nodes().join_invite(invite, code, at, lan).await;
-        self.networks_changed();
-        answered(r)
+        answered(self.nodes().join_invite(invite, code, at, lan).await)
     }
     async fn leave(&self, network: Option<&str>, force: bool) -> NetResult {
-        let r = self.nodes().leave(network, force).await;
-        self.networks_changed();
-        answered(r)
-    }
-    fn tunnel_address(&self, address: Option<&str>) {
-        for n in self.nodes().nodes() {
-            n.tunnel_address(address);
-        }
-    }
-    async fn ticket(&self, network: Option<&str>, host: &str, window: bool, at_window: bool) -> NetResult {
-        answered(self.on(network)?.ticket(host, window, at_window).await)
+        answered(self.nodes().leave(network, force))
     }
     async fn invite(&self, network: Option<&str>, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult {
         answered(self.on(network)?.invite(host, window, lan, at_window).await)
@@ -197,20 +165,13 @@ impl parts::Network for NetService {
     async fn approve(&self, network: Option<&str>, id: &str, at_window: bool) -> NetResult {
         answered(self.on(network)?.approve(id, at_window).await)
     }
-    async fn take_gateway(&self, network: Option<&str>, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult {
-        let r = self.on(network)?.take_gateway(address, lan, at_window).await;
-        self.networks_changed();
-        answered(r)
-    }
-    async fn set_gateway(&self, network: Option<&str>, address: &str) -> NetResult {
-        answered(self.on(network)?.set_gateway(address).await)
-    }
+
     async fn set_reach(&self, network: Option<&str>, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> NetResult {
         answered(self.on(network)?.set_reach(host, start, wake, at_window).await)
     }
     async fn settings(&self, network: Option<&str>, change: NetChange, at_window: bool) -> NetResult {
-        let NetChange { titles_only, share_load, lan, start, wake } = change;
-        answered(self.on(network)?.settings(Change { titles_only, share_load, lan, start, wake }, at_window).await)
+        let NetChange { titles_only, share_load, start, wake } = change;
+        answered(self.on(network)?.settings(Change { titles_only, share_load, start, wake }, at_window).await)
     }
     fn share(&self, network: Option<&str>, sharing: &Value, at_window: bool) -> NetResult {
         answered(self.nodes().share(network, sharing, at_window))

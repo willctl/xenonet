@@ -28,7 +28,6 @@
 //! nothing here logs a header.
 
 use crate::codec::random;
-use crate::gateway::Bucket;
 use crate::persist::Persist;
 use crate::{NetError, R};
 use serde_json::{json, Value};
@@ -39,6 +38,32 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 use xenonet_os::sync::{Locked, ReadWrite};
+
+/// A rate's bucket: `per_minute` at most, refilled as time goes.
+#[derive(Clone, Copy)]
+pub(crate) struct Bucket {
+    tokens: f64,
+    at: f64,
+}
+
+impl Bucket {
+    pub(crate) fn full(burst: f64, now: f64) -> Bucket {
+        Bucket { tokens: burst, at: now }
+    }
+
+    /// Takes one, or says how long until there's one.
+    pub(crate) fn take(&mut self, per_minute: f64, now: f64) -> Result<(), f64> {
+        let rate = per_minute / 60e3;
+        self.tokens = (self.tokens + (now - self.at) * rate).min(per_minute);
+        self.at = now;
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            Ok(())
+        } else {
+            Err((1.0 - self.tokens) / rate)
+        }
+    }
+}
 
 pub const SCHEMA: &str = "network/svc/v2";
 /// A request's body, at most.
@@ -1086,18 +1111,8 @@ mod tests {
     // What a machine in a network keeps, in memory.
     fn in_a_network() -> Arc<dyn Persist> {
         let kept = crate::persist::Memory::default();
-        let gateway = crate::files::Pin { host: "studio".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: None };
-        let net = crate::files::NetFile {
-            id: "net_0".into(),
-            name: "home".into(),
-            host: "studio".into(),
-            founder: "studio".into(),
-            gateway,
-            lan: None,
-            titles_only: false,
-            share_load: true,
-            joined: 0,
-        };
+        let net =
+            crate::files::NetFile { id: "net_0".into(), name: "home".into(), host: "studio".into(), founder: "studio".into(), titles_only: false, share_load: true, joined: 0 };
         kept.put_network(&net).unwrap();
         Arc::new(kept)
     }

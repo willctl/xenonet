@@ -214,6 +214,27 @@ pub struct Link {
 /// back.
 pub const CROSSING: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How long a connection to a peer that shares no network any more stays
+/// open: long enough for what was sent it last (the chain entry that
+/// removes it) to go, never longer. It carries nothing of the network's
+/// after this machine took the removal: every receiver decides what comes
+/// by its own chain, which no longer lists the peer.
+pub const REMOVED_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+// A connection that's no longer admitted, closed after REMOVED_GRACE, or
+// at once with no runtime to wait on.
+fn close_soon(l: Arc<Link>) {
+    match tokio::runtime::Handle::try_current() {
+        Ok(rt) => {
+            rt.spawn(async move {
+                tokio::time::sleep(REMOVED_GRACE).await;
+                l.close(Close::Removed);
+            });
+        }
+        Err(_) => l.close(Close::Removed),
+    }
+}
+
 /// Whether a connection that stands (dialled by `old`, `age` old) stays
 /// when another comes, dialled by `new`: only when the two crossed, and
 /// the one the lower endpoint id dialled is the old one.
@@ -475,11 +496,14 @@ impl Mesh {
                 return true;
             }
             let shared = self.admission.shared(peer);
-            if shared.is_empty() {
-                l.close(Close::Removed);
+            let none = shared.is_empty();
+            // What it carries is what's shared now: nothing, for one that
+            // closes after the grace.
+            *l.networks.writing() = shared;
+            if none {
+                close_soon(l.clone());
                 return false;
             }
-            *l.networks.writing() = shared;
             true
         });
     }

@@ -352,7 +352,7 @@ pub fn linked(w: &Runtime, up: bool) {
     }
 }
 
-/// The gateway lost frames: a full presence, and again what has no stored
+/// Entries were lost on the way: a full presence, and again what has no stored
 /// receipt.
 pub fn gap(w: &Runtime) {
     linked(w, true);

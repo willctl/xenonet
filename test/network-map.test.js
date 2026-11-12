@@ -11,8 +11,8 @@ import { remoteAgents, ALONE } from "../src/network-model.js";
 import { capHosts, HOST_CAP, hostLayout } from "../src/hosts.js";
 
 const NOW = Date.UTC(2026, 9, 21, 9, 0);
-const row = (id, more = {}) => ({ id, keyId: `xnk1_${"a".repeat(32)}`, window: true, founder: false, gateway: false, online: true, seen: NOW, agents: 0, waitsOnYou: 0, you: false, platform: "darwin", ...more });
-const state = (hosts) => ({ ...ALONE, network: { id: `net_${"0".repeat(32)}`, name: "home" }, self: { id: "studio", keyId: `xnk1_${"b".repeat(32)}`, window: true, founder: true, gateway: true }, hosts });
+const row = (id, more = {}) => ({ id, keyId: `xnk1_${"a".repeat(32)}`, window: true, founder: false, online: true, seen: NOW, agents: 0, waitsOnYou: 0, you: false, platform: "darwin", ...more });
+const state = (hosts) => ({ ...ALONE, network: { id: `net_${"0".repeat(32)}`, name: "home" }, self: { id: "studio", keyId: `xnk1_${"b".repeat(32)}`, window: true, founder: true }, hosts });
 const local = () => ({ nodes: [{ id: "core", kind: "core", name: "~/Projects", path: "~/Projects" }, { id: "project:atlas", kind: "project", name: "atlas" }], links: [{ source: "core", target: "project:atlas", kind: "contains" }], relations: [], stats: { sessions: 3, projects: 1, claude: 2, codex: 1, active: 1 } });
 
 const agents = () =>
@@ -33,7 +33,7 @@ test("out of a network, nothing joins the map", () => {
 });
 
 test("each other machine is a constellation: its host node, a project per repo or folder, and its sessions", () => {
-  const s = state([row("studio", { founder: true, gateway: true }), row("laptop"), row("rack", { window: false, online: false, seen: NOW - 7200e3 })]);
+  const s = state([row("studio", { founder: true }), row("laptop"), row("rack", { window: false, online: false, seen: NOW - 7200e3 })]);
   const part = networkPart(s, agents(), NOW);
   assert.deepEqual(part.hosts.map((x) => [x.id, x.state, x.network, x.sessions]), [["laptop", "live", true, 3], ["rack", "offline", true, 1]], "this machine isn't one of them");
   const byId = new Map(part.nodes.map((n) => [n.id, n]));

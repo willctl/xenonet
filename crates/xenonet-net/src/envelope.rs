@@ -64,9 +64,9 @@
 //! by its place or id anyway.
 
 use crate::codec::{b64, hash_b64, is_b64, sha256, unb64};
-use crate::frame::{open, seal, seal_with};
 use crate::keys::{HostKey, PublicKeys};
 use crate::roster::View;
+use crate::seal::{open, seal, seal_with};
 use crate::{NetError, R};
 use serde_json::{json, Map, Value};
 use std::collections::{HashSet, VecDeque};

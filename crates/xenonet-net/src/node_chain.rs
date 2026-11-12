@@ -146,11 +146,8 @@ impl Shared {
     /// The chain brought up to date with the members connected now, before
     /// this machine drafts an entry: each is asked for what it holds past
     /// this machine's length, and this machine waits for every answer, or
-    /// `SYNC`. A network with a gateway takes its entries in order there.
+    /// `SYNC`.
     pub(crate) async fn sync_chain(&self) {
-        if self.gatewayed() {
-            return;
-        }
         let (Some(t), Some(net)) = (self.link2(), self.network()) else { return };
         let peers = self.connected_members(None);
         if peers.is_empty() {

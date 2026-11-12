@@ -39,7 +39,7 @@ pub const STEPS: &str = r#"  launch[:inactive|front|hidden]  start it unless it'
                                   host-offline and host-online (a: another machine on the map,
                                   the first if left out) and host-skew[,host[,ms]];
                                   and a made-up network across machines: net-none,
-                                  net-founder, net-member, net-gateway-down, net-ticket,
+                                  net-founder, net-member, net-away, net-invite,
                                   net-mismatch and net-remote-waiting (a: the machine you're at;
                                   b: titles-only, the others share titles only; for
                                   net-founder, b: ask, a run on laptop waiting for your

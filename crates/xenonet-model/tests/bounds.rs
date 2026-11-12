@@ -34,7 +34,6 @@ mod made {
     pub fn untrusted() -> Vec<Doc> {
         vec![
             doc::<network::Claim>(),
-            doc::<network::Frame>(),
             doc::<network::Handoff>(),
             doc::<network::Message>(),
             doc::<network::Operator>(),
@@ -495,8 +494,8 @@ fn every_pattern_in_the_schemas_compiles_and_its_sample_matches() {
 }
 
 // The network's known answers (test/fixtures/net, which crates/xenonet-net
-// writes and checks) are real frames, a message frame's body with its feed
-// entry, a service request and roster entries: they read.
+// writes and checks) are a real feed entry, as a sealed envelope carries
+// it, and roster entries: they read.
 #[test]
 fn the_networks_known_answers_read_as_the_model_types() {
     use xenonet_model::network;
@@ -506,11 +505,8 @@ fn the_networks_known_answers_read_as_the_model_types() {
     fn of<T: serde::de::DeserializeOwned>(v: &serde_json::Value) -> Result<(), String> {
         serde_json::from_value::<T>(v.clone()).map(|_| ()).map_err(|e| e.to_string())
     }
-    for f in ["frame", "gatewayFrame"] {
-        read(f, of::<network::Frame>(&k[f]["frame"]));
-    }
-    read("frame.body", of::<network::Message>(&k["frame"]["body"]));
-    read("frame.body.entry.body", of::<network::SendBody>(&k["frame"]["body"]["entry"]["body"]));
+    read("sealedEnvelope.entry", of::<network::FeedEntry>(&k["sealedEnvelope"]["entry"]));
+    read("sealedEnvelope.entry.body", of::<network::SendBody>(&k["sealedEnvelope"]["entry"]["body"]));
     let roster = k["roster"].as_array().unwrap();
     assert_ne!(roster.len(), 0, "the known answers have a roster");
     for (i, e) in roster.iter().enumerate() {

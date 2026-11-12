@@ -1,19 +1,12 @@
-//! link/2 on this machine (`link2` has the protocol), beside the link to
-//! the gateway until the gateway goes (phase 5's commit 20).
+//! link/2 on this machine (`link2` has the protocol): how a network's
+//! machines reach each other.
 //!
 //! The node runs an iroh endpoint keyed by host.key, admits the members of
 //! its network's chain on it, and keeps a connection to each one it can
-//! reach. Everything the engine sends goes both ways: frames through the
-//! gateway, when the network has one, and envelopes on link/2. A kept
-//! entry a peer missed goes again on the next connect, from its hello. A
-//! network with no gateway's address runs on link/2 alone, its chain
-//! included (`chain2`).
-//!
-//! **Two copies.** Each entry may arrive twice, once each way. The copy
-//! that comes second, by the other way, is dropped here, by the entry's id,
-//! before anything reads its authority or a presence block in it: it is a
-//! silent duplicate, never a refused receipt or a second ask. A copy by the
-//! same way is the author sending again, which the feeds take as before.
+//! reach. Everything the engine sends goes as envelopes on link/2, the
+//! network's chain included (`node_chain`). A kept entry a peer missed goes
+//! again on the next connect, from its hello; an entry sent again is the
+//! feeds' to tell from the first.
 //!
 //! **Gaps** are filled from any member that holds the entries (`holder`):
 //! a Want goes to one holder at a time, the author first when it is
@@ -64,7 +57,7 @@
 //! its own chain. Its relays are the machine's (`nodes::home`): the ones
 //! every network lists, and the ones it adds of its own.
 
-use super::{json, Arc, Common, Duration, Locked, NetFile, ReadWrite, Shared, Value, Weak, RESEND};
+use super::{json, Arc, Common, Locked, NetFile, ReadWrite, Shared, Value, Weak, RESEND};
 use crate::dial::{Close, Dial, Mesh, PeerId};
 use crate::endpoint::{added_roots, peer_id, IrohDial, Relay, Relays, Settings};
 use crate::envelope::{Class as EnvClass, Envelope, Me as Recipient};
@@ -74,6 +67,7 @@ use crate::mailbox::{self, Post};
 use crate::presence::{self as live, Live};
 use crate::roster::Member;
 use std::collections::{HashMap, VecDeque};
+use std::time::Duration;
 use std::time::Instant;
 use xenonet_id::hlc::{Clock, Hlc};
 use xenonet_log::address::AddressRecord;
@@ -83,50 +77,6 @@ use xenonet_log::feed::{FeedEntry, Pos, Verified};
 const ADDRESS_TTL_S: u64 = 600;
 /// Where the members' address records are kept, in the network's folder.
 const ADDRESSES: &str = "addresses.json";
-/// How many entry ids are remembered to tell the second copy from the
-/// first.
-const TAKEN: usize = 65_536;
-
-/// Which way an entry came.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Via {
-    Gateway,
-    Link,
-}
-
-/// The entries taken lately, by id, and the way each came first.
-#[derive(Default)]
-pub struct Taken {
-    by: HashMap<String, Via>,
-    order: VecDeque<String>,
-    /// Copies dropped because they came the other way.
-    pub second: u64,
-}
-
-impl Taken {
-    /// Whether an entry that came `via` is to be taken: the first copy, or
-    /// another by the same way (its author sent it again). A copy by the
-    /// other way is the second of the two dual sending makes.
-    pub fn take(&mut self, id: &str, via: Via) -> bool {
-        match self.by.get(id) {
-            Some(v) if *v != via => {
-                self.second += 1;
-                false
-            }
-            Some(_) => true,
-            None => {
-                self.by.insert(id.to_string(), via);
-                self.order.push_back(id.to_string());
-                while self.order.len() > TAKEN {
-                    if let Some(old) = self.order.pop_front() {
-                        self.by.remove(&old);
-                    }
-                }
-                true
-            }
-        }
-    }
-}
 
 /// How this machine stands on link/2: its endpoint, mesh and connections,
 /// and what it learned of where members are.
@@ -135,7 +85,7 @@ pub struct Transport2 {
     pub mesh: Arc<Mesh>,
     pub links: Arc<Links>,
     /// The ways each member's address was found, by network and host id:
-    /// in its presence through the gateway, or in a record on link/2.
+    /// at join, or in a record on link/2.
     pub found: std::sync::Mutex<std::collections::BTreeMap<(String, String), std::collections::BTreeSet<&'static str>>>,
     /// This machine's own address record in each network, and when it was
     /// signed.
@@ -231,13 +181,9 @@ impl Shared {
         self.roster().view_ref().map(|v| v.members.values().map(|m| (peer_id(&m.keys), v.is_window(&m.id) || v.is_mailbox(&m.id))).collect()).unwrap_or_default()
     }
 
-    /// Takes an entry another member's feed sent, which came `via`: once,
-    /// whichever way came first. Its time moves this machine's HLC, never
-    /// more than five minutes past its own clock.
-    pub(super) fn take_entry(&self, host: String, v: Verified, authority: Value, window: bool, via: Via) -> bool {
-        if !self.common.taken.locked().take(&v.id(), via) {
-            return false;
-        }
+    /// Takes an entry another member's feed sent. Its time moves this
+    /// machine's HLC, never more than five minutes past its own clock.
+    pub(super) fn take_entry(&self, host: String, v: Verified, authority: Value, window: bool) -> bool {
         let now = self.now().max(0.0) as u64;
         self.common.clocks.locked().hlc.receive(Hlc::new(v.at, 0), now);
         if v.kind == xenonet_log::feed::Kind::Message && v.body.get("target").and_then(Value::as_str) == Some(super::PERSON_TARGET) {
@@ -272,11 +218,6 @@ impl Shared {
                 let _ = t.links.send(peer, o);
             }
         }
-    }
-
-    /// How many copies were dropped for coming second, the other way.
-    pub fn second_copies(&self) -> u64 {
-        self.common.taken.locked().second
     }
 
     /// How far this machine's HLC is ahead of its clock, in ms.
@@ -545,7 +486,7 @@ impl Shared {
     }
 
     /// The members' address records, kept with the network's files: after
-    /// a restart, with no gateway to meet at, this machine dials the
+    /// a restart, with no one place to meet at, this machine dials the
     /// members where they were last, and hears where they are now.
     fn keep_records(&self, network: &str) {
         let records: Vec<Value> = self.link2().map(|t| t.records.locked().iter().filter(|((n, _), _)| n == network).map(|(_, (_, v))| v.clone()).collect()).unwrap_or_default();
@@ -793,7 +734,7 @@ impl Machine for NodeMachine {
         };
         let (v, authority) = v;
         if !from_holder {
-            n.take_entry(m.id, v, authority, window, Via::Link);
+            n.take_entry(m.id, v, authority, window);
             return out;
         }
         // Another member's entry, which `m` holds or kept as a mailbox,
@@ -807,7 +748,7 @@ impl Machine for NodeMachine {
         // A holder serves kept entries, which rest on no authority; a
         // mailbox hands on the one sealed beside a message.
         let authority = if from_mailbox { authority } else { json!({}) };
-        n.take_entry(author.id.clone(), v, authority, view.is_window(&author.id), Via::Link);
+        n.take_entry(author.id.clone(), v, authority, view.is_window(&author.id));
         out
     }
 
@@ -1098,6 +1039,13 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
     for n in common.shareds() {
         n.members_changed();
     }
+    // The engine says its presence whole again now there's an endpoint to
+    // carry it: what it said before, while none ran (a machine that just
+    // joined its first network), went nowhere, and a connection sends a
+    // peer only what was said.
+    if let Some(n) = common.shareds().into_iter().find(|n| !n.is_removed()) {
+        xenonet_model::ops::Sink::linked(n.sink.as_ref(), true);
+    }
     s.log("net.link2", "link/2 is listening");
     drop((s, common));
     tokio::join!(links.clone().accept(), links.keep_up(), fetch_clock(c));
@@ -1141,21 +1089,5 @@ pub fn stop(c: &Common) {
     }
     if let Ok(rt) = tokio::runtime::Handle::try_current() {
         rt.spawn(async move { t.mesh.close().await });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_second_copy_by_the_other_way_is_dropped_and_a_resend_by_the_same_way_is_not() {
-        let mut t = Taken::default();
-        assert!(t.take("e1", Via::Gateway));
-        assert!(!t.take("e1", Via::Link), "the copy link/2 brought second");
-        assert!(t.take("e1", Via::Gateway), "the author sent it again the same way: the feed says it's a duplicate");
-        assert!(t.take("e2", Via::Link));
-        assert!(!t.take("e2", Via::Gateway));
-        assert_eq!(t.second, 2);
     }
 }

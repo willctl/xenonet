@@ -5,17 +5,17 @@
 // sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, frozenWords, reachOf, hostCan, widenWords, delegationWords, STARTS, START_WORDS, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, hostLine, hostTags, inviteWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, frozenWords, reachOf, hostCan, widenWords, delegationWords, STARTS, START_WORDS, ALONE, INVITE_MS, AWAY_MS } from "../src/network-model.js";
 import { parse } from "./harness/schema.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
-const host = (id, more = {}) => ({ id, keyId: `xnk1_${"a".repeat(32)}`, window: true, founder: false, gateway: false, online: true, seen: NOW, agents: 0, waitsOnYou: 0, you: false, platform: "darwin", ...more });
+const host = (id, more = {}) => ({ id, keyId: `xnk1_${"a".repeat(32)}`, window: true, founder: false, online: true, seen: NOW, agents: 0, waitsOnYou: 0, you: false, platform: "darwin", ...more });
 const founder = () => ({
   ...ALONE,
   network: { id: `net_${"0".repeat(32)}`, name: "home" },
-  self: { id: "studio", keyId: `xnk1_${"b".repeat(32)}`, window: true, founder: true, gateway: true },
-  gateway: { address: "gw.example.net", keyId: `xnk1_${"b".repeat(32)}`, kind: "tunnel", link: "live", since: NOW - 3600e3, reason: null, skewMs: 0 },
-  hosts: [host("studio", { founder: true, gateway: true, you: true }), host("laptop", { agents: 2 }), host("rack", { window: false, online: false, seen: NOW - 7200e3, agents: 1 })],
+  self: { id: "studio", keyId: `xnk1_${"b".repeat(32)}`, window: true, founder: true },
+  link: { state: "live", since: NOW - 3600e3, reason: null },
+  hosts: [host("studio", { founder: true, you: true }), host("laptop", { agents: 2 }), host("rack", { window: false, online: false, seen: NOW - 7200e3, agents: 1 })],
   rosterHead: "abc",
 });
 
@@ -23,7 +23,7 @@ test("anything but a network/state/v1 answer is a machine on its own, and the an
   for (const raw of [null, undefined, "x", {}, { schema: "network/state/v2" }, { error: "not found" }]) {
     const s = stateOf(raw);
     assert.equal(inNetwork(s), false);
-    assert.deepEqual([s.hosts, s.tickets, s.rosterMismatch], [[], [], []]);
+    assert.deepEqual([s.hosts, s.invites.open, s.rosterMismatch], [[], [], []]);
   }
   parse("network/state/v1", stateOf(null));
   const s = stateOf(founder());
@@ -34,30 +34,26 @@ test("anything but a network/state/v1 answer is a machine on its own, and the an
 });
 
 test("a machine in several networks: each listed, the first at the top, and the one picked in its place", () => {
-  const work = { id: `net_${"e".repeat(32)}`, name: "work", host: "studio-w", hosts: [host("studio-w"), host("lab")], gateway: { address: "10.0.0.9:47851", keyId: `xnk1_${"c".repeat(32)}`, kind: "lan", link: "live", since: NOW, reason: null, skewMs: 0 }, self: { id: "studio-w", keyId: `xnk1_${"d".repeat(32)}`, window: false, founder: false, gateway: false }, sharing: ["prj_web", 5], relays: ["https://relay.example.net", null] };
+  const work = { id: `net_${"e".repeat(32)}`, name: "work", host: "studio-w", hosts: [host("studio-w"), host("lab")], link: { state: "live", since: NOW, reason: null }, self: { id: "studio-w", keyId: `xnk1_${"d".repeat(32)}`, window: false, founder: false }, sharing: ["prj_web", 5], relays: ["https://relay.example.net", null] };
   const raw = { ...founder(), sharing: "all", networks: [{ id: founder().network.id, name: "home", host: "studio", hosts: founder().hosts, sharing: "all", relays: [] }, work, { name: "no id" }] };
   const first = stateOf(raw);
   assert.deepEqual(first.networks.map((n) => [n.name, n.host]), [["home", "studio"], ["work", "studio-w"]], "one with no id isn't listed");
   assert.deepEqual([first.network.name, first.self.id, first.hosts.length], ["home", "studio", 3]);
   const picked = stateOf(raw, work.id);
-  assert.deepEqual([picked.network, picked.self.id, picked.hosts.map((x) => x.id), picked.gateway.address], [{ id: work.id, name: "work" }, "studio-w", ["studio-w", "lab"], "10.0.0.9:47851"]);
+  assert.deepEqual([picked.network, picked.self.id, picked.hosts.map((x) => x.id), picked.link.since], [{ id: work.id, name: "work" }, "studio-w", ["studio-w", "lab"], NOW]);
   assert.deepEqual([picked.sharing, picked.relays], [["prj_web"], ["https://relay.example.net"]], "read leniently");
   assert.equal(stateOf(raw, "net_gone").network.name, "home", "a network that isn't there any more: the first");
   parse("network/state/v1", picked);
 });
 
-test("the link to the gateway in a word, with since when and why", () => {
-  assert.equal(linkWords(null).state, "none");
-  assert.match(linkWords(null).sub, /Set up… in the Actors panel/);
-  assert.deepEqual([linkWords({ link: "live", since: NOW }).state, linkWords({ link: "live" }).word], ["ok", "Linked"]);
-  const down = linkWords({ link: "offline", since: NOW - 25 * 60e3, reason: "timed out" }, NOW);
-  assert.equal(down.word, "Can't reach the gateway");
-  assert.match(down.sub, /since .*: timed out\. This machine keeps working/);
-  assert.match(linkWords({ link: "removed" }).sub, /xenonet net leave/);
-  assert.equal(linkWords({ link: "connecting" }).state, "wait");
-  assert.equal(skewWords(500), "");
-  assert.equal(skewWords(-3000), "clock 3 s off the gateway's");
-  assert.equal(skewWords(5 * 60e3), "clock 5 min off the gateway's");
+test("how this machine stands in the network, in a word, with since when and why", () => {
+  assert.equal(linkWords(null).state, "off");
+  assert.deepEqual([linkWords({ state: "live", since: NOW }).state, linkWords({ state: "live" }).word], ["ok", "In the network"]);
+  assert.match(linkWords({ state: "live", since: NOW - 60e3 }, NOW).sub, /^Reaching its machines since /);
+  const out = linkWords({ state: "removed", since: NOW, reason: "removed by studio" }, NOW);
+  assert.equal(out.state, "bad");
+  assert.match(out.sub, /: removed by studio\. Run xenonet net leave/);
+  assert.equal(linkWords({ state: "off" }).word, "Off");
 });
 
 test("each machine's line and marks", () => {
@@ -65,10 +61,11 @@ test("each machine's line and marks", () => {
   assert.equal(hostLine(s.hosts[1], NOW), "online · 2 agents");
   assert.equal(hostLine({ ...s.hosts[1], waitsOnYou: 1 }, NOW), "online · 2 agents · 1 waiting on you");
   assert.match(hostLine(s.hosts[2], NOW), /^offline since .+ · 1 agent when last seen$/);
-  assert.deepEqual(hostTags(s.hosts[0], s.self), ["this machine", "you're here", "founder", "gateway", "window"]);
+  assert.deepEqual(hostTags(s.hosts[0], s.self), ["this machine", "you're here", "founder", "window"]);
   assert.deepEqual(hostTags(s.hosts[2], s.self), []);
-  assert.equal(outboxWords({ frames: 0, bytes: 0, oldest: null }), "Nothing waits to go to other machines.");
-  assert.match(outboxWords({ frames: 3, bytes: 2816, oldest: NOW - 60e3 }, NOW), /^3 items wait in the outbox \(3 KB\), the oldest from .+\. They go when the gateway answers\.$/);
+  // What its mailboxes hold for a machine that's away.
+  assert.match(hostLine({ ...s.hosts[2], held: 3 }, NOW), /^offline since .+ · 1 agent when last seen · 3 items held for it$/);
+  assert.match(inviteWords({ host: "desk", window: true, expires: NOW + 60e3, wrong: 2 }, NOW), /^desk, with a window: works until .+ \(2 wrong codes\)$/);
 });
 
 test("other machines' agents come from the engine's list by their @<host>: ids, however it words a wait", () => {
@@ -158,17 +155,23 @@ test("a new machine's id, and the join line's secret part", () => {
   assert.match(hostIdProblem("laptop", s), /Replace/);
   assert.equal(joinOf(null), null);
   assert.equal(joinOf({ ok: true }), null);
-  assert.deepEqual(joinOf({ ticket: "KX7Q-49MZ-T2", address: "gw.example.net", expires: NOW }, NOW), { line: "xenonet net join gw.example.net KX7Q-49MZ-T2", secret: "KX7Q-49MZ-T2", expires: NOW });
-  assert.deepEqual(joinOf({ line: "xenonet net join 10.0.0.5:47850 AAAA-BBBB-CC" }, NOW), { line: "xenonet net join 10.0.0.5:47850 AAAA-BBBB-CC", secret: "AAAA-BBBB-CC", expires: NOW + TICKET_MS });
-  assert.deepEqual(joinFields(" xenonet net join gw.example.net KX7Q-49MZ-T2 ", ""), { address: "gw.example.net", ticket: "KX7Q-49MZ-T2" });
-  assert.deepEqual(joinFields(" gw.example.net ", " KX7Q-49MZ-T2"), { address: "gw.example.net", ticket: "KX7Q-49MZ-T2" });
+  assert.equal(joinOf({ ticket: "KX7Q-49MZ-T2", address: "gw.example.net" }), null, "a ticket is no invite");
+  const invite = "xni2_aGVsbG8";
+  // Through the network's relay, the line needs no address; with none, it
+  // names where the inviter is, or the LAN.
+  assert.deepEqual(joinOf({ invite, code: "KX7Q-49MZ-T2", relay: "https://relay.example.net", expires: NOW }, NOW), { line: `xenonet net join ${invite} KX7Q-49MZ-T2`, secret: "KX7Q-49MZ-T2", expires: NOW });
+  assert.deepEqual(joinOf({ invite, code: "AAAA-BBBB-CC", relay: null, at: ["192.168.1.20:47861"] }, NOW), { line: `xenonet net join ${invite} AAAA-BBBB-CC --at 192.168.1.20:47861`, secret: "AAAA-BBBB-CC", expires: NOW + INVITE_MS });
+  assert.equal(joinOf({ invite, code: "AAAA-BBBB-CC", lan: true }, NOW).line, `xenonet net join ${invite} AAAA-BBBB-CC --mdns`);
+  assert.deepEqual(joinFields(` xenonet net join ${invite} KX7Q-49MZ-T2 --at 10.0.0.5:47861 `, ""), { invite, code: "KX7Q-49MZ-T2", at: "10.0.0.5:47861", lan: false });
+  assert.deepEqual(joinFields(`xenonet net join ${invite} KX7Q-49MZ-T2 --mdns`, ""), { invite, code: "KX7Q-49MZ-T2", at: null, lan: true });
+  assert.deepEqual(joinFields(` ${invite} `, " KX7Q-49MZ-T2"), { invite, code: "KX7Q-49MZ-T2", at: null, lan: false });
 });
 
 test("what waits for approval says what it does and who asked", () => {
-  const add = { id: "e1", op: "add", host: "den", window: true, gateway: null, signers: ["laptop"], at: NOW };
-  const move = { id: "e2", op: "gateway", host: "desk", window: false, gateway: "10.0.0.7:47850", signers: ["desk"], at: NOW };
+  const add = { id: "e1", op: "add", host: "den", window: true, signers: ["laptop"], at: NOW };
+  const settings = { id: "e2", op: "settings", host: "desk", window: false, signers: ["desk"], at: NOW };
   assert.equal(proposalWords(add), "add den as a window host, asked by laptop");
-  assert.equal(proposalWords(move), "desk to be the gateway, at 10.0.0.7:47850, asked by desk");
+  assert.equal(proposalWords(settings), "settings desk, asked by desk");
   // Read leniently: one without an id can't be approved, so it isn't listed.
   const s = stateOf({ ...founder(), proposals: [add, { op: "add", host: "x1" }, null] });
   assert.deepEqual(s.proposals.map((p) => p.id), ["e1"]);

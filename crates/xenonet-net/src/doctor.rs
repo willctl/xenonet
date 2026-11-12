@@ -1,12 +1,12 @@
 //! What the doctor says about the network (docs/design/network.md, "The
 //! wire"), from what this machine keeps of it alone: the network, its
-//! roster and key, the link (up, or down since when and why), the
-//! gateway's key against the pinned one, the clock, the outbox and the
-//! queues, a member's feed frozen by a fork, a roster mismatch, being
-//! removed, and what the gateway's address means.
+//! chain and key, being removed, how it reaches each member on link/2
+//! (online, by a direct path or a relay), the members' clocks, what a
+//! mailbox holds of this machine's, a member's feed frozen by a fork, and
+//! a chain mismatch.
 //!
-//! The link keeps how it stands; these checks read it, so they work
-//! whether the link is running or not.
+//! The node keeps how it stands (`link.json`); these checks read it, so
+//! they work whether the service is running or not.
 //!
 //! The relays are the exception: each one the machine has (every
 //! network's list, and its own) is asked (`relays`), the way the endpoint
@@ -67,7 +67,6 @@ pub fn checks(d: &Dir, now: f64) -> Vec<Check> {
     out.push(("network.files", "The network's files are in order", files(d, &net.id, &net.host)));
     let link = d.read_link(&net.id).unwrap_or(Value::Null);
     let s = |k: &str| link.get(k).and_then(Value::as_str);
-    let gateway_here = link.get("gateway").and_then(Value::as_bool) == Some(true);
 
     // Removed.
     let removed = s("state") == Some("removed");
@@ -80,114 +79,78 @@ pub fn checks(d: &Dir, now: f64) -> Vec<Check> {
             verdict("ok", format!("{} in {}", net.host, net.name), None)
         },
     ));
+    let hosts: Vec<Value> = link.get("hosts").and_then(Value::as_array).cloned().unwrap_or_default();
+    let text = |h: &Value, k: &str| h.get(k).and_then(Value::as_str).unwrap_or("").to_string();
 
-    // The link.
-    let since = link.get("since").and_then(Value::as_f64);
-    let reason = s("reason").map(str::to_string);
-    let link_check = match s("state") {
-        _ if removed => verdict("skip", "removed from the network", None),
-        Some("live") if gateway_here => verdict("ok", "this machine is the network's gateway", None),
-        Some("live") => verdict(
-            "ok",
-            format!("live{}", if link.get("longPoll").and_then(Value::as_bool) == Some(true) { ", a request at a time (a proxy holds streams back)" } else { "" }),
-            None,
-        ),
-        Some("connecting") => verdict("info", "connecting to the gateway", None),
-        Some(state @ ("offline" | "refused")) => {
-            let at = since.map_or_else(String::new, |t| format!(" since {} UTC ({} ago)", clock_time(t), span(now - t)));
-            let why = reason.unwrap_or_else(|| if state == "refused" { "refused".into() } else { "no answer".into() });
-            verdict(
-                "warn",
-                format!("The network's gateway hasn't answered{at}: {why}"),
-                Some("What's for other machines goes again when the gateway is back. XenoNet tries again by itself."),
-            )
-        }
-        _ => verdict("info", "the link isn't running: XenoNet's service runs it", Some("xenonet service start")),
+    // How it reaches each member.
+    let online: Vec<&Value> = hosts.iter().filter(|h| h.get("online").and_then(Value::as_bool) == Some(true)).collect();
+    let away: Vec<String> = hosts
+        .iter()
+        .filter(|h| h.get("online").and_then(Value::as_bool) != Some(true))
+        .map(|h| match h.get("seen").and_then(Value::as_f64) {
+            Some(t) => format!("{} (since {} UTC, {} ago)", text(h, "id"), clock_time(t), span(now - t)),
+            None => text(h, "id"),
+        })
+        .collect();
+    let by_relay: Vec<String> = online.iter().filter(|h| h.get("path").and_then(Value::as_str) == Some("relay")).map(|h| text(h, "id")).collect();
+    let path = if removed {
+        verdict("skip", "removed from the network", None)
+    } else if s("state") != Some("live") {
+        verdict("info", "the network isn't running here: XenoNet's service runs it", Some("xenonet service start"))
+    } else if hosts.is_empty() {
+        verdict("ok", "this machine is the network's only member", None)
+    } else if away.is_empty() {
+        let relay = if by_relay.is_empty() { String::new() } else { format!(" ({} through a relay)", by_relay.join(", ")) };
+        verdict("ok", format!("connected to every member{relay}"), None)
+    } else {
+        verdict(
+            "info",
+            format!("{} not connected now; what's for them waits here, or at a mailbox, and goes when they're back", away.join(", ")),
+            Some("A member that's running and still not reached may need a relay the network lists, or the firewall to let XenoNet in."),
+        )
     };
-    out.push(("network.link", "This machine reaches the network's gateway", link_check));
+    out.push(("network.path", "This machine reaches the network's members", path));
 
-    // The gateway's key.
-    let pinned = s("pinnedKeyId").map_or(net.gateway.key_id.clone(), str::to_string);
-    out.push((
-        "network.key",
-        "The gateway proves the key this machine pinned",
-        match s("gatewayKeyId") {
-            Some(seen) if seen != pinned => verdict(
-                "fail",
-                format!("the gateway answered with the key {seen}, not {pinned}"),
-                Some("Check the gateway's address; if the gateway moved, xenonet net gateway set <address>"),
-            ),
-            Some(_) => verdict("ok", format!("{} ({pinned})", net.gateway.host), None),
-            None => verdict("info", format!("pinned {pinned}; not checked since XenoNet started"), None),
-        },
-    ));
-
-    // The clock.
-    let skew = link.get("skewMs").and_then(Value::as_f64);
+    // The members' clocks.
+    let skews: Vec<(String, f64)> = hosts.iter().filter_map(|h| Some((text(h, "id"), h.get("skewMs").and_then(Value::as_f64)?))).collect();
+    let worst = skews.iter().cloned().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()));
     out.push((
         "network.clock",
-        "This computer's clock is close to the gateway's",
-        match skew {
-            Some(x) if x.abs() > 60e3 => verdict(
+        "This computer's clock is close to the members'",
+        match worst {
+            Some((who, x)) if x.abs() > 5.0 * 60e3 => verdict(
                 "warn",
-                format!("this clock is {} {} the gateway's; XenoNet signs with the gateway's time, so the link works", span(x), if x > 0.0 { "behind" } else { "ahead of" }),
-                Some("Have this computer set its clock by itself: on Linux, timedatectl set-ntp true; on a Mac, System Settings › General › Date & Time."),
+                format!(
+                    "{who}'s clock is {} {} this one's: its presence is dropped here, its entries are taken but shown in the order of the clock that's right",
+                    span(x),
+                    if x > 0.0 { "ahead of" } else { "behind" }
+                ),
+                Some("Have every computer set its clock by itself: on Linux, timedatectl set-ntp true; on a Mac, System Settings › General › Date & Time."),
             ),
-            Some(x) if x.abs() >= 2000.0 => verdict("info", format!("{} off the gateway's", span(x)), None),
-            Some(_) => verdict("ok", "within two seconds of the gateway's", None),
-            None => verdict("skip", "not linked yet", None),
+            Some((who, x)) if x.abs() >= 2000.0 => verdict("info", format!("{who}'s clock is {} off this one's", span(x)), None),
+            Some(_) => verdict("ok", "within two seconds of every member's", None),
+            None => verdict("skip", "no member connected yet", None),
         },
     ));
 
-    // The outbox and the queues.
-    let o = link.get("outbox").cloned().unwrap_or(Value::Null);
-    let frames = o.get("frames").and_then(Value::as_u64).unwrap_or(0);
-    let dropped = o.get("dropped").and_then(Value::as_u64).unwrap_or(0);
-    let queues: Vec<String> = link
-        .get("queues")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|q| q.get("frames").and_then(Value::as_u64).unwrap_or(0) > 0)
-        .map(|q| format!("{} waits for {}", q.get("frames").and_then(Value::as_u64).unwrap_or(0), q.get("host").and_then(Value::as_str).unwrap_or("?")))
+    // What mailboxes hold of this machine's.
+    let held: Vec<String> = hosts
+        .iter()
+        .filter(|h| h.get("held").and_then(Value::as_u64).unwrap_or(0) > 0)
+        .map(|h| format!("{} for {}", h.get("held").and_then(Value::as_u64).unwrap_or(0), text(h, "id")))
         .collect();
-    let at_gateway = if queues.is_empty() { String::new() } else { format!("; at the gateway, {}", queues.join(", ")) };
-    let detail = format!("{frames} frame{} in the outbox{at_gateway}", if frames == 1 { "" } else { "s" });
     out.push((
-        "network.queues",
-        "Messages for other machines aren't piling up",
-        if dropped > 0 {
-            verdict(
-                "warn",
-                format!("{detail}; {dropped} went unsent, oldest first, after a week or past 10,000 frames or 50 MB"),
-                Some("Those messages' senders can send them again once the gateway is back."),
-            )
-        } else if frames > 1000 {
-            verdict("warn", detail, Some("The gateway hasn't taken them yet; they go when it's back."))
+        "network.mailbox",
+        "What a mailbox holds of this machine's reaches its members",
+        if held.is_empty() {
+            verdict("ok", "nothing of this machine's waits at a mailbox", None)
         } else {
-            verdict("ok", detail, None)
+            verdict("info", format!("held at a mailbox, not delivered yet: {}", held.join(", ")), Some("They go when those members connect; a mailbox keeps them a week at most."))
         },
     ));
 
     // The members' feeds.
     out.push(("network.feeds", "Every member's feed is taken", feeds(d, &net.id)));
-
-    // The join route, on the gateway's host.
-    if gateway_here {
-        let closed = link.get("joinClosedUntil").and_then(Value::as_f64).filter(|t| *t > now);
-        out.push((
-            "network.join",
-            "New machines can join through the gateway",
-            match closed {
-                Some(t) => verdict(
-                    "warn",
-                    format!("200 bad tickets came in an hour, so the join route is shut until {} UTC ({} from now)", clock_time(t), span(t - now)),
-                    Some("Someone may be guessing tickets. A machine joins once it opens again, with a new ticket."),
-                ),
-                None => verdict("ok", "open: each source gets 20 bad tickets an hour, and a ticket five wrong tries", None),
-            },
-        ));
-    }
 
     // The roster.
     let mismatch: Vec<&str> = link.get("rosterMismatch").and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
@@ -200,44 +163,11 @@ pub fn checks(d: &Dir, now: f64) -> Vec<Check> {
             verdict(
                 "warn",
                 format!("{} shows another roster than this machine's", mismatch.join(", ")),
-                Some("A gateway may be holding entries back; each host fetches what it's missing when it links."),
+                Some("Each machine asks for what it's missing when it connects. Two admins that changed the chain at the same moment leave different heads: change it again from one window."),
             )
         },
     ));
 
-    // The address.
-    let address = net.gateway.address.clone().unwrap_or_default();
-    let kind = if address.is_empty() { "" } else { crate::files::address_kind(&address) };
-    out.push((
-        "network.address",
-        "The gateway's address suits a network",
-        match kind {
-            "" => verdict(
-                "warn",
-                "the gateway has no address yet, so no other machine can join",
-                Some("Give the gateway its tailnet or LAN address (xenonet net set --lan <ip:port> on its host)."),
-            ),
-            "loopback" => verdict("info", format!("{address} is this computer alone: only XenoNets on it can join, which is for tests and same-machine use"), None),
-            "lan" => verdict(
-                "info",
-                format!("LAN only, at {address}: plain HTTP carrying signed, sealed frames, so the network sees who talks to whom, never what; actor tokens never cross it"),
-                None,
-            ),
-            _ if address.ends_with(".trycloudflare.com") => verdict(
-                "warn",
-                format!("{address} is a quick Cloudflare tunnel, whose address changes every time it starts"),
-                Some("Give the gateway its tailnet or LAN address instead (xenonet net set --lan <ip:port> on its host)."),
-            ),
-            // Funnel publishes only the actor gateway's /mcp, so a network's
-            // frames never get through a .ts.net name.
-            _ if crate::files::host_of(&address).trim_end_matches('.').to_ascii_lowercase().ends_with(".ts.net") => {
-                let whose = if gateway_here || net.gateway.host == net.host { "this machine's".to_string() } else { format!("{}'s", net.gateway.host) };
-                let fix = format!("Use {whose} tailnet address (xenonet net set --lan <tailnet ip:port> on the gateway's host).");
-                verdict("warn", format!("{address} is a Tailscale Funnel name: a network can't link through Funnel, which publishes only /mcp"), Some(fix.as_str()))
-            }
-            _ => verdict("ok", format!("through a tunnel, at {address}"), None),
-        },
-    ));
     if let Some(ca) = relay_ca(d) {
         out.push(("network.relay-ca", "The CAs you added for your own relays are in order", ca));
     }
@@ -569,16 +499,11 @@ pub fn identity_checks(d: &Dir) -> Vec<Check> {
 }
 
 /// What the doctor's firewall check (xenonet-doctor's firewall.rs) reads of
-/// the network: null when this machine isn't in one, else whether it's the
-/// network's gateway (as the roster says, or the pinned gateway when the
-/// roster can't be read), the gateway's address and its kind
-/// (address_kind).
+/// the network: null when this machine isn't in one, else that it is, so
+/// the members connect to its endpoint straight.
 pub fn standing(d: &Dir) -> Value {
-    let Ok(Some(net)) = d.read_network() else { return Value::Null };
-    let gateway = read_roster(d, &net.id).map_or(net.gateway.host == net.host, |r| r.view().gateway == net.host);
-    let address = net.gateway.address.filter(|a| !a.is_empty());
-    let kind = address.as_deref().map(crate::files::address_kind);
-    json!({ "gateway": gateway, "address": address, "kind": kind })
+    let Ok(Some(_)) = d.read_network() else { return Value::Null };
+    json!({ "inNetwork": true })
 }
 
 /// The roster, checked against the person chains kept beside it, which
@@ -657,32 +582,29 @@ mod tests {
     }
 
     #[test]
-    fn a_funnel_name_is_no_address_for_a_network() {
-        let d = kept(&std::env::temp_dir().join(format!("xenonet-net-doctor-funnel-{}", std::process::id())));
-        let pin = |address: &str| crate::files::Pin { host: "studio".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: Some(address.into()) };
-        let net = |host: &str, address: &str| crate::files::NetFile {
-            id: "net_0".into(),
-            name: "home".into(),
-            host: host.into(),
-            founder: "studio".into(),
-            gateway: pin(address),
-            lan: None,
-            titles_only: false,
-            share_load: true,
-            joined: 0,
+    fn the_rows_say_how_this_machine_reaches_its_members() {
+        let d = kept(&std::env::temp_dir().join(format!("xenonet-net-doctor-rows-{}", std::process::id())));
+        let net =
+            crate::files::NetFile { id: "net_0".into(), name: "home".into(), host: "studio".into(), founder: "studio".into(), titles_only: false, share_load: true, joined: 0 };
+        d.write_network(&net).unwrap();
+        let row = |link: Value, id: &str| {
+            d.write_link("net_0", &link).unwrap();
+            checks(&d, 0.0).into_iter().find(|c| c.0 == id).unwrap().2
         };
-        let address = |host: &str, a: &str| {
-            d.write_network(&net(host, a)).unwrap();
-            checks(&d, 0.0).into_iter().find(|c| c.0 == "network.address").unwrap().2
-        };
-        let here = address("studio", "studio.example-tailnet.ts.net");
-        assert_eq!(here["status"], "warn");
-        assert!(here["detail"].as_str().unwrap().contains("can't link through Funnel, which publishes only /mcp"), "{here}");
-        assert!(here["fix"].as_str().unwrap().starts_with("Use this machine's tailnet address"), "{here}");
-        let there = address("laptop", "https://Studio.Example-Tailnet.ts.net/");
-        assert!(there["fix"].as_str().unwrap().starts_with("Use studio's tailnet address"), "{there}");
-        assert_eq!(address("laptop", "100.64.0.7:48114")["status"], "info", "a tailnet address is a LAN one");
-        assert_eq!(address("laptop", "gw.example.com")["status"], "ok");
+        let host = |id: &str, online: bool, path: Option<&str>, skew: Option<i64>, held: u64| json!({ "id": id, "online": online, "path": path, "skewMs": skew, "held": held });
+        let alone = json!({ "state": "live", "hosts": [] });
+        assert_eq!(row(alone.clone(), "network.path")["detail"], "this machine is the network's only member");
+        assert_eq!(row(alone, "network.clock")["status"], "skip");
+        let all = json!({ "state": "live", "hosts": [host("laptop", true, Some("direct"), Some(40), 0), host("desk", true, Some("relay"), Some(-3000), 0)] });
+        assert_eq!(row(all.clone(), "network.path")["detail"], "connected to every member (desk through a relay)");
+        assert_eq!(row(all.clone(), "network.clock")["detail"], "desk's clock is 3 s off this one's");
+        assert_eq!(row(all, "network.mailbox")["status"], "ok");
+        let some = json!({ "state": "live", "hosts": [host("laptop", false, None, None, 4), host("desk", true, Some("direct"), Some(6 * 60_000), 0)] });
+        assert!(row(some.clone(), "network.path")["detail"].as_str().unwrap().starts_with("laptop not connected now"));
+        assert_eq!(row(some.clone(), "network.clock")["status"], "warn");
+        assert_eq!(row(some, "network.mailbox")["detail"], "held at a mailbox, not delivered yet: 4 for laptop");
+        assert_eq!(row(json!({ "state": "removed", "reason": "Removed by studio." }), "network.removed")["status"], "fail");
+        assert_eq!(standing(&d), json!({ "inNetwork": true }));
     }
 
     #[test]

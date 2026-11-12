@@ -34,8 +34,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{self, Cores};
 use xenonet_net::dial::Fut;
-use xenonet_net::gwstore::Caps;
-use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_net::node::{now_ms, Options};
 use xenonet_os::log::Log;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
@@ -94,10 +93,6 @@ fn actor_gateway(port: u16, service_port: u16) -> Arc<GatewayControl> {
     })
 }
 
-fn timing() -> Timing {
-    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
-}
-
 fn options(dir: &Path, who: &str) -> Options {
     let who = who.to_string();
     let mut o = Options::new(
@@ -111,14 +106,11 @@ fn options(dir: &Path, who: &str) -> Options {
             }
         }),
     );
-    o.timing = timing();
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
-    o.caps = Caps::default();
     // A caller waits 6 s here, not 90, so the timeout shows quickly.
     o.svc_ms = 6000;
     // svc/2 runs on each machine's endpoint, on loopback, with no mDNS.
-    o.link = true;
     o.bind = Some("127.0.0.1:0".parse().unwrap());
     o.lan = xenonet_net::endpoint::LanLookup::Off;
     o
@@ -222,7 +214,7 @@ async fn join(h: &Host, maker: &Host) {
 async fn live(h: &Host, hosts: usize) {
     until(&format!("{} live with {hosts} hosts", h.name), 20, || async {
         let s = h.state().await;
-        s["gateway"]["link"] == "live" && s["hosts"].as_array().map_or(0, Vec::len) == hosts && s["hosts"].as_array().unwrap().iter().all(|x| x["online"] == true)
+        s["link"]["state"] == "live" && s["hosts"].as_array().map_or(0, Vec::len) == hosts && s["hosts"].as_array().unwrap().iter().all(|x| x["online"] == true)
     })
     .await;
 }

@@ -16,7 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use xenonet_net::admission::Admission;
 use xenonet_net::dial::{Alpn, Close, Dial, Mesh};
 use xenonet_net::endpoint::{peer_id, IrohDial, LanLookup, Relays, Settings};
-use xenonet_net::files::{Dir, NetFile, Pin, KEY};
+use xenonet_net::files::{Dir, NetFile, KEY};
 use xenonet_net::identity::Identity;
 use xenonet_net::keys::HostKey;
 use xenonet_net::node::{Node, Options};
@@ -89,25 +89,12 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Nodes>, Arc<Node>, Arc<AtomicI6
     add.sign_with("studio", identity.machine_key().unwrap().as_ref(), Some(block)).unwrap();
     roster.offer(add).unwrap();
     files.write_roster(NET, &roster).unwrap();
-    let p = studio.public();
-    let pin = Pin { host: "studio".into(), key_id: p.key_id(), sign: p.sign_b64(), seal: p.seal_b64(), address: Some("127.0.0.1:1".into()) };
     files
-        .write_network(&NetFile {
-            id: NET.into(),
-            name: "home".into(),
-            host: "studio".into(),
-            founder: "studio".into(),
-            gateway: pin,
-            lan: None,
-            titles_only: false,
-            share_load: true,
-            joined: T0,
-        })
+        .write_network(&NetFile { id: NET.into(), name: "home".into(), host: "studio".into(), founder: "studio".into(), titles_only: false, share_load: true, joined: T0 })
         .unwrap();
     let clock = Arc::new(AtomicI64::new(T0 + 10 * MIN));
     let mut o = Options::new(dir.join("network"), kept, "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));
     o.vault = Some(vault);
-    o.link = true;
     o.bind = Some("127.0.0.1:0".parse().unwrap());
     o.lan = LanLookup::Off;
     let c = clock.clone();

@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{self, Cores};
 use xenonet_model::ops::{Incoming, Kind, Outgoing, Sink, To};
-use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_net::node::{now_ms, Options};
 use xenonet_os::log::Log;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
@@ -90,10 +90,8 @@ fn options(dir: &std::path::Path) -> Options {
         }),
     );
     o.clock = Arc::new(now_ms);
-    o.timing = Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 };
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.bind = Some("127.0.0.1:0".parse().unwrap());
-    o.link = true;
     o
 }
 
@@ -277,7 +275,7 @@ async fn a_machine_in_two_networks_keeps_them_apart_and_one_goes_on_without_the_
     assert_eq!(s, 200, "{v}");
     until("laptop removed from N1", 15, || {
         let s = futures_lite(laptop.state());
-        s["networks"][0]["gateway"]["link"] == "removed"
+        s["networks"][0]["link"]["state"] == "removed"
     })
     .await;
     laptop.send(None, To::Host("desk".into()), Kind::Message, message("after N1")).unwrap();

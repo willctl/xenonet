@@ -3,7 +3,7 @@
 // announce on the LAN).
 
 use super::*;
-use crate::dial::{Link, Mesh};
+use crate::dial::{Link, Mesh, REMOVED_GRACE};
 use std::future::Future;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -185,12 +185,16 @@ async fn removal_from_n1_while_still_in_n2_stops_n1_and_n2_still_flows() {
     let (asked, ()) = tokio::join!(ask(&bs, b"n2 still"), echo(&at));
     assert_eq!(asked, b"n2 still");
 
-    // And from n2: nothing is shared, so the connection closes, and b is
-    // told why.
+    // And from n2: nothing is shared, so the connection leaves the mesh at
+    // once, carries no network, and closes after the grace that lets what
+    // was sent b last go; b is told why.
     a.mesh.set_members("n2", [a.id]);
-    assert!(at.is_closed());
-    assert_eq!(within(bs.closed()).await, Some(Close::Removed));
     assert!(a.mesh.link(b.id, Alpn::Link).is_none());
+    assert_eq!(at.check("n2").unwrap_err().code, "not-in-network");
+    let started = Instant::now();
+    assert_eq!(within(bs.closed()).await, Some(Close::Removed));
+    assert!(at.is_closed());
+    assert!(started.elapsed() >= REMOVED_GRACE.saturating_sub(Duration::from_millis(100)), "closed after the grace, not at once");
     a.mesh.close().await;
     b.mesh.close().await;
 }

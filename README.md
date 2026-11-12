@@ -240,10 +240,12 @@ sessions on the others in `peers`, message them, and are warned when one is
 changing the same file in its clone. What waits on you on any machine shows
 in every console. On a machine where you use a XenoNet window, the map shows
 every other machine's beside its own, and their transcripts open in that
-window. One machine is the gateway, and the others link out to it,
-so no machine opens a port. Frames between machines are signed and sealed:
-the gateway passes them on and can't read them. **Add a machine** shows one
-line to run on the new machine, which works once, for ten minutes. You can
+window. The machines reach each other straight over
+[iroh](https://www.iroh.computer): on your LAN, by direct paths, or through
+a relay you name, so no machine opens a port. What one machine sends
+another is signed and sealed: a relay or a mailbox passes it on and can't
+read it. **Add a machine** shows one line to run on the new machine, which
+works once, for ten minutes. You can
 also publish a local HTTP service to the network, and
 programs on the other machines reach it through their own XenoNet.
 [A network across your machines](docs/guide/network.md) shows how.
@@ -303,8 +305,8 @@ Build already write.
   - When you ask Codex which folders are projects, it gets an outline of
     the folder names in your projects folder, after XenoNet has shown you
     all of it.
-  - When you join a network, this machine keeps one outbound link to the
-    network's gateway and sends what
+  - When you join a network, this machine connects to the network's other
+    machines, and to the relays it names, and sends what
     [A network across your machines](docs/guide/network.md#what-crosses-and-what-doesnt)
     lists.
   - With an OpenRouter key, XenoNet asks OpenRouter what the key has spent,
@@ -450,13 +452,10 @@ data. `xenonet drift` shows it, and the doctor warns about new drift.
 XenoNet's core is being rewritten in six phases.
 [direction.md](docs/design/direction.md) says where each stands, and
 [goals.md](docs/design/goals.md) what it's for. Today a network's machines
-link through a gateway, and `xenonet net invite` and `xenonet net join` let
-a new machine join straight from the machine that invited it, over
-[iroh](https://www.iroh.computer). Here is what's
-next:
+reach each other over [iroh](https://www.iroh.computer), with relays and
+mailboxes you choose, and a new machine joins straight from the machine
+that invited it. Here is what's next:
 
-- Peer to peer. Machines link to each other over iroh, with relays and
-  mailboxes you choose, and no machine as the gateway.
 - Intents. You make an intent at your window on one machine, and provider
   sessions work it on any of your machines your delegation names, then
   report what came of it.

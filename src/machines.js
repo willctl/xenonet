@@ -114,7 +114,7 @@ export function createMachinesView({ modals, sfx = () => {}, hosts, graph = () =
 
   function card(x, counts) {
     const row = x.here ? null : hostRow(x.id);
-    const tags = [x.window ? "window host" : model.network ? "no window" : null, x.gateway ? "gateway" : null, x.founder ? "founder" : null].filter(Boolean);
+    const tags = [x.window ? "window host" : model.network ? "no window" : null, x.founder ? "founder" : null].filter(Boolean);
     const ver = x.here ? version : (row?.version ?? null);
     const since = x.online ? (x.here ? "here" : row?.since ? `online ${sinceText(row.since)}` : "online") : sinceText(x.seen);
     const r = x.reading;
@@ -286,7 +286,6 @@ export function createMachinesView({ modals, sfx = () => {}, hosts, graph = () =
           counted: x.counted,
           platform: x.platform,
           window: x.window,
-          gateway: x.gateway,
           founder: x.founder,
           gpu: hasGpu(x),
           hardware: x.reading?.hardware ?? null,

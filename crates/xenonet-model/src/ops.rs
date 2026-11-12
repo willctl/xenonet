@@ -1,8 +1,8 @@
 //! The coordination operations: what one XenoNet tells another, and what
 //! an agent or actor asks of the engine (docs/design/direction.md, "Domain
 //! model"). An operation's body is one of the network documents
-//! (`crate::network`); its kind says which, and whether a gateway keeps it
-//! for a host that's away.
+//! (`crate::network`); its kind says which, and whether it's kept for a
+//! host that's away.
 //!
 //! It's also the seam between the engine and the network
 //! (docs/design/network.md, section 6): the bodies the engine sends and
@@ -11,7 +11,7 @@
 //! implements (`Net`, the network as the engine sees it, which xenonet-net
 //! puts its link behind; `Sink`, what the network calls in the engine; and
 //! `RelaySink`, where the map's relay bodies go). Frames, keys, sealing,
-//! the roster and the gateway live behind it, in xenonet-net. With no
+//! the roster and link/2 live behind it, in xenonet-net. With no
 //! network, `NoNet` is behind it and every local path is unchanged.
 
 use schemars::JsonSchema;
@@ -70,7 +70,7 @@ impl Kind {
         Self::ALL.into_iter().find(|k| k.as_str() == kind)
     }
 
-    /// Whether a gateway keeps it for a host that's away. Presence isn't
+    /// Whether it's kept for a host that's away. Presence isn't
     /// kept: a full set goes when the host is back. Nor is the map: a
     /// console asks for a fresh snapshot.
     pub fn queued(self) -> bool {
@@ -113,7 +113,7 @@ pub enum To {
 #[derive(Debug, Clone)]
 pub struct Outgoing {
     /// The network it goes in, by id: one of `Net::networks`. None is the
-    /// first of them, the one network the gateway's path carries. A network
+    /// first of them. A network
     /// this machine isn't in is refused, never another taken in its place.
     pub network: Option<String>,
     pub to: To,
@@ -231,8 +231,8 @@ pub trait Net: Send + Sync {
     /// Every network this machine is in, with its host id in each: the one
     /// it founded or joined first, first.
     fn networks(&self) -> Vec<Me>;
-    /// The first of `networks`, which the paths that name no network yet
-    /// (the gateway's) go through; None when this machine is in none.
+    /// The first of `networks`, which the paths that name no network go
+    /// through; None when this machine is in none.
     fn me(&self) -> Option<Me> {
         self.networks().into_iter().next()
     }
@@ -285,14 +285,15 @@ pub trait Net: Send + Sync {
 pub trait Sink: Send + Sync {
     /// A body from another host.
     fn receive(&self, incoming: Incoming);
-    /// The link to the gateway came up (`up`), or went down. On the way up
-    /// the engine sends its full presence and claims.
+    /// This machine reaches its networks' machines (`up`: its node runs and
+    /// link/2 listens), or no longer does. On the way up the engine sends
+    /// its full presence and claims.
     fn linked(&self, up: bool);
     /// A host was removed from the roster: its agents, claims and waiting
     /// handoffs go.
     fn removed(&self, host: &str);
-    /// The gateway lost frames for this host (a `gap`): the engine asks the
-    /// others for a full presence and sends again what has no receipt.
+    /// Entries for this host were lost on the way (a `gap`): the engine
+    /// sends its full presence again, and again what has no receipt.
     fn gap(&self);
 }
 
@@ -306,9 +307,9 @@ pub trait RelaySink: Send + Sync {
     fn relay(&self, incoming: Incoming);
     /// A host was removed from the roster.
     fn removed(&self, _host: &str) {}
-    /// The link to the gateway came up, or went down.
+    /// This machine reaches its networks' machines, or no longer does.
     fn linked(&self, _up: bool) {}
-    /// The gateway lost frames for this host.
+    /// Entries for this host were lost on the way.
     fn gap(&self) {}
 }
 

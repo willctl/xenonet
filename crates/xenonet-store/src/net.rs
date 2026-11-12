@@ -15,24 +15,18 @@ use xenonet_log::chain::{Entry, Policy};
 
 pub(crate) const TABLES: &[&str] = &[
     // Each network this machine is in: this machine's id in it, who
-    // founded it, the gateway as this machine pinned it, and its settings.
+    // founded it, and its settings.
     "CREATE TABLE networks (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         host TEXT NOT NULL,
         founder TEXT NOT NULL,
-        gateway_host TEXT NOT NULL,
-        gateway_key_id TEXT NOT NULL,
-        gateway_sign TEXT NOT NULL,
-        gateway_seal TEXT NOT NULL,
-        gateway_address TEXT,
-        lan TEXT,
         titles_only INTEGER NOT NULL,
         share_load INTEGER NOT NULL,
         joined INTEGER NOT NULL
     ) STRICT",
-    // How each network's link last stood, as the link writes it for the
-    // doctor.
+    // How this machine stands in each network, and how it reaches each
+    // member, as its node writes it for the doctor.
     "CREATE TABLE link_status (
         network TEXT PRIMARY KEY REFERENCES networks (id) ON DELETE CASCADE,
         status TEXT NOT NULL
@@ -43,13 +37,6 @@ pub(crate) const TABLES: &[&str] = &[
     "CREATE TABLE network_sharing (
         network TEXT PRIMARY KEY REFERENCES networks (id) ON DELETE CASCADE,
         sharing TEXT NOT NULL
-    ) STRICT",
-    // Where this machine stands in each network's gateway stream: the
-    // gateway's epoch and the last seq read in it.
-    "CREATE TABLE link_cursor (
-        network TEXT PRIMARY KEY REFERENCES networks (id) ON DELETE CASCADE,
-        epoch TEXT NOT NULL,
-        seq INTEGER NOT NULL
     ) STRICT",
     // The services this machine published to each network, in the order
     // they were published.
@@ -94,23 +81,9 @@ pub struct Network {
     /// This machine's id in it.
     pub host: String,
     pub founder: String,
-    pub gateway: Gateway,
-    /// Where this machine's gateway listens on the LAN, when it's the
-    /// gateway in LAN-only mode.
-    pub lan: Option<String>,
     pub titles_only: bool,
     pub share_load: bool,
     pub joined: i64,
-}
-
-/// The network's gateway, as this machine pinned it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Gateway {
-    pub host: String,
-    pub key_id: String,
-    pub sign: String,
-    pub seal: String,
-    pub address: Option<String>,
 }
 
 /// A person whose chain this machine holds.
@@ -173,9 +146,7 @@ impl Db {
     /// The networks this machine is in.
     pub fn networks(&self) -> R<Vec<Network>> {
         self.read(|c| {
-            let mut q = c.prepare(
-                "SELECT id, name, host, founder, gateway_host, gateway_key_id, gateway_sign, gateway_seal, gateway_address, lan, titles_only, share_load, joined FROM networks ORDER BY rowid",
-            )?;
+            let mut q = c.prepare("SELECT id, name, host, founder, titles_only, share_load, joined FROM networks ORDER BY rowid")?;
             let rows = q
                 .query_map([], |r| {
                     Ok(Network {
@@ -183,11 +154,9 @@ impl Db {
                         name: r.get(1)?,
                         host: r.get(2)?,
                         founder: r.get(3)?,
-                        gateway: Gateway { host: r.get(4)?, key_id: r.get(5)?, sign: r.get(6)?, seal: r.get(7)?, address: r.get(8)? },
-                        lan: r.get(9)?,
-                        titles_only: r.get::<_, i64>(10)? != 0,
-                        share_load: r.get::<_, i64>(11)? != 0,
-                        joined: r.get(12)?,
+                        titles_only: r.get::<_, i64>(4)? != 0,
+                        share_load: r.get::<_, i64>(5)? != 0,
+                        joined: r.get(6)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -199,27 +168,11 @@ impl Db {
     pub fn put_network(&self, n: &Network) -> R<()> {
         self.write(|c| {
             c.execute(
-                "INSERT INTO networks (id, name, host, founder, gateway_host, gateway_key_id, gateway_sign, gateway_seal, gateway_address, lan, titles_only, share_load, joined)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                "INSERT INTO networks (id, name, host, founder, titles_only, share_load, joined)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT (id) DO UPDATE SET name = excluded.name, host = excluded.host, founder = excluded.founder,
-                   gateway_host = excluded.gateway_host, gateway_key_id = excluded.gateway_key_id, gateway_sign = excluded.gateway_sign,
-                   gateway_seal = excluded.gateway_seal, gateway_address = excluded.gateway_address, lan = excluded.lan,
                    titles_only = excluded.titles_only, share_load = excluded.share_load, joined = excluded.joined",
-                params![
-                    n.id,
-                    n.name,
-                    n.host,
-                    n.founder,
-                    n.gateway.host,
-                    n.gateway.key_id,
-                    n.gateway.sign,
-                    n.gateway.seal,
-                    n.gateway.address,
-                    n.lan,
-                    i64::from(n.titles_only),
-                    i64::from(n.share_load),
-                    n.joined
-                ],
+                params![n.id, n.name, n.host, n.founder, i64::from(n.titles_only), i64::from(n.share_load), n.joined],
             )?;
             Ok(())
         })
@@ -231,7 +184,7 @@ impl Db {
         self.write(|c| {
             c.execute("DELETE FROM chain_entries WHERE chain = ?1", params![network_chain(id)])?;
             c.execute("DELETE FROM link_status WHERE network = ?1", params![id])?;
-            c.execute("DELETE FROM link_cursor WHERE network = ?1", params![id])?;
+
             c.execute("DELETE FROM network_sharing WHERE network = ?1", params![id])?;
             for t in ["feed_writers", "feed_out", "feed_acks", "feed_in", "feed_loose", "feed_heads", "feed_held", "mailbox"] {
                 c.execute(&format!("DELETE FROM {t} WHERE network = ?1"), params![id])?;
@@ -310,29 +263,6 @@ impl Db {
             for (n, u) in urls.iter().enumerate() {
                 c.execute("INSERT INTO own_relays (n, url) VALUES (?1, ?2)", params![n as i64, u])?;
             }
-            Ok(())
-        })
-    }
-
-    /// Where this machine stands in a network's gateway stream: the
-    /// gateway's epoch and the last seq read in it.
-    pub fn link_cursor(&self, network: &str) -> R<Option<(String, u64)>> {
-        self.read(|c| {
-            Ok(c.query_row("SELECT epoch, seq FROM link_cursor WHERE network = ?1", params![network], |r| {
-                Ok((r.get::<_, String>(0)?, u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0)))
-            })
-            .optional()?)
-        })
-    }
-
-    /// Where this machine stands in a network's gateway stream now.
-    pub fn put_link_cursor(&self, network: &str, epoch: &str, seq: u64) -> R<()> {
-        self.write(|c| {
-            c.execute(
-                "INSERT INTO link_cursor (network, epoch, seq) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM networks WHERE id = ?1)
-                 ON CONFLICT (network) DO UPDATE SET epoch = excluded.epoch, seq = excluded.seq",
-                params![network, epoch, i64::try_from(seq).unwrap_or(i64::MAX)],
-            )?;
             Ok(())
         })
     }

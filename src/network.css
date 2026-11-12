@@ -49,7 +49,6 @@ p.net-warn {
   background: rgb(var(--attention-rgb) / 0.08);
 }
 .net .net-tickets { margin: 4px 0 8px; padding-left: 18px; font-size: 12px; color: var(--text); }
-.net .net-outbox { margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
 .net .net-check {
   display: flex;
   align-items: center;
@@ -60,7 +59,6 @@ p.net-warn {
   cursor: pointer;
 }
 .net .net-choices .ac-dot { --c: var(--accent); }
-.net .net-where { font-size: 11px; color: var(--muted); white-space: nowrap; }
 /* An agent opened from its card in the strip. */
 .net .net-flash { animation: net-flash 1.6s ease-out 1; }
 @keyframes net-flash { from { background: rgb(var(--attention-rgb) / 0.18); } to { background: transparent; } }

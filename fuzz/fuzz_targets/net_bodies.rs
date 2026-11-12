@@ -50,8 +50,8 @@ struct FakeNet {
 }
 
 impl Net for FakeNet {
-    fn me(&self) -> Option<Me> {
-        Some(Me { network: "net_0123456789abcdef0123456789abcdef".into(), name: "home".into(), host: "studio".into() })
+    fn networks(&self) -> Vec<Me> {
+        vec![Me { network: xenonet_fuzz::net::NET.into(), name: "home".into(), host: "studio".into() }]
     }
     fn hosts(&self) -> Vec<Host> {
         HOSTS.iter().map(|(h, window)| Host { id: (*h).into(), window: *window, online: true, seen: Some(1_792_512_000_000.0) }).collect()
@@ -297,7 +297,7 @@ fuzz_target!(|data: &[u8]| {
             let arrived = xenonet_net::sink::Arrived { host: from.into(), entry: v, authority, window };
             xenonet_fuzz::run(data, || network::entry_in(w, arrived.clone()));
         } else {
-            let incoming = Incoming { from: from.into(), kind, body: b.clone(), at: now_ms(), from_window_host: window };
+            let incoming = Incoming { network: xenonet_fuzz::net::NET.into(), from: from.into(), kind, body: b.clone(), at: now_ms(), from_window_host: window };
             xenonet_fuzz::run(data, || network::receive(w, incoming.clone()));
         }
         landed_as_theirs(w, &mut e.last, from, window, &b);

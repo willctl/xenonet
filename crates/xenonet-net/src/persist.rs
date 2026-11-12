@@ -1,7 +1,6 @@
 //! What a machine keeps of its networks and its person between starts:
-//! each network (this machine's id in it, the gateway it pinned), the roster's
-//! entries, how the link last stood and where it stands in the gateway's
-//! stream, the services published to it, its own feed (where it writes,
+//! each network (this machine's id in it), the roster's entries, how this
+//! machine last stood in it, the services published to it, its own feed (where it writes,
 //! the kept entries it wrote and how far each member acked them) and how
 //! it stands with the other members' feeds, the people's chains, the
 //! presence blocks taken, and the token roots' certificates. The keys stay
@@ -79,10 +78,7 @@ pub trait Persist: Send + Sync {
     /// The token roots' certificates, in the order they were made.
     fn token_roots(&self) -> R<Vec<Value>>;
     fn put_token_roots(&self, certificates: &[Value]) -> R<()>;
-    /// The gateway's epoch this machine last saw in the network, and the
-    /// last seq it read in it.
-    fn cursor(&self, network: &str) -> R<Option<(String, u64)>>;
-    fn put_cursor(&self, network: &str, epoch: &str, seq: u64) -> R<()>;
+
     /// Where this machine writes its feed in the network, once it has begun.
     fn feed_writer(&self, network: &str) -> R<Option<WriterAt>>;
     /// Keeps where it writes, and the kept entry it just wrote: both or
@@ -171,7 +167,6 @@ struct Kept {
     persons: BTreeMap<String, (bool, Vec<person::Entry>)>,
     seen: Vec<Seen>,
     roots: Vec<Value>,
-    cursors: BTreeMap<String, (String, u64)>,
     writers: BTreeMap<String, WriterAt>,
     out: BTreeMap<String, Vec<FeedEntry>>,
     acks: BTreeMap<(String, String), Pos>,
@@ -229,7 +224,6 @@ impl Persist for Memory {
         k.rosters.remove(network);
         k.links.remove(network);
         k.services.remove(network);
-        k.cursors.remove(network);
         k.writers.remove(network);
         k.out.remove(network);
         k.mail.retain(|m| m.network != network);
@@ -266,13 +260,6 @@ impl Persist for Memory {
     }
     fn put_token_roots(&self, certificates: &[Value]) -> R<()> {
         self.0.locked().roots = certificates.to_vec();
-        Ok(())
-    }
-    fn cursor(&self, network: &str) -> R<Option<(String, u64)>> {
-        Ok(self.0.locked().cursors.get(network).cloned())
-    }
-    fn put_cursor(&self, network: &str, epoch: &str, seq: u64) -> R<()> {
-        self.0.locked().cursors.insert(network.to_string(), (epoch.to_string(), seq));
         Ok(())
     }
     fn feed_writer(&self, network: &str) -> R<Option<WriterAt>> {

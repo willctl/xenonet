@@ -491,9 +491,6 @@ const network = createNetwork({
     mapNetwork(v);
   },
   message: (id) => messageTo(id),
-  // The gateway's tunnel or LAN address is set where the actor gateway's
-  // is, in the Actors panel.
-  gateway: () => openActors(),
   // This machine's projects and folders on the map, for Start a session.
   projects: () => [...fullIndex.values()].filter((n) => !n.host && (n.kind === "project" || n.kind === "zone") && n.path).map((n) => ({ id: n.id, name: n.name, path: n.path })),
 });
@@ -704,8 +701,8 @@ const commandList = [
   { id: "connect-agents", label: "Connect your agents to XenoNet", keywords: "si super intelligence agents claude code codex grok build mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
   // The kill switch for messages between sessions and actors, and every wake (crates/xenonet-engine/src/delivery/policy.rs).
   { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
-  { id: "network", label: "Network settings: your other machines", keywords: "settings network machines computers hosts laptop server gateway start create join leave remove replace tunnel lan titles only share", run: () => network.open() },
-  { id: "add-machine", label: "Add a machine", keywords: "network another computer laptop server host join ticket second machine", run: () => network.addMachine() },
+  { id: "network", label: "Network settings: your other machines", keywords: "settings network machines computers hosts laptop server start create join leave remove replace relay lan titles only share", run: () => network.open() },
+  { id: "add-machine", label: "Add a machine", keywords: "network another computer laptop server host join invite second machine", run: () => network.addMachine() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
   { id: "install-command", label: "Install the xenonet command", keywords: "cli terminal shell path doctor", run: () => installCommand() },
   { id: "layout", label: "Reset layout and unpin dragged nodes", keywords: "positions", run: async () => (await fetch("/api/layout", { method: "DELETE" }), hud.toast("Layout reset")) },

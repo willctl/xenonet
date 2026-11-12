@@ -5,24 +5,23 @@
 //! The node isn't on the mesh yet, so each side runs an iroh endpoint of
 //! its own for the join alone: the inviter's while any invite is open (it
 //! closes with the last), the joiner's for its one attempt. After the
-//! join, the new machine links through the network's gateway as before,
-//! by the gateway's address the inviter sends, until the gateway goes
-//! (phase 5's commit 20).
+//! join, the new machine reaches the members on link/2, by the address
+//! records the inviter sends: its own and the members' it holds.
 //!
 //! Neither side reaches anyone's infrastructure unless the person chose
 //! it: a relay only when the network's chain lists one (the invite names
 //! the first), mDNS only with `lan`, and otherwise the address the person
 //! gives (`at`), such as a tailnet or LAN address.
 
-use super::{
-    identity, is_host_id, json, not_in, ticket, Arc, Duration, HostKey, JoinHandle, Locked, Mutex, NetError, NetFile, NetworkPolicy, Node, Notify, Op, Pin, PublicKeys, Shared,
-    Value, Weak, KEY, R,
-};
+use super::{identity, is_host_id, json, not_in, Arc, HostKey, Locked, Mutex, NetError, NetFile, NetworkPolicy, Node, Notify, Op, PublicKeys, Shared, Value, Weak, KEY, R};
 use crate::admission::Admission;
 use crate::dial::{Close, Dial, Mesh, PeerId};
 use crate::endpoint::{added_roots, IrohDial, LanLookup, Relay, Relays, Settings};
 use crate::join::{self, Admit, Admitted, Answer, Burned, Door, Invite, Served, Ticket};
+use crate::ticket;
 use std::net::SocketAddr;
+use std::time::Duration;
+use tokio::task::JoinHandle;
 
 /// How long an inviter's address, as the person gave it, is kept.
 const AT_TTL: Duration = Duration::from_mins(15);
@@ -302,15 +301,11 @@ impl Node {
         let host = s(&v, "host");
         let roster = join::verify(NetworkPolicy::with(identity.clone()), v.get("roster").unwrap_or(&Value::Null), &inv, &host, key.public(), &machine)?;
         let view = roster.view();
-        let gw = view.gateway_member().cloned().ok_or_else(|| NetError::new(502, "bad-answer", "the network's chain names no gateway"))?;
-        let address = v.get("gateway").map(|g| s(g, "address")).filter(|a| !a.is_empty()).or_else(|| view.gateway_address.clone());
         let net = NetFile {
             id: view.network.clone(),
             name: v.get("network").map(|x| s(x, "name")).unwrap_or_default(),
             host: host.clone(),
             founder: view.founder.clone(),
-            gateway: Pin { host: view.gateway.clone(), key_id: gw.keys.key_id(), sign: gw.keys.sign_b64(), seal: gw.keys.seal_b64(), address },
-            lan: None,
             titles_only: false,
             share_load: true,
             joined: n.now() as i64,
@@ -420,12 +415,12 @@ impl Admit for NodeAdmit {
                 // A window host added by an admin that isn't the founder
                 // waits for a second admin.
                 Err(err) if err.code == "needs-approval" => {
-                    node.propose(e).await?;
+                    node.propose(e);
                     return Ok(Admitted::Waiting(waiting_words(&ticket.host)));
                 }
                 Err(err) => return Err(err.into()),
             }
-            node.submit(e).await?;
+            node.submit(e)?;
             Ok(Admitted::Joined(answer(n, ticket)?))
         })
     }
@@ -438,9 +433,8 @@ fn waiting_words(host: &str) -> String {
 }
 
 // What the joiner is sent once it's in: the chain, the owner's person
-// chain, where the gateway is when the network has one, and the address
-// records of this machine and of the members it knows, each signed by its
-// member, so the joiner finds them on link/2.
+// chain, and the address records of this machine and of the members it
+// knows, each signed by its member, so the joiner finds them on link/2.
 fn answer(n: &Shared, t: &Ticket) -> R<Value> {
     let net = n.network().ok_or_else(not_in)?;
     let mut addresses: Vec<Value> = n.address_record().into_iter().collect();
@@ -453,7 +447,6 @@ fn answer(n: &Shared, t: &Ticket) -> R<Value> {
         "founder": net.founder,
         "roster": n.roster().to_json(),
         "person": n.person_json(),
-        "gateway": { "host": net.gateway.host, "address": net.gateway.address },
         "now": n.now() as i64,
     }))
 }

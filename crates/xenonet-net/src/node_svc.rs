@@ -7,11 +7,12 @@
 //! node, which takes the caller to be the member whose endpoint id the
 //! connection authenticated in its own chain.
 
-use super::{Arc, Common, Duration, Locked, Shared, Weak};
+use super::{Arc, Common, Locked, Shared, Weak};
 use crate::dial::{Fut, PeerId};
 use crate::endpoint::peer_id;
 use crate::svc::{self, Answer};
 use crate::svc2::{self, WindowCheck, WindowKey, WindowRead};
+use std::time::Duration;
 use xenonet_model::ids::is_host_id;
 
 /// How long the window waits for another machine's transcript.
@@ -73,7 +74,7 @@ impl Shared {
             return Answer::refused(413, "too-big", "a request's body is at most 8 MiB");
         }
         let Some(t) = self.link2() else { return Answer::refused(503, "offline", "this machine's endpoint isn't running, so it reaches no other machine") };
-        // A member with no link/2 connection and none to the gateway is
+        // A member with no link/2 connection that presence says is offline is
         // away: said now, rather than after a dial's wait.
         let peer = peer_id(&member.keys);
         if !t.links.is_connected(peer) && !self.peers.locked().get(host).is_some_and(|p| p.online) {

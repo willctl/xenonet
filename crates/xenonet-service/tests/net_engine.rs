@@ -26,8 +26,7 @@ use std::time::Duration;
 use xenonet_api::cores::NetLink;
 use xenonet_api::cores::{self, Cores, State, R};
 use xenonet_api::wire::WireEnv;
-use xenonet_net::gwstore::Caps;
-use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_net::node::{now_ms, Options};
 use xenonet_os::log::Log;
 use xenonet_runtime::runtime::Runtime;
 use xenonet_service::a2a::{A2a, A2aCores, A2aParts, Limits};
@@ -209,10 +208,6 @@ fn clone(dir: &Path, remote: &str, branch: &str) -> String {
     dir.to_string_lossy().into_owned()
 }
 
-fn timing() -> Timing {
-    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
-}
-
 fn options(dir: &Path, who: &str, kept: Arc<dyn xenonet_net::persist::Persist>) -> Options {
     let who = who.to_string();
     let mut o = Options::new(
@@ -226,13 +221,10 @@ fn options(dir: &Path, who: &str, kept: Arc<dyn xenonet_net::persist::Persist>) 
             }
         }),
     );
-    o.timing = timing();
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
-    o.caps = Caps::default();
     // link/2's and join/2's endpoints on loopback alone.
     o.bind = Some("127.0.0.1:0".parse().unwrap());
-    o.link = true;
     o
 }
 
@@ -475,7 +467,7 @@ async fn join(h: &Host, inv: &(String, String, String)) {
 async fn live(h: &Host, hosts: usize) {
     until(&format!("{} live with {hosts} hosts", h.name), 20, || async {
         let s = h.state().await;
-        s["gateway"]["link"] == "live" && s["hosts"].as_array().map_or(0, Vec::len) == hosts && s["hosts"].as_array().unwrap().iter().all(|x| x["online"] == true)
+        s["link"]["state"] == "live" && s["hosts"].as_array().map_or(0, Vec::len) == hosts && s["hosts"].as_array().unwrap().iter().all(|x| x["online"] == true)
     })
     .await;
 }
@@ -752,7 +744,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     for (h, me) in [(&a, S1), (&b, L1)] {
         until(&format!("desk's agents gone from {}'s peers", h.name), 10, || async { !h.peers(me).await.iter().any(|p| p.starts_with("@desk:")) }).await;
     }
-    until("desk knows it was removed", 10, || async { c.state().await["gateway"]["link"] == "removed" }).await;
+    until("desk knows it was removed", 10, || async { c.state().await["link"]["state"] == "removed" }).await;
 
     // laptop invites den as a window host: once laptop has signed den in,
     // den's join waits for the founder's approval, as the chain's rules say.

@@ -9,12 +9,12 @@
 //!
 //! - GET /api/net/state, through the core's route (routes/net.rs), which
 //!   asks `simulated_net_state` first;
-//! - the network's writes from the window (ticket, replace, remove,
+//! - the network's writes from the window (invite, replace, remove,
 //!   settings, create, join, leave), on the simulated state;
 //! - GET /api/engine/state and GET /api/engine/agents, with the simulated
 //!   hosts' agents after this machine's own;
-//! - POST /api/actors/you/message to a simulated host's agent, which goes
-//!   into the simulated outbox while its host is away;
+//! - POST /api/actors/you/message to a simulated host's agent, which is
+//!   held for it while its host is away;
 //! - the person's devices in the state, and revoking one from the window
 //!   (POST /api/net/devices/revoke);
 //! - a member's feed a fork froze (net-frozen), and unfreezing it from the
@@ -38,17 +38,16 @@ use xenonet_model::ids::{is_host_id, parse_qualified};
 use xenonet_os::sync::Locked;
 
 /// The simulations, for the console tools' list.
-pub const KINDS: [&str; 9] = ["net-none", "net-founder", "net-member", "net-gateway-down", "net-ticket", "net-mismatch", "net-remote-waiting", "net-approval", "net-frozen"];
+pub const KINDS: [&str; 9] = ["net-none", "net-founder", "net-member", "net-away", "net-invite", "net-mismatch", "net-remote-waiting", "net-approval", "net-frozen"];
 
 const NETWORK_ID: &str = "net_5d1e0c7a9b3f4e2d8c6a1b0f9e7d3c25";
-const ADDRESS: &str = "gw.example.net";
 const ROSTER_HEAD: &str = "c2ltdWxhdGVkLXJvc3Rlci1oZWFkLTA0";
 const PROPOSAL_ID: &str = "c2ltdWxhdGVkLWFkZC1kZW4tYXMtd2luZG93";
 const PERSON_ID: &str = "prs_simulatedpersonofthehomenetwork2";
 /// laptop's machine signing key, as a frozen feed names its author.
 const LAPTOP_SIGNING: &str = "xns1_simulatedlaptopsigningkeysofhome";
-const TICKET_MS: f64 = 10.0 * 60e3;
-const MAX_TICKETS: usize = 5;
+const INVITE_MS: f64 = 10.0 * 60e3;
+const MAX_INVITES: usize = 5;
 const MAX_TEXT: usize = 16000;
 const MINUTE: f64 = 60e3;
 
@@ -74,23 +73,7 @@ fn served(sim: &Sim) -> Value {
     let mut nets = Vec::new();
     if s["network"].is_object() {
         let mut first = json!({ "id": s["network"]["id"], "name": s["network"]["name"], "host": s["self"]["id"], "relays": [], "sharing": "all", "inContact": true });
-        for k in [
-            "self",
-            "gateway",
-            "hosts",
-            "tickets",
-            "outbox",
-            "rosterHead",
-            "rosterMismatch",
-            "frozen",
-            "titlesOnly",
-            "shareLoad",
-            "start",
-            "wake",
-            "proposals",
-            "relays",
-            "sharing",
-        ] {
+        for k in ["self", "link", "hosts", "invites", "rosterHead", "rosterMismatch", "frozen", "titlesOnly", "shareLoad", "start", "wake", "proposals", "relays", "sharing"] {
             if let Some(v) = s.get(k) {
                 first[k] = v.clone();
             }
@@ -113,13 +96,11 @@ fn other_network(state: &Value) -> Value {
     let me = state["self"]["id"].as_str().unwrap_or("studio");
     let mut mine = state["hosts"].as_array().and_then(|h| h.iter().find(|x| x["self"] == json!(true)).cloned()).unwrap_or_else(|| json!({ "id": me }));
     mine["founder"] = json!(false);
-    mine["gateway"] = json!(false);
     let mut lab = mine.clone();
     for (k, v) in [
         ("id", json!("lab")),
         ("keyId", json!(key_id("lab"))),
         ("self", json!(false)),
-        ("gateway", json!(true)),
         ("founder", json!(true)),
         ("agents", json!(0)),
         ("waitsOnYou", json!(0)),
@@ -131,11 +112,10 @@ fn other_network(state: &Value) -> Value {
         "id": "net_7c0ffee000000000000000000000beef",
         "name": "work",
         "host": me,
-        "self": { "id": me, "keyId": key_id(me), "window": false, "founder": false, "gateway": false },
-        "gateway": { "address": "10.0.0.9:47851", "keyId": key_id("lab"), "kind": "lan", "link": "live", "since": null, "reason": null, "skewMs": null },
+        "self": { "id": me, "keyId": key_id(me), "window": false, "founder": false, "link2": true },
+        "link": { "state": "live", "since": null, "reason": null },
         "hosts": [mine, lab],
-        "tickets": [],
-        "outbox": { "frames": 0, "bytes": 0, "oldest": null },
+        "invites": { "open": [], "burned": [] },
         "rosterMismatch": [],
         "frozen": [],
         "proposals": [],
@@ -165,10 +145,8 @@ pub fn alone() -> Value {
         "schema": "network/state/v1",
         "network": null,
         "self": null,
-        "gateway": null,
+        "link": null,
         "hosts": [],
-        "tickets": [],
-        "outbox": { "frames": 0, "bytes": 0, "oldest": null },
         "rosterHead": null,
         "rosterMismatch": [],
         "titlesOnly": false,
@@ -177,12 +155,12 @@ pub fn alone() -> Value {
 }
 
 /// The hook the core's GET /api/net/state asks first: the simulated
-/// state while a simulation runs (its lapsed tickets gone), else None.
+/// state while a simulation runs (its lapsed invites gone), else None.
 pub fn simulated_net_state(ctx: &Ctx) -> Option<Value> {
     let now = ctx.now();
     let mut all = sims().locked();
     let sim = all.get_mut(&key(ctx))?;
-    if let Some(t) = sim.state["tickets"].as_array_mut() {
+    if let Some(t) = sim.state["invites"]["open"].as_array_mut() {
         t.retain(|t| t["expires"].as_f64().is_some_and(|e| e > now));
     }
     Some(served(sim))
@@ -313,7 +291,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
         }
         (
             "POST",
-            "/api/net/ticket"
+            "/api/net/invite"
             | "/api/net/replace"
             | "/api/net/remove"
             | "/api/net/create"
@@ -378,13 +356,12 @@ struct Machine {
     id: &'static str,
     window: bool,
     founder: bool,
-    gateway: bool,
     platform: &'static str,
 }
 
-const STUDIO: Machine = Machine { id: "studio", window: true, founder: true, gateway: true, platform: "darwin" };
-const LAPTOP: Machine = Machine { id: "laptop", window: true, founder: false, gateway: false, platform: "darwin" };
-const RACK: Machine = Machine { id: "rack", window: false, founder: false, gateway: false, platform: "linux" };
+const STUDIO: Machine = Machine { id: "studio", window: true, founder: true, platform: "darwin" };
+const LAPTOP: Machine = Machine { id: "laptop", window: true, founder: false, platform: "darwin" };
+const RACK: Machine = Machine { id: "rack", window: false, founder: false, platform: "linux" };
 
 /// A made-up key id: xnk1_ and 32 base32 letters, the same for a host each time.
 pub fn key_id(host: &str) -> String {
@@ -503,7 +480,6 @@ fn host_row(m: &Machine, online: bool, seen: Option<f64>, agents: usize, you: bo
         "keyId": key_id(m.id),
         "window": m.window,
         "founder": m.founder,
-        "gateway": m.gateway,
         "online": online,
         "seen": seen,
         "agents": agents,
@@ -551,17 +527,17 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         s["simulated"] = json!(true);
         return Some((s, vec![]));
     }
-    let member = matches!(kind, "net-member" | "net-gateway-down");
-    if !member && !matches!(kind, "net-founder" | "net-ticket" | "net-mismatch" | "net-remote-waiting" | "net-approval" | "net-frozen") {
+    let member = matches!(kind, "net-member" | "net-away");
+    if !member && !matches!(kind, "net-founder" | "net-invite" | "net-mismatch" | "net-remote-waiting" | "net-approval" | "net-frozen") {
         return None;
     }
-    let down = kind == "net-gateway-down";
+    // studio, the founder, is away: what laptop sends it is held.
+    let down = kind == "net-away";
     let me = if member { &LAPTOP } else { &STUDIO };
     let you = you_at.filter(|h| is_host_id(h)).unwrap_or(me.id);
-    let dropped = now - 25.0 * MINUTE;
     // From this host: who's online, and when each was last heard from.
     let rack_seen = now - 2.0 * 3600e3;
-    let (studio_on, studio_seen) = if down { (false, dropped) } else { (true, now - 3e3) };
+    let (studio_on, studio_seen) = if down { (false, now - 25.0 * MINUTE) } else { (true, now - 3e3) };
     let laptop_seen = now - 4e3;
     let mut agents = Vec::new();
     let mut hosts = Vec::new();
@@ -578,6 +554,12 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
             agents.extend(theirs);
         }
         let mut row = host_row(m, online, Some(seen), if m.id == me.id { 0 } else { count }, m.id == you);
+        if m.id != me.id {
+            // How this machine reaches it: directly, or not at all while
+            // it's away, with what waits for it held.
+            row["path"] = if online { json!("direct") } else { Value::Null };
+            row["held"] = json!(if down && m.id == "studio" { 3 } else { 0 });
+        }
         // Where you last worked: a moment ago where you are, and a while
         // ago at the other window hosts, so what waits sounds only there.
         row["youAt"] = if m.id == you {
@@ -589,23 +571,13 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         };
         hosts.push(row);
     }
-    let gateway = json!({
-        "address": ADDRESS,
-        "keyId": key_id(STUDIO.id),
-        "kind": "tunnel",
-        "link": if down { "offline" } else { "live" },
-        "since": if down { dropped } else if member { now - 40.0 * MINUTE } else { now - 3.0 * 3600e3 },
-        "reason": if down { json!("timed out") } else { Value::Null },
-        "skewMs": if down { Value::Null } else if member { json!(120) } else { json!(0) },
-    });
     let mut state = json!({
         "schema": "network/state/v1",
         "network": { "id": NETWORK_ID, "name": "home" },
-        "self": { "id": me.id, "keyId": key_id(me.id), "window": me.window, "founder": me.founder, "gateway": me.gateway },
-        "gateway": gateway,
+        "self": { "id": me.id, "keyId": key_id(me.id), "window": me.window, "founder": me.founder, "link2": true },
+        "link": { "state": "live", "since": if member { now - 40.0 * MINUTE } else { now - 3.0 * 3600e3 }, "reason": null },
         "hosts": hosts,
-        "tickets": [],
-        "outbox": if down { json!({ "frames": 3, "bytes": 2816, "oldest": now - 22.0 * MINUTE }) } else { json!({ "frames": 0, "bytes": 0, "oldest": null }) },
+        "invites": { "open": [], "burned": [] },
         "rosterHead": ROSTER_HEAD,
         "rosterMismatch": [],
         "titlesOnly": false,
@@ -616,14 +588,14 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         "person": person_of(me.id, &[&STUDIO, &LAPTOP, &RACK]),
     });
     match kind {
-        "net-ticket" => state["tickets"] = json!([{ "host": "desk", "window": false, "expires": now + 8.5 * MINUTE }]),
+        "net-invite" => state["invites"]["open"] = json!([{ "host": "desk", "window": false, "expires": now + 8.5 * MINUTE, "wrong": 0 }]),
         "net-mismatch" => state["rosterMismatch"] = json!(["laptop"]),
         // laptop signed two different entries at one place in its feed:
         // nothing more from it is taken until you unfreeze it.
         "net-frozen" => state["frozen"] = json!([{ "author": LAPTOP_SIGNING, "host": "laptop", "at": { "inc": 1_794_400_000_000_u64, "seq": 7 } }]),
         // laptop, a window host but not the founder, signed den in as a
         // window host: that waits for the founder or a second window host.
-        "net-approval" => state["proposals"] = json!([{ "id": PROPOSAL_ID, "op": "add", "host": "den", "window": true, "gateway": null, "signers": ["laptop"], "at": now - 40e3 }]),
+        "net-approval" => state["proposals"] = json!([{ "id": PROPOSAL_ID, "op": "add", "host": "den", "window": true, "signers": ["laptop"], "at": now - 40e3 }]),
         // laptop's session waits on you with a question; at net-founder its
         // other one seems stuck too.
         "net-remote-waiting" | "net-founder" => {
@@ -754,7 +726,8 @@ fn host_arg(body: &Value) -> &str {
     body.get("host").and_then(Value::as_str).unwrap_or("")
 }
 
-fn ticket_words() -> String {
+// A made-up invite's code, as `xenonet net invite` shows it.
+fn code_words() -> String {
     const B32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     let mut b = [0u8; 10];
     let _ = getrandom::fill(&mut b);
@@ -762,15 +735,27 @@ fn ticket_words() -> String {
     format!("{}-{}-{}", &t[0..4], &t[4..8], &t[8..10])
 }
 
-// A ticket for `host`, kept as waiting, and the answer that shows it once.
-fn ticket_for(sim: &mut Sim, host: &str, window: bool, now: f64) -> Value {
-    let ticket = ticket_words();
-    let address = sim.state["gateway"]["address"].as_str().unwrap_or(ADDRESS).to_string();
-    let expires = now + TICKET_MS;
-    if let Some(t) = sim.state["tickets"].as_array_mut() {
-        t.push(json!({ "host": host, "window": window, "expires": expires }));
+// An invite for `host`, kept as open, and the answer that shows it and its
+// code once.
+fn invite_for(sim: &mut Sim, host: &str, window: bool, now: f64) -> Value {
+    let code = code_words();
+    let invite = format!("xni2_simulated{}", code.replace('-', "").to_lowercase());
+    let expires = now + INVITE_MS;
+    if let Some(t) = sim.state["invites"]["open"].as_array_mut() {
+        t.push(json!({ "host": host, "window": window, "expires": expires, "wrong": 0 }));
     }
-    json!({ "ticket": ticket, "line": format!("xenonet net join {address} {ticket}"), "address": address, "host": host, "window": window, "expires": expires, "simulated": true })
+    json!({
+        "host": host,
+        "window": window,
+        "invite": invite,
+        "code": code,
+        "line": format!("xenonet net join {invite} <code>"),
+        "expires": expires,
+        "relay": null,
+        "lan": false,
+        "at": ["192.168.1.20:47861"],
+        "simulated": true,
+    })
 }
 
 fn has_host(state: &Value, host: &str) -> bool {
@@ -796,7 +781,7 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             let Some((mut state, _)) = made_up("net-founder", None, now) else { return fail(500, "error", "") };
             state["network"]["name"] = json!(name);
-            state["self"] = json!({ "id": host, "keyId": key_id(&host), "window": true, "founder": true, "gateway": true });
+            state["self"] = json!({ "id": host, "keyId": key_id(&host), "window": true, "founder": true, "link2": true });
             let mut row = host_row(&STUDIO, true, Some(now), 0, true);
             row["id"] = json!(host);
             row["keyId"] = json!(key_id(&host));
@@ -805,9 +790,6 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             state["person"]["device"] = json!(device_id(&host));
             state["person"]["devices"][0]["id"] = json!(device_id(&host));
             state["person"]["devices"][0]["label"] = json!(host);
-            // No tunnel or LAN address yet: the person sets one, as the
-            // Actors panel's gateway does.
-            state["gateway"] = Value::Null;
             sim.state = state;
             sim.agents.clear();
             Reply::json(200, sim.state.clone())
@@ -816,14 +798,13 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             if in_network {
                 return fail(409, "in-network", "This machine is in a network already.");
             }
-            let address = body.get("address").and_then(Value::as_str).map_or("", str::trim);
-            let ticket = body.get("ticket").and_then(Value::as_str).map_or("", str::trim);
-            let shape = ticket.replace('-', "");
-            if address.is_empty() || shape.len() != 10 || !shape.bytes().all(|b| b.is_ascii_alphanumeric()) {
-                return fail(400, "bad-request", "Give the address and the ticket from the line Add a machine showed.");
+            let invite = body.get("invite").and_then(Value::as_str).map_or("", str::trim);
+            let code = body.get("code").and_then(Value::as_str).map_or("", str::trim);
+            let shape = code.replace('-', "");
+            if !invite.starts_with("xni2_") || shape.len() != 10 || !shape.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                return fail(400, "bad-request", "Give the invite and its code, as Add a machine showed them.");
             }
-            let Some((mut state, agents)) = made_up("net-member", None, now) else { return fail(500, "error", "") };
-            state["gateway"]["address"] = json!(address);
+            let Some((state, agents)) = made_up("net-member", None, now) else { return fail(500, "error", "") };
             sim.state = state;
             sim.agents = agents;
             Reply::json(200, sim.state.clone())
@@ -837,12 +818,9 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             sim.agents.clear();
             Reply::json(200, sim.state.clone())
         }
-        "/api/net/ticket" => {
+        "/api/net/invite" => {
             if !in_network {
                 return outside();
-            }
-            if sim.state["gateway"].is_null() {
-                return fail(409, "no-address", "The gateway has no address yet. Give it its tailnet or LAN address first.");
             }
             if !is_host_id(&host) {
                 return fail(400, "bad-request", "A machine's id is 2 to 32 lowercase letters, digits and dashes, starting with a letter.");
@@ -850,12 +828,12 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             if has_host(&sim.state, &host) {
                 return fail(409, "taken", format!("There's a machine called {host} in the network already. If it was set up again, use Replace on its row."));
             }
-            let now_waiting = sim.state["tickets"].as_array().map_or(0, |t| t.iter().filter(|t| t["expires"].as_f64().is_some_and(|e| e > now)).count());
-            if now_waiting >= MAX_TICKETS {
-                return fail(429, "too-many", "Five tickets wait already. Use one, or let them lapse.");
+            let now_open = sim.state["invites"]["open"].as_array().map_or(0, |t| t.iter().filter(|t| t["expires"].as_f64().is_some_and(|e| e > now)).count());
+            if now_open >= MAX_INVITES {
+                return fail(429, "too-many", "Five invites are open already. Use one, or let them lapse.");
             }
             let window = body.get("window") == Some(&Value::Bool(true));
-            Reply::json(200, ticket_for(sim, &host, window, now))
+            Reply::json(200, invite_for(sim, &host, window, now))
         }
         "/api/net/replace" => {
             if !in_network {
@@ -867,7 +845,7 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             let Some(window) = sim.state["hosts"].as_array().and_then(|l| l.iter().find(|h| h["id"] == host.as_str())).map(|h| h["window"] == true) else {
                 return fail(404, "not-found", format!("There's no machine called {host} in the network."));
             };
-            let mut out = ticket_for(sim, &host, window, now);
+            let mut out = invite_for(sim, &host, window, now);
             out["replaced"] = json!(host);
             Reply::json(200, out)
         }
@@ -1241,9 +1219,8 @@ fn note_delegated(reach: &mut Value, start: &str, by: &str, now: f64) {
 }
 
 // You, writing to a simulated host's agent from the window: checked as
-// the real route checks the window, then kept in the simulated outbox
-// while its host or the gateway is away. Anything else goes on to the
-// real route, with its body put back.
+// the real route checks the window, then held for its host while it's
+// away. Anything else goes on to the real route, with its body put back.
 async fn message(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> {
     let bytes = req.bytes(16 << 10).await?;
     let body = xenonet_text::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
@@ -1261,18 +1238,13 @@ async fn message(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> {
     if text.is_empty() || text.chars().count() > MAX_TEXT {
         return Ok(Some(Reply::coded(400, "bad-request", "say what to tell it: text, up to 16,000 characters")));
     }
-    let now = ctx.now();
     let state = {
         let mut all = sims().locked();
         let Some(sim) = all.get_mut(&key(ctx)) else { return Ok(None) };
-        let reachable = sim.state["gateway"]["link"] == "live" && sim.state["hosts"].as_array().is_some_and(|l| l.iter().any(|h| h["id"] == host.as_str() && h["online"] == true));
-        if !reachable {
-            let o = &mut sim.state["outbox"];
-            o["frames"] = json!(o["frames"].as_u64().unwrap_or(0) + 1);
-            o["bytes"] = json!(o["bytes"].as_u64().unwrap_or(0) + text.len() as u64);
-            if o["oldest"].is_null() {
-                o["oldest"] = json!(now);
-            }
+        let row = sim.state["hosts"].as_array_mut().and_then(|l| l.iter_mut().find(|h| h["id"] == host.as_str()));
+        let reachable = row.as_ref().is_some_and(|h| h["online"] == true);
+        if let Some(h) = row.filter(|_| !reachable) {
+            h["held"] = json!(h["held"].as_u64().unwrap_or(0) + 1);
         }
         (reachable, sim.state.clone())
     };
@@ -1290,7 +1262,7 @@ mod tests {
     use crate::http::Peer;
     use async_trait::async_trait;
 
-    const HOST_KEYS: [&str; 11] = ["id", "keyId", "window", "founder", "gateway", "online", "seen", "agents", "waitsOnYou", "you", "platform"];
+    const HOST_KEYS: [&str; 10] = ["id", "keyId", "window", "founder", "online", "seen", "agents", "waitsOnYou", "you", "platform"];
 
     fn key_ok(k: &Value) -> bool {
         k.as_str().is_some_and(|s| s.len() == 37 && s.starts_with("xnk1_") && s[5..].bytes().all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b)))
@@ -1298,7 +1270,7 @@ mod tests {
 
     // What network/state/v1 requires, as far as these states use it.
     fn well_formed(s: &Value) {
-        for k in ["schema", "network", "self", "gateway", "hosts", "tickets", "outbox", "rosterHead", "rosterMismatch", "titlesOnly"] {
+        for k in ["schema", "network", "self", "link", "hosts", "rosterHead", "rosterMismatch", "titlesOnly"] {
             assert!(s.get(k).is_some(), "{k} is there");
         }
         assert_eq!(s["schema"], "network/state/v1");
@@ -1318,17 +1290,13 @@ mod tests {
             }
             assert!(is_host_id(h["id"].as_str().unwrap()) && key_ok(&h["keyId"]));
         }
-        if !s["gateway"].is_null() {
-            let g = &s["gateway"];
-            assert!(key_ok(&g["keyId"]));
-            assert!(["off", "connecting", "live", "offline", "refused", "removed"].contains(&g["link"].as_str().unwrap()));
-            assert!(["tunnel", "lan", "loopback"].contains(&g["kind"].as_str().unwrap()));
-            for k in ["since", "reason", "skewMs"] {
-                assert!(g.get(k).is_some());
-            }
+        let l = &s["link"];
+        assert!(["off", "live", "removed"].contains(&l["state"].as_str().unwrap()));
+        for k in ["since", "reason"] {
+            assert!(l.get(k).is_some());
         }
-        for k in ["frames", "bytes", "oldest"] {
-            assert!(s["outbox"].get(k).is_some());
+        for k in ["open", "burned"] {
+            assert!(s["invites"][k].is_array());
         }
     }
 
@@ -1352,16 +1320,16 @@ mod tests {
     fn each_kind_shows_what_it_says() {
         let now = 1.8e12;
         let (f, _) = made_up("net-founder", None, now).unwrap();
-        assert_eq!(f["self"], json!({ "id": "studio", "keyId": key_id("studio"), "window": true, "founder": true, "gateway": true }));
+        assert_eq!(f["self"], json!({ "id": "studio", "keyId": key_id("studio"), "window": true, "founder": true, "link2": true }));
         let row = |s: &Value, id: &str| s["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).cloned().unwrap();
         assert_eq!((row(&f, "rack")["online"].clone(), row(&f, "studio")["you"].clone()), (json!(false), json!(true)));
         let (m, agents) = made_up("net-member", None, now).unwrap();
-        assert_eq!((m["self"]["id"].clone(), m["self"]["gateway"].clone(), row(&m, "laptop")["you"].clone()), (json!("laptop"), json!(false), json!(true)));
+        assert_eq!((m["self"]["id"].clone(), m["self"]["founder"].clone(), row(&m, "laptop")["you"].clone()), (json!("laptop"), json!(false), json!(true)));
         assert!(agents.iter().any(|a| a["host"] == "studio"));
-        let (d, _) = made_up("net-gateway-down", None, now).unwrap();
-        assert_eq!((d["gateway"]["link"].clone(), d["gateway"]["reason"].clone(), d["outbox"]["frames"].clone()), (json!("offline"), json!("timed out"), json!(3)));
+        let (d, _) = made_up("net-away", None, now).unwrap();
+        assert_eq!((d["link"]["state"].clone(), row(&d, "studio")["held"].clone(), row(&d, "studio")["path"].clone()), (json!("live"), json!(3), Value::Null));
         assert_eq!(row(&d, "studio")["online"], false);
-        assert_eq!(made_up("net-ticket", None, now).unwrap().0["tickets"][0]["host"], "desk");
+        assert_eq!(made_up("net-invite", None, now).unwrap().0["invites"]["open"][0]["host"], "desk");
         assert_eq!(made_up("net-mismatch", None, now).unwrap().0["rosterMismatch"], json!(["laptop"]));
         let (w, agents) = made_up("net-remote-waiting", Some("laptop"), now).unwrap();
         let waiting: Vec<&Value> = agents.iter().filter(|a| a["waitsOnYou"] == true).collect();
@@ -1432,25 +1400,26 @@ mod tests {
     }
 
     #[test]
-    fn tickets_once_each_and_never_for_a_machine_thats_there() {
+    fn invites_once_each_and_never_for_a_machine_thats_there() {
         let now = 1.8e12;
         let mut s = sim("net-founder");
-        let r = apply(&mut s, "/api/net/ticket", &json!({ "host": "desk", "window": true }), now);
+        let r = apply(&mut s, "/api/net/invite", &json!({ "host": "desk", "window": true }), now);
         assert_eq!(r.status, 200);
         let t = r.body_json();
-        let ticket = t["ticket"].as_str().unwrap();
-        assert!(ticket.len() == 12 && ticket.as_bytes()[4] == b'-' && ticket.as_bytes()[9] == b'-');
-        assert_eq!(t["line"], format!("xenonet net join gw.example.net {ticket}"));
-        assert_eq!(s.state["tickets"], json!([{ "host": "desk", "window": true, "expires": now + TICKET_MS }]));
-        assert!(!s.state.to_string().contains(ticket), "the state never holds the ticket");
-        assert_eq!(apply(&mut s, "/api/net/ticket", &json!({ "host": "laptop" }), now).status, 409);
-        assert_eq!(apply(&mut s, "/api/net/ticket", &json!({ "host": "Desk!" }), now).status, 400);
+        let code = t["code"].as_str().unwrap();
+        let invite = t["invite"].as_str().unwrap();
+        assert!(code.len() == 12 && code.as_bytes()[4] == b'-' && code.as_bytes()[9] == b'-');
+        assert_eq!(t["line"], format!("xenonet net join {invite} <code>"));
+        assert_eq!(s.state["invites"]["open"], json!([{ "host": "desk", "window": true, "expires": now + INVITE_MS, "wrong": 0 }]));
+        assert!(!s.state.to_string().contains(code), "the state never holds the code");
+        assert_eq!(apply(&mut s, "/api/net/invite", &json!({ "host": "laptop" }), now).status, 409);
+        assert_eq!(apply(&mut s, "/api/net/invite", &json!({ "host": "Desk!" }), now).status, 400);
         for h in ["a1", "a2", "a3", "a4"] {
-            assert_eq!(apply(&mut s, "/api/net/ticket", &json!({ "host": h }), now).status, 200);
+            assert_eq!(apply(&mut s, "/api/net/invite", &json!({ "host": h }), now).status, 200);
         }
-        assert_eq!(apply(&mut s, "/api/net/ticket", &json!({ "host": "a5" }), now).status, 429);
+        assert_eq!(apply(&mut s, "/api/net/invite", &json!({ "host": "a5" }), now).status, 429);
         let mut alone = sim("net-none");
-        assert_eq!(apply(&mut alone, "/api/net/ticket", &json!({ "host": "desk" }), now).status, 409);
+        assert_eq!(apply(&mut alone, "/api/net/invite", &json!({ "host": "desk" }), now).status, 409);
     }
 
     #[test]
@@ -1518,13 +1487,14 @@ mod tests {
         assert_eq!(apply(&mut s, "/api/net/leave", &json!({}), now).body_json()["network"], Value::Null);
         let made = apply(&mut s, "/api/net/create", &json!({ "name": "home", "host": "desk" }), now).body_json();
         well_formed(&made);
-        assert_eq!((made["self"]["id"].clone(), made["gateway"].clone(), made["hosts"].as_array().unwrap().len()), (json!("desk"), Value::Null, 1));
-        assert_eq!(apply(&mut s, "/api/net/ticket", &json!({ "host": "laptop" }), now).status, 409, "no address yet");
+        assert_eq!((made["self"]["id"].clone(), made["hosts"].as_array().unwrap().len()), (json!("desk"), 1));
+        assert_eq!(apply(&mut s, "/api/net/invite", &json!({ "host": "laptop" }), now).status, 200, "an invite at once: no address to set first");
         apply(&mut s, "/api/net/leave", &json!({}), now);
-        assert_eq!(apply(&mut s, "/api/net/join", &json!({ "address": "gw.home.lan:47850", "ticket": "nope" }), now).status, 400);
-        let joined = apply(&mut s, "/api/net/join", &json!({ "address": "gw.home.lan:47850", "ticket": "KX7Q-49MZ-T2" }), now).body_json();
+        assert_eq!(apply(&mut s, "/api/net/join", &json!({ "invite": "xni2_x", "code": "nope" }), now).status, 400);
+        assert_eq!(apply(&mut s, "/api/net/join", &json!({ "address": "gw.home.lan:47850", "ticket": "KX7Q-49MZ-T2" }), now).status, 400, "no tickets");
+        let joined = apply(&mut s, "/api/net/join", &json!({ "invite": "xni2_x", "code": "KX7Q-49MZ-T2" }), now).body_json();
         well_formed(&joined);
-        assert_eq!(joined["gateway"]["address"], "gw.home.lan:47850");
+        assert_eq!(joined["self"]["id"], "laptop");
     }
 
     struct Window;
@@ -1591,20 +1561,20 @@ mod tests {
         assert!(clear(&ctx) && !clear(&ctx));
         assert_eq!(get(ctx.clone()).await.status, 503);
         // Nothing simulated: the rest is the real routes'.
-        assert!(route(&ctx, &mut Req::fake("POST", "/api/net/ticket", &[], Some("{}"))).await.unwrap().is_none());
+        assert!(route(&ctx, &mut Req::fake("POST", "/api/net/invite", &[], Some("{}"))).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn writes_and_messages_are_the_windows_and_a_message_to_a_host_thats_away_waits() {
         let ctx = dev_ctx();
-        simulate(&ctx, "net-gateway-down", None, None).unwrap();
+        simulate(&ctx, "net-away", None, None).unwrap();
         let key = ctx.window_key.reveal().to_string();
         let with_key = [("x-xenonet-window", key.as_str())];
         let file = ctx.api_key.reveal().to_string();
-        let ticket = |headers: &[(&str, &str)]| Req::fake("POST", "/api/net/ticket", headers, Some(r#"{"host":"desk"}"#));
-        assert_eq!(admitted(&ctx, ticket(&[("x-xenonet-credential", file.as_str())])).await.err(), Some(403), "the window's");
-        assert_eq!(route(&ctx, &mut admitted(&ctx, ticket(&with_key)).await.unwrap()).await.unwrap().unwrap().status, 200);
-        assert_eq!(simulated_net_state(&ctx).unwrap()["tickets"][0]["host"], "desk");
+        let invite = |headers: &[(&str, &str)]| Req::fake("POST", "/api/net/invite", headers, Some(r#"{"host":"desk"}"#));
+        assert_eq!(admitted(&ctx, invite(&[("x-xenonet-credential", file.as_str())])).await.err(), Some(403), "the window's");
+        assert_eq!(route(&ctx, &mut admitted(&ctx, invite(&with_key)).await.unwrap()).await.unwrap().unwrap().status, 200);
+        assert_eq!(simulated_net_state(&ctx).unwrap()["invites"]["open"][0]["host"], "desk");
         let to = simulated_remote_agents(&ctx).unwrap().into_iter().find(|a| a["host"] == "studio").unwrap()["id"].clone();
         let body = json!({ "to": to, "text": "Hold the release until the tests pass" }).to_string();
         let msg = |headers: &[(&str, &str)]| Req::fake("POST", "/api/actors/you/message", headers, Some(&body));
@@ -1612,7 +1582,8 @@ mod tests {
         let sent = route(&ctx, &mut admitted(&ctx, msg(&with_key)).await.unwrap()).await.unwrap().unwrap().body_json();
         assert_eq!((sent["state"].clone(), sent["host"].clone()), (json!("queued"), json!("studio")));
         assert!(sent["mid"].as_str().unwrap().starts_with("msg_"));
-        assert_eq!(simulated_net_state(&ctx).unwrap()["outbox"]["frames"], 4);
+        let held = simulated_net_state(&ctx).unwrap()["hosts"].as_array().unwrap().iter().find(|h| h["id"] == "studio").unwrap()["held"].clone();
+        assert_eq!(held, 4, "held for studio");
         // A message for anyone else goes on to the real route, its body whole.
         let mut other = admitted(&ctx, Req::fake("POST", "/api/actors/you/message", &with_key, Some(r#"{"to":"actor:wren","text":"hi"}"#))).await.unwrap();
         assert!(route(&ctx, &mut other).await.unwrap().is_none());

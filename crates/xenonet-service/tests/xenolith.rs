@@ -30,7 +30,7 @@ use xenonet_api::cores::{self, Cores};
 use xenonet_authz::{Action, ActorGrant, ActorSlug, Binding, Ground, Schema, Token, ACTOR_PREFIX};
 use xenonet_model::ops::{Kind, Outgoing, To};
 use xenonet_net::forward::{Forwardable, Forwards, Grant, Grants};
-use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_net::node::{now_ms, Options};
 use xenonet_net::{NetError, R};
 use xenonet_os::log::Log;
 use xenonet_service::config::Config;
@@ -113,10 +113,8 @@ fn options(dir: &Path, forwards: Arc<Forwards>) -> Options {
         }),
     );
     o.clock = Arc::new(now_ms);
-    o.timing = Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 };
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.bind = Some("127.0.0.1:0".parse().unwrap());
-    o.link = true;
     o.forwards = Some(forwards);
     o
 }

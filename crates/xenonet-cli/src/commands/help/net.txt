@@ -1,23 +1,17 @@
 XenoNet networks across your machines. A machine can be in several, with
-a host id of its own in each. One machine is each network's gateway; the
-others link to it over HTTP(S), so no machine opens a port and nothing
-needs SSH keys. Frames between machines are signed by the one that sent
-them and sealed for the one they're for: the gateway passes them on and
-can't read them.
+a host id of its own in each. The machines reach each other straight, over
+QUIC: on your LAN, by direct paths, or through a relay when the network
+names one, so no machine opens a port and nothing needs SSH keys. What
+one machine sends another is signed by it and sealed for the one it's
+for: a relay or a mailbox passes it on and can't read it.
 
 What acts on one network takes --network <id|name>. A machine in one
 network needs no --network; one in several is asked which.
 
-  xenonet net create --name <name> --host <id> [--lan <ip:port>]
-                     [--relay <url|n0>]
+  xenonet net create --name <name> --host <id> [--relay <url|n0>]
                                    makes a network, beside any this machine
-                                   is in, with this machine as its founder
-                                   and gateway. Other machines reach the
-                                   gateway through the actor gateway's
-                                   tunnel (xenonet gateway on --tunnel …), or
-                                   on your LAN at --lan, an address this
-                                   machine has (never 0.0.0.0). --relay
-                                   names the network's relay: your own
+                                   is in, with this machine as its founder.
+                                   --relay names the network's relay: your own
                                    iroh-relay's URL, or n0 for n0's public
                                    relays (rate-limited, run by n0). With
                                    none, machines reach each other on the
@@ -35,25 +29,16 @@ network needs no --network; one in several is asked which.
                                    machine that made the invite: at its
                                    address (--at, such as its tailnet or LAN
                                    address), on your LAN (--mdns), or through
-                                   the network's relay when it has one. The
-                                   line Add a machine shows (an address and
-                                   a ticket) joins through the gateway
-  xenonet net status [--json]      each network, this machine in it, the
-                                   gateway and the link, and what waits to
-                                   be sent
+                                   the network's relay when it has one
+  xenonet net status [--json]      each network, this machine in it, and
+                                   what's held for a machine that's away
   xenonet net hosts [--json]       the machines in each network
-  xenonet net add-machine <id> [--window]
-                                   a ticket for a new machine, and the line to
-                                   run there. --window when you'll use a
-                                   XenoNet window on it. It's XenoNet's
-                                   window's (Add a machine), since signing
-                                   the machine in asks you
   xenonet net remove <id>          takes a machine out of the network
   xenonet net revoke-device        revoking a lost machine's device is
                                    XenoNet's window's (Network settings ›
                                    Your devices), since it asks you
   xenonet net replace <id>         takes a reinstalled machine's old keys out,
-                                   and makes a ticket for it to join again
+                                   and makes an invite for it to join again
   xenonet net leave [--force]      asks to be taken out, then forgets the
                                    network here; the others this machine is
                                    in carry on as they were
@@ -77,12 +62,11 @@ network needs no --network; one in several is asked which.
                                    one of its own. With no word, the
                                    relays as they stand
   xenonet net set [--titles-only | --no-titles-only]
-                  [--share-load | --no-share-load] [--lan <ip:port>]
+                  [--share-load | --no-share-load]
                   [--start off|you|network|delegate] [--wake consent|network]
                                    what this machine shares with the network
                                    (its load: CPU, GPU, memory and the parts,
-                                   on by default), a LAN-only gateway's
-                                   address, who may start sessions here (you,
+                                   on by default), who may start sessions here (you,
                                    by default; network adds the network's
                                    sessions and actors; delegate is the
                                    network, with what they start running
@@ -111,21 +95,12 @@ network needs no --network; one in several is asked which.
                                    to --approve it there. Delegate needs the
                                    machine to have a device of yours, which
                                    your delegation names
-  xenonet net gateway take [--lan <ip:port>]
-                                   makes this machine the network's gateway,
-                                   at that LAN address or through the actor
-                                   gateway's tunnel. On the founder's machine
-                                   it's done; elsewhere it waits for the
-                                   founder or another window host to approve
   xenonet net approve <id> [--op <op>]
                                    approves what waits for approval about a
-                                   machine, such as its move to gateway or
-                                   its add as a window host, and shows what
-                                   it approves. Several waiting: name one by
-                                   the entry id the answer lists
-  xenonet net gateway set <address>
-                                   follows the gateway to a new address, when
-                                   this machine missed the move
+                                   machine, such as its add as a window
+                                   host, and shows what it approves. Several
+                                   waiting: name one by the entry id the
+                                   answer lists
 
 Creating, joining and leaving are yours to do: XenoNet refuses them from
 under an agent. The founder's key is the network's root: a network whose

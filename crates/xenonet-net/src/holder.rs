@@ -27,7 +27,7 @@
 //!   member wasn't there for. A holder that can't serve that way says it
 //!   doesn't have them, and the receiver asks the author.
 //! - **Rate limits** per requester (`Limits`): 600 records and 60 messages
-//!   a minute, the gateway's limits per link.
+//!   a minute.
 
 use crate::dial::PeerId;
 use serde_json::Value;

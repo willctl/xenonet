@@ -19,8 +19,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use xenonet_api::cores::{self, Cores};
 use xenonet_model::ops::{Incoming, Kind, Net, Outgoing, Sink, To};
-use xenonet_net::gwstore::Caps;
-use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_net::node::{now_ms, Options};
 use xenonet_os::log::Log;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
@@ -98,14 +97,9 @@ struct Host {
     sink: Arc<TestSink>,
     dir: PathBuf,
     shift: f64,
-    caps: Caps,
 }
 
-fn timing() -> Timing {
-    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
-}
-
-fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
+fn options(dir: &std::path::Path, shift: f64) -> Options {
     let who = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let mut o = Options::new(
         dir.join("state").join("network"),
@@ -119,25 +113,22 @@ fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
         }),
     );
     o.clock = Arc::new(move || now_ms() + shift);
-    o.timing = timing();
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
-    o.caps = caps;
     // join/2's endpoints on loopback alone, and link/2's.
     o.bind = Some("127.0.0.1:0".parse().unwrap());
-    o.link = true;
     o
 }
 
 impl Host {
-    async fn new(test: &str, name: &str, shift: f64, caps: Caps) -> Host {
+    async fn new(test: &str, name: &str, shift: f64) -> Host {
         let dir = std::env::temp_dir().join(format!("xenonet-net-it-{test}-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        Host::open(dir, shift, caps).await
+        Host::open(dir, shift).await
     }
 
-    async fn open(dir: PathBuf, shift: f64, caps: Caps) -> Host {
+    async fn open(dir: PathBuf, shift: f64) -> Host {
         let home = dir.join("home").to_string_lossy().into_owned();
         let state = dir.join("state").to_string_lossy().into_owned();
         let env = move |k: &str| match k {
@@ -150,12 +141,12 @@ impl Host {
         xenonet_service::serve::wire_root(&mut cores);
         cores.verify = Arc::new(You { person: json!({ "ok": true }) });
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
-        let svc = NetService::open(options(&dir, shift, caps)).unwrap();
+        let svc = NetService::open(options(&dir, shift)).unwrap();
         let sink = Arc::new(TestSink::default());
         svc.sinks().set(sink.clone());
         let _ = ctx.net.set(svc.clone());
         svc.start().await.unwrap();
-        Host { ctx, svc, sink, dir, shift, caps }
+        Host { ctx, svc, sink, dir, shift }
     }
 
     /// What this machine keeps of its network, as the doctor reads it.
@@ -173,9 +164,9 @@ impl Host {
     /// The same machine started again: its files as they were.
     async fn restart(self) -> Host {
         self.svc.stop();
-        let (dir, shift, caps) = (self.dir.clone(), self.shift, self.caps);
+        let (dir, shift) = (self.dir.clone(), self.shift);
         drop(self);
-        Host::open(dir, shift, caps).await
+        Host::open(dir, shift).await
     }
 
     async fn call(&self, method: &str, path: &str, body: Value, window: bool) -> (u16, Value) {
@@ -296,7 +287,7 @@ async fn a_founder_alone_leaves_only_with_force() {
     // As `xenonet net leave` does it from the person's terminal
     // (crates/xenonet-cli/tests/net.rs, which only gets this far where
     // it isn't run from under an agent).
-    let a = Host::new("alone", "studio", 0.0, Caps::default()).await;
+    let a = Host::new("alone", "studio", 0.0).await;
     let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio" }), true).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["self"]["founder"], true);
@@ -366,16 +357,16 @@ fn host_in(s: &Value, of: &str) -> Value {
 /// invites from its window, found at the address the invite's door gives,
 /// and each reaches the others on link/2.
 async fn network(test: &str) -> (Host, Host, Host) {
-    let a = Host::new(test, "studio", 0.0, Caps::default()).await;
+    let a = Host::new(test, "studio", 0.0).await;
     let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio" }), true).await;
     assert_eq!(s, 200, "{v}");
-    assert_eq!(v["gateway"]["link"], "live", "{v}");
+    assert_eq!(v["link"]["state"], "live", "{v}");
     let mut joined = Vec::new();
     for (name, window) in [("laptop", true), ("desk", false)] {
         let (s, inv) = a.call("POST", "/api/net/invite", json!({ "host": name, "window": window }), true).await;
         assert_eq!(s, 200, "{inv}");
         let at = inv["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
-        let h = Host::new(test, name, 0.0, Caps::default()).await;
+        let h = Host::new(test, name, 0.0).await;
         let (s, v) = h.call("POST", "/api/net/join", json!({ "invite": inv["invite"], "code": inv["code"], "at": at }), true).await;
         assert_eq!(s, 200, "{v}");
         joined.push(h);
@@ -408,7 +399,7 @@ async fn a_network_runs_on_link2_alone_its_chain_messages_and_acts_included() {
     assert_eq!(len, 3);
     until("the chain everywhere", 10, || b.roster().len() == len && c.roster().len() == len).await;
     let s = c.state().await;
-    assert_eq!(s["gateway"]["address"], "", "{s}");
+    assert!(s.get("gateway").is_none(), "{s}");
     assert_eq!(host_in(&s, "laptop")["path"], "direct", "{s}");
 
     // A message, and one whose act rests on an authority: each reaches
@@ -426,7 +417,7 @@ async fn a_network_runs_on_link2_alone_its_chain_messages_and_acts_included() {
 
     // desk goes away: a message for it waits at laptop, and goes when desk
     // is back.
-    let (dir, shift, caps) = (c.dir.clone(), c.shift, c.caps);
+    let (dir, shift) = (c.dir.clone(), c.shift);
     c.svc.stop();
     drop(c);
     let mut away = false;
@@ -439,7 +430,7 @@ async fn a_network_runs_on_link2_alone_its_chain_messages_and_acts_included() {
     }
     assert!(away, "laptop never saw desk go: {}", b.state().await);
     b.send("desk", Kind::Message, "while away");
-    let c = Host::open(dir, shift, caps).await;
+    let c = Host::open(dir, shift).await;
     let feeds = Arc::new(HeldFeeds::default());
     c.svc.sinks().set_feeds(feeds.clone());
     until("the waiting message at desk", 30, || feeds.texts().contains(&"while away".to_string())).await;
@@ -501,14 +492,14 @@ async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head(
     let admit = |e: &xenonet_net::roster::Entry| id.prove(true, ADMIT, &e.digest(), "", now).unwrap();
     // With presence for it: taken. Without, or with a block lifted off
     // another entry: refused, as presence.
-    let mut e = n.draft(Op::Add, spare(), None);
+    let mut e = n.draft(Op::Add, spare());
     let block = admit(&e);
     e.sign_with("studio", machine.as_ref(), Some(block.clone())).unwrap();
     n.roster().would_take(&e).unwrap();
-    let mut bare = n.draft(Op::Add, spare(), None);
+    let mut bare = n.draft(Op::Add, spare());
     bare.sign_by("studio", machine.as_ref()).unwrap();
     assert_eq!(n.roster().would_take(&bare).unwrap_err().code, "presence");
-    let mut lifted = n.draft(Op::Add, spare(), None);
+    let mut lifted = n.draft(Op::Add, spare());
     lifted.sign_with("studio", machine.as_ref(), Some(block)).unwrap();
     assert_eq!(n.roster().would_take(&lifted).unwrap_err().code, "presence", "a block lifted off another entry");
     // Asking presence away from the window asks nobody.
@@ -517,7 +508,7 @@ async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head(
     // The person pairs another device: their chain's new head reaches
     // laptop and desk, pushed; an entry made under the old head is stale
     // to a live receiver, though the chain itself would take it.
-    let old = n.draft(Op::Add, spare(), None);
+    let old = n.draft(Op::Add, spare());
     let tablet = xenonet_id::sign::SeedSigner::from_seed(&[11; 32], xenonet_id::sign::KeyHome::File).unwrap();
     id.pair(true, person::NewDevice { key: xenonet_id::sign::Signer::public(&tablet), kind: person::DeviceKind::Weaker, label: "tablet".into() }, now).unwrap();
     let head = id.head();
@@ -525,7 +516,7 @@ async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head(
         until("the new head pushed", 10, || h.svc.node().shared().identity().head() == head).await;
     }
     assert_eq!(n.fresh_person_head(&old).unwrap_err().code, "stale-person-head");
-    n.fresh_person_head(&n.draft(Op::Add, spare(), None)).unwrap();
+    n.fresh_person_head(&n.draft(Op::Add, spare())).unwrap();
 
     // studio's own device is revoked: its presence counts for nothing made
     // under that head, and it acts as the person no more.
@@ -536,7 +527,7 @@ async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head(
     revoke.sign(&dev, device.signer.as_ref(), Some(block)).unwrap();
     id.offer(&person, &[revoke.to_json()]).unwrap();
     assert!(!id.can_act());
-    let mut e = n.draft(Op::Add, spare(), None);
+    let mut e = n.draft(Op::Add, spare());
     let block = xenonet_id::presence::prove(device.signer.as_ref(), device.check.as_deref(), ADMIT, &e.digest(), "", now).unwrap();
     e.sign_with("studio", machine.as_ref(), Some(block)).unwrap();
     assert_eq!(n.roster().would_take(&e).unwrap_err().code, "presence", "a revoked device's presence");
@@ -546,7 +537,7 @@ async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_machine_joins_with_an_invite_over_join2() {
-    let a = Host::new("invite", "studio", 0.0, Caps::default()).await;
+    let a = Host::new("invite", "studio", 0.0).await;
     // Without the window's key: no network is made, since setting up the
     // person asks them.
     let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio" }), false).await;
@@ -567,7 +558,7 @@ async fn a_machine_joins_with_an_invite_over_join2() {
     // desk's invite keeps studio's door open after laptop's is used.
     let (s, desk) = a.call("POST", "/api/net/invite", json!({ "host": "desk" }), true).await;
     assert_eq!(s, 200, "{desk}");
-    let b = Host::new("invite", "laptop", 0.0, Caps::default()).await;
+    let b = Host::new("invite", "laptop", 0.0).await;
     let join = |invite: &Value, code: &str| json!({ "invite": invite, "code": code, "at": at });
     let (s, v) = b.call("POST", "/api/net/join", json!({ "invite": invite, "code": code }), true).await;
     assert_eq!((s, v["code"].clone()), (409, json!("no-path")), "{v}");
@@ -588,7 +579,7 @@ async fn a_machine_joins_with_an_invite_over_join2() {
     assert_eq!(a.state().await["invites"]["open"].as_array().unwrap().len(), 1, "laptop's is used");
     // It worked once: another machine with the same invite and code is
     // told no such ticket is open.
-    let c = Host::new("invite", "desk", 0.0, Caps::default()).await;
+    let c = Host::new("invite", "desk", 0.0).await;
     let (s, v) = c.call("POST", "/api/net/join", join(&inv["invite"], &code), true).await;
     assert_eq!((s, v["code"].clone()), (404, json!("no-ticket")), "{v}");
     // Five wrong codes retire desk's invite, and studio's console says so.

@@ -5213,10 +5213,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
- "xenonet-actors",
- "xenonet-adapter",
  "xenonet-api",
- "xenonet-components",
  "xenonet-os",
  "xenonet-text",
 ]
@@ -5486,13 +5483,11 @@ dependencies = [
 name = "xenonet-net"
 version = "0.2.0"
 dependencies = [
- "bytes",
  "futures",
  "iroh",
  "iroh-mdns-address-lookup",
  "reqwest",
  "ring",
- "rusqlite",
  "rustls",
  "serde_json",
  "tokio",

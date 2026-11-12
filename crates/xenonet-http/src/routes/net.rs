@@ -4,10 +4,10 @@
 //! person's own terminal, never from under an agent or with an actor's
 //! token. What asks the person (their presence, Touch ID on a Mac) is done
 //! only for a request that came with the window's key: making the first
-//! network (it sets up their identity), **Add a machine** (`POST ticket`,
-//! whose join then asks to sign the machine in; it answers the join line
-//! once, and nothing keeps it), **Replace**, approving or making an entry
-//! that admits or widens, and moving the gateway. Anything else is refused
+//! network (it sets up their identity), **Add a machine** (`POST invite`,
+//! whose join then asks to sign the machine in; it answers the invite and
+//! its code once, and nothing keeps the code), **Replace**, and approving
+//! or making an entry that admits or widens. Anything else is refused
 //! there, never prompted for.
 //!
 //! A machine may be in several networks. What acts on one takes
@@ -19,22 +19,18 @@
 //! - `POST create`, `POST join`, `POST leave`: on this machine only. Each
 //!   create and join adds a network beside the ones there are; `create`
 //!   takes `relay`, the person's own iroh-relay's URL, or n0. A
-//!   join with `invite` and `code` goes over join/2 to the machine that
-//!   made the invite (`at`, its address, or `lan`, mDNS, when the invite
-//!   names no relay); one with `address` and `ticket` goes through the
-//!   gateway's join route, for the window's Add a machine until the
-//!   gateway goes.
-//! - `POST invite`: an invite and its code, for join/2; the window's, as a
-//!   ticket is.
-//! - `POST ticket`, `POST remove`, `POST replace`.
+//!   join takes `invite` and `code` and goes over join/2 to the machine
+//!   that made the invite (`at`, its address, or `lan`, mDNS, when the
+//!   invite names no relay).
+//! - `POST invite`: an invite and its code, for join/2: the window's Add a
+//!   machine.
+//! - `POST remove`, `POST replace`.
 //! - `POST approve`: signs an entry that waits for the founder or a second
-//!   window host (a move of the gateway, or a window host's add), by the
-//!   id the state lists it under.
-//! - `POST gateway/take`, `POST gateway/set`: moving the gateway by hand.
+//!   window host (a window host's add), by the id the state lists it
+//!   under.
 //! - `PUT settings`: titles only, whether this machine shares its load,
-//!   who may start and wake sessions here (`start`, `wake`), and a
-//!   LAN-only gateway's address. With `host`, another machine's `start`
-//!   and `wake`. Start and wake are settings entries in the network's
+//!   and who may start and wake sessions here (`start`, `wake`). With
+//!   `host`, another machine's `start` and `wake`. Start and wake are settings entries in the network's
 //!   chain, signed here (with presence where they widen); `approve` signs
 //!   one that waits, by its id.
 //! - `GET forwards`: the actors whose grants forward an ALPN over this
@@ -64,7 +60,6 @@ use crate::ctx::{Answer, Ctx};
 use crate::http::{Reply, Req};
 use crate::parts::{NetChange, NetResult, Network};
 use serde_json::{json, Value};
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 /// The network's state as a development instance's `simulate` set it, or
@@ -89,33 +84,6 @@ fn refused(e: &CoreError) -> Reply {
     Reply::json(e.status.unwrap_or(500), json!({ "error": e.message, "code": e.code }))
 }
 
-/// A LAN address as the person gives it: an IP address this machine has
-/// and a port, never 0.0.0.0. The words of why it isn't one otherwise.
-pub fn parse_lan(text: &str) -> Result<SocketAddr, String> {
-    let addr: SocketAddr = text.trim().parse().map_err(|_| "a LAN address is an IP address and a port, such as 192.168.1.5:47850".to_string())?;
-    if addr.ip().is_unspecified() || addr.port() == 0 {
-        return Err("a LAN address is one this machine has, with a port: never 0.0.0.0".into());
-    }
-    Ok(addr)
-}
-
-fn lan_of(text: &str) -> Result<SocketAddr, CoreError> {
-    parse_lan(text).map_err(bad)
-}
-
-/// The actor gateway's public host, which a network through its tunnel
-/// is reached at.
-/// The actor gateway's public host, when its tunnel carries the network's
-/// routes too. Tailscale Funnel publishes `/mcp` alone, so a network on
-/// that gateway takes a LAN or tailnet address instead.
-fn public_host(ctx: &Ctx) -> Option<String> {
-    let g = ctx.gateway.get()?;
-    if g.tunnel_view()["kind"] == "tailscale" {
-        return None;
-    }
-    g.public_host()
-}
-
 /// `/api/net/…`, or None for any other path.
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
     let path = req.path.clone();
@@ -130,28 +98,14 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         ("GET", "state" | "svc" | "forwards")
             | (
                 "POST",
-                "create"
-                    | "join"
-                    | "leave"
-                    | "ticket"
-                    | "invite"
-                    | "remove"
-                    | "replace"
-                    | "approve"
-                    | "gateway/take"
-                    | "gateway/set"
-                    | "svc/publish"
-                    | "svc/unpublish"
-                    | "devices/revoke"
-                    | "feeds/unfreeze"
-                    | "relays"
+                "create" | "join" | "leave" | "invite" | "remove" | "replace" | "approve" | "svc/publish" | "svc/unpublish" | "devices/revoke" | "feeds/unfreeze" | "relays"
             )
             | ("PUT", "settings" | "sharing")
     );
     if !known {
         return Reply::error(404, "not found");
     }
-    // Who may is rules.rs's: yours, and a ticket the window's.
+    // Who may is rules.rs's: yours, and an invite the window's.
     if rest == "forwards" {
         return match ctx.cores.forwards.list() {
             Ok(v) => Reply::json(200, v),
@@ -182,87 +136,36 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     let window = req.by.window;
     let result = match rest {
         "state" => Ok(net.state()),
-        "create" => create(ctx, net, &body, window).await,
-        "join" if body.get("invite").is_some() => {
+        "create" => {
+            let relay = text("relay");
+            net.create(&text("name"), &text("host"), Some(relay.as_str()).filter(|r| !r.trim().is_empty()), window).await
+        }
+        "join" => {
             let at = text("at");
             net.join_invite(&text("invite"), &text("code"), Some(at.as_str()).filter(|a| !a.is_empty()), on("lan")).await
         }
-        "join" => net.join(&text("address"), &text("ticket")).await,
-        "leave" => {
-            let r = net.leave(network, on("force")).await;
-            if r.is_ok() {
-                net.unlisten();
-            }
-            r
-        }
-        "ticket" => {
-            net.tunnel_address(public_host(ctx).as_deref());
-            net.ticket(network, &text("host"), on("window"), window).await
-        }
-        "invite" => {
-            net.tunnel_address(public_host(ctx).as_deref());
-            net.invite(network, &text("host"), on("window"), on("lan"), window).await
-        }
+        "leave" => net.leave(network, on("force")).await,
+        "invite" => net.invite(network, &text("host"), on("window"), on("lan"), window).await,
         "remove" => net.remove(network, &text("host")).await,
         "replace" => net.replace(network, &text("host"), window).await,
         "settings" => settings(net, network, &body, window).await,
         "sharing" => net.share(network, body.get("sharing").unwrap_or(&Value::Null), window),
         "relays" => net.relay(network, &text("url"), body.get("add") != Some(&Value::Bool(false)), on("mine"), window).await,
         "approve" => net.approve(network, &text("id"), window).await,
-        "gateway/take" => take(ctx, net, network, &body, window).await,
         "svc" => net.svc_list(network),
         "svc/publish" => publish(ctx, net, network, &body, window),
         "devices/revoke" => net.revoke_device(&text("device"), window),
         "feeds/unfreeze" => net.unfreeze(network, &text("author"), window),
-        "svc/unpublish" => net.svc_unpublish(network, &text("name")),
-        _ => net.set_gateway(network, &text("address")).await,
+        _ => net.svc_unpublish(network, &text("name")),
     };
     match result {
         Ok(v) => Reply::json(200, v),
-        // The ticket's maker hasn't signed this machine in yet, or a second
+        // The invite's maker hasn't signed this machine in yet, or a second
         // window host hasn't approved it: the join is taken, and waits.
         // The window and the CLI say why and ask again.
         Err(e) if e.code.as_deref() == Some("waiting") => Reply::json(202, json!({ "waiting": true, "message": e.message })),
         Err(e) => refused(&e),
     }
-}
-
-async fn create(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetResult {
-    let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let lan = match body.get("lan").and_then(Value::as_str).filter(|l| !l.trim().is_empty()) {
-        Some(l) => Some(lan_of(l)?),
-        None => None,
-    };
-    // The LAN listener first: an address this machine can't listen on is
-    // refused before the network is made.
-    if let Some(addr) = lan {
-        svc.listen(addr).await?;
-    }
-    let lan_text = lan.map(|a| a.to_string());
-    let relay = text("relay");
-    let made = svc.create(&text("name"), &text("host"), public_host(ctx).as_deref(), lan_text.as_deref(), Some(relay.as_str()).filter(|r| !r.trim().is_empty()), window).await;
-    if made.is_err() && lan.is_some() {
-        svc.unlisten();
-    }
-    made
-}
-
-/// **Make this the network's gateway**: at the LAN address given, which it
-/// listens on first, or at the actor gateway's tunnel.
-async fn take(ctx: &Ctx, svc: &dyn Network, network: Option<&str>, body: &Value, window: bool) -> NetResult {
-    let lan = match body.get("lan").and_then(Value::as_str).filter(|l| !l.trim().is_empty()) {
-        Some(l) => Some(lan_of(l)?),
-        None => None,
-    };
-    if let Some(addr) = lan {
-        svc.listen(addr).await?;
-    }
-    let lan_text = lan.map(|a| a.to_string());
-    let took = svc.take_gateway(network, public_host(ctx).as_deref(), lan_text.as_deref(), window).await;
-    if took.is_err() && lan.is_some() {
-        svc.unlisten();
-    }
-    took
 }
 
 /// **Publish a service**: a service on this machine for the network's
@@ -280,12 +183,11 @@ fn publish(ctx: &Ctx, svc: &dyn Network, network: Option<&str>, body: &Value, wi
     };
     let target = text("target");
     if let Some(port) = svc.svc_port(&target) {
-        // Its API, the actor gateway's port as it runs (one it saved, or
-        // the old default on an install set up before ports were saved)
-        // and the default it would take, and the network's LAN door.
+        // Its API, and the actor gateway's port as it runs (one it saved,
+        // or the old default on an install set up before ports were saved)
+        // and the default it would take.
         let mut own = vec![ctx.config.port, ctx.config.gateway_port.unwrap_or_else(|| crate::config::gateway_port_of(ctx.config.port))];
         own.extend(ctx.gateway.get().map(|g| g.port()));
-        own.extend(svc.lans().iter().map(SocketAddr::port));
         if own.contains(&port) {
             return Err(bad(format!("port {port} is XenoNet's own: publishing it would let other hosts act as this machine's owner")));
         }
@@ -309,25 +211,6 @@ async fn settings(svc: &dyn Network, network: Option<&str>, body: &Value, window
     }
     let titles = body.get("titlesOnly").and_then(Value::as_bool);
     let load = body.get("shareLoad").and_then(Value::as_bool);
-    let lan = match body.get("lan") {
-        None => None,
-        Some(Value::Null) => Some(None),
-        Some(Value::String(s)) if s.trim().is_empty() => Some(None),
-        Some(Value::String(s)) => Some(Some(lan_of(s)?)),
-        Some(_) => return Err(bad("lan is an address, or null")),
-    };
-    if let Some(l) = lan {
-        if !svc.is_gateway(network) {
-            return Err(net_error(409, "not-gateway", "the LAN address is the gateway's: set it on its host"));
-        }
-        if let Some(addr) = l {
-            svc.listen(addr).await?;
-        }
-    }
-    let change = NetChange { titles_only: titles, share_load: load, lan: lan.map(|l| l.map(|a| a.to_string())), start: text("start"), wake: text("wake") };
-    let r = svc.settings(network, change, window).await;
-    if lan.is_some() {
-        svc.unlisten();
-    }
-    r
+    let change = NetChange { titles_only: titles, share_load: load, start: text("start"), wake: text("wake") };
+    svc.settings(network, change, window).await
 }

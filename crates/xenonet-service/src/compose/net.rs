@@ -1,8 +1,8 @@
 //! What this machine keeps of its network and its person
 //! (`xenonet_net::persist::Persist`), in the store: the network's row, its
-//! roster and each person's chain as chain entries, how the link stood and
-//! where it stands in the gateway's stream, the services published, the
-//! presence blocks taken and the token roots' certificates
+//! roster and each person's chain as chain entries, how this machine stood
+//! in it, the services published, the presence blocks taken and the token
+//! roots' certificates
 //! (`xenonet_store::net`), and this machine's feed and how it stands with
 //! the others' (`xenonet_store::feed`). Here at the composition root,
 //! which knows both: the network depends on no store, and the store on no
@@ -12,7 +12,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use xenonet_id::codec::{b64, unb64_n};
 use xenonet_net::feed::{FeedEntry, Fork, Pos};
-use xenonet_net::files::{NetFile, Pin};
+use xenonet_net::files::NetFile;
 use xenonet_net::holder::Held;
 use xenonet_net::identity::person::{self, PersonPolicy};
 use xenonet_net::mailbox::Mail;
@@ -20,7 +20,7 @@ use xenonet_net::persist::{Persist, Person, Seen, WriterAt};
 use xenonet_net::roster::{self, NetworkPolicy};
 use xenonet_net::share::Sharing;
 use xenonet_net::{NetError, R};
-use xenonet_store::net::{self as kept, Gateway, Network};
+use xenonet_store::net::{self as kept, Network};
 use xenonet_store::{Db, StoreError};
 
 /// The store, as the network and the person keep in it.
@@ -31,33 +31,11 @@ fn store(e: StoreError) -> NetError {
 }
 
 fn network_of(n: &NetFile) -> Network {
-    let g = &n.gateway;
-    Network {
-        id: n.id.clone(),
-        name: n.name.clone(),
-        host: n.host.clone(),
-        founder: n.founder.clone(),
-        gateway: Gateway { host: g.host.clone(), key_id: g.key_id.clone(), sign: g.sign.clone(), seal: g.seal.clone(), address: g.address.clone() },
-        lan: n.lan.clone(),
-        titles_only: n.titles_only,
-        share_load: n.share_load,
-        joined: n.joined,
-    }
+    Network { id: n.id.clone(), name: n.name.clone(), host: n.host.clone(), founder: n.founder.clone(), titles_only: n.titles_only, share_load: n.share_load, joined: n.joined }
 }
 
 fn net_file(n: Network) -> NetFile {
-    let g = n.gateway;
-    NetFile {
-        id: n.id,
-        name: n.name,
-        host: n.host,
-        founder: n.founder,
-        gateway: Pin { host: g.host, key_id: g.key_id, sign: g.sign, seal: g.seal, address: g.address },
-        lan: n.lan,
-        titles_only: n.titles_only,
-        share_load: n.share_load,
-        joined: n.joined,
-    }
+    NetFile { id: n.id, name: n.name, host: n.host, founder: n.founder, titles_only: n.titles_only, share_load: n.share_load, joined: n.joined }
 }
 
 impl Persist for StorePersist {
@@ -116,12 +94,7 @@ impl Persist for StorePersist {
     fn put_token_roots(&self, certificates: &[Value]) -> R<()> {
         self.0.put_token_roots(certificates).map_err(store)
     }
-    fn cursor(&self, network: &str) -> R<Option<(String, u64)>> {
-        self.0.link_cursor(network).map_err(store)
-    }
-    fn put_cursor(&self, network: &str, epoch: &str, seq: u64) -> R<()> {
-        self.0.put_link_cursor(network, epoch, seq).map_err(store)
-    }
+
     fn feed_writer(&self, network: &str) -> R<Option<WriterAt>> {
         Ok(self.0.feed_writer(network).map_err(store)?.map(|w| WriterAt { inc: w.inc, kept: w.kept, loose: w.loose, link: w.link, head: w.head }))
     }
@@ -198,18 +171,7 @@ mod tests {
         let kept = open();
         let identity = xenonet_net::identity::Identity::open(dir.join("identity"), kept.clone(), Some(Arc::new(xenonet_keys::Fake { allow: true }))).unwrap();
         identity.found(true, "studio", 1).unwrap();
-        let pin = Pin { host: "studio".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: Some("127.0.0.1:1".into()) };
-        let n = NetFile {
-            id: "net_0".into(),
-            name: "home".into(),
-            host: "studio".into(),
-            founder: "studio".into(),
-            gateway: pin,
-            lan: None,
-            titles_only: true,
-            share_load: false,
-            joined: 7,
-        };
+        let n = NetFile { id: "net_0".into(), name: "home".into(), host: "studio".into(), founder: "studio".into(), titles_only: true, share_load: false, joined: 7 };
         kept.put_network(&n).unwrap();
         kept.put_presence_seen(&[("xns1_a".into(), [3; 16], 9)]).unwrap();
         drop((kept, identity));

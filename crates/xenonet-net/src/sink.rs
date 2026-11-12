@@ -202,13 +202,13 @@ impl Sink for LogSink {
         (self.log)("net.receive", &format!("a {} frame from {}, with no engine to take it", incoming.kind.as_str(), incoming.from));
     }
     fn linked(&self, up: bool) {
-        (self.log)("net.link", if up { "the link to the network's gateway is up" } else { "the link to the network's gateway is down" });
+        (self.log)("net.link", if up { "this machine reaches the network's machines" } else { "this machine reaches none of the network's machines" });
     }
     fn removed(&self, host: &str) {
         (self.log)("net.removed", &format!("{host} was removed from the network"));
     }
     fn gap(&self) {
-        (self.log)("net.gap", "the gateway lost frames for this host or from it");
+        (self.log)("net.gap", "entries for this host or from it were lost on the way");
     }
 }
 

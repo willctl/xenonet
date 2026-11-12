@@ -1,6 +1,6 @@
 //! This machine in every network it is in (phase 5, commit 13): one node
 //! per network (`node::Node`), each with its own chain, roster, feed
-//! writer, settings, services and link to its gateway, and what they share
+//! writer, settings and services, and what they share
 //! (`node::Common`): the person here, one link/2 endpoint with one
 //! connection per peer, the HLC and the entries taken lately.
 //!
@@ -158,19 +158,7 @@ impl Nodes {
         }
     }
 
-    /// The gateway here of the network whose LAN door is `addr`, or, with
-    /// no address, of the one reached through the tunnel.
-    pub fn gateway_at(&self, lan: Option<&str>) -> Option<Arc<crate::gateway::Gateway>> {
-        self.nodes().into_iter().filter_map(|n| Some((n.shared().network()?, n.gateway()?))).find(|(f, _)| f.lan.as_deref() == lan).map(|(_, g)| g)
-    }
-
-    /// The LAN addresses this machine's gateways listen on.
-    pub fn lan_doors(&self) -> Vec<String> {
-        self.nodes().into_iter().filter(|n| n.shared().is_gateway()).filter_map(|n| n.shared().network()?.lan).collect()
-    }
-
-    /// Starts each network's link (and its gateway, where it's this
-    /// machine), and link/2 for them all.
+    /// Starts each network's node, and link/2 for them all.
     pub fn start(&self) -> R<()> {
         for n in self.nodes() {
             n.start()?;
@@ -190,7 +178,7 @@ impl Nodes {
     }
 
     fn start_link2(&self) {
-        if !self.opts.link || self.nodes().is_empty() {
+        if self.nodes().is_empty() {
             return;
         }
         let mut task = self.link2.locked();
@@ -314,25 +302,13 @@ impl Nodes {
     /// `xenonet net create`: a new network, beside any this machine is in
     /// already, with the relay the person names (`relay`: their own
     /// iroh-relay's URL, n0 for n0's public ones, or none).
-    pub async fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, relay: Option<&str>, at_window: bool) -> R<Value> {
+    pub async fn create(&self, name: &str, host: &str, relay: Option<&str>, at_window: bool) -> R<Value> {
         let relays = relay.map(str::trim).filter(|r| !r.is_empty()).map(relay_urls).transpose()?;
         if self.nodes().iter().any(|n| n.shared().network().is_some_and(|f| f.name == name.trim())) {
             return Err(NetError::new(409, "taken", format!("this machine is in a network named {} already: give the new one another name", name.trim())));
         }
-        // One gateway through the tunnel at a time: a second network's
-        // gateway here listens on a LAN address of its own.
-        if lan.is_none() && self.gateway_at(None).is_some() {
-            return Err(NetError::new(
-                409,
-                "tunnel-taken",
-                "this machine is the gateway of a network through the tunnel already: give the new network a LAN address (--lan <ip:port>)",
-            ));
-        }
-        if lan.is_some() && self.lan_doors().iter().any(|l| Some(l.as_str()) == lan) {
-            return Err(NetError::new(409, "lan-taken", "another network's gateway here listens on that address: give the new one its own port"));
-        }
         let fresh = Node::open_in(self.opts.clone(), self.sink.clone(), self.common.clone(), None)?;
-        fresh.create(name, host, address, lan, at_window)?;
+        fresh.create(name, host, at_window)?;
         self.added(fresh.clone());
         if let Some(urls) = relays {
             if let Err(e) = fresh.set_relays(&urls, true, at_window).await {
@@ -342,14 +318,6 @@ impl Nodes {
                 return Ok(out);
             }
         }
-        Ok(self.state())
-    }
-
-    /// `xenonet net join <address> <ticket>`: one network more.
-    pub async fn join(&self, address: &str, ticket: &str) -> R<Value> {
-        let fresh = Node::open_in(self.opts.clone(), self.sink.clone(), self.common.clone(), None)?;
-        fresh.join(address, ticket).await?;
-        self.added(fresh);
         Ok(self.state())
     }
 
@@ -377,9 +345,9 @@ impl Nodes {
 
     /// `xenonet net leave`: the network `which` names goes; the others stay
     /// as they were.
-    pub async fn leave(&self, which: Option<&str>, force: bool) -> R<Value> {
+    pub fn leave(&self, which: Option<&str>, force: bool) -> R<Value> {
         let node = self.pick(which)?;
-        let out = node.leave(force).await?;
+        let out = node.leave(force)?;
         self.nets.writing().retain(|n| !Arc::ptr_eq(n, &node));
         self.listed();
         if self.nodes().is_empty() {

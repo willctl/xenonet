@@ -1,6 +1,6 @@
 // The network across machines (docs/design/network.md) as the console
-// words it: GET /api/net/state (network/state/v1) read leniently, the link
-// to the gateway in a word, each machine's line, other machines' agents
+// words it: GET /api/net/state (network/state/v1) read leniently, how this
+// machine stands in it in a word, each machine's line, other machines' agents
 // from the engine's list, what of theirs waits on you or seems stuck, and
 // whether what waits sounds here. No DOM here: the Network panel
 // (network.js), the attention strip (alerts.js), the map (network-map.js)
@@ -9,20 +9,19 @@ import { hostOfId } from "./hosts.js";
 
 // A machine's id in a network, which the person picks.
 export const HOST_ID = /^[a-z][a-z0-9-]{1,31}$/;
-// How long a ticket works.
-export const TICKET_MS = 10 * 60e3;
+// How long an invite works.
+export const INVITE_MS = 10 * 60e3;
 
 // A machine that isn't in a network.
 export const ALONE = Object.freeze({
   schema: "network/state/v1",
   network: null,
   self: null,
-  gateway: null,
+  link: null,
   hosts: [],
-  tickets: [],
+  invites: { open: [], burned: [] },
   proposals: [],
   frozen: [],
-  outbox: { frames: 0, bytes: 0, oldest: null },
   rosterHead: null,
   rosterMismatch: [],
   titlesOnly: false,
@@ -46,7 +45,7 @@ export function networksOf(raw) {
 // `chosen`, a network's id, that network's part of it, as the first's is
 // at the top of the answer; else the first network's.
 export function stateOf(raw, chosen = null) {
-  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], tickets: [], proposals: [], frozen: [], rosterMismatch: [], networks: [] };
+  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], invites: { open: [], burned: [] }, proposals: [], frozen: [], rosterMismatch: [], networks: [] };
   const networks = networksOf(raw);
   const pick = networks.find((n) => n.id === chosen) ?? null;
   if (pick) raw = { ...raw, ...pick, network: { id: pick.id, name: pick.name } };
@@ -55,11 +54,11 @@ export function stateOf(raw, chosen = null) {
     ...raw,
     networks,
     hosts: list(raw.hosts).filter((x) => x && typeof x.id === "string"),
-    tickets: list(raw.tickets),
+    invites: { open: list(raw.invites?.open).filter((t) => t && typeof t.host === "string"), burned: list(raw.invites?.burned).filter((t) => t && typeof t.host === "string") },
     proposals: list(raw.proposals).filter((p) => p && typeof p.id === "string" && typeof p.host === "string"),
     frozen: list(raw.frozen).filter((f) => f && typeof f.author === "string"),
     rosterMismatch: list(raw.rosterMismatch).filter((x) => typeof x === "string"),
-    outbox: raw.outbox && typeof raw.outbox === "object" ? raw.outbox : ALONE.outbox,
+    link: raw.link && typeof raw.link === "object" ? raw.link : null,
   };
 }
 
@@ -103,35 +102,20 @@ export function clock(ms, now = Date.now()) {
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export const KIND_WORDS = { tunnel: "through a tunnel", lan: "on the LAN", loopback: "on this machine only" };
-
-// How far this machine's clock is from the gateway's, when it's enough to
-// mention: the link signs with the offset, so it's for the doctor and you.
-export function skewWords(ms) {
-  if (!Number.isFinite(ms) || Math.abs(ms) < 2000) return "";
-  const s = Math.round(Math.abs(ms) / 1000);
-  return `clock ${s < 120 ? `${s} s` : `${Math.round(s / 60)} min`} off the gateway's`;
-}
-
-// The link to the gateway: a state for its dot (ok, wait, bad, off, none),
-// a word, and a line under it.
-export function linkWords(g, now = Date.now()) {
-  if (!g) return { state: "none", word: "No address yet", sub: "The other machines reach the gateway at an address: a tunnel, or this machine's address on your LAN. Set it with the gateway's Set up… in the Actors panel." };
-  const since = Number.isFinite(g.since) ? ` since ${clock(g.since, now)}` : "";
-  const why = g.reason ? `: ${g.reason}` : "";
-  switch (g.link) {
+// How this machine stands in the network: a state for its dot (ok, bad,
+// off), a word, and a line under it. Its machines reach each other
+// straight, so there's no one machine to reach: each row says whether its
+// machine is online.
+export function linkWords(l, now = Date.now()) {
+  const since = Number.isFinite(l?.since) ? ` since ${clock(l.since, now)}` : "";
+  const why = l?.reason ? `: ${l.reason}` : "";
+  switch (l?.state) {
     case "live":
-      return { state: "ok", word: "Linked", sub: `Linked${since}` };
-    case "connecting":
-      return { state: "wait", word: "Connecting…", sub: `Reaching the gateway${since}${why}` };
-    case "offline":
-      return { state: "bad", word: "Can't reach the gateway", sub: `No answer${since}${why}. This machine keeps working; what's for other machines waits in the outbox and goes when the gateway is back.` };
-    case "refused":
-      return { state: "bad", word: "The gateway refused this machine", sub: `Refused${since}${why}. The doctor says more.` };
+      return { state: "ok", word: "In the network", sub: `Reaching its machines${since}, on the LAN, by direct paths or through a relay.` };
     case "removed":
       return { state: "bad", word: "Removed from the network", sub: `Removed${since}${why}. Run xenonet net leave on this machine to use it on its own again.` };
     default:
-      return { state: "off", word: "Off", sub: "The link to the gateway is off." };
+      return { state: "off", word: "Off", sub: "This machine isn't reaching the network's machines: XenoNet's service isn't running its node." };
   }
 }
 
@@ -141,32 +125,24 @@ export function hostLine(host, now = Date.now()) {
   if (!host) return "";
   const agents = Number.isFinite(host.agents) ? plural(host.agents, "agent") : null;
   const waits = host.waitsOnYou > 0 ? `${host.waitsOnYou} waiting on you` : null;
-  if (host.online) return ["online", agents, waits].filter(Boolean).join(" · ");
+  const held = host.held > 0 ? `${plural(host.held, "item")} held for it` : null;
+  if (host.online) return ["online", agents, waits, held].filter(Boolean).join(" · ");
   const away = Number.isFinite(host.seen) ? `offline since ${clock(host.seen, now)}` : "offline";
-  return [away, agents && `${agents} when last seen`, waits].filter(Boolean).join(" · ");
+  return [away, agents && `${agents} when last seen`, waits, held].filter(Boolean).join(" · ");
 }
 
 // The marks beside a machine's name.
 export function hostTags(host, self) {
-  return [host.id === self?.id && "this machine", host.you && "you're here", host.founder && "founder", host.gateway && "gateway", host.window && "window"].filter(Boolean);
+  return [host.id === self?.id && "this machine", host.you && "you're here", host.founder && "founder", host.window && "window"].filter(Boolean);
 }
 
-// What's waiting to go to other machines.
-export function outboxWords(o, now = Date.now()) {
-  const n = Number(o?.frames) || 0;
-  if (!n) return "Nothing waits to go to other machines.";
-  const kb = Number(o.bytes) > 0 ? ` (${Math.max(1, Math.round(o.bytes / 1024))} KB)` : "";
-  const oldest = Number.isFinite(o.oldest) ? `, the oldest from ${clock(o.oldest, now)}` : "";
-  return `${plural(n, "item")} wait${n === 1 ? "s" : ""} in the outbox${kb}${oldest}. They go when the gateway answers.`;
-}
-
-export const ticketWords = (t, now = Date.now()) => `${t.host}${t.window ? ", with a window" : ""}: works until ${clock(t.expires, now)}`;
+export const inviteWords = (t, now = Date.now()) => `${t.host}${t.window ? ", with a window" : ""}: works until ${clock(t.expires, now)}${t.wrong > 0 ? ` (${plural(t.wrong, "wrong code")})` : ""}`;
 
 // An entry that waits for the founder or a second window host to approve
 // it (state.proposals): what it does, and who signed it so far.
 export function proposalWords(p) {
   const by = list(p?.signers).join(" and ") || "nobody yet";
-  const what = p.op === "gateway" ? `${p.host} to be the gateway${p.gateway ? `, at ${p.gateway}` : ""}` : p.op === "add" ? `add ${p.host}${p.window ? " as a window host" : ""}` : `${p.op} ${p.host}`;
+  const what = p.op === "add" ? `add ${p.host}${p.window ? " as a window host" : ""}` : `${p.op} ${p.host}`;
   return `${what}, asked by ${by}`;
 }
 
@@ -277,21 +253,27 @@ export function hostIdProblem(id, state) {
   return null;
 }
 
-// A ticket's answer (POST /api/net/ticket, or replace): the line to run,
-// the part of it that's secret, and when it lapses. Null if there's no line.
+// An invite's answer (POST /api/net/invite, or replace): the line to run
+// on the new machine, the part of it that's secret (the code), and when it
+// lapses. When the invite names no relay, the line says where to find this
+// machine (--at, or --mdns on the LAN). Null if there's no invite.
 export function joinOf(data, now = Date.now()) {
   if (!data || typeof data !== "object") return null;
-  const ticket = typeof data.ticket === "string" && data.ticket ? data.ticket : null;
-  const line = typeof data.line === "string" && data.line ? data.line : ticket && typeof data.address === "string" ? `xenonet net join ${data.address} ${ticket}` : null;
-  if (!line) return null;
-  return { line, secret: ticket ?? line.trim().split(/\s+/).pop(), expires: Number.isFinite(data.expires) ? data.expires : now + TICKET_MS };
+  const invite = typeof data.invite === "string" && data.invite.startsWith("xni2_") ? data.invite : null;
+  const code = typeof data.code === "string" && data.code ? data.code : null;
+  if (!invite || !code) return null;
+  const at = list(data.at).filter((a) => typeof a === "string" && a);
+  const how = data.relay ? "" : data.lan ? " --mdns" : at.length ? ` --at ${at[0]}` : "";
+  return { line: `xenonet net join ${invite} ${code}${how}`, secret: code, expires: Number.isFinite(data.expires) ? data.expires : now + INVITE_MS };
 }
 
-// The address and ticket from what was typed or pasted: either one, or the
-// whole line Add a machine showed.
-export function joinFields(address, ticket) {
-  const m = /^\s*xenonet\s+net\s+join\s+(\S+)\s+(\S+)\s*$/.exec(address ?? "");
-  return m ? { address: m[1], ticket: m[2] } : { address: String(address ?? "").trim(), ticket: String(ticket ?? "").trim() };
+// The invite, its code and where to find the machine that made it, from
+// what was typed or pasted: either one, or the whole line Add a machine
+// showed.
+export function joinFields(invite, code) {
+  const m = /^\s*xenonet\s+net\s+join\s+(\S+)\s+(\S+)(?:\s+--at\s+(\S+)|\s+(--mdns))?\s*$/.exec(invite ?? "");
+  if (m) return { invite: m[1], code: m[2], at: m[3] ?? null, lan: !!m[4] };
+  return { invite: String(invite ?? "").trim(), code: String(code ?? "").trim(), at: null, lan: false };
 }
 
 // What a standing delegation is, as the console says it where it's set:

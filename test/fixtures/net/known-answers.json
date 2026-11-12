@@ -19,84 +19,10 @@
       "keyId": "xnk1_7u27fms2purut6skexnyjpeanykqq2s7"
     }
   ],
-  "frame": {
-    "ephemeralSecret": "SQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
-    "machineSeed": "RwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
-    "entryId": "cVFjHFwELhDDcvbe2q-e6NN5ReB5JIUa0TDsTr_6rGU",
-    "body": {
-      "schema": "network/message/v3",
-      "entry": {
-        "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
-        "group": "net_00112233445566778899aabbccddeeff",
-        "inc": 1792512000000,
-        "seq": 1,
-        "kind": "message",
-        "at": 1792512345678,
-        "body": {
-          "schema": "network/send/v1",
-          "mid": "msg_00000000-0000-4000-8000-000000000001",
-          "sender": "claude:aaaaaaaa-0001",
-          "senderKind": "agent",
-          "target": "claude:bbbbbbbb-0001",
-          "body": "hello from studio",
-          "replyTo": null,
-          "scope": "direct",
-          "kind": "message",
-          "hops": 0,
-          "at": 1792512345678
-        },
-        "sig": "6dRnnrjvVI_8P9IhLyut7OXYFXrrrtGeAgOs6YRhUJ4vIO8YdsaVF9TxpBXX0f-5ARtAfNzyWzn-T2Be7mNKCg"
-      }
-    },
-    "sealingHead": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1",
-    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1\nkFqP8KYiqH1C1ltsc7VF922_xChZhxzzRtgHA7bQIsk",
-    "frame": {
-      "v": 1,
-      "id": "frm_00000000-0000-4000-8000-0000000000aa",
-      "kind": "message",
-      "from": "studio",
-      "to": "laptop",
-      "at": 1792512345678,
-      "sealed": true,
-      "body": "ONGtHtN_RYgcXi9LoskF9gCg5BNwLk0r63UuXzirk0uWXV-sdRPNkPca038H7ZtvrOeF7EY1nvEVT0jAFElaRDcC0FvVCjJ2CApGmDKNX9oNZ7mQ_QmYELkWtzBk53VjC2iwtnxSI28mZUrn5TA8bNPvobkqP071hh1vmLrKe2dXvFLgAmwZ343aztCrOq50vA3HDqeB2cD-6zfeCyePCamttwmukrIfFLVwhMry6p1spn61i22l-5B_xw8Q-AwEIKS5k_Y35ucJxY1bhur1O7zdPfCUmlmAT5vD-2iTHh_7MfOy9SIJZU8nPVYMmvnsTOtpOIBif2kdsDE4Thmh_K8lsv1qOaGGfH7hsNZmgBbSdb0PnBfxQ1-xOgV1j8-_NrsLenugI4AR75tZpslyEymEYdYA7AhfHrCBdUh28HL9LskpNx2_B_NMPNdKn3URE2JLk_n8kopfvg8hd-SYxJNDKMqGg-uxrQeaR7ht1eJdCXmDbTD16kkaerBwu0o-HHTzDAY-XIMI3vMy8LdmPXwmh5_9dv10DxlJ-wMeEaEFGTE6DxRTX_OIGJLzfvBtSBzSyWbo75UAhHbkNwiyLdl7ar3rRFxr3Cn5HW5-CIP4h-whiK-n3kjVEA-M6gyD8-y-2XcbiNPubtdAJORBW-jQtgN2vKUTX5V6C8zyl1DTib1rOemeT-xKC3WrBqN5jsJ2griPXeg2TKk-16QaPEmacjQCLfdFnXyPettUCaUPOFgOQG2TxxEu_wiTcfSemzRo7dXwyQdvGL10KEBvY8_-slA-A7rM-G_dFQrtwepu3TekfTPYWFcy",
-      "sig": "KN64HEH3Y_lIo8w0qHDDMvmLPInPLwn85kANi-t_HhkbdORyCGq8jiThbvQcj88rkxggOwIkZQAqY-uld3d4CQ"
-    }
-  },
-  "gatewayFrame": {
-    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000bb\nping\nstudio\nlaptop\n1792512345678\n0\nShaixQzN0GbHLiAAAb0xCBtasFCpC2QHu4nzYXwknBQ",
-    "frame": {
-      "v": 1,
-      "id": "frm_00000000-0000-4000-8000-0000000000bb",
-      "kind": "ping",
-      "from": "studio",
-      "to": "laptop",
-      "at": 1792512345678,
-      "sealed": false,
-      "body": "eyJub3ciOjE3OTI1MTIzNDU2NzgsImxpbmtlZCI6WyJsYXB0b3AiLCJzdHVkaW8iXX0",
-      "sig": "9BVOwe_XXSeT3_Z9uPOzT7tzgovkYRyrAtN4AyFQxkTj1zGOSTyw9RwdY5oIED2yvbl7V4NEmtcAnYk7er7bDQ"
-    }
-  },
   "ticket": {
     "code": "KX7Q49MZT2",
     "display": "KX7Q-49MZ-T2",
-    "hash": "m5VW2ALYPf1lyDLGxluig_BMwipjqH1CVSixXyIv76g",
-    "nonce": "bm9uY2Utb2YtdGhlLWpvaW4",
-    "joinerKeyId": "xnk1_7u27fms2purut6skexnyjpeanykqq2s7",
-    "joinProof": "jME60y_MlmGAz8l2dxX2KTDidmLQ0Neuk7f5KIjet4k",
-    "gatewayKeyId": "xnk1_nbfuzqjnx7kwkmuanszkrlbq5pstmg7e",
-    "gatewayProof": "n1jdnsK-0YMSq61tp-7ixZLkOWLqHGTBws4JAHo06Ds"
-  },
-  "request": {
-    "method": "POST",
-    "target": "/net/v1/frames",
-    "body": "{\"frames\":[]}",
-    "signingString": "xenonet-req/1\nnet_00112233445566778899aabbccddeeff\nPOST\n/net/v1/frames\n1792512345000\ncmVxdWVzdC1ub25jZQ\nlaptop\nKsCnTIQhhoUZMYTnsYlj5f8rFKxCFG2LcCgufW4jEQ8",
-    "headers": {
-      "x-xenonet-net-host": "laptop",
-      "x-xenonet-net-time": "1792512345000",
-      "x-xenonet-net-nonce": "cmVxdWVzdC1ub25jZQ",
-      "x-xenonet-net-sig": "CGWsh_YnphgPCKpJw0C4B5-a7uY8iDWcHUubjjh8On2vKUPNnkYiZ5YoU1QNhCOkSy3ONpPMNL87EH7S3QOxAw"
-    }
+    "hash": "m5VW2ALYPf1lyDLGxluig_BMwipjqH1CVSixXyIv76g"
   },
   "person": {
     "rootSeed": "RQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
@@ -284,6 +210,8 @@
   },
   "sealedEnvelope": {
     "ephemeralSecret": "SwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws",
+    "machineSeed": "RwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "entryId": "cVFjHFwELhDDcvbe2q-e6NN5ReB5JIUa0TDsTr_6rGU",
     "entry": {
       "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
       "group": "net_00112233445566778899aabbccddeeff",

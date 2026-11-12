@@ -2,29 +2,28 @@
 // sections 4, 7 and 8): Settings → Network, which the palette calls
 // Network settings, and Add a machine.
 //
-//   - On its own, a machine offers Start a network (this machine is the
-//     founder and the gateway) and Join one (the line Add a machine shows
-//     elsewhere, run here in a terminal, or its address and ticket here).
-//   - In a network: its name and this machine, the gateway (its address,
-//     kind and link, since when, why it's down, clock skew), each machine
-//     (online or since when, its agents and what waits on you, founder,
-//     gateway, window, where you're at) with Remove and Replace, other
-//     machines' agents under them with Message (with the text of what
-//     waits on you, or why one seems stuck, as their machine shares it,
-//     escaped as transcripts are), the tickets waiting, the outbox, a
-//     roster mismatch, and "Share with the network: titles only"; your
+//   - On its own, a machine offers Start a network (this machine is its
+//     founder) and Join one (the line Add a machine shows elsewhere, run
+//     here in a terminal, or its invite and code here).
+//   - In a network: its name and this machine, how this machine stands in
+//     it, each machine (online or since when, its agents and what waits on
+//     you, what's held for it, founder, window, where you're at) with
+//     Remove and Replace, other machines' agents under them with Message
+//     (with the text of what waits on you, or why one seems stuck, as
+//     their machine shares it, escaped as transcripts are), the invites
+//     open, a roster mismatch, and "Share with the network: titles only"; your
 //     devices, with Revoke for a lost machine's, and the services this
 //     machine publishes, with Publish a service (network-person.js).
 //   - Add a machine asks the new machine's id and whether you'll use a
 //     XenoNet window on it, then shows the join line once, masked as a
 //     token is (secret.js): out of the page's text until Show, then for ten
 //     seconds, and masked again when the window loses focus or the page is
-//     held still for a screenshot. XenoNet keeps only the ticket's hash.
+//     held still for a screenshot. XenoNet keeps only the code's hash.
 //
 // The state comes from GET /api/net/state, read again every few seconds in
 // a network, rarely out of one, and whenever the event stream says it
 // changed (net). Other machines' agents come from the engine's list (GET
-// /api/engine/agents), with @<host>: ids. Starting, joining, tickets,
+// /api/engine/agents), with @<host>: ids. Starting, joining, invites,
 // removing, replacing and the setting go through the window's own calls,
 // with its key: they're yours, and marked so (data-yours). A machine on its
 // own never sees any of this outside this panel and Add a machine.
@@ -33,7 +32,7 @@ import { hostOfId } from "./hosts.js";
 import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
 import { personOf, servicesOf, devicesHtml, servicesHtml, publishHtml, publishBody } from "./network-person.js";
-import { stateOf, networksOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
+import { stateOf, networksOf, inNetwork, clock, linkWords, hostLine, hostTags, inviteWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, INVITE_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 // What a session starts as, in the Start a session box.
@@ -60,14 +59,9 @@ const SECRET = "net-join";
 let loadingStyles = null;
 const styles = () => (loadingStyles ??= Promise.all([import("./actors.css"), import("./network.css")]).catch(() => {}));
 
-// An address, hidden while identities are (Hide identities), as the
-// gateway's is in the Actors panel.
-const addrHtml = (text) => `<span class="addr-real">${h(text)}</span><span class="addr-masked">address hidden</span>`;
-
 // `calls` are the window's own (actor-requests.js); `message(id)` opens the
-// box that writes to a session as you; `gateway()` opens the Actors panel,
-// where the gateway's address is set; `onChange(view)` hears each new read.
-export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {}, onChange = () => {}, message = () => {}, gateway = () => {}, projects = () => [], request = (...a) => globalThis.fetch(...a) }) {
+// box that writes to a session as you; `onChange(view)` hears each new read.
+export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {}, onChange = () => {}, message = () => {}, projects = () => [], request = (...a) => globalThis.fetch(...a) }) {
   let state = stateOf(null);
   // The network the panel shows, by id, when this machine is in several:
   // the first until you pick another.
@@ -86,8 +80,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   let drawn = "";
   let busy = false;
   // The join line on screen: who it's for and when it lapses. The line
-  // itself is kept as a secret (secret.js), never here.
-  let joinTicket = null;
+  // itself is kept as a secret (secret.js), never here, but for its code,
+  // which the driver's text masks.
+  let joinCode = null;
   // The last start sent from the box, and the answers to starts you asked
   // for (the start event), newest first: for the driver.
   let lastStart = null;
@@ -173,23 +168,19 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
 
   function aloneHtml() {
     return `<p class="ac-lead">This machine is on its own.</p>
-      <p class="pj-note">A network joins the machines you use, each running XenoNet. The sessions on each can see and message each other, what waits on you shows in every console, and you can message any session from any of them. One machine is the gateway: the others reach it, and it passes what they send on without reading it.</p>
+      <p class="pj-note">A network joins the machines you use, each running XenoNet. The sessions on each can see and message each other, what waits on you shows in every console, and you can message any session from any of them. The machines reach each other straight: on your LAN, by direct paths, or through a relay you name.</p>
       <ol class="ac-list net-choices">
-        <li class="ac-row"><span class="ac-dot"></span><div class="ac-main"><div class="ac-name"><span class="ac-title">Start a network</span></div><div class="ac-what">This machine is the first one in it, and its gateway.</div></div><div class="ac-acts"><button class="act primary" data-net-go="start">Start a network…</button></div></li>
+        <li class="ac-row"><span class="ac-dot"></span><div class="ac-main"><div class="ac-name"><span class="ac-title">Start a network</span></div><div class="ac-what">This machine is the first one in it, and its founder.</div></div><div class="ac-acts"><button class="act primary" data-net-go="start">Start a network…</button></div></li>
         <li class="ac-row"><span class="ac-dot"></span><div class="ac-main"><div class="ac-name"><span class="ac-title">Join one</span></div><div class="ac-what">Another machine is in a network: its Add a machine shows a line to run here.</div></div><div class="ac-acts"><button class="act" data-net-go="join">Join one…</button></div></li>
       </ol>`;
   }
 
-  function gatewayHtml() {
-    const g = state.gateway;
-    const w = linkWords(g);
-    // Where it is, beside its address; how the link stands, under it.
-    const where = g ? [KIND_WORDS[g.kind], state.self?.gateway ? "this machine" : null].filter(Boolean).join(" · ") : "";
-    const addr = g?.address ? `<code class="ac-gw-addr" data-net-address>${addrHtml(g.address)}</code>` : "";
-    const setup = !g || state.self?.gateway ? `<button class="act${g ? "" : " primary"}" data-net-gateway-setup title="The gateway's tunnel or LAN address is set in the Actors panel">${g ? "Change the address…" : "Set the address…"}</button>` : "";
-    return `<div class="ac-gw" data-state="${h(w.state)}" data-net-gateway data-net-link="${h(g?.link ?? "none")}">
-        <div class="ac-gw-line"><span class="ac-gw-dot"></span><span class="ac-gw-word" data-net-link-word>${h(w.word)}</span>${addr}${where ? `<span class="net-where">${h(where)}</span>` : ""}<span class="grow"></span>${setup}</div>
-        <div class="ac-gw-sub" data-net-link-sub>${h([w.sub, g && skewWords(g.skewMs)].filter(Boolean).join(" · "))}</div>
+  // How this machine stands in the network, in a word and a line.
+  function linkHtml() {
+    const w = linkWords(state.link);
+    return `<div class="ac-gw" data-state="${h(w.state)}" data-net-standing data-net-link="${h(state.link?.state ?? "off")}">
+        <div class="ac-gw-line"><span class="ac-gw-dot"></span><span class="ac-gw-word" data-net-link-word>${h(w.word)}</span></div>
+        <div class="ac-gw-sub" data-net-link-sub>${h(w.sub)}</div>
       </div>`;
   }
 
@@ -262,10 +253,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   function memberHtml() {
     const hosts = [...state.hosts].sort((a, b) => (b.id === state.self?.id) - (a.id === state.self?.id) || (b.online === true) - (a.online === true) || (a.id < b.id ? -1 : 1));
     const mismatch = state.rosterMismatch.length
-      ? `<p class="net-warn" data-net-mismatch>${h(state.rosterMismatch.join(", "))} ${state.rosterMismatch.length === 1 ? "sees" : "see"} another list of the network's machines than this one. One of you missed a change to it, or the gateway is holding one back. The doctor says more.</p>`
+      ? `<p class="net-warn" data-net-mismatch>${h(state.rosterMismatch.join(", "))} ${state.rosterMismatch.length === 1 ? "sees" : "see"} another list of the network's machines than this one. One of you missed a change to it; it comes when the two reach each other. The doctor says more.</p>`
       : "";
-    const tickets = state.tickets.length
-      ? `<div class="panel-title sub"><span>Waiting to join</span><span class="tick">${state.tickets.length}</span></div><ul class="net-tickets" data-net-tickets>${state.tickets.map((t) => `<li>${h(ticketWords(t))}</li>`).join("")}</ul>`
+    const invites = state.invites.open.length
+      ? `<div class="panel-title sub"><span>Waiting to join</span><span class="tick">${state.invites.open.length}</span></div><ul class="net-tickets" data-net-invites>${state.invites.open.map((t) => `<li>${h(inviteWords(t))}</li>`).join("")}</ul>`
       : "";
     // What waits for the founder or a second window host: a window host
     // signs it too here, unless it has.
@@ -282,11 +273,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
           .map((f) => `<li data-net-frozen-feed="${h(f.author)}">${h(frozenWords(f))}. Unfreeze it once you trust that machine again, or remove it.${state.self ? ` <button class="act" data-net-unfreeze="${h(f.author)}" data-yours>Unfreeze</button>` : ""}</li>`)
           .join("")}</ul>`
       : "";
-    return `${gatewayHtml()}${mismatch}${frozen}
+    return `${linkHtml()}${mismatch}${frozen}
       <div class="panel-title sub"><span>Machines</span><span class="tick">${hosts.length}</span></div>
       <ol class="ac-list" data-net-hosts>${hosts.map((x) => hostHtml(x, view.confirm)).join("")}</ol>
-      ${approvals}${tickets}
-      <p class="net-outbox" data-net-outbox>${h(outboxWords(state.outbox))}</p>
+      ${approvals}${invites}
       <div class="panel-title sub"><span>This machine</span></div>
       <label class="net-check"><input type="checkbox" data-net-titles data-yours ${state.titlesOnly ? "checked" : ""}> Share with the network: titles only</label>
       <p class="pj-note">On, the other consoles see this machine's sessions by their titles alone: not the text of a question waiting, the last message, or why a session seems stuck.</p>
@@ -350,7 +340,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         <label class="ac-field"><span class="ac-k">Relay</span><select class="ac-input" data-net-relay-kind><option value="">None: the LAN and direct paths only</option><option value="own">Your own iroh-relay</option><option value="n0">n0's public relays (rate-limited, run by n0)</option></select></label>
         <label class="ac-field"><span class="ac-k">Your relay's URL</span><input class="ac-input" data-net-relay-own placeholder="https://relay.example.net" spellcheck="false" autocomplete="off"></label>
       </div>
-      <p class="pj-note">The id is what every console calls this machine: lowercase letters, digits and dashes. Pick a name, since XenoNet never uses the machine's own. This machine is the network's founder, whose key is its root, and its gateway. The other machines reach the gateway at an address, a tunnel or this machine's address on your LAN, which you set next. In a terminal: <code>xenonet net create --name &lt;name&gt; --host &lt;id&gt; [--relay &lt;url|n0&gt;]</code>. With no relay, the network's machines reach each other on the LAN and by direct paths.</p>
+      <p class="pj-note">The id is what every console calls this machine: lowercase letters, digits and dashes. Pick a name, since XenoNet never uses the machine's own. This machine is the network's founder, whose key is its root. In a terminal: <code>xenonet net create --name &lt;name&gt; --host &lt;id&gt; [--relay &lt;url|n0&gt;]</code>. With no relay, the network's machines reach each other on the LAN and by direct paths.</p>
       ${errorHtml(view.error)}
       <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-create data-yours>Start the network</button></div>`;
   }
@@ -358,11 +348,12 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   function joinHtml() {
     return `<p class="ac-lead">Join a network</p>
       <p class="pj-note">On a machine that's in the network, choose Add a machine. It shows one line to run here, in a terminal:</p>
-      <pre class="ac-message">xenonet net join &lt;address&gt; &lt;ticket&gt;</pre>
-      <p class="pj-note">Or paste that line, or its address and ticket, here. The ticket works once, for ten minutes.</p>
+      <pre class="ac-message">xenonet net join &lt;invite&gt; &lt;code&gt;</pre>
+      <p class="pj-note">Or paste that line, or its invite and code, here. The invite works once, for ten minutes.</p>
       <div class="ac-form">
-        <label class="ac-field"><span class="ac-k">Address</span><input class="ac-input" data-net-join-address placeholder="gw.example.net" spellcheck="false" autocomplete="off"></label>
-        <label class="ac-field"><span class="ac-k">Ticket</span><input class="ac-input" type="password" data-net-join-ticket data-yours placeholder="KX7Q-49MZ-T2" spellcheck="false" autocomplete="off"></label>
+        <label class="ac-field"><span class="ac-k">Invite</span><input class="ac-input" data-net-join-invite placeholder="xni2_…" spellcheck="false" autocomplete="off"></label>
+        <label class="ac-field"><span class="ac-k">Code</span><input class="ac-input" type="password" data-net-join-code data-yours placeholder="KX7Q-49MZ-T2" spellcheck="false" autocomplete="off"></label>
+        <label class="ac-field"><span class="ac-k">Its address</span><input class="ac-input" data-net-join-at placeholder="192.168.1.20:47861, when the invite names no relay" spellcheck="false" autocomplete="off"></label>
       </div>
       ${errorHtml(view.error)}
       <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-join data-yours>Join</button></div>`;
@@ -376,7 +367,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <label class="net-check"><input type="checkbox" data-net-add-window ${view.window ? "checked" : ""}> I'll use a XenoNet window on it</label>
       <p class="pj-note">The id is what every console calls it: lowercase letters, digits and dashes. Pick a name, since XenoNet never uses the machine's own. A machine with a window can act for you from its console: message sessions as you, and add or remove machines. Leave it unticked for a server you only reach in a terminal. XenoNet then shows one line to run on the new machine, which works once, for ten minutes.</p>
       ${errorHtml(view.error)}
-      <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span>${view.error && /address/i.test(view.error) ? `<button class="act" data-net-gateway-setup>Set the address…</button>` : ""}<button class="act primary" data-net-make data-yours>Make the join line</button></div>`;
+      <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-make data-yours>Make the join line</button></div>`;
   }
 
   const joined = () => !!view.host && state.hosts.some((x) => x.id === view.host);
@@ -392,7 +383,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         <li><div class="ac-step-head"><span class="ac-step-text">In a terminal on ${h(view.host)}, where XenoNet is installed, run this line.</span><button class="act primary" data-secret-copy="${SECRET}">Copy line</button></div>${secretHtml(SECRET, { attrs: "data-net-join-line", block: true })}</li>
         ${waitHtml()}
       </ol>
-      <p class="pj-note" data-net-line-note>It works once, until ${h(clock(view.expires))}: ten minutes. XenoNet keeps only a hash of its ticket, so it can't show it again.${view.replaces ? ` ${h(view.host)}'s old keys stop working once it joins with this one.` : ""}${view.window ? ` From its window, ${h(view.host)} can act for you.` : ""}</p>
+      <p class="pj-note" data-net-line-note>It works once, until ${h(clock(view.expires))}: ten minutes. XenoNet keeps only a hash of its code, so it can't show it again.${view.replaces ? ` ${h(view.host)}'s old keys stop working once it joins with this one.` : ""}${view.window ? ` From its window, ${h(view.host)} can act for you.` : ""}</p>
       <div class="m-foot"><span class="grow"></span><button class="act" data-net-done>Done</button></div>`;
   }
 
@@ -516,7 +507,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     b.innerHTML = html;
     drawn = view.name === "main" ? html : view.name;
     if (view.name === "session") arm();
-    b.querySelector("[data-net-add-host], [data-net-self], [data-net-join-address], [data-net-svc-name]")?.focus();
+    b.querySelector("[data-net-add-host], [data-net-self], [data-net-join-invite], [data-net-svc-name]")?.focus();
   }
 
   function go(next) {
@@ -535,8 +526,6 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (p && view.name !== "main") {
       p.textContent = error;
       p.hidden = false;
-      // The address problem gets its fix beside it.
-      if (view.name === "add" && /address/i.test(error) && !body().querySelector(".m-foot [data-net-gateway-setup]")) body().querySelector("[data-net-make]")?.insertAdjacentHTML("beforebegin", `<button class="act" data-net-gateway-setup>Set the address…</button>`);
     } else go(view);
     return { ok: false, status: r.status, error };
   }
@@ -553,13 +542,13 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     }
   }
 
-  // Shows a ticket's line once, masked, for `host`.
+  // Shows an invite's line once, masked, for `host`.
   function showLine(r, host, window, replaces = null) {
     const join = joinOf(r.data);
-    if (!join) return failed({ status: 502, error: "XenoNet made a ticket but sent no line to show." });
+    if (!join) return failed({ status: 502, error: "XenoNet made an invite but sent no line to show." });
     forgetSecrets();
     keepSecret(SECRET, join.secret, join.line);
-    joinTicket = join.secret;
+    joinCode = join.secret;
     sfx("success");
     go({ name: "line", host, window, expires: join.expires, replaces });
     void refresh().catch(() => {});
@@ -573,8 +562,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const problem = hostIdProblem(host, state);
     if (problem) return failed({ status: 400, error: problem });
     return busyWith(async () => {
-      const r = await netCall("POST", "/api/net/ticket", { host, window });
-      return r.ok ? showLine(r, host, window) : failed(r, `xenonet net add-machine ${host}${window ? " --window" : ""}`);
+      const r = await netCall("POST", "/api/net/invite", { host, window });
+      return r.ok ? showLine(r, host, window) : failed(r, `xenonet net invite ${host}${window ? " --window" : ""}`);
     });
   }
 
@@ -591,7 +580,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       const r = await netCall("POST", "/api/net/remove", { host });
       if (!r.ok) return failed(r, `xenonet net remove ${host}`);
       sfx("success");
-      toast(`${host} is out of the network. Its frames are refused from now on.`);
+      toast(`${host} is out of the network. What it sends is refused from now on.`);
       view = { name: "main" };
       await refresh();
       return { ok: true };
@@ -658,31 +647,33 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       chosen = networksOf(r.data).find((x) => x.name === name)?.id ?? chosen;
       if (r.data?.relayRefused) toast(`The network ${name} is started, without its relay: ${r.data.relayRefused}`, true);
       await refresh();
-      toast(state.gateway ? `The network ${name} is started.` : `The network ${name} is started. Set the gateway's address next.`);
+      toast(`The network ${name} is started.`);
       go({ name: "main" });
       return { ok: true };
     });
   }
 
   async function join() {
-    const { address, ticket } = joinFields(body().querySelector("[data-net-join-address]").value, body().querySelector("[data-net-join-ticket]").value);
-    body().querySelector("[data-net-join-ticket]").value = "";
-    if (!address || !ticket) return failed({ status: 400, error: "Give the address and the ticket from the line Add a machine showed." });
+    const typed = joinFields(body().querySelector("[data-net-join-invite]").value, body().querySelector("[data-net-join-code]").value);
+    body().querySelector("[data-net-join-code]").value = "";
+    const at = typed.at ?? (body().querySelector("[data-net-join-at]")?.value.trim() || null);
+    if (!typed.invite || !typed.code) return failed({ status: 400, error: "Give the invite and its code, as Add a machine showed them." });
+    const sent = { invite: typed.invite, code: typed.code, lan: typed.lan, ...(at ? { at } : {}) };
     return busyWith(async () => {
-      let r = await calls.call("POST", "/api/net/join", { address, ticket });
-      // A ticket made on a machine that isn't the gateway waits for that
-      // machine to sign this one in, or for a second approval: say why, and
-      // ask again until the ticket lapses.
-      const until = Date.now() + TICKET_MS;
+      let r = await calls.call("POST", "/api/net/join", sent);
+      // The machine that made the invite signs this one in, which may wait
+      // for you there, or for a second approval: say why, and ask again
+      // until the invite lapses.
+      const until = Date.now() + INVITE_MS;
       let said = false;
       while (r.ok && r.data?.waiting && Date.now() < until) {
-        if (!said) toast(r.data.message ?? "The join waits for the machine that made the ticket.");
+        if (!said) toast(r.data.message ?? "The join waits for the machine that made the invite.");
         said = true;
         await new Promise((done) => setTimeout(done, 3000));
-        r = await calls.call("POST", "/api/net/join", { address, ticket });
+        r = await calls.call("POST", "/api/net/join", sent);
       }
-      if (r.ok && r.data?.waiting) return failed({ status: 409, error: r.data.message ?? "The ticket lapsed while the join waited." });
-      if (!r.ok) return failed(r, "xenonet net join <address> <ticket>");
+      if (r.ok && r.data?.waiting) return failed({ status: 409, error: r.data.message ?? "The invite lapsed while the join waited." });
+      if (!r.ok) return failed(r, "xenonet net join <invite> <code>");
       sfx("success");
       // The network joined is the last the state lists: the panel shows it.
       chosen = networksOf(r.data).at(-1)?.id ?? chosen;
@@ -826,10 +817,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (t.closest("[data-net-back]")) return go({ name: "main" });
     if (t.closest("[data-net-done]")) {
       forgetSecrets();
-      joinTicket = null;
+      joinCode = null;
       return go({ name: "main" });
     }
-    if (t.closest("[data-net-gateway-setup]")) return gateway();
     if (t.closest("[data-net-make]")) return make();
     if (t.closest("[data-net-create]")) return create();
     if (d.netPick) return pickNetwork(d.netPick);
@@ -871,7 +861,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         // The line on screen goes with the panel.
         onClose: () => {
           forgetSecrets();
-          joinTicket = null;
+          joinCode = null;
           clearTimeout(armTimer);
           unblur();
           view = { name: "main" };
@@ -931,20 +921,20 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   // "desk|wake:consent", "desk|<id>").
   const centres = (attr) => Object.fromEntries([...(panel?.querySelectorAll(`[${attr}]`) ?? [])].map((b) => [b.getAttribute(attr), centre(`[${attr}="${CSS.escape(b.getAttribute(attr))}"]`)]).filter(([, at]) => at));
 
-  // Text from the panel with the ticket masked, shown or not.
-  const masked = (text) => (joinTicket ? text.split(joinTicket).join("••••••••••••") : text);
+  // Text from the panel with the code masked, shown or not.
+  const masked = (text) => (joinCode ? text.split(joinCode).join("••••••••••••") : text);
 
-  // Whether the join line shows masked: its ticket isn't in the text the
-  // page shows. Never the ticket itself.
+  // Whether the join line shows masked: its code isn't in the text the
+  // page shows. Never the code itself.
   function joinState() {
     if (view.name !== "line" || !isOpen()) return null;
     const box = panel.querySelector(`[data-secret="${SECRET}"]`);
     const text = box?.querySelector(".secret-text")?.innerText ?? "";
-    return { host: view.host, window: !!view.window, expires: view.expires, shown: !!box?.classList.contains("shown"), masked: !joinTicket || !text.includes(joinTicket), joined: joined(), kept: secretValue(SECRET) != null };
+    return { host: view.host, window: !!view.window, expires: view.expires, shown: !!box?.classList.contains("shown"), masked: !joinCode || !text.includes(joinCode), joined: joined(), kept: secretValue(SECRET) != null };
   }
 
   function driverState() {
-    const g = state.gateway;
+    const l = state.link;
     return {
       open: isOpen(),
       view: isOpen() ? view.name : null,
@@ -958,7 +948,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       networks: state.networks.map((x) => ({ id: x.id, name: x.name, host: x.host, current: x.id === state.network?.id, hosts: (x.hosts ?? []).length, sharing: x.sharing, relays: x.relays, inContact: x.inContact ?? null })),
       relaysHere: state.relaysHere ?? null,
       shareable,
-      gateway: g ? { address: g.address, kind: g.kind, link: g.link, words: linkWords(g).word, since: g.since ?? null, reason: g.reason ?? null, skewMs: g.skewMs ?? null } : null,
+      link: l ? { state: l.state ?? "off", words: linkWords(l).word, since: l.since ?? null, reason: l.reason ?? null } : null,
       hosts: state.hosts.map((x) => ({
         id: x.id,
         online: !!x.online,
@@ -966,8 +956,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         you: !!x.you,
         here: x.id === state.self?.id,
         founder: !!x.founder,
-        gateway: !!x.gateway,
         window: !!x.window,
+        path: x.path ?? null,
+        held: x.held ?? 0,
         agents: x.agents ?? 0,
         waitsOnYou: x.waitsOnYou ?? 0,
         reach: reachOf(x),
@@ -976,10 +967,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         row: isOpen() ? (panel.querySelector(`[data-net-host="${CSS.escape(x.id)}"] [data-net-host-line]`)?.textContent ?? null) : null,
         remote: agents.filter((a) => a.host === x.id).map((a) => ({ id: a.id, title: a.title, app: a.app, status: a.status, waits: a.waits, text: a.text, stuck: a.stuck, lastMessage: a.lastMessage, projectKey: a.projectKey })),
       })),
-      tickets: state.tickets.map((t) => ({ host: t.host, window: !!t.window, expires: t.expires })),
-      proposals: state.proposals.map((p) => ({ id: p.id, op: p.op, host: p.host, window: !!p.window, gateway: p.gateway ?? null, signers: p.signers ?? [], words: proposalWords(p) })),
+      invites: state.invites.open.map((t) => ({ host: t.host, window: !!t.window, expires: t.expires, wrong: t.wrong ?? 0 })),
+      proposals: state.proposals.map((p) => ({ id: p.id, op: p.op, host: p.host, window: !!p.window, signers: p.signers ?? [], words: proposalWords(p) })),
       frozen: state.frozen.map((f) => ({ author: f.author, host: f.host ?? null, at: f.at ?? null, words: frozenWords(f) })),
-      outbox: { frames: state.outbox.frames ?? 0, bytes: state.outbox.bytes ?? 0, oldest: state.outbox.oldest ?? null },
       mismatch: state.rosterMismatch,
       titlesOnly: !!state.titlesOnly,
       shareLoad: state.shareLoad !== false,

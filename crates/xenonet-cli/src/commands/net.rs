@@ -4,7 +4,7 @@
 //! in one network needs no more than its list does.
 //! Creating, joining and leaving are the person's: the service refuses
 //! them from under an agent, as it does `xenonet service install`. What
-//! asks the person (a ticket, a widening, setting up their identity with
+//! asks the person (an invite, a widening, setting up their identity with
 //! the first network) is made in XenoNet's window, never here.
 
 use crate::args::Flags;
@@ -24,14 +24,14 @@ fn call(s: &Server, method: &str, route: &str, body: Option<&Value>) -> Result<V
     s.request(method, route, body, &[]).map_err(refused)
 }
 
-fn link_words(g: &Value) -> String {
-    let since = (num(g, "since") > 0.0).then(|| ago(num(g, "since"), now()));
-    let reason = str(g, "reason").map(|r| format!(": {r}")).unwrap_or_default();
-    match str(g, "link") {
-        Some("live") => c::green("live"),
-        Some("connecting") => c::dim("connecting…"),
+// How this machine stands in the network: live while its node runs,
+// removed once a member took it out.
+fn link_words(l: &Value) -> String {
+    let since = if num(l, "since") > 0.0 { format!(" since {}", ago(num(l, "since"), now())) } else { String::new() };
+    let reason = str(l, "reason").map(|r| format!(": {r}")).unwrap_or_default();
+    match str(l, "state") {
+        Some("live") => c::green(format!("live{since}")),
         Some("removed") => c::red(format!("removed{reason}")),
-        Some(state @ ("offline" | "refused")) => c::yellow(format!("{state}{}{reason}", since.map(|s| format!(" since {s}")).unwrap_or_default())),
         _ => c::dim("off"),
     }
 }
@@ -42,7 +42,7 @@ fn show_status(st: &Value) {
         return;
     };
     let me = st.get("self").cloned().unwrap_or(Value::Null);
-    let roles: Vec<&str> = [("founder", "founder"), ("gateway", "gateway"), ("window", "window host")].iter().filter(|(k, _)| on(&me, k)).map(|(_, w)| *w).collect();
+    let roles: Vec<&str> = [("founder", "founder"), ("window", "window host")].iter().filter(|(k, _)| on(&me, k)).map(|(_, w)| *w).collect();
     print(format!(
         "{} {} this machine is {}{}",
         c::bold(t(net, "name")),
@@ -51,17 +51,10 @@ fn show_status(st: &Value) {
         if roles.is_empty() { String::new() } else { format!(" ({})", roles.join(", ")) }
     ));
     print(format!("  {}  {}", c::dim("key     "), t(&me, "keyId")));
-    let g = st.get("gateway").cloned().unwrap_or(Value::Null);
-    let address = str(&g, "address").filter(|a| !a.is_empty()).map_or_else(|| c::yellow("no address yet"), str::to_string);
-    print(format!("  {}  {address} ({})", c::dim("gateway "), t(&g, "kind")));
-    print(format!("  {}  {}", c::dim("link    "), link_words(&g)));
-    if let Some(skew) = g.get("skewMs").and_then(Value::as_f64).filter(|s| s.abs() >= 2000.0) {
-        print(format!("  {}  this clock is {} s {} the gateway's", c::dim("clock   "), (skew.abs() / 1000.0).round(), if skew > 0.0 { "behind" } else { "ahead of" }));
-    }
-    let o = st.get("outbox").cloned().unwrap_or(Value::Null);
-    print(format!("  {}  {} waiting to go", c::dim("outbox  "), num(&o, "frames")));
-    for q in list(st, "queues").iter().filter(|q| num(q, "frames") > 0.0) {
-        print(format!("  {}  {} waiting for {}", c::dim("queue   "), num(q, "frames"), t(q, "host")));
+    print(format!("  {}  {}", c::dim("link    "), link_words(st.get("link").unwrap_or(&Value::Null))));
+    // What waits for a machine that's away, in its mailboxes.
+    for h in list(st, "hosts").iter().filter(|h| num(h, "held") > 0.0) {
+        print(format!("  {}  {} held for {}", c::dim("held    "), num(h, "held"), t(h, "id")));
     }
     print(format!("  {}  start: {}, wake: {}", c::dim("sessions"), t(st, "start"), t(st, "wake")));
     if let Some(d) = st.get("delegated").filter(|d| d.is_object()) {
@@ -92,13 +85,11 @@ fn show_status(st: &Value) {
 }
 
 /// What an entry waiting for approval says, as the person approves it:
-/// its op and host, the address for a move of the gateway, a window host's
-/// add, and who signed it so far.
+/// its op and host, a window host's add, and who signed it so far.
 fn proposal_words(p: &Value) -> String {
     let by: Vec<&str> = list(p, "signers").iter().filter_map(Value::as_str).collect();
-    let what = match (str(p, "op"), str(p, "gateway")) {
-        (Some("gateway"), Some(a)) => format!("{} to be the gateway, at {a}", t(p, "host")),
-        (Some("add"), _) if on(p, "window") => format!("add {}, as a window host", t(p, "host")),
+    let what = match str(p, "op") {
+        Some("add") if on(p, "window") => format!("add {}, as a window host", t(p, "host")),
         _ => format!("{} {}", t(p, "op"), t(p, "host")),
     };
     format!("{what} (signed by {})", by.join(", "))
@@ -113,7 +104,7 @@ fn show_hosts(st: &Value) {
     let wide = hosts.iter().map(|h| t(h, "id").len()).max().unwrap_or(0);
     for h in hosts {
         let mut bits = Vec::new();
-        for (k, w) in [("self", "this machine"), ("founder", "founder"), ("gateway", "gateway"), ("window", "window")] {
+        for (k, w) in [("self", "this machine"), ("founder", "founder"), ("window", "window")] {
             if on(h, k) {
                 bits.push(w.to_string());
             }
@@ -184,6 +175,22 @@ fn show_relays(st: &Value) {
             direct.join(", ")
         )));
     }
+}
+
+/// An invite's answer (`invite`, `replace`): the invite, its code apart,
+/// and how the new machine finds this one when the invite names no relay.
+fn show_invite(r: &Value) {
+    print(format!("\n  {}\n", t(r, "invite")));
+    print(format!("and tell it the code some other way than the invite went: {}", c::bold(t(r, "code"))));
+    let how = if str(r, "relay").is_some() {
+        String::new()
+    } else if on(r, "lan") {
+        " --mdns".to_string()
+    } else {
+        let at = list(r, "at").iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>();
+        format!(" --at <{}>", if at.is_empty() { "this machine's address".to_string() } else { at.join(" or ") })
+    };
+    print(format!("\nOn {}: xenonet net join <invite> <code>{how}", t(r, "host")));
 }
 
 fn arg(args: &[String], i: usize, what: &str) -> Result<String, Fail> {
@@ -303,9 +310,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let mut body = Map::new();
             body.insert("name".into(), json!(name));
             body.insert("host".into(), json!(host));
-            if let Some(lan) = flags.text("lan") {
-                body.insert("lan".into(), json!(lan));
-            }
             if let Some(relay) = flags.text("relay") {
                 body.insert("relay".into(), json!(relay));
             }
@@ -313,9 +317,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             out(&st, &|st| {
                 let made = list(st, "networks").iter().find(|n| str(n, "name") == Some(name.as_str())).map_or_else(|| st.clone(), view_of);
                 print(format!("{} made the network {}, with this machine as {}", c::green("✓"), c::bold(t(&made["network"], "name")), t(&made["self"], "id")));
-                if str(&made["gateway"], "address").is_none_or(str::is_empty) {
-                    print(c::yellow("  The gateway has no address yet: xenonet net set --lan <ip:port>, with this machine's tailnet or LAN address."));
-                }
                 if let Some(why) = str(st, "relayRefused") {
                     print(c::yellow(format!("  The relay wasn't added: {why}. Add it from XenoNet's window, Network settings.")));
                 }
@@ -323,23 +324,19 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             })
         }
         "join" => {
-            let first = arg(args, 1, "the invite and its code: xenonet net join <invite> <code>")?;
-            let second = arg(args, 2, "the code that came with the invite")?;
-            // An invite goes over join/2 to the machine that made it; a line
-            // from Add a machine (an address and a ticket) through the
-            // gateway, until the gateway goes.
-            let body = if first.trim().starts_with("xni2_") {
-                let mut b = json!({ "invite": first, "code": second, "lan": flags.on("mdns") });
-                if let Some(at) = flags.text("at") {
-                    b["at"] = json!(at);
-                }
-                b
-            } else {
-                json!({ "address": first, "ticket": second })
-            };
-            // While the ticket's maker hasn't signed this machine in, or a
+            let invite = arg(args, 1, "the invite and its code: xenonet net join <invite> <code>")?;
+            let code = arg(args, 2, "the code that came with the invite")?;
+            if !invite.trim().starts_with("xni2_") {
+                return Err(Fail::new("that isn't an invite: an invite starts with xni2_, as Add a machine or xenonet net invite shows it", 2));
+            }
+            // The invite goes over join/2 to the machine that made it.
+            let mut body = json!({ "invite": invite, "code": code, "lan": flags.on("mdns") });
+            if let Some(at) = flags.text("at") {
+                body["at"] = json!(at);
+            }
+            // While the invite's maker hasn't signed this machine in, or a
             // second window host hasn't approved it, the join waits: it says
-            // why once, and asks again until the ticket lapses.
+            // why once, and asks again until the invite lapses.
             let started = std::time::Instant::now();
             let mut said = false;
             let st = loop {
@@ -360,7 +357,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 // The network joined is the last the state lists.
                 let joined = list(st, "networks").last().map_or_else(|| st.clone(), view_of);
                 print(format!("{} joined {} as {}", c::green("✓"), c::bold(t(&joined["network"], "name")), t(&joined["self"], "id")));
-                print(format!("  {}  {}", c::dim("gateway key"), t(&joined["gateway"], "keyId")));
             })
         }
         "invite" => {
@@ -368,25 +364,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let r = call(&s, "POST", "/api/net/invite", Some(&within(json!({ "host": host, "window": flags.on("window"), "lan": flags.on("mdns") }))))?;
             out(&r, &|r| {
                 print(format!("Give {} this invite. It works once, for ten minutes:", c::bold(t(r, "host"))));
-                print(format!("\n  {}\n", t(r, "invite")));
-                print(format!("and tell it the code some other way than the invite went: {}", c::bold(t(r, "code"))));
-                let how = if str(r, "relay").is_some() {
-                    String::new()
-                } else if on(r, "lan") {
-                    " --mdns".to_string()
-                } else {
-                    let at = list(r, "at").iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>();
-                    format!(" --at <{}>", if at.is_empty() { "this machine's address".to_string() } else { at.join(" or ") })
-                };
-                print(format!("\nOn {}: xenonet net join <invite> <code>{how}", t(r, "host")));
-            })
-        }
-        "add-machine" => {
-            let host = arg(args, 1, "the new machine's id: xenonet net add-machine <id>")?;
-            let r = call(&s, "POST", "/api/net/ticket", Some(&within(json!({ "host": host, "window": flags.on("window") }))))?;
-            out(&r, &|r| {
-                print(format!("Run this on {} within ten minutes. It works once.", c::bold(t(r, "host"))));
-                print(format!("\n  {}\n", t(r, "line")));
+                show_invite(r);
             })
         }
         "remove" | "replace" => {
@@ -394,8 +372,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let r = call(&s, "POST", &format!("/api/net/{what}"), Some(&within(json!({ "host": host }))))?;
             out(&r, &|r| {
                 if what == "replace" {
-                    print(format!("{} {}'s old keys are out. Run this on it within ten minutes:", c::green("✓"), host));
-                    print(format!("\n  {}\n", t(r, "line")));
+                    print(format!("{} {}'s old keys are out. Give it this invite. It works once, for ten minutes:", c::green("✓"), host));
+                    show_invite(r);
                 } else {
                     print(format!("{} {host} is out of the network", c::green("✓")));
                 }
@@ -411,7 +389,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 } else if on(r, "removed") {
                     ""
                 } else {
-                    " (the gateway didn't hear it ask: a window host can remove it)"
+                    " (no member heard it ask: a window host can remove it)"
                 };
                 print(format!("{} left {}{asked}; this machine's other networks carry on as they were", c::green("✓"), t(r, "left")));
             })
@@ -424,11 +402,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             if flags.has("shareLoad") {
                 body.insert("shareLoad".into(), json!(flags.is_true("shareLoad")));
             }
-            if flags.is_false("lan") {
-                body.insert("lan".into(), Value::Null);
-            } else if let Some(lan) = flags.str("lan") {
-                body.insert("lan".into(), json!(lan));
-            }
             for k in ["start", "wake", "approve"] {
                 if let Some(v) = flags.text(k) {
                     body.insert(k.into(), json!(v));
@@ -436,7 +409,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             if body.is_empty() {
                 return Err(Fail::new(
-                    "say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --start <off|you|network|delegate>, --wake <consent|network>, --lan <ip:port> or --no-lan",
+                    "say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --start <off|you|network|delegate> or --wake <consent|network>",
                     2,
                 ));
             }
@@ -490,28 +463,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             out(&call(&s, "POST", "/api/net/approve", Some(&within(json!({ "id": t(&p, "id") }))))?, &show_status)
         }
-        "gateway" => match args.get(1).map(String::as_str) {
-            Some("take") => {
-                let mut body = Map::new();
-                if let Some(lan) = flags.text("lan") {
-                    body.insert("lan".into(), json!(lan));
-                }
-                let st = call(&s, "POST", "/api/net/gateway/take", Some(&within(Value::Object(body))))?;
-                if on(&st, "proposed") && !flags.on("json") {
-                    print(format!("{} asked: the founder or another window host approves it with xenonet net approve {}", c::green("✓"), t(&st["self"], "id")));
-                    return Ok(0);
-                }
-                out(&st, &show_status)
-            }
-            Some("set") => {
-                let address = arg(args, 2, "the gateway's new address")?;
-                out(&call(&s, "POST", "/api/net/gateway/set", Some(&within(json!({ "address": address }))))?, &show_status)
-            }
-            _ => Err(Fail::new("xenonet net gateway take, or xenonet net gateway set <address>", 2)),
-        },
-        w => Err(Fail::new(
-            format!("xenonet net doesn't know {w}: create, join, invite, status, hosts, add-machine, remove, replace, leave, set, share, relay, approve or gateway"),
-            2,
-        )),
+        w => Err(Fail::new(format!("xenonet net doesn't know {w}: create, join, invite, status, hosts, remove, replace, leave, set, share, relay or approve"), 2)),
     }
 }

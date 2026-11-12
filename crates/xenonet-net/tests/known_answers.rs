@@ -1,20 +1,19 @@
 // Known answers for the network's crypto (test/fixtures/net/known-answers.json):
 // fixed keys, a fixed ephemeral key and fixed ids, so another
-// implementation can check its key ids, heads, signatures, sealing, ticket
-// proofs, request signatures and roster hashes against these, byte for
-// byte. Ed25519 signs deterministically, and the presence blocks have
-// fixed nonces, so all of it is reproducible. The roster is
-// `xenonet-roster/2`, signed by each signer's machine signing key (seed 7
-// for studio), never its host key: entry 0 names its owner person, whose chain (a root
-// key and studio's device) is here too, and laptop's admit carries the
-// presence block from studio's device that the chain checks it by. The
-// person's chain goes on past the head the roster names, with a delegation
-// (the standard one, every device, a year) signed by that device with its
-// presence, as a widening is. The message frame carries an entry of
-// studio's feed (`network/message/v3`), signed by studio's machine key as
-// the roster lists it. `sealedEnvelope` carries that same entry in an
-// envelope (`xenonet-net/2`), sealed for laptop with a fixed ephemeral
-// key, and `envelope` is a live presence envelope from studio, unsealed.
+// implementation can check its key ids, heads, sealing, tickets and roster
+// hashes against these, byte for byte. Ed25519 signs deterministically,
+// and the presence blocks have fixed nonces, so all of it is reproducible.
+// The roster is `xenonet-roster/2`, signed by each signer's machine signing
+// key (seed 7 for studio), never its host key: entry 0 names its owner
+// person, whose chain (a root key and studio's device) is here too, and
+// laptop's admit carries the presence block from studio's device that the
+// chain checks it by. The person's chain goes on past the head the roster
+// names, with a delegation (the standard one, every device, a year) signed
+// by that device with its presence, as a widening is. `sealedEnvelope`
+// carries an entry of studio's feed, signed by studio's machine key as the
+// roster lists it, in an envelope (`xenonet-net/2`) sealed for laptop with
+// a fixed ephemeral key, and `envelope` is a live presence envelope from
+// studio, unsealed.
 //
 // XENONET_WRITE_FIXTURES=1 cargo test -p xenonet-net --test known_answers
 // writes the file again.
@@ -28,10 +27,9 @@ use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
 use xenonet_net::codec::{b64, unb64_n};
 use xenonet_net::envelope::{Envelope, Me};
 use xenonet_net::feed::{FeedEntry, Kind, Writer};
-use xenonet_net::frame::{gateway_frame, host_frame, open_frame, Draft, Frame};
 use xenonet_net::keys::HostKey;
 use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster, ADMIT};
-use xenonet_net::{request, ticket};
+use xenonet_net::ticket;
 
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/fixtures/net/known-answers.json");
 const NET: &str = "net_00112233445566778899aabbccddeeff";
@@ -92,18 +90,7 @@ fn answers() -> Value {
     });
     let studio_machine = SeedSigner::from_seed(&secret(7), KeyHome::File).unwrap();
     let entry = Writer::start(studio_machine.public().id(), NET, 1_792_512_000_000).write(&studio_machine, Kind::Message, 1_792_512_345_678, send).unwrap();
-    let body = xenonet_net::node::entry_body(&entry, None);
-    let d = Draft { network: NET, id: "frm_00000000-0000-4000-8000-0000000000aa".into(), kind: "message", from: "studio", to: "laptop", at: 1_792_512_345_678 };
-    let f = host_frame(&d, &studio, laptop.public(), &body, Some(secret(9))).unwrap();
-    assert_eq!(open_frame(NET, &laptop, &f).unwrap(), body);
-    let g = gateway_frame(
-        &Draft { kind: "ping", from: "studio", to: "laptop", id: "frm_00000000-0000-4000-8000-0000000000bb".into(), ..d },
-        &studio,
-        &json!({ "now": 1_792_512_345_678_i64, "linked": ["laptop", "studio"] }),
-    );
     let code = "KX7Q49MZT2";
-    let hash = ticket::hash(code);
-    let nonce = "bm9uY2Utb2YtdGhlLWpvaW4";
     let root = SeedSigner::from_seed(&secret(5), KeyHome::File).unwrap();
     let device = SeedSigner::from_seed(&secret(6), KeyHome::File).unwrap();
     let machine_key = |n: u8| SeedSigner::from_seed(&secret(n), KeyHome::File).unwrap();
@@ -129,39 +116,14 @@ fn answers() -> Value {
     let sealed = Envelope::seal_entry(&entry, &machine(8).id(), laptop.public(), Some(secret(11))).unwrap();
     let presence = json!({ "op": "delta", "sessions": [{ "id": "claude:aaaaaaaa-0001", "state": "working" }] });
     let live = Envelope::live(NET, &machine(7).id(), "presence", 1_792_512_345_679, &presence).unwrap();
-    let req_body = br#"{"frames":[]}"#;
-    let target = "/net/v1/frames";
-    let headers = request::sign(&laptop, NET, "laptop", "POST", target, 1_792_512_345_000, "cmVxdWVzdC1ub25jZQ", req_body);
     json!({
         "about": "Known answers for one network across machines (docs/design/network.md, section 3): written by crates/xenonet-net/tests/known_answers.rs. Secrets here are test values, never a real host's.",
         "network": NET,
         "hosts": [studio_v, laptop_v],
-        "frame": {
-            "ephemeralSecret": b64(&secret(9)),
-            "machineSeed": b64(&secret(7)),
-            "entryId": entry.id(),
-            "body": body,
-            "sealingHead": f.sealing_head(NET),
-            "head": f.head(NET),
-            "frame": f.to_json(),
-        },
-        "gatewayFrame": { "head": g.head(NET), "frame": g.to_json() },
         "ticket": {
             "code": code,
             "display": ticket::display(code),
-            "hash": b64(&hash),
-            "nonce": nonce,
-            "joinerKeyId": laptop.key_id(),
-            "joinProof": ticket::join_proof(&hash, nonce, &laptop.key_id()),
-            "gatewayKeyId": studio.key_id(),
-            "gatewayProof": ticket::gateway_proof(&hash, &studio.key_id(), nonce),
-        },
-        "request": {
-            "method": "POST",
-            "target": target,
-            "body": String::from_utf8_lossy(req_body),
-            "signingString": request::signing_string(NET, "POST", target, 1_792_512_345_000, "cmVxdWVzdC1ub25jZQ", "laptop", req_body),
-            "headers": headers.into_iter().map(|(k, v)| (k, Value::String(v))).collect::<serde_json::Map<_, _>>(),
+            "hash": b64(&ticket::hash(code)),
         },
         "person": {
             "rootSeed": b64(&secret(5)),
@@ -175,6 +137,8 @@ fn answers() -> Value {
         "envelope": { "body": presence, "head": live.head(), "envelope": live.to_json() },
         "sealedEnvelope": {
             "ephemeralSecret": b64(&secret(11)),
+            "machineSeed": b64(&secret(7)),
+            "entryId": entry.id(),
             "entry": entry.to_json(),
             "sealingHead": sealed.sealing_head(),
             "head": sealed.head(),
@@ -204,24 +168,17 @@ fn the_fixtures_check_from_their_own_values() {
     let studio = key(&v["hosts"][0]);
     let laptop = key(&v["hosts"][1]);
     assert_eq!(studio.key_id(), v["hosts"][0]["keyId"]);
-    let f = Frame::parse(&v["frame"]["frame"]).unwrap();
-    assert_eq!(f.head(net), v["frame"]["head"]);
-    assert!(f.verify(net, studio.public()));
-    assert_eq!(open_frame(net, &laptop, &f).unwrap(), v["frame"]["body"]);
-    // The entry it carries checks against studio's machine key, as the
-    // roster lists it, and has its id.
-    let machine = SeedSigner::from_seed(&unb64_n::<32>(v["frame"]["machineSeed"].as_str().unwrap()).unwrap(), KeyHome::File).unwrap().public();
-    let entry = FeedEntry::parse(&v["frame"]["body"]["entry"]).unwrap();
-    assert_eq!(entry.id(), v["frame"]["entryId"]);
+    // The entry the sealed envelope carries checks against studio's
+    // machine key, as the roster lists it, and has its id.
+    let machine = SeedSigner::from_seed(&unb64_n::<32>(v["sealedEnvelope"]["machineSeed"].as_str().unwrap()).unwrap(), KeyHome::File).unwrap().public();
+    let entry = FeedEntry::parse(&v["sealedEnvelope"]["entry"]).unwrap();
+    assert_eq!(entry.id(), v["sealedEnvelope"]["entryId"]);
     let studio_in_roster = v["roster"][0]["host"]["machine"].clone();
     assert_eq!(studio_in_roster, machine.to_json(), "the roster's key for studio's machine");
     entry.verify(&machine).unwrap();
-    let g = Frame::parse(&v["gatewayFrame"]["frame"]).unwrap();
-    assert!(g.verify(net, studio.public()));
     let t = &v["ticket"];
-    let hash = ticket::hash(t["code"].as_str().unwrap());
-    assert!(ticket::check_join(&hash, t["nonce"].as_str().unwrap(), t["joinerKeyId"].as_str().unwrap(), t["joinProof"].as_str().unwrap()));
-    assert!(ticket::check_gateway(&hash, t["gatewayKeyId"].as_str().unwrap(), t["nonce"].as_str().unwrap(), t["gatewayProof"].as_str().unwrap()));
+    assert_eq!(b64(&ticket::hash(t["code"].as_str().unwrap())), t["hash"]);
+    assert_eq!(ticket::normalize(t["display"].as_str().unwrap()).as_deref(), t["code"].as_str());
     let owner = PersonChain::from_json(&v["person"]["chain"]).unwrap();
     assert_eq!(owner.id(), v["person"]["id"].as_str());
     let device = SeedSigner::from_seed(&unb64_n::<32>(v["person"]["deviceSeed"].as_str().unwrap()).unwrap(), KeyHome::File).unwrap();
@@ -244,10 +201,7 @@ fn the_fixtures_check_from_their_own_values() {
     let live = Envelope::parse(&v["envelope"]["envelope"]).unwrap();
     assert_eq!(live.head(), v["envelope"]["head"].as_str().unwrap());
     assert_eq!(live.open_live(&studio.public().sign, &view).unwrap(), v["envelope"]["body"]);
-    let q = &v["request"];
-    let h = |k: &str| q["headers"][k].as_str().map(str::to_string);
-    let signed = request::Signed::from_headers(h).unwrap();
-    assert!(signed.verify(laptop.public(), net, "POST", q["target"].as_str().unwrap(), q["body"].as_str().unwrap().as_bytes()));
+    assert_eq!(view.network, net, "the network the chain names");
 }
 
 #[test]

@@ -162,74 +162,6 @@ impl Document for Claim {
         "An agent's claim on a path inside a project, or its release, as a kept entry of its machine's feed, so agents on every machine with a checkout of the project are warned.";
 }
 
-// ---- network/frame/v1
-
-crate::constant!(
-    /// The frame format's version: always 1.
-    pub FrameVersion = 1
-);
-
-crate::pattern! {
-    // A frame's id.
-    pub struct FrameId(r"^frm_[0-9a-f-]{36}$");
-}
-
-// What a frame carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum FrameKind {
-    Hello,
-    Ping,
-    Gap,
-    Roster,
-    Removed,
-    Presence,
-    Claims,
-    Message,
-    Relay,
-    Operator,
-}
-
-crate::tag!(pub Everyone = "*");
-
-// A frame's recipient: one host, or every host.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum FrameTo {
-    Host(HostId),
-    All(Everyone),
-}
-
-/// A network frame.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Frame {
-    pub v: FrameVersion,
-    pub id: FrameId,
-    /// Set by the gateway, per recipient, within its epoch: what a host resumes after
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub seq: Opt<Uint>,
-    pub kind: FrameKind,
-    /// The host that sent it, whose key signed it
-    pub from: HostId,
-    /// The host it's for, or * for every host (presence and claims, sealed once per host)
-    pub to: FrameTo,
-    /// When the sender made it, by its clock
-    pub at: f64,
-    /// Whether body is sealed to the recipient's X25519 key; frames between hosts always are
-    pub sealed: bool,
-    /// The sealed bytes, or the JSON of an unsealed gateway frame
-    pub body: Base64Bytes,
-    /// Ed25519 over the head: xenonet-net/1, network id, id, kind, from, to, at, sealed (1 or 0) and the base64url SHA-256 of the body bytes, joined by newlines
-    pub sig: Base64Bytes,
-}
-
-impl Document for Frame {
-    const ID: &'static str = "network/frame/v1";
-    const TITLE: &'static str = "A network frame";
-    const DESCRIPTION: &'static str =
-        "One line of a link's NDJSON: signed by the host that sent it and, between hosts, sealed for the host it's for. The gateway sees the head and never the body.";
-}
-
 // ---- network/handoff/v1
 
 crate::tag!(pub HandoffTag = "network/handoff/v1");
@@ -886,41 +818,24 @@ pub struct SelfHost {
     pub key_id: KeyId,
     pub window: bool,
     pub founder: bool,
-    pub gateway: bool,
 }
 
-// How the gateway is reached.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum GatewayKind {
-    Tunnel,
-    Lan,
-    Loopback,
-}
-
-// The state of this machine's link to the gateway.
+// How this machine stands in the network: off while its node isn't
+// running, live while it is, removed once a member took it out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkState {
     Off,
-    Connecting,
     Live,
-    Offline,
-    Refused,
     Removed,
 }
 
-// The network's gateway and this machine's link to it.
+// How this machine stands in the network, since when and why.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Gateway {
-    pub address: Text<0, 300>,
-    pub key_id: KeyId,
-    pub kind: GatewayKind,
-    pub link: LinkState,
+pub struct Link {
+    pub state: LinkState,
     pub since: Nullable<Ms>,
     pub reason: Nullable<Text<0, 280>>,
-    pub skew_ms: Nullable<Int>,
 }
 
 // A host of the network, as this machine sees it.
@@ -931,7 +846,6 @@ pub struct HostRow {
     pub key_id: KeyId,
     pub window: bool,
     pub founder: bool,
-    pub gateway: bool,
     pub online: bool,
     pub seen: Nullable<Ms>,
     pub agents: Uint,
@@ -950,22 +864,39 @@ pub struct HostRow {
     /// What the host's XenoNet takes beyond messages: start (a start request) and answer (an answer to a run's permission prompt). An older XenoNet says nothing
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub can: Opt<Bounded<Capability, 0, 16>>,
+    /// How this machine reaches it on link/2: direct or relay; null while it isn't connected
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub path: Opt<Nullable<Text<0, 32>>>,
+    /// The entries for it its mailboxes hold while it's away
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub held: Opt<Nullable<Uint>>,
 }
 
-// A ticket that waits to be used.
+// An invite that's open, for join/2: the code itself is shown once, where
+// it was made.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Ticket {
+pub struct Invite {
     pub host: HostId,
     pub window: bool,
     pub expires: Ms,
+    /// Wrong codes tried so far; five retire it
+    pub wrong: Uint,
 }
 
-// What waits to be sent.
+// An invite that closed unused.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Outbox {
-    pub frames: Uint,
-    pub bytes: Uint,
-    pub oldest: Nullable<Ms>,
+pub struct BurnedInvite {
+    pub host: HostId,
+    pub at: Ms,
+    /// Retired after five wrong codes; false when it ran out of time
+    pub retired: bool,
+}
+
+// The invites this machine made.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Invites {
+    pub open: Vec<Invite>,
+    pub burned: Vec<BurnedInvite>,
 }
 
 // Who put this machine on delegation.
@@ -973,14 +904,6 @@ pub struct Outbox {
 pub struct Delegation {
     pub by: HostId,
     pub at: Ms,
-}
-
-// What waits at the gateway for one host.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Queue {
-    pub host: HostId,
-    pub frames: Uint,
-    pub bytes: Uint,
 }
 
 // A roster entry waiting for more signatures.
@@ -991,8 +914,6 @@ pub struct Proposal {
     pub op: RosterOp,
     pub host: HostId,
     pub window: bool,
-    /// For op gateway: the address it moves to
-    pub gateway: Nullable<Text<0, 300>>,
     /// The hosts that signed it so far
     pub signers: Vec<HostId>,
     pub at: Ms,
@@ -1062,11 +983,12 @@ pub struct State {
     pub network: Nullable<NetworkInfo>,
     #[serde(rename = "self")]
     pub this_host: Nullable<SelfHost>,
-    pub gateway: Nullable<Gateway>,
+    /// null: this machine isn't in a network
+    pub link: Nullable<Link>,
     pub hosts: Vec<HostRow>,
-    /// Tickets that wait; the ticket itself is shown once, where it was made
-    pub tickets: Vec<Ticket>,
-    pub outbox: Outbox,
+    /// The invites this machine made, while it's in a network
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub invites: Opt<Invites>,
     pub roster_head: Nullable<Base64Url>,
     /// Hosts whose presence shows another roster head
     pub roster_mismatch: Vec<HostId>,
@@ -1083,23 +1005,11 @@ pub struct State {
     /// Who may wake this machine's sessions for a message; consent unless widened
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub wake: Opt<WakeReach>,
-    /// On the gateway's host: what waits at the gateway for each host
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub queues: Opt<Vec<Queue>>,
-    /// On the gateway's host: its queues' epoch, which hosts resume within
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub epoch: Opt<Base64Bytes>,
-    /// On the gateway's host: when the join route opens again, after 200 bad tickets in an hour; null while it's open
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub join_closed_until: Opt<Nullable<Ms>>,
     /// Roster entries signed by too few, waiting for the founder or a second window host to approve them
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub proposals: Opt<Vec<Proposal>>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub removed: Opt<Removal>,
-    /// The LAN address this machine's gateway listens on, when it's a LAN-only gateway
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub lan: Opt<Text<0, 300>>,
     /// XenoNet Dev's made-up network (simulate net-…)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub simulated: Opt<bool>,
@@ -1125,7 +1035,7 @@ pub struct FrozenFeed {
 impl Document for State {
     const ID: &'static str = "network/state/v1";
     const TITLE: &'static str = "The network, as a host sees it";
-    const DESCRIPTION: &'static str = "GET /api/net/state: the network this machine is in, its gateway and link, the other hosts, and what waits.";
+    const DESCRIPTION: &'static str = "GET /api/net/state: the network this machine is in, how it stands in it, the other hosts, and what waits.";
 }
 
 // ---- network/svc/v2
@@ -1283,7 +1193,6 @@ impl Document for Svc {
 /// The documents this module writes.
 pub const DOCUMENTS: &[crate::schema::Writer] = &[
     crate::schema::file::<Claim>,
-    crate::schema::file::<Frame>,
     crate::schema::file::<Handoff>,
     crate::schema::file::<Message>,
     crate::schema::file::<Operator>,

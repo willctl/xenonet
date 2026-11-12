@@ -7,7 +7,6 @@
 use crate::cores::CoreError;
 use async_trait::async_trait;
 use serde_json::Value;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 /// What a network operation answers: its document, or a refusal with its
@@ -103,8 +102,6 @@ pub trait A2aOut: Send + Sync {
 pub struct NetChange {
     pub titles_only: Option<bool>,
     pub share_load: Option<bool>,
-    /// The gateway's LAN address, or None inside to take it away.
-    pub lan: Option<Option<String>>,
     pub start: Option<String>,
     pub wake: Option<String>,
 }
@@ -149,37 +146,19 @@ pub trait Network: Send + Sync {
     fn network_name(&self) -> Option<String>;
     /// This machine's id in `network`, while it's in it.
     fn host(&self, network: Option<&str>) -> Option<String>;
-    /// Whether this machine is `network`'s gateway.
-    fn is_gateway(&self, network: Option<&str>) -> bool;
-    /// A LAN listener, at `addr`, beside any other.
-    async fn listen(&self, addr: SocketAddr) -> Result<(), CoreError>;
-    /// The LAN listeners no network's gateway here uses close.
-    fn unlisten(&self);
-    /// The LAN listeners' addresses.
-    fn lans(&self) -> Vec<SocketAddr>;
-    /// A new network, founded here beside any other: `address` is the
-    /// gateway's public host, `lan` its LAN address, `relay` the relay the
-    /// person named (their own iroh-relay's URL, or n0).
-    async fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, relay: Option<&str>, at_window: bool) -> NetResult;
-    /// Joins through the gateway's join route with a ticket: the window's
-    /// Add a machine, until the gateway goes.
-    async fn join(&self, address: &str, ticket: &str) -> NetResult;
+    /// A new network, founded here beside any other: `relay` is the relay
+    /// the person named (their own iroh-relay's URL, or n0).
+    async fn create(&self, name: &str, host: &str, relay: Option<&str>, at_window: bool) -> NetResult;
     /// Joins over join/2 with an invite and its code, finding the inviter
     /// at `at`, through the invite's relay, or by mDNS (`lan`).
     async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult;
     async fn leave(&self, network: Option<&str>, force: bool) -> NetResult;
-    /// The address a ticket names for the gateway, through its tunnel.
-    fn tunnel_address(&self, address: Option<&str>);
-    /// A ticket the gateway keeps, for `join`.
-    async fn ticket(&self, network: Option<&str>, host: &str, window: bool, at_window: bool) -> NetResult;
     /// An invite for `host`, and its code apart, for join/2; `lan` has the
     /// inviter announce itself on the LAN by mDNS while it's open.
     async fn invite(&self, network: Option<&str>, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult;
     async fn remove(&self, network: Option<&str>, host: &str) -> NetResult;
     async fn replace(&self, network: Option<&str>, host: &str, at_window: bool) -> NetResult;
     async fn approve(&self, network: Option<&str>, id: &str, at_window: bool) -> NetResult;
-    async fn take_gateway(&self, network: Option<&str>, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult;
-    async fn set_gateway(&self, network: Option<&str>, address: &str) -> NetResult;
     /// Who may start and wake sessions on another machine.
     async fn set_reach(&self, network: Option<&str>, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> NetResult;
     async fn settings(&self, network: Option<&str>, change: NetChange, at_window: bool) -> NetResult;

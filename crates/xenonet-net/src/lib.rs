@@ -1,21 +1,15 @@
-//! One network across machines (docs/design/network.md, sections 1–4 and
-//! 9): a gateway and the hosts that joined it, each host dialling out to
-//! the gateway over plain HTTP(S).
+//! The network across machines (docs/design/network.md): this machine in
+//! every network it's in, machine to machine over iroh, with no gateway.
 //!
 //! - `keys`: a host's two keys, Ed25519 to sign and X25519 to be sealed
 //!   to, in one owner-only file, and its key id (from `xenonet-id`).
-//! - `frame`: a frame on the wire (`network/frame/v1`), its head, its
-//!   signature and the sealing of its body.
+//! - `seal`: sealing for one machine, binding a head.
 //! - `envelope`: the envelope (`xenonet-net/2`) that carries a feed entry,
-//!   sealed for one recipient, or a live presence delta: a head for
-//!   routing only, checked against the signed entry inside.
-//! - `roster`: the signed chain of hosts, and who may sign what.
-//! - `ticket`: the one-time code that lets one machine join.
-//! - `request`: how a host signs its requests to the gateway.
-//! - `gwstore`: the gateway's queues.
-//! - `gateway`: the gateway's routes, `/net/v1/…`, over any transport.
-//! - `link`: a host's link to its gateway, with backoff, the clock
-//!   offset, epochs and the long-poll fallback.
+//!   sealed for one recipient with what its act rests on beside it, or a
+//!   live presence delta: a head for routing only, checked against the
+//!   signed entry inside.
+//! - `roster`: the network's chain of members, and who may sign what.
+//! - `ticket`: the one-time code an invite's join proves.
 //! - `nodes`: this machine in every network it's in, behind
 //!   `xenonet_model::ops::Net`: a node per network, what names a network
 //!   going to that one's node, link/2 and the relays every network lists
@@ -23,20 +17,17 @@
 //! - `node`: this machine in one network, behind
 //!   `xenonet_model::ops::Net`, calling a `Sink`: its own feed in the
 //!   network as its author (xenonet-log's `feed`), whose entries carry
-//!   messages, receipts and handoffs, and the other members' entries,
-//!   checked against their keys in the roster, to the engine's `Feeds`.
+//!   messages, receipts, handoffs and the person's acts, the other
+//!   members' entries, checked against their keys in the chain, to the
+//!   engine's `Feeds`, and the chain itself, machine to machine.
 //! - `identity`: the person on this machine: their chain, device key,
 //!   sealed root, the people's chains it holds, the presence it took.
 //! - `ground`: the facts this machine decides incoming acts on
 //!   (`xenonet_authz::Ground`), and the `Governance` the engine reads them
 //!   through.
-//! - `svc`: services a host publishes to the network: the checks at both
-//!   ends of a request to one.
+//! - `svc`: services a host publishes to the network, and its checks of
+//!   requests to them.
 //! - `doctor`: what the doctor says about the network, from its files.
-//!
-//! The transport that replaces the gateway (phase 5), beside it until the
-//! node moves over:
-//!
 //! - `dial`: the `Dial` a transport implements, and the `Mesh` every
 //!   connection goes through (one per peer and protocol, crossing dials,
 //!   the networks a connection carries).
@@ -46,13 +37,13 @@
 //!   and a door per protocol.
 //! - `share`: what each network is shown of this machine: the sessions
 //!   in projects shared into it, all of them in the first network.
-//! - `link2`: `xenonet/link/2`, members' feeds, messages and presence
-//!   between machines on one connection per peer: a hello with each
-//!   shared network's heads, Want/Ack, kept, loose and live streams, every
-//!   record checked against the networks the connection carries. The same
-//!   engine runs another program's protocol shaped like it (`Protocol`,
-//!   over a `Mesh` with that program's `admission::Doors`): Xenolith's
-//!   sync/2, whose groups are spaces.
+//! - `link2`: `xenonet/link/2`, members' feeds, messages, presence and the
+//!   network's chain between machines on one connection per peer: a hello
+//!   with each shared network's heads, Want/Ack, kept, loose and live
+//!   streams, every record checked against the networks the connection
+//!   carries. The same engine runs another program's protocol shaped like
+//!   it (`Protocol`, over a `Mesh` with that program's `admission::Doors`):
+//!   Xenolith's sync/2, whose groups are spaces.
 //! - `holder`: filling a feed's gap from any member that holds it, one
 //!   holder at a time; serving the entries this machine applied, to
 //!   current members only.
@@ -63,11 +54,11 @@
 //! - `join`: joining over `xenonet/join/2`: the invite, the code apart
 //!   from it, proofs both ways, the inviter's tickets, and the joiner's
 //!   check of the chain from its genesis; another program's join is a
-//!   `JoinTarget` of its own. `ticket`'s gateway proofs stay beside it for
-//!   the gateway's join route until the gateway goes.
+//!   `JoinTarget` of its own.
 //! - `svc2`: `xenonet/svc/2`, one bi stream per request: services members
 //!   publish, and the window's reads of another machine's transcripts
 //!   under a per-launch window key its device certified.
+//! - `forward`: actors' own protocols, forwarded between members.
 
 pub mod admission;
 pub mod codec;
@@ -77,24 +68,20 @@ pub mod endpoint;
 pub mod envelope;
 pub mod files;
 pub mod forward;
-pub mod frame;
-pub mod gateway;
 pub mod ground;
-pub mod gwstore;
 pub mod holder;
 pub mod identity;
 pub mod join;
 pub mod keys;
-pub mod link;
 pub mod link2;
 pub mod mailbox;
 pub mod node;
 pub mod nodes;
 pub mod persist;
 pub mod presence;
-pub mod request;
 pub mod roots;
 pub mod roster;
+pub mod seal;
 pub mod share;
 #[cfg(test)]
 pub mod sim;
@@ -143,12 +130,6 @@ impl fmt::Display for NetError {
 impl std::error::Error for NetError {}
 
 pub type R<T> = Result<T, NetError>;
-
-impl From<rusqlite::Error> for NetError {
-    fn from(e: rusqlite::Error) -> Self {
-        NetError::internal(format!("the network's database: {e}"))
-    }
-}
 
 impl From<xenonet_id::IdError> for NetError {
     fn from(e: xenonet_id::IdError) -> Self {

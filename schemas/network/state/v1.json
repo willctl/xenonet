@@ -3,7 +3,7 @@
   "$id": "https://xenonet.dev/schemas/network/state/v1.json",
   "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "The network, as a host sees it",
-  "description": "GET /api/net/state: the network this machine is in, its gateway and link, the other hosts, and what waits.",
+  "description": "GET /api/net/state: the network this machine is in, how it stands in it, the other hosts, and what waits.",
   "type": "object",
   "properties": {
     "schema": {
@@ -56,17 +56,13 @@
             },
             "founder": {
               "type": "boolean"
-            },
-            "gateway": {
-              "type": "boolean"
             }
           },
           "required": [
             "id",
             "keyId",
             "window",
-            "founder",
-            "gateway"
+            "founder"
           ],
           "additionalProperties": {}
         },
@@ -75,36 +71,16 @@
         }
       ]
     },
-    "gateway": {
+    "link": {
       "anyOf": [
         {
           "type": "object",
           "properties": {
-            "address": {
-              "type": "string",
-              "maxLength": 300
-            },
-            "keyId": {
-              "type": "string",
-              "pattern": "^xnk1_[a-z2-7]{32}$",
-              "description": "What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys"
-            },
-            "kind": {
-              "type": "string",
-              "enum": [
-                "tunnel",
-                "lan",
-                "loopback"
-              ]
-            },
-            "link": {
+            "state": {
               "type": "string",
               "enum": [
                 "off",
-                "connecting",
                 "live",
-                "offline",
-                "refused",
                 "removed"
               ]
             },
@@ -129,35 +105,20 @@
                   "type": "null"
                 }
               ]
-            },
-            "skewMs": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                {
-                  "type": "null"
-                }
-              ]
             }
           },
           "required": [
-            "address",
-            "keyId",
-            "kind",
-            "link",
+            "state",
             "since",
-            "reason",
-            "skewMs"
+            "reason"
           ],
           "additionalProperties": {}
         },
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "null: this machine isn't in a network"
     },
     "hosts": {
       "type": "array",
@@ -178,9 +139,6 @@
             "type": "boolean"
           },
           "founder": {
-            "type": "boolean"
-          },
-          "gateway": {
             "type": "boolean"
           },
           "online": {
@@ -344,6 +302,31 @@
               "maxLength": 32
             },
             "maxItems": 16
+          },
+          "path": {
+            "description": "How this machine reaches it on link/2: direct or relay; null while it isn't connected",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "held": {
+            "description": "The entries for it its mailboxes hold while it's away",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -351,7 +334,6 @@
           "keyId",
           "window",
           "founder",
-          "gateway",
           "online",
           "seen",
           "agents",
@@ -362,63 +344,75 @@
         "additionalProperties": {}
       }
     },
-    "tickets": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "host": {
-            "description": "The host's id in the network, picked by the person: never the machine's own name",
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{1,31}$"
-          },
-          "window": {
-            "type": "boolean"
-          },
-          "expires": {
-            "description": "Epoch milliseconds",
-            "type": "number"
-          }
-        },
-        "required": [
-          "host",
-          "window",
-          "expires"
-        ],
-        "additionalProperties": {}
-      },
-      "description": "Tickets that wait; the ticket itself is shown once, where it was made"
-    },
-    "outbox": {
+    "invites": {
       "type": "object",
       "properties": {
-        "frames": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "bytes": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "oldest": {
-          "anyOf": [
-            {
-              "type": "number",
-              "description": "Epoch milliseconds"
+        "open": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "description": "The host's id in the network, picked by the person: never the machine's own name",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,31}$"
+              },
+              "window": {
+                "type": "boolean"
+              },
+              "expires": {
+                "description": "Epoch milliseconds",
+                "type": "number"
+              },
+              "wrong": {
+                "description": "Wrong codes tried so far; five retire it",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
             },
-            {
-              "type": "null"
-            }
-          ]
+            "required": [
+              "host",
+              "window",
+              "expires",
+              "wrong"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "burned": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "description": "The host's id in the network, picked by the person: never the machine's own name",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,31}$"
+              },
+              "at": {
+                "description": "Epoch milliseconds",
+                "type": "number"
+              },
+              "retired": {
+                "description": "Retired after five wrong codes; false when it ran out of time",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "host",
+              "at",
+              "retired"
+            ],
+            "additionalProperties": {}
+          }
         }
       },
       "required": [
-        "frames",
-        "bytes",
-        "oldest"
+        "open",
+        "burned"
       ],
+      "description": "The invites this machine made, while it's in a network",
       "additionalProperties": {}
     },
     "rosterHead": {
@@ -490,53 +484,6 @@
       ],
       "description": "Who may wake this machine's sessions for a message; consent unless widened"
     },
-    "queues": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "host": {
-            "description": "The host's id in the network, picked by the person: never the machine's own name",
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{1,31}$"
-          },
-          "frames": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "bytes": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          }
-        },
-        "required": [
-          "host",
-          "frames",
-          "bytes"
-        ],
-        "additionalProperties": {}
-      },
-      "description": "On the gateway's host: what waits at the gateway for each host"
-    },
-    "epoch": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]*$",
-      "description": "On the gateway's host: its queues' epoch, which hosts resume within"
-    },
-    "joinClosedUntil": {
-      "anyOf": [
-        {
-          "type": "number",
-          "description": "Epoch milliseconds"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "On the gateway's host: when the join route opens again, after 200 bad tickets in an hour; null while it's open"
-    },
     "proposals": {
       "type": "array",
       "items": {
@@ -569,18 +516,6 @@
           "window": {
             "type": "boolean"
           },
-          "gateway": {
-            "description": "For op gateway: the address it moves to",
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 300
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "signers": {
             "description": "The hosts that signed it so far",
             "type": "array",
@@ -600,7 +535,6 @@
           "op",
           "host",
           "window",
-          "gateway",
           "signers",
           "at"
         ],
@@ -647,11 +581,6 @@
       ],
       "description": "This machine was removed from the network",
       "additionalProperties": {}
-    },
-    "lan": {
-      "type": "string",
-      "description": "The LAN address this machine's gateway listens on, when it's a LAN-only gateway",
-      "maxLength": 300
     },
     "simulated": {
       "type": "boolean",
@@ -836,10 +765,8 @@
     "schema",
     "network",
     "self",
-    "gateway",
+    "link",
     "hosts",
-    "tickets",
-    "outbox",
     "rosterHead",
     "rosterMismatch",
     "titlesOnly"

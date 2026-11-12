@@ -71,7 +71,6 @@ function machine(row, r, { here, color, now, windowed }) {
     seen: num(row?.seen),
     window: !!row?.window,
     founder: !!row?.founder,
-    gateway: !!row?.gateway,
     platform: reading?.platform ?? (typeof row?.platform === "string" ? row.platform : null),
     color,
     reading,
@@ -134,7 +133,7 @@ export function machinesOf(reading, net, now = Date.now()) {
   const windowed = !!net.self?.window;
   const readings = new Map(list(reading?.hosts).filter((r) => r && typeof r.host === "string").map((r) => [r.host, r]));
   const roster = list(net.hosts).filter((x) => x && typeof x.id === "string");
-  if (self && !roster.some((x) => x.id === self)) roster.unshift({ id: self, online: true, window: windowed, founder: !!net.self?.founder, gateway: !!net.self?.gateway });
+  if (self && !roster.some((x) => x.id === self)) roster.unshift({ id: self, online: true, window: windowed, founder: !!net.self?.founder });
   const machines = roster.map((row, i) => {
     const here = row.id === self;
     return machine(row, here ? reading : (readings.get(row.id) ?? null), { here, color: i % HOST_COLORS, now, windowed });

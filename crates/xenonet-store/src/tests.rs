@@ -145,19 +145,9 @@ fn another_threads_call_waits_for_a_transaction_to_end() {
 
 #[test]
 fn a_network_and_what_goes_with_it_are_forgotten_together() {
-    use net::{Gateway, Network};
+    use net::Network;
     let db = Db::memory().unwrap();
-    let n = Network {
-        id: "net_a".into(),
-        name: "home".into(),
-        host: "laptop".into(),
-        founder: "laptop".into(),
-        gateway: Gateway { host: "laptop".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: None },
-        lan: None,
-        titles_only: false,
-        share_load: true,
-        joined: 5,
-    };
+    let n = Network { id: "net_a".into(), name: "home".into(), host: "laptop".into(), founder: "laptop".into(), titles_only: false, share_load: true, joined: 5 };
     db.put_link_status("net_a", &serde_json::json!({ "state": "live" })).unwrap();
     assert_eq!(db.link_status("net_a").unwrap(), None, "nothing kept for a network this machine isn't in");
     db.put_network(&n).unwrap();

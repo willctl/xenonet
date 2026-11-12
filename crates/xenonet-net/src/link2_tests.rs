@@ -751,7 +751,7 @@ fn every_entry_is_applied_at_most_once_however_often_it_comes() {
             let mut sent = Vec::new();
             for i in 0..20 {
                 let e = if i % 3 == 0 { a2.write(N1, Kind::Message, json!({ "to": "b", "text": format!("m{i}") })) } else { a2.claim(N1, i) };
-                // Each twice, as the gateway's path and link/2 both carry it.
+                // Each twice, as an author sending again does.
                 assert!(a2.send(&e, B) && a2.send(&e, B));
                 sent.push(e);
             }
