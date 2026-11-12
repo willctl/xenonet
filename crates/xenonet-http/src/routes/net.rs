@@ -98,7 +98,22 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         ("GET", "state" | "svc" | "forwards")
             | (
                 "POST",
-                "forwards/approve" | "forwards/deny" | "forwards/revoke" | "create" | "join" | "leave" | "invite" | "remove" | "replace" | "approve" | "svc/publish" | "svc/unpublish" | "devices/revoke" | "feeds/unfreeze" | "relays"
+                "forwards/approve"
+                    | "forwards/sign"
+                    | "forwards/deny"
+                    | "forwards/revoke"
+                    | "create"
+                    | "join"
+                    | "leave"
+                    | "invite"
+                    | "remove"
+                    | "replace"
+                    | "approve"
+                    | "svc/publish"
+                    | "svc/unpublish"
+                    | "devices/revoke"
+                    | "feeds/unfreeze"
+                    | "relays"
             )
             | ("PUT", "settings" | "sharing")
     );
@@ -155,7 +170,15 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "remove" => net.remove(network, &text("host")).await,
         "replace" => net.replace(network, &text("host"), window).await,
         "settings" => settings(net, network, &body, window).await,
-        "sharing" => net.share(network, body.get("sharing").unwrap_or(&Value::Null), window),
+        "sharing" => {
+            let r = net.share(network, body.get("sharing").unwrap_or(&Value::Null), window);
+            // Xenolith holds a project's space back from a network that
+            // doesn't see the project any more.
+            if r.is_ok() {
+                ctx.cores.forwards.changed();
+            }
+            r
+        }
         "relays" => net.relay(network, &text("url"), body.get("add") != Some(&Value::Bool(false)), on("mine"), window).await,
         "approve" => net.approve(network, &text("id"), window).await,
         "svc" => net.svc_list(network),
@@ -174,7 +197,9 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     }
 }
 
-/// An actor's forward grant (Xenolith's, for its shared mode): `approve`
+/// An actor's forward grant (Xenolith's, for its shared mode), and the
+/// spaces it curates: `sign` one of their entries as the person (`space`,
+/// `op`, `network`, `level`), the window's, since it asks them; `approve`
 /// the ask for one (`alpn`, `key`, and the `networks` it reaches, each one
 /// this machine is in), which asks the person, so it's the window's;
 /// `deny` it; `revoke` the grant on `alpn`, which ends its forward. The
@@ -197,6 +222,7 @@ async fn forwards(ctx: &Ctx, req: &mut Req, what: &str) -> Result<Value, CoreErr
             }
             f.approve(&text("alpn"), &text("key"), &networks, req.by.window)
         }
+        "sign" => f.sign(&body, req.by.window).await,
         "deny" => f.deny(&text("alpn"), &text("key")),
         _ => f.revoke(&text("alpn")),
     }

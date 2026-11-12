@@ -92,6 +92,9 @@ pub(crate) enum Job {
     },
     /// Shared mode attached to XenoNet's forward, or its session ended.
     Attached,
+    /// What XenoNet's window told this Xenolith over its session (`told`): a draft to make, an
+    /// entry the person signed to sequence, what each network sees of the projects.
+    Told(Value),
     Detached,
     /// A holder has none of what was asked of it.
     DontHave {
@@ -386,6 +389,12 @@ struct Worker {
     fwd_groups: BTreeSet<String>,
     /// What the grant XenoNet gave names, as the chains check it.
     grant_said: Value,
+    /// What each network sees of this machine's projects, as XenoNet last said (`sharing`), and
+    /// the networks each project's space is held back from by it (revision 7), by space.
+    sharing: Value,
+    narrowed: BTreeMap<String, BTreeSet<String>>,
+    /// The spaces last said to XenoNet's window.
+    said_spaces: Value,
     status: Arc<Mutex<Value>>,
     open: Option<mpsc::Sender<()>>,
     me: String,
@@ -439,6 +448,9 @@ pub(crate) fn spawn(
         offered: BTreeMap::new(),
         fwd_groups: BTreeSet::new(),
         grant_said: Value::Null,
+        sharing: Value::Null,
+        narrowed: BTreeMap::new(),
+        said_spaces: Value::Null,
         me: cfg.keys.context.public().id(),
         endpoint,
         cfg,
@@ -486,6 +498,7 @@ pub(crate) fn spawn(
                         if due.is_some_and(|at| at <= Instant::now()) {
                             due = None;
                             w.scan();
+                            w.say_spaces(false);
                         }
                         w.fetch_tick();
                     }
@@ -697,7 +710,8 @@ impl Worker {
     fn network_role(&self, id: &str, b: &Bound) -> Option<Role> {
         let h = self.held.get(id)?;
         let mine = self.my_networks();
-        let level = chains::network_shares(&h.space).into_iter().filter(|(n, _)| mine.contains(n) && b.networks.contains(n)).map(|(_, l)| l).max();
+        let held_back = self.narrowed.get(id);
+        let level = chains::network_shares(&h.space).into_iter().filter(|(n, _)| mine.contains(n) && b.networks.contains(n) && !held_back.is_some_and(|x| x.contains(n))).map(|(_, l)| l).max();
         if self.curates(id) {
             return level.map(Role::Member);
         }
@@ -775,6 +789,129 @@ impl Worker {
 
     /// Reads the chains and follow records again, and puts the endpoint's admission, the
     /// snapshot link/2 answers from, and the status right.
+    /// Says to XenoNet's window the spaces this Xenolith curates: what each is about, its owner and
+    /// the networks it's shared into (`hello` on a new session). Its word, for showing: what the
+    /// person signs is checked from the draft itself.
+    fn say_spaces(&mut self, hello: bool) {
+        let Some(dial) = self.fwd.read().ok().and_then(|f| f.as_ref().map(|f| f.dial.clone())) else { return };
+        // From the chains on disk: a space the service founded since is in it too.
+        let spaces: Vec<Value> = chains::held(&self.cfg.paths)
+            .into_iter()
+            .filter(|(_, s)| s.view().curator.id() == self.me)
+            .map(|(p, s)| {
+                let v = s.view();
+                let networks: Vec<Value> = chains::network_shares(&s).into_iter().map(|(n, l)| json!({ "network": n, "level": l.as_str() })).collect();
+                json!({ "id": p.id, "address": p.address.to_string(), "about": v.about.to_string(), "owner": chains::describe(&s)["owner"], "weaker": v.weaker(), "networks": networks })
+            })
+            .collect();
+        let spaces = Value::Array(spaces);
+        // Said again only when it changed, or on a new session.
+        if !hello && spaces == self.said_spaces {
+            return;
+        }
+        if dial.say(json!({ "t": "spaces", "hello": hello, "spaces": spaces })).is_ok() {
+            self.said_spaces = spaces;
+        }
+    }
+
+    /// What XenoNet's window told this Xenolith: draft an entry for the person to sign, sequence
+    /// one they signed, or what each network sees of the projects now.
+    fn told(&mut self, body: &Value) {
+        let Some(dial) = self.fwd.read().ok().and_then(|f| f.as_ref().map(|f| f.dial.clone())) else { return };
+        let req = body.get("req").cloned().unwrap_or(Value::Null);
+        let answer = |r: Result<(&str, Value), String>| {
+            let v = match r {
+                Ok((t, mut v)) => {
+                    v["t"] = json!(t);
+                    v["req"] = req.clone();
+                    v
+                }
+                Err(e) => json!({ "t": "failed", "req": req, "error": e }),
+            };
+            let _ = dial.say(v);
+        };
+        match body.get("t").and_then(Value::as_str) {
+            Some("draft") => answer(self.draft_for(body).map(|d| ("drafted", d))),
+            Some("signed") => {
+                let r = self.sequence_for(body).map(|d| ("sequenced", json!({ "space": d })));
+                let ok = r.is_ok();
+                answer(r);
+                if ok {
+                    self.refresh();
+                    self.scan();
+                    self.say_spaces(false);
+                }
+            }
+            // The window reads the spaces: they're said again, changed or not.
+            Some("list") => {
+                self.said_spaces = Value::Null;
+                self.say_spaces(false);
+            }
+            Some("sharing") => {
+                self.sharing = body.get("networks").cloned().unwrap_or(Value::Null);
+                self.narrow();
+            }
+            _ => {}
+        }
+    }
+
+    // The space a request names, by its id, if this Xenolith curates it.
+    fn curated(&self, body: &Value) -> Result<SpaceId, String> {
+        let id = body.get("space").and_then(Value::as_str).unwrap_or("");
+        // From the chains on disk, as the service may have founded it since.
+        chains::held(&self.cfg.paths).into_iter().find(|(p, s)| p.id == id && s.view().curator.id() == self.me).map(|(p, _)| p.address).ok_or_else(|| format!("this Xenolith doesn't curate {id}"))
+    }
+
+    // The entry the window asked for, drafted for the person's device to sign. A move from the
+    // owner key carries that key's signature: the chain takes it only with the person's device and
+    // presence beside it, and to the person alone.
+    fn draft_for(&self, body: &Value) -> Result<Value, String> {
+        let address = self.curated(body)?;
+        let head = body.get("personHead").and_then(Value::as_str).map(str::to_string);
+        let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+        let now = now_ms();
+        if let Some(n) = text("unshareNetwork") {
+            return chains::draft_unshare(&self.cfg.paths, &address, &n, head, now);
+        }
+        let d = if let Some(to) = text("moveOwner") {
+            chains::Draft::MoveOwner { to }
+        } else if let Some(network) = text("shareNetwork") {
+            let level = text("level").as_deref().map_or(Some(Level::Append), Level::parse).ok_or("that isn't a level")?;
+            chains::Draft::ShareNetwork { network, level }
+        } else {
+            return Err("say what to draft".into());
+        };
+        chains::draft(&self.cfg.paths, &address, &d, Some(self.cfg.keys.owner.to_person()), head, &self.cfg.keys.context, now)
+    }
+
+    fn sequence_for(&self, body: &Value) -> Result<Value, String> {
+        let address = self.curated(body)?;
+        match (body.get("entry"), body.get("side")) {
+            (Some(e), None) => chains::sequence(&self.cfg.paths, &self.cfg.root, &address, e, &self.cfg.keys.context),
+            (None, Some(s)) => chains::sequence_side(&self.cfg.paths, &self.cfg.root, &address, s, &self.cfg.keys.context),
+            _ => Err("give the signed entry or side entry".into()),
+        }
+    }
+
+    /// Holds each project's space back from the networks its project isn't shared into any more,
+    /// as XenoNet says, until an unshare records it in the chain.
+    fn narrow(&mut self) {
+        let mut narrowed = BTreeMap::new();
+        for (id, h) in &self.held {
+            let n = chains::narrowed(&h.space, &self.sharing);
+            if !n.is_empty() {
+                narrowed.insert(id.clone(), n);
+            }
+        }
+        if narrowed != self.narrowed {
+            for (id, n) in &narrowed {
+                self.log(&format!("{id} is held back from {} at once: its project isn't shared into it any more", n.iter().cloned().collect::<Vec<_>>().join(", ")));
+            }
+            self.narrowed = narrowed;
+            self.refresh();
+        }
+    }
+
     fn refresh(&mut self) {
         self.held = chains::held(&self.cfg.paths).into_iter().map(|(p, s)| (p.id.clone(), Held { address: p.address, space: s })).collect();
         self.follows = cs::follows(&self.cfg.paths);
@@ -844,7 +981,8 @@ impl Worker {
             for id in &ids {
                 let h = &self.held[id];
                 let told = Told { space: id.clone(), genesis: h.space.entries()[0].hash(), digest: chains::digest(&h.space) };
-                for (n, _) in chains::network_shares(&h.space).into_iter().filter(|(n, _)| mine.contains(n)) {
+                let held_back = self.narrowed.get(id);
+                for (n, _) in chains::network_shares(&h.space).into_iter().filter(|(n, _)| mine.contains(n) && !held_back.is_some_and(|x| x.contains(n))) {
                     for ep in self.known.endpoints_in(&n).into_iter().filter(|e| *e != me) {
                         let t = fwd_tell.entry(ep.clone()).or_default();
                         if !t.iter().any(|x| x.space == *id) {
@@ -963,6 +1101,7 @@ impl Worker {
         self.groups_set = admit.keys().cloned().collect();
         self.track(&ids);
         self.write_status();
+        self.say_spaces(false);
     }
 
     fn write_status(&self) {
@@ -1182,7 +1321,9 @@ impl Worker {
             Job::Attached => {
                 self.refresh();
                 self.scan();
+                self.say_spaces(true);
             }
+            Job::Told(body) => self.told(&body),
             Job::Detached => {
                 for p in std::mem::take(&mut self.bound).into_keys() {
                     self.peers.remove(&p);

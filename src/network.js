@@ -32,7 +32,7 @@ import { hostOfId } from "./hosts.js";
 import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
 import { personOf, servicesOf, devicesHtml, servicesHtml, publishHtml, publishBody } from "./network-person.js";
-import { contextOf, contextHtml, approveBody } from "./network-context.js";
+import { contextOf, contextHtml, approveBody, signBody } from "./network-context.js";
 import { stateOf, networksOf, inNetwork, clock, linkWords, hostLine, hostTags, inviteWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, INVITE_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
@@ -857,6 +857,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (d.netUnpublish) return unpublish(d.netUnpublish);
     if (d.netCtxAllow) return contextAct("approve", approveBody(body(), d.netCtxAllow), "Allowed: Xenolith collects its grant and syncs over the network.");
     if (d.netCtxDeny) return contextAct("deny", { alpn: d.netCtxDeny.split("|")[0], key: d.netCtxDeny.split("|").slice(1).join("|") }, "Turned down.");
+    if (d.netCtxSign) return contextAct("sign", signBody(d.netCtxSign), "Signed: Xenolith has taken it into the space's chain.");
     if (d.netCtxRevoke) return contextAct("revoke", { alpn: d.netCtxRevoke }, "Taken back: its sync over the network ends now.");
     if (t.closest("[data-net-publish]")) return publish();
     if (d.netReplace) return replace(d.netReplace);
@@ -1028,7 +1029,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]"), ctxAllow: centres("data-net-ctx-allow"), ctxDeny: centres("data-net-ctx-deny"), ctxRevoke: centres("data-net-ctx-revoke"), ctxNet: centres("data-net-ctx-net") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]"), ctxAllow: centres("data-net-ctx-allow"), ctxDeny: centres("data-net-ctx-deny"), ctxRevoke: centres("data-net-ctx-revoke"), ctxSign: centres("data-net-ctx-sign"), ctxNet: centres("data-net-ctx-net") } : null,
     };
   }
 

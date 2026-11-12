@@ -31,8 +31,10 @@ use xenonet_authz::{Action, ActorGrant, ActorSlug, Binding, Ground, Schema, Toke
 use xenonet_model::ops::{Kind, Outgoing, To};
 use xenonet_net::forward::{Forwardable, Forwards, Grant, Grants};
 use xenonet_net::node::{now_ms, Options};
+use xenonet_net::space_sign::{Asked, Level};
 use xenonet_net::{NetError, R};
 use xenonet_os::log::Log;
+use xenonet_service::compose::context::Context;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
 use xenonet_service::gateway::network::NetService;
@@ -116,6 +118,9 @@ struct Host {
     ctx: Arc<Ctx>,
     svc: Arc<NetService>,
     forwards: Arc<Forwards>,
+    /// The window's side of Xenolith's session: its spaces and offers, and
+    /// signing their entries as the person.
+    context: Arc<Context>,
     /// The context keys the person approved a grant for here.
     approved: Arc<Mutex<Vec<String>>>,
     socket: PathBuf,
@@ -186,9 +191,11 @@ impl Host {
         forwards.set_chains(Arc::new(move || nodes.upgrade().map_or(Value::Null, |n| xenonet_service::compose::forward::chains_of(&n))));
         let _ = ctx.net.set(svc.clone());
         svc.start().await.unwrap();
+        let context = Context::new(&forwards);
+        context.set_nodes(svc.nodes());
         let socket = dir.join("f.sock");
         xenonet_service::compose::forward::listen(forwards.clone(), &socket, |_| {}).unwrap();
-        Host { ctx, svc, forwards, approved, socket, dir }
+        Host { ctx, svc, forwards, context, approved, socket, dir }
     }
 
     async fn call(&self, method: &str, path: &str, body: Value) -> (u16, Value) {
@@ -215,23 +222,12 @@ impl Host {
         assert!(self.forwards.answered(ALPN, key));
     }
 
-    /// The person's device signs a drafted space entry (`draft`: the entry,
-    /// which may carry no signature yet, and its act) with their presence
-    /// for it, as XenoNet's window would.
-    fn sign_as_person(&self, draft: &Value) -> Value {
-        let identity = self.svc.nodes().common().identity.clone();
-        let device = identity.device_key().unwrap().unwrap();
-        let mut unsigned = draft["entry"].as_object().unwrap().clone();
-        let mut signers = unsigned.remove("signers").and_then(|s| s.as_array().cloned()).unwrap_or_default();
-        let sig = device.signer.sign(xenonet_id::sign::Purpose::SPACE, Value::Object(unsigned.clone()).to_string().as_bytes()).unwrap();
-        let act: [u8; 32] = xenonet_id::codec::unb64_n(draft["act"].as_str().unwrap()).unwrap();
-        let block = identity.prove(true, xenonet_log::space::WIDEN, &act, "share a space", now_ms() as i64).unwrap();
-        signers.push(json!({ "key": device.signer.public().id(), "sig": xenonet_id::codec::b64(&sig), "presence": block.to_json() }));
-        unsigned.insert("signers".into(), Value::Array(signers));
-        // What the chain will check: it reads back as an entry, and its act is the draft's.
-        let e = xenonet_log::space::Entry::parse(&Value::Object(unsigned.clone())).unwrap();
-        assert_eq!(e.digest(), act);
-        Value::Object(unsigned)
+    /// What the window offers for the space `id` now: each offer's op and
+    /// network.
+    fn offers(&self, id: &str) -> Vec<(String, Option<String>)> {
+        let view = self.context.view();
+        let Some(s) = view.as_array().and_then(|a| a.iter().find(|s| s["id"] == id).cloned()) else { return vec![] };
+        s["offers"].as_array().into_iter().flatten().map(|o| (o["op"].as_str().unwrap_or("").to_string(), o["network"].as_str().map(String::from))).collect()
     }
 
     fn person(&self) -> (String, String) {
@@ -372,7 +368,6 @@ async fn a_space_shared_into_one_network_reaches_its_members_alone_and_a_grant_w
     let desk = Host::new("desk").await;
     let n1 = network(&laptop, &studio, "home", "laptop", "studio").await;
     let n2 = network(&laptop, &desk, "work", "laptop", "desk").await;
-    let (person, _) = laptop.person();
     // link/2 up between laptop and each of the others, by a direct path: the
     // endpoint the forwards ride knows where they are.
     for h in [&studio, &laptop, &desk] {
@@ -420,14 +415,18 @@ async fn a_space_shared_into_one_network_reaches_its_members_alone_and_a_grant_w
     };
     until("laptop's Xenolith founded its spaces", 20, || id_of("atlas").is_some() && id_of("notes").is_some()).await;
     let (atlas, notes) = (id_of("atlas").unwrap(), id_of("notes").unwrap());
-    for (space, net) in [("project:atlas", &n2), ("project:notes", &n1)] {
-        let (_, head) = laptop.person();
-        let moved = l.run(&["spaces", "draft", space, "--move-owner", &person, "--person-head", &head], None);
-        l.run(&["spaces", "sequence", space], Some(&laptop.sign_as_person(&moved).to_string()));
-        let (_, head) = laptop.person();
-        let share = l.run(&["spaces", "draft", space, "--share-network", net, "--level", "append", "--person-head", &head], None);
-        l.run(&["spaces", "sequence", space], Some(&laptop.sign_as_person(&share).to_string()));
+    // The window offers to make each yours, then to share it into each
+    // network; the person signs each at the window (their device, with
+    // presence), Xenolith drafting and sequencing it over its session.
+    until("the window sees atlas, the owner key's", 30, || laptop.offers(&atlas) == vec![("moveOwner".to_string(), None)]).await;
+    assert!(laptop.context.sign(&atlas, &Asked::MoveOwner, false).await.is_err_and(|e| e.contains("window")), "signing as the person is the window's");
+    for (space, net) in [(&atlas, &n2), (&notes, &n1)] {
+        laptop.context.sign(space, &Asked::MoveOwner, true).await.unwrap();
+        until("the window offers to share it", 30, || laptop.offers(space).iter().any(|(op, n)| op == "shareNetwork" && n.as_ref() == Some(net))).await;
+        laptop.context.sign(space, &Asked::Share { network: net.clone(), level: Level::Append }, true).await.unwrap();
     }
+    until("the window offers to unshare atlas from N2", 30, || laptop.offers(&atlas).iter().any(|(op, n)| op == "unshareNetwork" && n.as_ref() == Some(&n2))).await;
+    assert!(laptop.context.sign(&atlas, &Asked::MoveOwner, true).await.is_err(), "a space moves to the person once");
     // Shares need the person's device: one only the owner key signed is refused.
     let (_, head) = laptop.person();
     let unsigned = l.run(&["spaces", "draft", "project:atlas", "--share-network", &n1, "--person-head", &head], None);

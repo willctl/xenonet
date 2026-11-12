@@ -261,6 +261,7 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
                 }
                 // The chains the actors' forwards hand out (Xenolith's
                 // shared mode verifies its peers by them).
+                ctx.cores.forwards.on_net(svc.nodes());
                 if let Some(f) = ctx.cores.forwards.net() {
                     let nodes = Arc::downgrade(svc.nodes());
                     f.set_chains(Arc::new(move || nodes.upgrade().map_or(Value::Null, |n| crate::compose::forward::chains_of(&n))));

@@ -340,6 +340,21 @@ isn't renewed (the person approves again). Taking it back
 which ends the forward. Collecting a grant records its context key in
 `context_keys`, which the map ties a space's marker by.
 
+**Space entries signed at the window.** Over its session Xenolith says
+which spaces it curates (`say`); the window offers, for each, the acts
+the person may sign: a move from the standalone owner key to them, a
+share into each network the grant reaches (first those the space's
+project is shared into, "from the project"), and an unshare. Signing
+(`POST /api/net/forwards/sign`, a WINDOW row) asks Xenolith to draft the
+entry, reads the draft back and signs it only when it does exactly the
+act asked, to that space, with its act hash its own
+(`xenonet_net::space_sign`), then hands it back to be sequenced. What
+widens takes a presence block for the act hash; an unshare takes the
+device's signature alone. When what a network sees of this machine's
+projects changes (`PUT /api/net/sharing`), Xenolith is told (`sharing`),
+and holds a project's space back from a network that no longer sees the
+project at once; the unshare that records it is offered at the window.
+
 **Page cursors** for a cloud assistant's lists are the grant narrowed to
 one read, its filters' hash and five minutes, holding where the last page
 ended as data that narrows nothing. A cursor can't be made up or changed,

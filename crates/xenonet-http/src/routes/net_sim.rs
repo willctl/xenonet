@@ -75,7 +75,39 @@ const LITH_ALPN: &str = "xenolith/sync/2";
 // What the simulated Xenolith asked: a grant for its key, a minute ago.
 fn made_up_context(variant: Option<&str>, now: f64) -> Value {
     let asks = if variant == Some("xenolith") { json!([{ "alpn": LITH_ALPN, "key": LITH_KEY, "actor": "xenolith", "at": now - 60e3 }]) } else { json!([]) };
-    json!({ "forwardable": [LITH_ALPN], "socket": null, "forwards": [], "asks": asks, "grants": [] })
+    json!({ "forwardable": [LITH_ALPN], "socket": null, "forwards": [], "asks": asks, "grants": [], "spaces": [] })
+}
+
+// The space the simulated Xenolith curates once it's granted: atlas, the
+// standalone owner key's until you make it yours.
+fn made_up_space() -> Value {
+    json!({ "id": "spc_simulatedatlasspace0000000000", "address": "project:atlas", "about": "name:project:atlas", "owner": format!("key:{LITH_KEY}"), "weaker": true, "networks": [] })
+}
+
+// The simulated person's id.
+fn served_person(state: &Value) -> String {
+    state["person"]["id"].as_str().unwrap_or("prs_simulated").to_string()
+}
+
+// The simulated forwards as GET lists them: each space with its offers, as
+// the service makes them (compose/context.rs) for these networks.
+fn with_offers(sim: &Sim) -> Value {
+    let mine: Vec<Value> = served(sim)["networks"].as_array().into_iter().flatten().map(|n| n["id"].clone()).collect();
+    let mut out = sim.context.clone();
+    if let Some(spaces) = out["spaces"].as_array_mut() {
+        for s in spaces {
+            let shared: Vec<Value> = s["networks"].as_array().into_iter().flatten().map(|n| n["network"].clone()).collect();
+            let offers: Vec<Value> = if s["weaker"] == true {
+                vec![json!({ "op": "moveOwner" })]
+            } else {
+                let share = mine.iter().filter(|n| !shared.contains(n)).map(|n| json!({ "op": "shareNetwork", "network": n, "level": "append", "fromProject": false }));
+                let unshare = shared.iter().map(|n| json!({ "op": "unshareNetwork", "network": n, "narrowed": false }));
+                share.chain(unshare).collect()
+            };
+            s["offers"] = Value::Array(offers);
+        }
+    }
+    out
 }
 
 /// The state as a simulation serves it: every network in `networks`, the
@@ -301,7 +333,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
         ("GET", "/api/net/forwards") => {
             let all = sims().locked();
             let Some(sim) = all.get(&key(ctx)) else { return Ok(None) };
-            Ok(Some(Reply::json(200, sim.context.clone())))
+            Ok(Some(Reply::json(200, with_offers(sim))))
         }
         ("GET", "/api/net/svc") => {
             let all = sims().locked();
@@ -322,6 +354,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             | "/api/net/svc/publish"
             | "/api/net/svc/unpublish"
             | "/api/net/forwards/approve"
+            | "/api/net/forwards/sign"
             | "/api/net/forwards/deny"
             | "/api/net/forwards/revoke"
             | "/api/net/relays",
@@ -979,8 +1012,36 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             let grant = json!({ "actor": "xenolith", "alpn": alpn, "key": key, "networks": networks, "rights": ["ctx-read", "ctx-append", "ctx-write"], "approved": now, "until": now + 30.0 * 86_400e3, "state": "granted" });
             sim.context["grants"] = json!([grant.clone()]);
+            sim.context["spaces"] = json!([made_up_space()]);
             sim.context["forwards"] = json!([{ "alpn": alpn, "actor": "xenolith", "networks": networks, "until": grant["until"], "connections": [] }]);
             Reply::json(200, grant)
+        }
+        // Signing as you, as the service does it: the space as it then
+        // stands, its offers what the window shows next.
+        "/api/net/forwards/sign" => {
+            let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            let (id, op, network) = (text("space"), text("op"), text("network"));
+            let Some(spaces) = sim.context["spaces"].as_array_mut() else { return fail(500, "error", "") };
+            let Some(s) = spaces.iter_mut().find(|s| s["id"] == id.as_str()) else { return fail(409, "refused", format!("this Xenolith doesn't curate {id}")) };
+            let shared = |s: &Value| s["networks"].as_array().is_some_and(|l| l.iter().any(|n| n["network"] == network.as_str()));
+            match op.as_str() {
+                "moveOwner" if s["weaker"] == true => {
+                    s["weaker"] = json!(false);
+                    s["owner"] = json!(format!("person:{}", served_person(&sim.state)));
+                }
+                "shareNetwork" if s["weaker"] != true && !network.is_empty() && !shared(s) => {
+                    if let Some(l) = s["networks"].as_array_mut() {
+                        l.push(json!({ "network": network, "level": body.get("level").and_then(Value::as_str).unwrap_or("append") }));
+                    }
+                }
+                "unshareNetwork" if shared(s) => {
+                    if let Some(l) = s["networks"].as_array_mut() {
+                        l.retain(|n| n["network"] != network.as_str());
+                    }
+                }
+                _ => return fail(409, "refused", "that isn't one to sign for this space now"),
+            }
+            Reply::json(200, json!({ "space": s.clone() }))
         }
         "/api/net/forwards/revoke" => {
             let alpn = body.get("alpn").and_then(Value::as_str).unwrap_or("");
@@ -989,6 +1050,7 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             };
             sim.context["grants"] = json!([]);
             sim.context["forwards"] = json!([]);
+            sim.context["spaces"] = json!([]);
             Reply::json(200, json!({ "revoked": g }))
         }
         "/api/net/svc/unpublish" => {
@@ -1669,5 +1731,29 @@ mod tests {
         assert_eq!(threads, [24, 12, 32], "each its own machine");
         assert_eq!(made_up_reading("rack", now).unwrap()["gpus"].as_array().unwrap().len(), 2);
         assert!(made_up_reading("desk", now).is_none());
+    }
+
+    #[test]
+    fn the_made_up_xenolith_is_granted_and_its_space_made_yours_shared_and_unshared() {
+        let now = 1.8e12;
+        let mut s = sim("net-founder");
+        let net = served(&s)["networks"][0]["id"].as_str().unwrap().to_string();
+        let ask = json!({ "alpn": LITH_ALPN, "key": LITH_KEY, "networks": [net] });
+        assert_eq!(
+            apply(&mut s, "/api/net/forwards/approve", &json!({ "alpn": LITH_ALPN, "key": LITH_KEY, "networks": ["net_elsewhere"] }), now).status,
+            400,
+            "a network this machine isn't in"
+        );
+        assert_eq!(apply(&mut s, "/api/net/forwards/approve", &ask, now).status, 200);
+        let id = with_offers(&s)["spaces"][0]["id"].as_str().unwrap().to_string();
+        assert_eq!(with_offers(&s)["spaces"][0]["offers"], json!([{ "op": "moveOwner" }]));
+        let sign = |s: &mut Sim, op: &str| apply(s, "/api/net/forwards/sign", &json!({ "space": id, "op": op, "network": net }), now).status;
+        assert_eq!(sign(&mut s, "shareNetwork"), 409, "the owner key's space shares into no network");
+        assert_eq!(sign(&mut s, "moveOwner"), 200);
+        assert_eq!(sign(&mut s, "shareNetwork"), 200);
+        assert_eq!(with_offers(&s)["spaces"][0]["offers"][0]["op"], "unshareNetwork");
+        assert_eq!(sign(&mut s, "unshareNetwork"), 200);
+        assert_eq!(apply(&mut s, "/api/net/forwards/revoke", &json!({ "alpn": LITH_ALPN }), now).status, 200);
+        assert_eq!(with_offers(&s)["spaces"], json!([]));
     }
 }

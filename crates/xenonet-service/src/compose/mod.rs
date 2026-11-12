@@ -4,6 +4,7 @@
 pub mod acp;
 pub mod app;
 pub mod connect;
+pub mod context;
 pub mod forward;
 pub mod keys;
 pub mod net;

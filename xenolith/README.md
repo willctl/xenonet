@@ -552,7 +552,15 @@ another way. XenoNet hands it copies of
 its networks' chains and the person chains of their owners, which Xenolith
 checks from genesis itself. A space reaches a network's members once its owner
 is the person and it's shared into that network, both signed by one of the
-person's devices with their presence:
+person's devices with their presence. XenoNet's window does both: Network
+settings, Shared context, lists the spaces this Xenolith curates with Make it
+yours, Share into each network (first the ones the space's project is shared
+into, marked "from the project") and Stop sharing. Xenolith drafts the entry
+over the forward session, XenoNet checks the draft does what the button says,
+your device signs it, and Xenolith appends it as the curator. When a project
+stops being shared into a network, XenoNet tells Xenolith, which holds the
+project's space back from that network at once; Stop sharing, which asks no
+Touch ID, records it in the chain. From a terminal:
 
 ```bash
 xenolith spaces draft project:atlas --move-owner prs_… --person-head …

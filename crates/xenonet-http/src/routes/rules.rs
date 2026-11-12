@@ -380,6 +380,9 @@ pub const RULES: &[Rule] = &[
     // issuing a grant, which asks you; turning it down or taking a grant
     // back narrows.
     r("POST",   "/api/net/forwards/approve", WINDOW, Doing::Act(Action::RegisterActor)),
+    // Signing a space's entry as you (Xenolith's draft): your device signs,
+    // with your presence where it widens.
+    r("POST",   "/api/net/forwards/sign", WINDOW, Nothing),
     r("POST",   "/api/net/forwards/deny", YOU, Nothing),
     r("POST",   "/api/net/forwards/revoke", YOU, Nothing),
     r("POST",   "/api/net/create", YOU, Nothing),
@@ -720,6 +723,7 @@ mod tests {
         assert_eq!(rule("POST", "/api/net/forwards/approve").unwrap().who, &[Window], "a forward grant is issued at the window alone");
         assert_eq!(rule("POST", "/api/net/forwards/approve").unwrap().act, Doing::Act(Action::RegisterActor));
         assert_eq!(rule("POST", "/api/net/forwards/revoke").unwrap().who, &[You]);
+        assert_eq!(rule("POST", "/api/net/forwards/sign").unwrap().who, &[Window], "the person's device signs at the window alone");
         // No row, no route: a path made up now, or a method a path doesn't take.
         assert!(rule("GET", "/api/brand-new").is_none());
         assert!(rule("PUT", "/api/graph").is_none());

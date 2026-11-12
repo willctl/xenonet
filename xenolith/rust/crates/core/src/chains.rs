@@ -661,6 +661,54 @@ pub fn sequence(paths: &AppPaths, root: &Path, address: &SpaceId, entry: &Value,
     })
 }
 
+/// The unshare of `address` from `network` for a device of the person to sign: a side entry,
+/// which needs no presence and no curator (any owner the space has had signs it alone). Returns
+/// the side and its act.
+pub fn draft_unshare(paths: &AppPaths, address: &SpaceId, network: &str, person_head: Option<String>, now: i64) -> Result<Value, String> {
+    let (id, space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet"))?;
+    let subject = Subject::parse(&format!("network:{network}")).ok_or_else(|| format!("{network} isn't a network id (net_…)"))?;
+    if space.level(&subject).is_none() {
+        return Err(format!("{address} isn't shared into {network}"));
+    }
+    let side = space.unshare(subject, person_head, now);
+    Ok(json!({ "space": id, "address": address.to_string(), "side": side.to_json(), "act": b64(&side.digest()) }))
+}
+
+/// Takes `side`, an unshare the person's device signed, into `address`'s chain.
+pub fn sequence_side(paths: &AppPaths, root: &Path, address: &SpaceId, side: &Value, context: &dyn Signer) -> Result<Value, String> {
+    let s = xenonet_log::space::Side::parse(side).map_err(|e| e.message)?;
+    locked(paths, || {
+        let (id, mut space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet"))?;
+        if s.space != id {
+            return Err("that side entry is for another space".into());
+        }
+        space.offer_side(s.clone()).map_err(|e| e.message)?;
+        save_space(paths, &space, &mut unrecorded)?;
+        mark(root, address, &space, context, &mut unrecorded)?;
+        Ok(describe(&space))
+    })
+}
+
+/// The networks a project's space is held back from at once, before an unshare records it: the
+/// ones it's shared into whose sharing, as this machine's XenoNet says (`sharing`: each network's
+/// "all" or list of project ids), no longer takes its project (revision 7). XenoNet's word only
+/// narrows: a network it says nothing of, or a space about no project, holds nothing back.
+pub fn narrowed(space: &Space, sharing: &Value) -> BTreeSet<String> {
+    narrowed_of(&space.view().about, network_shares(space).into_iter().map(|(n, _)| n), sharing)
+}
+
+/// `narrowed`, for a space about `about` shared into `networks`.
+pub fn narrowed_of(about: &EntityRef, networks: impl Iterator<Item = String>, sharing: &Value) -> BTreeSet<String> {
+    let EntityRef::Project(p) = about else { return BTreeSet::new() };
+    networks
+        .filter(|n| match sharing.get(n) {
+            Some(Value::String(s)) => s != "all",
+            Some(Value::Array(a)) => !a.iter().any(|x| x.as_str() == Some(p.as_str())),
+            _ => false,
+        })
+        .collect()
+}
+
 /// What a holder has of a space, as two holders compare it: the ids of every entry and side entry
 /// it holds, in any order, hashed. Equal digests, nothing to send.
 pub fn digest(space: &Space) -> String {
@@ -945,5 +993,17 @@ mod tests {
         assert!(e.contains("move-owner"), "{e}");
         assert_eq!(load_space(&h.paths, &h.id("project:atlas")).unwrap().len(), before, "the chain is as it was");
         assert!(bind_plan(&h.paths, &sp("project:nope"), None, None).is_err());
+    }
+
+    #[test]
+    fn a_projects_space_is_held_back_from_a_network_its_project_isnt_shared_into_any_more() {
+        let p = format!("prj_{}", "a".repeat(32));
+        let prj = EntityRef::parse(&p).unwrap();
+        let nets = || ["net_1".to_string(), "net_2".to_string(), "net_3".to_string(), "net_4".to_string()].into_iter();
+        let sharing = json!({ "net_1": "all", "net_2": [p], "net_3": [], "net_4": [format!("prj_{}", "b".repeat(32))] });
+        assert_eq!(narrowed_of(&prj, nets(), &sharing), ["net_3".to_string(), "net_4".to_string()].into());
+        assert!(narrowed_of(&prj, nets(), &json!({})).is_empty(), "a network XenoNet says nothing of holds nothing back");
+        let name = EntityRef::parse("name:project:atlas").unwrap();
+        assert!(narrowed_of(&name, nets(), &sharing).is_empty(), "a space about no project");
     }
 }

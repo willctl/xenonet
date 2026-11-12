@@ -716,7 +716,7 @@ test("a machine in two networks: each listed with its own host id, one shown at 
   await s.driver("network", "close");
 }));
 
-test("shared context: Xenolith's ask for a grant allowed for the network it's ticked for, and taken back; no grant ever reaches the page", { timeout: limit(60000) }, shoot("network-context", async () => {
+test("shared context: Xenolith's ask for a grant allowed for the network it's ticked for, its space made yours, shared and unshared at the window, and the grant taken back; no grant ever reaches the page", { timeout: limit(60000) }, shoot("network-context", async () => {
   await simulate("net-founder", { b: "xenolith" }, (n) => n.context?.asks.length === 1);
   let { network: n } = await s.driver("network", "context");
   const ask = n.context.asks[0];
@@ -735,6 +735,25 @@ test("shared context: Xenolith's ask for a grant allowed for the network it's ti
   assert.doesNotMatch(JSON.stringify(n), /xenonet_actor_/, "the grant goes to Xenolith over its socket, never to the window");
   n = (await s.driver("network", "context")).network;
   assert.match(n.text, /Xenolith\s*attached\s*reaches home · syncing/i);
+  // Its space, the standalone owner key's: made yours, shared into home,
+  // and unshared, each signed at the window.
+  const space = n.context.spaces[0];
+  assert.deepEqual(space.offers.map((o) => o.op), ["moveOwner"]);
+  const signed = async (at, what, done) => {
+    n = (await s.driver("network", "context")).network;
+    await clickAt(n.at.ctxSign[at], what);
+    const got = await until(async () => {
+      const x = await network();
+      return done(x.context.spaces[0]) ? x : null;
+    });
+    assert.ok(got, `${what} signed`);
+    return got;
+  };
+  n = await signed(`${space.id}|moveOwner|`, "Make it yours", (x) => !x.weaker);
+  n = await signed(`${space.id}|shareNetwork|${n.networkId}`, "Share into home", (x) => x.networks.some((y) => y.network === n.networkId));
+  assert.match((await s.driver("network", "context")).network.text, /project:atlas\s*yours · shared into home \(append\)/);
+  n = await signed(`${space.id}|unshareNetwork|${n.networkId}`, "Stop sharing into home", (x) => x.networks.length === 0);
+  n = (await s.driver("network", "context")).network;
   await clickAt(n.at.ctxRevoke[ask.alpn], "Take back");
   assert.ok(await until(async () => (await network()).context.grants.length === 0), "taken back");
   await s.driver("network", "close");

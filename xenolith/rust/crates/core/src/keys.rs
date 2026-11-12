@@ -145,6 +145,14 @@ impl OwnerSigner {
         }
         Ok(&self.0)
     }
+
+    /// The key, for the one entry it may sign without the owner key presented: a move of a space
+    /// it owns to the person, drafted for XenoNet's window. The chain takes that move only to a
+    /// person and only with their device's signature and presence beside the key's (review
+    /// revision 21), so the key alone gives nothing away by it.
+    pub fn to_person(&self) -> &dyn Signer {
+        &self.0
+    }
 }
 
 /// The three keys, as the service holds them.

@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 const FORWARDS: &str = "the forwards";
 
+#[async_trait::async_trait]
 pub trait Forwards: Send + Sync {
     /// What `GET /api/net/forwards` answers: the forwardable ALPNs, each
     /// actor forwarding one with its connections, the asks for a grant
@@ -31,6 +32,20 @@ pub trait Forwards: Send + Sync {
     fn revoke(&self, _alpn: &str) -> R<Value> {
         pending(FORWARDS)
     }
+    /// Signs, as the person, an entry of a space the actor curates
+    /// (Xenolith's): `{space, op: moveOwner | shareNetwork | unshareNetwork,
+    /// network, level}`. The actor drafts it, the draft is checked to do
+    /// that, the person's device signs it (with their presence where it
+    /// widens), and the actor sequences it. From the window alone.
+    async fn sign(&self, _body: &Value, _window: bool) -> R<Value> {
+        pending(FORWARDS)
+    }
+    /// The network's nodes, once they run: whose identity signs, and what
+    /// each network sees of this machine's projects.
+    fn on_net(&self, _nodes: &Arc<xenonet_net::nodes::Nodes>) {}
+    /// What a network sees of this machine's projects may have changed: the
+    /// actor is told when it did.
+    fn changed(&self) {}
     /// The forwards themselves, for the node and the local socket; None in
     /// a XenoNet that forwards nothing.
     fn net(&self) -> Option<Arc<xenonet_net::forward::Forwards>> {
@@ -38,4 +53,5 @@ pub trait Forwards: Send + Sync {
     }
 }
 
+#[async_trait::async_trait]
 impl Forwards for Pending {}

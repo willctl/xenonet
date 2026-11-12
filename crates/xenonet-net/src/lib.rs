@@ -86,6 +86,7 @@ pub mod share;
 #[cfg(test)]
 pub mod sim;
 pub mod sink;
+pub mod space_sign;
 pub mod svc;
 pub mod svc2;
 pub mod ticket;

@@ -38,6 +38,8 @@ pub const XENONET_PORT: u16 = 47840;
 /// The forward, while attached.
 pub(crate) struct Fwd {
     pub links: Arc<Links>,
+    /// The session, for what this Xenolith says to XenoNet's window (`say`).
+    pub dial: Arc<ForwardDial>,
 }
 
 /// Where XenoNet's forward socket is: config.json's `sync.xenonet.socket`, else
@@ -247,7 +249,7 @@ async fn attach(
     let admission = Arc::new(Admission::with(Doors { members: vec![protocol().alpn], join: None }));
     let mesh = Arc::new(Mesh::new(dial.clone(), admission));
     let links = Links::over(protocol(), mesh, engine::machine(cfg, jobs.clone(), me, shared.clone(), true));
-    *fwd.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Fwd { links: links.clone() });
+    *fwd.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Fwd { links: links.clone(), dial: dial.clone() });
     let _ = jobs.send(Job::Attached);
     (cfg.log)(&format!("sync: shared mode is on, over XenoNet's endpoint {}", crate::hex(me)));
     shared.set_xenonet(json!({ "mode": "attached", "socket": path.to_string_lossy(), "endpoint": crate::hex(me) }));
@@ -265,6 +267,18 @@ async fn attach(
                 }
                 // At most once a second, however many connections ask.
                 tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        })
+    };
+    // What XenoNet's window tells this Xenolith (drafts to make, entries the person signed, what
+    // each network sees of the projects) goes to the worker, which reads and writes the chains.
+    let told = {
+        let (dial, jobs) = (dial.clone(), jobs.clone());
+        tokio::spawn(async move {
+            while let Some(body) = dial.told().await {
+                if jobs.send(Job::Told(body)).is_err() {
+                    return;
+                }
             }
         })
     };
@@ -288,6 +302,7 @@ async fn attach(
     };
     keep.abort();
     rechain.abort();
+    told.abort();
     *fwd.write().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     let _ = jobs.send(Job::Detached);
     links.mesh().close().await;

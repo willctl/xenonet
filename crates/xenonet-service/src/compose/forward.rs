@@ -53,16 +53,20 @@ impl Grants for Decided {
 struct Core {
     forwards: Arc<Forwards>,
     grants: Arc<dyn GrantsCore>,
+    context: Arc<crate::compose::context::Context>,
 }
 
 fn refused(status: u16, code: &str, message: impl Into<String>) -> CoreError {
     CoreError { status: Some(status), code: Some(code.to_string()), ..CoreError::new(message) }
 }
 
+#[async_trait::async_trait]
 impl ForwardsCore for Core {
     fn list(&self) -> Result<Value, CoreError> {
         let mut v = self.forwards.list();
         v["grants"] = self.grants.forward_grants();
+        // The spaces Xenolith curates, with what the window offers for each.
+        v["spaces"] = self.context.view();
         // Each ask with the actor it's for.
         if let Some(asks) = v["asks"].as_array_mut() {
             for a in asks {
@@ -101,6 +105,21 @@ impl ForwardsCore for Core {
         }
     }
 
+    async fn sign(&self, body: &Value, window: bool) -> Result<Value, CoreError> {
+        let asked = crate::compose::context::asked_of(body).map_err(|e| refused(400, "bad-request", e))?;
+        let space = body.get("space").and_then(Value::as_str).filter(|s| s.starts_with("spc_")).ok_or_else(|| refused(400, "bad-request", "name the space (spc_…)"))?;
+        let out = self.context.sign(space, &asked, window).await.map_err(|e| refused(409, "refused", e))?;
+        Ok(serde_json::json!({ "space": out }))
+    }
+
+    fn on_net(&self, nodes: &Arc<xenonet_net::nodes::Nodes>) {
+        self.context.set_nodes(nodes);
+    }
+
+    fn changed(&self) {
+        self.context.changed();
+    }
+
     fn net(&self) -> Option<Arc<Forwards>> {
         Some(self.forwards.clone())
     }
@@ -119,7 +138,8 @@ pub fn wire(cores: &mut Cores) {
             }
         }));
     }
-    cores.forwards = Arc::new(Core { forwards, grants: cores.grants.clone() });
+    let context = crate::compose::context::Context::new(&forwards);
+    cores.forwards = Arc::new(Core { forwards, grants: cores.grants.clone(), context });
 }
 
 /// Copies of this machine's chains for its actors (`Forwards::set_chains`):
@@ -204,7 +224,7 @@ mod tests {
     #[test]
     fn approving_a_grant_is_the_windows_and_needs_a_proved_ask() {
         let forwards = Forwards::new(Forwardable::new(FORWARDED).unwrap(), Arc::new(Decided(Arc::new(xenonet_api::cores::Pending))));
-        let core = Core { forwards: forwards.clone(), grants: Arc::new(xenonet_api::cores::Pending) };
+        let core = Core { forwards: forwards.clone(), grants: Arc::new(xenonet_api::cores::Pending), context: crate::compose::context::Context::new(&forwards) };
         let nets = ["net_00000000000000000000000000000001".to_string()];
         assert_eq!(core.approve("xenolith/sync/2", "xns1_k", &nets, false).unwrap_err().code.as_deref(), Some("window"));
         assert_eq!(core.approve("xenolith/sync/2", "xns1_k", &nets, true).unwrap_err().code.as_deref(), Some("not-found"), "no ask waits for that key");

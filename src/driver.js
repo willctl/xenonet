@@ -562,7 +562,8 @@ export function createDriver(app) {
     // service with { name, target, paths, hosts } filled in, "devices",
     // "services" and "context" the panel scrolled to Your devices,
     // Services or Shared context (Xenolith's ask for a grant, at.ctxAllow
-    // and at.ctxDeny, and the grant you gave, at.ctxRevoke), "pick"
+    // and at.ctxDeny, the grant you gave, at.ctxRevoke, and its spaces'
+    // entries you sign, at.ctxSign), "pick"
     // shows another of this machine's networks ({ network }: its id), and
     // "close" closes it;
     // "refresh" reads it again, and "served" gives GET /api/net/state as
