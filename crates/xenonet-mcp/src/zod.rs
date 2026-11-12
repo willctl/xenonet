@@ -35,7 +35,7 @@ enum Kind {
         max: Option<f64>,
     },
     Bool,
-    Enum(Vec<&'static str>),
+    Enum(Vec<String>),
     Lit(Value),
     Arr {
         item: Box<Z>,
@@ -116,8 +116,8 @@ pub fn int() -> Z {
 pub fn boolean() -> Z {
     of(Kind::Bool)
 }
-pub fn enumeration(values: &[&'static str]) -> Z {
-    of(Kind::Enum(values.to_vec()))
+pub fn enumeration(values: &[&str]) -> Z {
+    of(Kind::Enum(values.iter().map(ToString::to_string).collect()))
 }
 pub fn literal(v: Value) -> Z {
     of(Kind::Lit(v))
@@ -381,7 +381,7 @@ impl Z {
                 v.cloned()
             }
             Kind::Enum(values) => {
-                if !matches!(v, Some(Value::String(s)) if values.contains(&s.as_str())) {
+                if !matches!(v, Some(Value::String(s)) if values.contains(s)) {
                     let quoted: Vec<String> = values.iter().map(|s| json!(s).to_string()).collect();
                     // One value reads as a literal does.
                     say(

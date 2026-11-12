@@ -370,7 +370,7 @@
           {
             "name": "start_session",
             "title": "Start a session",
-            "description": "Starts a new Claude Code, Codex or Grok Build session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once. Whether the session started, and what it came to when it stopped (finished, stopped to ask something, was denied a tool, failed or left nothing), come to you as messages that quote its last words, and the end wakes you if you are idle. XenoNet reports it; the new session needn't be told to. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.",
+            "description": "Starts a new Claude Code, Codex, Grok Build or Hermes Agent session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once. Whether the session started, and what it came to when it stopped (finished, stopped to ask something, was denied a tool, failed or left nothing), come to you as messages that quote its last words, and the end wakes you if you are idle. XenoNet reports it; the new session needn't be told to. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.",
             "inputSchema": {
               "type": "object",
               "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -384,12 +384,13 @@
                   "type": "string"
                 },
                 "app": {
-                  "description": "claude (Claude Code, the default), codex or grok (Grok Build).",
+                  "description": "claude (Claude Code, the default), codex, grok (Grok Build) or hermes-agent (Hermes Agent).",
                   "type": "string",
                   "enum": [
                     "claude",
                     "codex",
-                    "grok"
+                    "grok",
+                    "hermes-agent"
                   ]
                 },
                 "prompt": {
@@ -397,7 +398,7 @@
                   "description": "What the new session should do: its first prompt."
                 },
                 "mode": {
-                  "description": "A permission mode; manual, the default, is your user's own settings. Codex takes none.",
+                  "description": "A permission mode; manual, the default, is your user's own settings. Codex and Hermes Agent take none.",
                   "type": "string",
                   "enum": [
                     "manual",
@@ -439,12 +440,13 @@
                   "type": "string"
                 },
                 "app": {
-                  "description": "claude (Claude Code, the default), codex or grok (Grok Build).",
+                  "description": "claude (Claude Code, the default), codex, grok (Grok Build) or hermes-agent (Hermes Agent).",
                   "type": "string",
                   "enum": [
                     "claude",
                     "codex",
-                    "grok"
+                    "grok",
+                    "hermes-agent"
                   ]
                 },
                 "actor": {

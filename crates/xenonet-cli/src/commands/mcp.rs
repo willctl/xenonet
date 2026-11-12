@@ -55,9 +55,16 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
 }
 
 /// What the sessions' server knows of the registry: the apps whose
-/// sessions say they're calling, in its order.
+/// sessions say they're calling, and the apps XenoNet starts sessions of
+/// (headless, or over ACP where the registry gives a command), in its
+/// order, each with whether a start of it takes a mode.
 pub fn registry() -> xenonet_mcp::Registry {
-    xenonet_mcp::Registry { callers: xenonet_adapter::apps::with("caller").map(|a| a.id.clone()).collect() }
+    use xenonet_engine::delivery::{apps, starts};
+    let modes = |a: &xenonet_adapter::apps::App| apps::of(&a.id).and_then(|w| w.no_mode).is_none() && !starts::acp_only(a);
+    xenonet_mcp::Registry {
+        callers: xenonet_adapter::apps::with("caller").map(|a| a.id.clone()).collect(),
+        starts: starts::apps().into_iter().map(|a| xenonet_mcp::StartApp { id: a.id.clone(), name: a.name.clone(), modes: modes(a) }).collect(),
+    }
 }
 
 #[cfg(test)]
@@ -65,7 +72,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_callers_are_the_registrys() {
-        assert_eq!(registry().callers, ["claude", "codex", "grok"]);
+    fn the_registrys_apps() {
+        xenonet_platforms::install();
+        let r = registry();
+        assert_eq!(r.callers, ["claude", "codex", "grok"]);
+        let starts: Vec<(&str, bool)> = r.starts.iter().map(|a| (a.id.as_str(), a.modes)).collect();
+        assert_eq!(starts, [("claude", true), ("codex", false), ("grok", true), ("hermes-agent", false)], "Hermes Agent over ACP, under its own settings");
     }
 }

@@ -35,7 +35,7 @@ pub mod fixture {
 }
 
 pub use console::Control;
-pub use xenonet::{channel_enabled, server_name, Registry};
+pub use xenonet::{channel_enabled, server_name, Registry, StartApp};
 
 /// Serves the sessions' server on stdio until the client goes; `xenonet
 /// mcp` runs it, with the registry's apps.
