@@ -18,9 +18,11 @@
 //   import xenonet-api and the base crates and nothing else. What else a
 //   surface needs, the root gives it (a trait or the data it reads), or it
 //   asks the xenonet binary.
-// - The composition root (ROOT): xenonet-service (compose/, serve.rs, the
-//   gateway, A2A and the other servers) and xenonet-cli (the binary, whose
-//   `serve()` composes). No limit, and no other crate depends on either.
+// - The composition root (ROOT): xenonet-service (compose/, with the
+//   engine's runtime, remote actors' cores and the integrations; serve.rs,
+//   the gateway, A2A and the other servers) and xenonet-cli (the binary,
+//   whose `serve()` composes). No limit, and no other crate depends on
+//   either.
 //
 // And for every crate but the surfaces and the root: it never depends on a
 // surface crate or an adapter crate, and never holds a registry id literal
@@ -37,7 +39,8 @@
 // xenonet-adapter is the registry itself, and adapters (adapters/*) may
 // name their own platform; the demo names the apps it makes sessions for.
 // A generic adapter (GENERIC: one protocol, for whichever apps the
-// registry names, as xenonet-acp and xenonet-a2a are) may not: it's held
+// registry names, as xenonet-acp, xenonet-a2a and xenonet-mcp-catalog
+// are) may not: it's held
 // to the core's rule on literals, and depends on no platform's adapter,
 // surface or root.
 // Test code is left out: what follows a `#[cfg(test)]`, files a test
