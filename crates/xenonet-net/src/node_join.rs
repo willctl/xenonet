@@ -412,6 +412,7 @@ impl Admit for NodeAdmit {
             if n.proposals().iter().any(|p| p.op == Op::Add && p.host.id == ticket.host && p.host.keys == keys) {
                 return Ok(Admitted::Waiting(waiting_words(&ticket.host)));
             }
+            n.sync_chain().await;
             let e = n.sign_in(&ticket.host, keys, ticket.window, add)?;
             let verdict = n.roster().would_take(&e);
             match verdict {

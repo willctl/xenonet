@@ -255,6 +255,19 @@ impl Shared {
         false
     }
 
+    /// An envelope as `host`'s link/2 connection hands it on, whether or
+    /// not one is up: what a test drives the receiving side with. What
+    /// would go back to `host` goes, if it's connected.
+    pub fn envelope_from(&self, host: &str, env: Envelope) {
+        let Some(peer) = self.roster().view_ref().and_then(|v| v.member(host).map(|m| peer_id(&m.keys))) else { return };
+        let out = NodeMachine(Arc::downgrade(&self.common)).envelope_in(peer, env);
+        if let Some(t) = self.link2() {
+            for o in out {
+                let _ = t.links.send(peer, o);
+            }
+        }
+    }
+
     /// How many copies were dropped for coming second, the other way.
     pub fn second_copies(&self) -> u64 {
         self.common.taken.locked().second
@@ -543,8 +556,9 @@ impl Shared {
     /// but `host`'s own: what it passes on to `host` when they connect.
     pub(super) fn records_for(&self, network: &str, host: &str) -> Vec<Value> {
         let Some(t) = self.link2() else { return Vec::new() };
+        let view = self.roster().view();
         let held = t.records.locked();
-        held.iter().filter(|((n, h), _)| n == network && h != host).map(|(_, (_, v))| v.clone()).collect()
+        held.iter().filter(|((n, h), _)| n == network && h != host && view.member(h).is_some()).map(|(_, (_, v))| v.clone()).collect()
     }
 
     /// The holders for `author`'s feed in `network`, best first, among the
@@ -932,8 +946,9 @@ pub(crate) fn link2_presence(c: &Common, body: &Value) {
 /// sent its presence whole again, shown what it may see now.
 pub(crate) fn presence_again(c: &Common) {
     let Some(t) = c.link2.reading().clone() else { return };
-    for peer in t.links.peers().into_keys() {
-        let Some(snap) = t.presence.locked().connected(peer) else { return };
+    let peers: Vec<PeerId> = t.links.peers().into_keys().collect();
+    let again = t.presence.locked().again(&peers);
+    for (peer, snap) in again {
         let Some(n) = presence_node(c, peer) else { continue };
         let Some(net) = n.network() else { continue };
         if let Some(env) = n.live_for(&net, peer, &snap) {

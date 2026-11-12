@@ -222,6 +222,17 @@ impl Live {
         peers.iter().map(|p| (*p, self.sent.next(*p, &self.own, before, &delta))).collect()
     }
 
+    /// What `peers` may be shown changed (what's shared into a network):
+    /// the snapshot again, at a new version, so each takes it as newer than
+    /// what it holds. Nothing before the engine has said anything.
+    pub fn again(&mut self, peers: &[PeerId]) -> Vec<(PeerId, Value)> {
+        if self.own.is_empty() {
+            return Vec::new();
+        }
+        self.own.version += 1;
+        peers.iter().map(|p| (*p, self.sent.connected(*p, &self.own))).collect()
+    }
+
     /// A connection to `peer` came up: the snapshot it gets, once the
     /// engine has said anything.
     pub fn connected(&mut self, peer: PeerId) -> Option<Value> {
@@ -295,6 +306,19 @@ mod tests {
         // Versions only go up, whatever the counter says.
         own.take(&engine(5, false, vec![agent(3, "idle")], vec![])).unwrap();
         assert_eq!(own.version(), 14);
+    }
+
+    #[test]
+    fn shown_again_it_comes_at_a_newer_version_than_the_peer_holds() {
+        let mut live = Live::default();
+        let p = PeerId([1; 32]);
+        assert!(live.again(&[p]).is_empty(), "nothing before the engine said anything");
+        live.changed(&engine(10, true, vec![agent(1, "working")], vec![]), &[p]);
+        let had = live.sent.by[&p];
+        let again = live.again(&[p]);
+        assert_eq!(again.len(), 1);
+        assert_eq!((again[0].1["full"].clone(), again[0].1["counter"].clone()), (json!(true), json!(had + 1)), "a receiver takes only what's past its version");
+        assert_eq!(live.sent.by[&p], had + 1);
     }
 
     #[test]

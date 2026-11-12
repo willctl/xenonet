@@ -366,9 +366,12 @@ impl Nodes {
     }
 
     fn added(&self, node: Arc<Node>) {
-        self.nets.writing().push(node);
+        self.nets.writing().push(node.clone());
         self.listed();
         self.start_link2();
+        // Its members kept connected now it's listed, where link/2 runs
+        // already for another network.
+        node.shared().members_changed();
         self.common.take_joined();
     }
 

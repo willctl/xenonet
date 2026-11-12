@@ -19,18 +19,27 @@
 //! - **A removal** goes to the machine it removes before it's taken here,
 //!   while their connection still carries the network: that machine hears
 //!   it was removed, then the connection closes.
+//! - **Before an entry is drafted** here (a removal, a setting, a relay, an
+//!   approval, a machine signed in), this machine asks every member it's
+//!   connected to for what it holds past its own chain, and waits for them
+//!   a moment, so the person acting at one window after another builds on
+//!   what the first one did. Two admins writing at the same moment can
+//!   still both take the same place: the members then hold different
+//!   heads, which the state shows (`rosterMismatch`).
 //!
 //! Every entry is decided by the receiver's own copy of the chain, under
 //! the network's policy, whoever passed it on: a member can withhold an
 //! entry, never forge or change one.
 
-use super::{json, Entry, NetError, Shared, Value};
+use super::{json, Entry, Locked, NetError, Shared, Value};
 use crate::dial::PeerId;
 use crate::endpoint::peer_id;
 use crate::link2::{Control, Out};
 
 /// Entries in one Chain record, at most.
 const BATCH: usize = 64;
+/// How long a machine waits for the members' chains before it drafts.
+const SYNC: std::time::Duration = std::time::Duration::from_millis(1500);
 
 impl Shared {
     /// The members of this network connected on link/2 now, but `except`.
@@ -94,6 +103,8 @@ impl Shared {
     /// copy of the chain; a gap asks the peer for what comes before. Then
     /// what waits for approval.
     pub(super) fn chain_in(&self, peer: PeerId, host: &str, body: &Value) {
+        *self.chain_heard.locked() += 1;
+        self.chain_wake.notify_waiters();
         if let Some(p) = body.get("person").filter(|p| p.is_object()) {
             self.offer_person(p);
         }
@@ -119,11 +130,46 @@ impl Shared {
         }
     }
 
-    /// A ChainWant from `peer`: what this machine holds past `from`.
+    /// A ChainWant from `peer`: what this machine holds past `from`, or an
+    /// empty record when it holds nothing more, so the asker knows.
     pub(super) fn chain_want_in(&self, peer: PeerId, from: u64) {
         let Some(t) = self.link2() else { return };
-        for out in self.chain_since(from) {
-            let _ = t.links.send(peer, out);
+        let mut out = self.chain_since(from);
+        if out.is_empty() {
+            out.extend(self.chain_record(&[], &[]));
+        }
+        for o in out {
+            let _ = t.links.send(peer, o);
+        }
+    }
+
+    /// The chain brought up to date with the members connected now, before
+    /// this machine drafts an entry: each is asked for what it holds past
+    /// this machine's length, and this machine waits for every answer, or
+    /// `SYNC`. A network with a gateway takes its entries in order there.
+    pub(crate) async fn sync_chain(&self) {
+        if self.gatewayed() {
+            return;
+        }
+        let (Some(t), Some(net)) = (self.link2(), self.network()) else { return };
+        let peers = self.connected_members(None);
+        if peers.is_empty() {
+            return;
+        }
+        let want = *self.chain_heard.locked() + peers.len() as u64;
+        let from = self.roster().len();
+        for p in &peers {
+            let _ = t.links.send(*p, Out::Control(Control::ChainWant { network: net.id.clone(), from }));
+        }
+        let end = tokio::time::Instant::now() + SYNC;
+        loop {
+            let woke = self.chain_wake.notified();
+            if *self.chain_heard.locked() >= want {
+                return;
+            }
+            if tokio::time::timeout_at(end, woke).await.is_err() {
+                return;
+            }
         }
     }
 }

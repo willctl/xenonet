@@ -276,6 +276,10 @@ pub struct Shared {
     /// The sessions each member was shown through the gateway, so a delta
     /// names no other (`share::presence_for`).
     shown: Mutex<HashMap<String, std::collections::BTreeSet<String>>>,
+    /// Chain records heard from members on link/2, counted, and the wake
+    /// for a machine bringing its chain up to date before it drafts.
+    chain_heard: Mutex<u64>,
+    chain_wake: Notify,
 }
 
 /// What every network this machine is in shares: the person here, one
@@ -2189,6 +2193,8 @@ impl Node {
             me_agents: Mutex::new(BTreeMap::new()),
             common,
             shown: Mutex::new(HashMap::new()),
+            chain_heard: Mutex::new(0),
+            chain_wake: Notify::new(),
         });
         Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()), invites: join2::Invites::default() }))
     }
@@ -2597,6 +2603,7 @@ impl Node {
     pub async fn remove(&self, host: &str) -> R<Value> {
         let n = &self.shared;
         let (net, _) = self.me()?;
+        n.sync_chain().await;
         if host == net.host {
             return Err(NetError::bad("to take this machine out, run xenonet net leave"));
         }
@@ -2679,6 +2686,7 @@ impl Node {
     pub async fn set_reach(&self, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, _) = self.me()?;
+        n.sync_chain().await;
         let start = start.map(|s| crate::roster::Start::parse(s).ok_or_else(|| NetError::bad("start is off, you, network or delegate"))).transpose()?;
         let wake = wake.map(|w| crate::roster::Wake::parse(w).ok_or_else(|| NetError::bad("wake is consent or network"))).transpose()?;
         let (target, had, device) = {
@@ -2814,6 +2822,7 @@ impl Node {
     pub async fn set_relays(&self, urls: &[String], add: bool, at_window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, _) = self.me()?;
+        n.sync_chain().await;
         let had = n.roster().view().relays;
         let mut to = had.clone();
         if add {
@@ -3076,6 +3085,7 @@ impl Node {
     pub async fn approve(&self, id: &str, at_window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, _) = self.me()?;
+        n.sync_chain().await;
         if !n.roster().view().is_window(&net.host) {
             return Err(NetError::new(403, "not-window", "approving is a window host's"));
         }
