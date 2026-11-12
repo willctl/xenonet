@@ -264,20 +264,39 @@ impl ActorSide {
 
     /// A call on the registry, with what it told told once it's let go.
     pub fn with<T>(&self, w: &Runtime, f: impl FnOnce(&mut Registry, &mut ActorHost<'_>) -> registry::Result<T>) -> Result<T> {
-        let (out, told) = {
+        let (out, told) = self.in_turn(|| {
             let mut reg = self.reg.locked();
             let mut host = ActorHost { map: &w.map, names: &self.names };
             let out = f(&mut reg, &mut host);
             let told: Told = (reg.take_emits(), reg.take_changed());
             (out, told)
-        };
+        });
         self.tell(w, told);
         out.map_err(thrown)
     }
 
     /// A read of the registry.
     pub fn read<T>(&self, f: impl FnOnce(&Registry) -> T) -> T {
-        f(&self.reg.locked())
+        self.in_turn(|| f(&self.reg.locked()))
+    }
+
+    /// `f` with the store's turn taken before the registry's lock: the
+    /// order an entry from another machine takes them in, since it's
+    /// applied in a store transaction that reads the registry. Taken the
+    /// other way round, a thread holding the registry would wait for the
+    /// store while the store's holder waits for the registry. Inside a
+    /// transaction this thread holds already, `f` is part of it.
+    pub(crate) fn in_turn<T>(&self, f: impl FnOnce() -> T) -> T {
+        let began = !self.store.with(EngineStore::in_transaction) && self.store.with(EngineStore::begin).is_ok();
+        let out = f();
+        if began {
+            // What the registry wrote stays, as each of its writes did on
+            // its own before.
+            if self.store.with(EngineStore::commit).is_err() {
+                self.store.with(EngineStore::rollback);
+            }
+        }
+        out
     }
 
     fn tell(&self, w: &Runtime, (emits, changed): Told) {

@@ -71,7 +71,7 @@ impl Host for RegHost<'_> {
     }
     fn watch_pid(&mut self, id: &str, pid: &Value) -> Result<(), Fail> {
         let Some(a) = self.actors() else { return Err(Fail::Error(rows::Error::new("no actors"))) };
-        a.reg.locked().watch_pid(id, pid).map_err(|f| registry_fail(thrown(f)))
+        a.in_turn(|| a.reg.locked().watch_pid(id, pid)).map_err(|f| registry_fail(thrown(f)))
     }
     fn snapshot(&mut self, id: &str) -> Result<Value, Fail> {
         self.change(|r, h| r.snapshot(id, "public", Some(now_ms()), None, h))

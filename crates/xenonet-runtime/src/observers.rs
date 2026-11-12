@@ -102,7 +102,7 @@ impl Host<'_> {
 
     /// A read of the registry, or the empty answer without actors.
     fn reg<T: Default>(&self, f: impl FnOnce(&xenonet_actors::registry::Actors) -> T) -> T {
-        self.actors().map_or_else(T::default, |a| f(&a.reg.locked()))
+        self.actors().map_or_else(T::default, |a| a.in_turn(|| f(&a.reg.locked())))
     }
 
     fn waiting_json(list: &[xenonet_actors::registry::Waiting]) -> Vec<Value> {
@@ -231,14 +231,14 @@ impl Actors for Host<'_> {
         a.store.with(|s| s.has_actor_ref(id, r, since)).map_err(Host::sql)
     }
     fn expire_waiting(&self, at: f64) -> Vec<Value> {
-        self.actors().map_or_else(Vec::new, |a| Host::waiting_json(&a.reg.locked().expire_waiting(at)))
+        self.actors().map_or_else(Vec::new, |a| a.in_turn(|| Host::waiting_json(&a.reg.locked().expire_waiting(at))))
     }
     fn waiting(&self) -> Vec<Value> {
-        self.actors().map_or_else(Vec::new, |a| Host::waiting_json(&a.reg.locked().waiting))
+        self.actors().map_or_else(Vec::new, |a| a.in_turn(|| Host::waiting_json(&a.reg.locked().waiting)))
     }
     fn drop_waiting_at(&self, index: usize) {
         if let Some(a) = self.actors() {
-            a.reg.locked().drop_waiting_at(index);
+            a.in_turn(|| a.reg.locked().drop_waiting_at(index));
         }
     }
 }

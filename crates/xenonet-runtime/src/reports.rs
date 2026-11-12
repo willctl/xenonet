@@ -114,7 +114,7 @@ impl reports::Host for ReportHost<'_> {
         let a = self.actors("awaitSession")?;
         let own: Vec<f64> = self.own.clone().unwrap_or_default().into_iter().map(f64::from).collect();
         let at = xenonet_text::text::to_number(Some(at));
-        a.reg.locked().await_session(id, app.clone(), place.clone(), own, at, now_ms());
+        a.in_turn(|| a.reg.locked().await_session(id, app.clone(), place.clone(), own, at, now_ms()));
         Ok(())
     }
     fn remove_list(&mut self) -> Vec<Value> {
