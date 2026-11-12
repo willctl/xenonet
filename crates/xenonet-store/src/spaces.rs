@@ -30,7 +30,58 @@ pub(crate) const TABLES: &[&str] = &[
         until INTEGER NOT NULL,
         at INTEGER NOT NULL
     ) STRICT",
+    // The forward grants the person approved at the window, one per
+    // actor: the ALPN it receives, the context key it speaks with, the
+    // networks it reaches and its rights (JSON lists), when they approved
+    // it, and the grant minted under it now: its first revocation id, its
+    // revocation ids (a JSON list) and its end. The actor collects a new
+    // one over the forward socket while it's within that end.
+    "CREATE TABLE forward_grants (
+        actor TEXT PRIMARY KEY,
+        alpn TEXT NOT NULL,
+        key TEXT NOT NULL,
+        networks TEXT NOT NULL,
+        rights TEXT NOT NULL,
+        approved INTEGER NOT NULL,
+        token TEXT,
+        ids TEXT,
+        until INTEGER
+    ) STRICT",
 ];
+
+/// A forward grant the person approved (`forward_grants`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForwardGrant {
+    pub actor: String,
+    pub alpn: String,
+    pub key: String,
+    pub networks: Vec<String>,
+    pub rights: Vec<String>,
+    pub approved: i64,
+    /// The grant minted under it now: its first revocation id, all its
+    /// ids and its end; None before the actor first collects one.
+    pub token: Option<(String, Vec<String>, i64)>,
+}
+
+impl ForwardGrant {
+    /// As the window lists it: never a token's text, which XenoNet doesn't
+    /// keep.
+    pub fn to_json(&self) -> Value {
+        json!({
+            "actor": self.actor,
+            "alpn": self.alpn,
+            "key": self.key,
+            "networks": self.networks,
+            "rights": self.rights,
+            "approved": self.approved,
+            "until": self.token.as_ref().map(|t| t.2),
+        })
+    }
+}
+
+fn list_of(text: Option<String>) -> Vec<String> {
+    text.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
 
 /// A marker as the map takes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,6 +146,68 @@ impl Db {
             }
             Ok(true)
         })
+    }
+
+    /// Records what the person approved for `g.actor`, in place of what
+    /// they approved for it before; the grant minted under that goes with
+    /// it (its caller revokes it).
+    pub fn approve_forward(&self, g: &ForwardGrant) -> R<()> {
+        let (networks, rights) = (Value::from(g.networks.clone()).to_string(), Value::from(g.rights.clone()).to_string());
+        self.write(|c| {
+            c.execute(
+                "INSERT INTO forward_grants (actor, alpn, key, networks, rights, approved, token, ids, until) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, NULL)
+                 ON CONFLICT (actor) DO UPDATE SET alpn = ?2, key = ?3, networks = ?4, rights = ?5, approved = ?6, token = NULL, ids = NULL, until = NULL",
+                params![g.actor, g.alpn, g.key, networks, rights, g.approved],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// The grant now minted under `actor`'s approval: its first
+    /// revocation id, its ids and its end.
+    pub fn set_forward_token(&self, actor: &str, token: &str, ids: &[String], until: i64) -> R<()> {
+        let ids = Value::from(ids.to_vec()).to_string();
+        self.write(|c| {
+            c.execute("UPDATE forward_grants SET token = ?2, ids = ?3, until = ?4 WHERE actor = ?1", params![actor, token, ids, until])?;
+            Ok(())
+        })
+    }
+
+    /// What the person approved for `actor`.
+    pub fn forward_grant(&self, actor: &str) -> R<Option<ForwardGrant>> {
+        Ok(self.forward_grants()?.into_iter().find(|g| g.actor == actor))
+    }
+
+    /// Every forward grant the person approved, by actor.
+    pub fn forward_grants(&self) -> R<Vec<ForwardGrant>> {
+        self.read(|c| {
+            let mut q = c.prepare_cached("SELECT actor, alpn, key, networks, rights, approved, token, ids, until FROM forward_grants ORDER BY actor")?;
+            let rows = q.query_map([], |r| {
+                let token: Option<String> = r.get(6)?;
+                let until: Option<i64> = r.get(8)?;
+                let ids = list_of(r.get(7)?);
+                Ok(ForwardGrant {
+                    actor: r.get(0)?,
+                    alpn: r.get(1)?,
+                    key: r.get(2)?,
+                    networks: list_of(r.get(3)?),
+                    rights: list_of(r.get(4)?),
+                    approved: r.get(5)?,
+                    token: token.zip(until).map(|(t, u)| (t, ids, u)),
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// Takes back what the person approved for `actor`: what was there.
+    pub fn drop_forward_grant(&self, actor: &str) -> R<Option<ForwardGrant>> {
+        let had = self.forward_grant(actor)?;
+        self.write(|c| {
+            c.execute("DELETE FROM forward_grants WHERE actor = ?1", params![actor])?;
+            Ok(())
+        })?;
+        Ok(had)
     }
 
     /// How the map takes a space folder's marker (`v`, the file's JSON) at
@@ -232,6 +345,32 @@ mod tests {
         // Not bound yet: by its name.
         let unbound = founded(EntityRef::Name { kind: "project".into(), name: "atlas".into() }, Owner::Person(WILL.into()), &lith);
         assert!(matches!(db.space_tie(&unbound, NOW).unwrap(), Tie::Unbound(_)));
+    }
+
+    #[test]
+    fn a_forward_grant_is_approved_minted_under_and_taken_back() {
+        let (db, _) = db();
+        let g = ForwardGrant {
+            actor: "xenolith".into(),
+            alpn: "xenolith/sync/2".into(),
+            key: signer(1).public().id(),
+            networks: vec!["net_00000000000000000000000000000001".into()],
+            rights: vec!["ctx-read".into()],
+            approved: NOW,
+            token: None,
+        };
+        db.approve_forward(&g).unwrap();
+        assert_eq!(db.forward_grant("xenolith").unwrap(), Some(g.clone()));
+        db.set_forward_token("xenolith", "aa01", &["aa01".into(), "aa02".into()], NOW + 5).unwrap();
+        let minted = db.forward_grant("xenolith").unwrap().unwrap();
+        assert_eq!(minted.token, Some(("aa01".into(), vec!["aa01".into(), "aa02".into()], NOW + 5)));
+        assert_eq!(minted.to_json()["until"], NOW + 5);
+        assert!(!minted.to_json().to_string().contains("token"), "no token's text or id in what the window lists");
+        // Approved again (other networks): what was minted under the old goes.
+        db.approve_forward(&ForwardGrant { networks: vec![], ..g.clone() }).unwrap();
+        assert_eq!(db.forward_grant("xenolith").unwrap().unwrap().token, None);
+        assert_eq!(db.drop_forward_grant("xenolith").unwrap().map(|g| g.actor), Some("xenolith".into()));
+        assert_eq!(db.forward_grants().unwrap(), vec![]);
     }
 
     #[test]

@@ -51,6 +51,20 @@
 //!   keying material under `EXPORTER` (both ends derive the same bytes),
 //!   so what the actor signs is bound to the QUIC connection XenoNet
 //!   terminates and can't be spliced onto another (phase 6, revision 16d).
+//! - `collect {alpn, key}`: an actor without a grant (or with one near
+//!   its end) asks for one for its context key (`key`, the public key).
+//!   XenoNet answers `challenge {nonce}`, the actor `proof {sig}`: the
+//!   key's signature over the ALPN, the key's id and the nonce
+//!   (`Purpose::FORWARD_COLLECT`), so only what holds the key collects.
+//!   Then `grant {token}` once the person approved a grant for that key
+//!   at XenoNet's window (`Grants::collect` mints it), `waiting` while
+//!   the ask waits for them (the connection stays open, and the grant
+//!   follows as they approve), or `refused`. The grant goes from the
+//!   service to the actor over this owner-only socket alone: never
+//!   through a command's output, a log or anything an agent reads.
+//! - `say {body}` on a session: the actor's word to the composition root
+//!   (`Forwards::set_said`), which answers with `told {body}`
+//!   (`Forwards::tell`). What it says decides nothing by itself.
 //! - `chains`: copies of the chains this machine holds (its networks', the
 //!   persons' that own them, its token roots' certificates), as the
 //!   composition root gives them (`Forwards::set_chains`). The actor
@@ -87,6 +101,11 @@ pub const MAX_WAITING: usize = 256;
 /// The label a forwarded connection's keying material is derived under,
 /// for its header.
 pub const EXPORTER: &[u8] = b"xenonet/forward/1";
+/// How long an actor's ask for a grant waits for the person, shown at the
+/// window, before it lapses.
+pub const ASK_MS: i64 = 10 * 60_000;
+/// The most asks waiting at once.
+pub const MAX_ASKS: usize = 8;
 
 /// What the composition root says of this machine's chains, for the
 /// actors (`chains`).
@@ -139,12 +158,28 @@ impl Forwardable {
     }
 }
 
-/// A grant that may forward: whose it is, and its revocation ids (hex), any
-/// of which revoked ends it.
+/// A grant that may forward: whose it is, its revocation ids (hex), any
+/// of which revoked ends it, the networks it reaches and its end.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grant {
     pub actor: String,
     pub ids: Vec<String>,
+    /// The networks (`net_` ids) whose members it reaches, or None for
+    /// every network this machine is in.
+    pub networks: Option<BTreeSet<String>>,
+    /// When it ends, in milliseconds since 1970.
+    pub until: i64,
+}
+
+impl Grant {
+    /// The networks of `of` (a connection's, by this machine's chains) it
+    /// reaches.
+    pub fn reached(&self, of: &BTreeSet<String>) -> BTreeSet<String> {
+        match &self.networks {
+            None => of.clone(),
+            Some(n) => of.intersection(n).cloned().collect(),
+        }
+    }
 }
 
 /// What decides a forward: the service's, over xenonet-authz. It decides
@@ -154,6 +189,34 @@ pub trait Grants: Send + Sync {
     /// time, not revoked, and its forward names `alpn` exactly; why not
     /// otherwise (`no-grant`, `other-alpn`, `revoked`).
     fn decide(&self, token: &str, alpn: &str) -> R<Grant>;
+
+    /// A new grant on `alpn` for the actor speaking with the context key
+    /// `key` (its id), which has proved it holds it: its text, minted
+    /// under what the person approved for that key at the window.
+    /// `unapproved` when they haven't (the ask then waits for them); any
+    /// other refusal ends the collect.
+    fn collect(&self, _alpn: &str, _key: &str) -> R<String> {
+        Err(refused("no-grant", "this XenoNet hands out no grants to forward"))
+    }
+}
+
+/// An actor's ask for a grant, waiting for the person: the ALPN, the
+/// context key it proved it holds, and when it asked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ask {
+    pub alpn: String,
+    pub key: String,
+    pub at: i64,
+}
+
+/// What hears what an actor says on its session: its ALPN, its actor and
+/// the body.
+pub type Said = Arc<dyn Fn(&str, &str, &Value) + Send + Sync>;
+
+/// The words a collect's proof signs: the ALPN, the key's id and the
+/// challenge.
+pub fn collect_words(alpn: &str, key: &str, nonce: &[u8; 32]) -> Vec<u8> {
+    format!("{alpn}\n{key}\n{}", b64(nonce)).into_bytes()
 }
 
 // ---------- XenoNet's side ----------
@@ -208,6 +271,17 @@ pub struct Forwards {
     /// they can't.
     socket: Mutex<Option<Result<String, String>>>,
     chains: RwLock<Option<Chains>>,
+    /// The asks for a grant waiting for the person, by ALPN and key: when
+    /// each came.
+    asks: Mutex<BTreeMap<(String, String), i64>>,
+    /// Wakes the collects that wait, when the person answers an ask.
+    answered: tokio::sync::Notify,
+    /// What hears what an actor says on its session.
+    said: RwLock<Option<Said>>,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 impl Forwards {
@@ -221,7 +295,64 @@ impl Forwards {
             next: AtomicU64::new(1),
             socket: Mutex::new(None),
             chains: RwLock::new(None),
+            asks: Mutex::default(),
+            answered: tokio::sync::Notify::new(),
+            said: RwLock::new(None),
         })
+    }
+
+    /// The asks for a grant waiting for the person, oldest first; lapsed
+    /// ones go.
+    pub fn asks(&self) -> Vec<Ask> {
+        let now = now_ms();
+        let mut a = self.asks.locked();
+        a.retain(|_, at| now - *at < ASK_MS);
+        let mut out: Vec<Ask> = a.iter().map(|((alpn, key), at)| Ask { alpn: alpn.clone(), key: key.clone(), at: *at }).collect();
+        out.sort_by_key(|x| x.at);
+        out
+    }
+
+    /// Records an ask for a grant for `key` on `alpn`, for the window to
+    /// show: refused when too many wait.
+    pub fn ask(&self, alpn: &str, key: &str) -> R<()> {
+        let _ = self.asks();
+        let mut a = self.asks.locked();
+        let k = (alpn.to_string(), key.to_string());
+        if !a.contains_key(&k) && a.len() >= MAX_ASKS {
+            return Err(NetError::new(429, "busy", "too many asks for a grant wait for the person"));
+        }
+        a.entry(k).or_insert_with(now_ms);
+        Ok(())
+    }
+
+    /// The person answered the ask for `key` on `alpn` (approved it, so a
+    /// collect gets a grant now, or turned it down): it stops waiting, and
+    /// the collects that wait try again. Whether one waited.
+    pub fn answered(&self, alpn: &str, key: &str) -> bool {
+        let had = self.asks.locked().remove(&(alpn.to_string(), key.to_string())).is_some();
+        self.answered.notify_waiters();
+        had
+    }
+
+    /// Where what the actors say on their sessions goes: the composition
+    /// root's.
+    pub fn set_said(&self, said: Said) {
+        *self.said.writing() = Some(said);
+    }
+
+    /// Tells the actor attached on `alpn` `body` (`told`): whether one is,
+    /// with a grant that still stands.
+    pub fn tell(&self, alpn: &str, body: Value) -> bool {
+        let Some(a) = self.forwardable.get(alpn) else { return false };
+        let Some(s) = self.session(a) else { return false };
+        s.send(json!({ "t": "told", "body": body }));
+        true
+    }
+
+    /// The grant of the actor attached on `alpn` now.
+    pub fn attached_grant(&self, alpn: &str) -> Option<Grant> {
+        let a = self.forwardable.get(alpn)?;
+        self.state.locked().sessions.get(&a).map(|s| s.grant.clone())
     }
 
     pub fn forwardable(&self) -> &Forwardable {
@@ -255,7 +386,7 @@ impl Forwards {
                     .filter(|l| !l.is_closed())
                     .map(|l| json!({ "peer": b64(&l.peer().0), "networks": l.networks(), "dialledByThis": l.dialled_by() != l.peer() }))
                     .collect();
-                json!({ "alpn": s.alpn.name(), "actor": s.grant.actor, "connections": conns })
+                json!({ "alpn": s.alpn.name(), "actor": s.grant.actor, "networks": s.grant.networks, "until": s.grant.until, "connections": conns })
             })
             .collect();
         let socket = match &*self.socket.locked() {
@@ -263,7 +394,8 @@ impl Forwards {
             Some(Err(why)) => json!({ "error": why }),
             None => Value::Null,
         };
-        json!({ "forwardable": self.forwardable.alpns().iter().map(|a| a.name()).collect::<Vec<_>>(), "socket": socket, "forwards": rows })
+        let asks: Vec<Value> = self.asks().iter().map(|a| json!({ "alpn": a.alpn, "key": a.key, "at": a.at })).collect();
+        json!({ "forwardable": self.forwardable.alpns().iter().map(|a| a.name()).collect::<Vec<_>>(), "socket": socket, "forwards": rows, "asks": asks })
     }
 
     /// Where the actors reach these forwards, or why they can't: what the
@@ -335,8 +467,15 @@ impl Forwards {
             link.close(Close::Refused);
             return;
         };
+        // A member of none of the networks the grant reaches is closed
+        // before the actor hears of it.
+        let networks = s.grant.reached(&link.networks());
+        if networks.is_empty() {
+            link.close(Close::Refused);
+            return;
+        }
         let conn = self.adopt(&s, &link);
-        s.send(json!({ "t": "incoming", "conn": conn, "peer": b64(&link.peer().0), "networks": link.networks(), "exporter": exporter_of(&link) }));
+        s.send(json!({ "t": "incoming", "conn": conn, "peer": b64(&link.peer().0), "networks": networks, "exporter": exporter_of(&link) }));
     }
 
     // The connection's number in the session, and the task that hands its
@@ -408,6 +547,7 @@ impl Forwards {
         match v.get("t").and_then(Value::as_str) {
             Some("attach") => self.attached(&v, r, w).await,
             Some("take") => self.take(&v, r, w).await,
+            Some("collect") => self.collect(&v, r, w).await,
             _ => {
                 let _ = say_refused(&mut w, &bad("kind")).await;
             }
@@ -446,7 +586,7 @@ impl Forwards {
             }
         };
         let me = self.mesh.reading().as_ref().map_or(PeerId([0; 32]), |m| m.me());
-        if write_json(&mut w, &json!({ "t": "attached", "me": b64(&me.0), "session": b64(&s.secret) })).await.is_err() {
+        if write_json(&mut w, &json!({ "t": "attached", "me": b64(&me.0), "session": b64(&s.secret), "until": s.grant.until })).await.is_err() {
             self.end(&s, Close::Done, None);
             return;
         }
@@ -495,8 +635,15 @@ impl Forwards {
                     match mesh.dial(peer, s.alpn).await {
                         Ok(link) => {
                             let Some(f) = me.upgrade() else { return };
+                            // A machine in none of the networks the grant
+                            // reaches is never dialled for it.
+                            let networks = s.grant.reached(&link.networks());
+                            if networks.is_empty() {
+                                s.send(json!({ "t": "failed", "req": req, "code": "not-a-member", "error": "that machine is in none of the networks this grant reaches" }));
+                                return;
+                            }
                             let conn = f.adopt(&s, &link);
-                            s.send(json!({ "t": "dialled", "req": req, "conn": conn, "networks": link.networks(), "exporter": exporter_of(&link) }));
+                            s.send(json!({ "t": "dialled", "req": req, "conn": conn, "networks": networks, "exporter": exporter_of(&link) }));
                         }
                         Err(e) => s.send(json!({ "t": "failed", "req": req, "code": e.code, "error": e.message })),
                     }
@@ -518,6 +665,12 @@ impl Forwards {
                 });
             }
             Some("chains") => s.send(json!({ "t": "chains", "req": req, "chains": self.chains_now() })),
+            Some("say") => {
+                let said = self.said.reading().clone();
+                if let (Some(said), Some(body)) = (said, c.get("body")) {
+                    said(s.alpn.name(), &s.grant.actor, body);
+                }
+            }
             Some("close") => {
                 let conn = c.get("conn").and_then(Value::as_u64).unwrap_or(0);
                 let why = c.get("code").and_then(Value::as_u64).and_then(Close::from_code).unwrap_or(Close::Done);
@@ -548,6 +701,86 @@ impl Forwards {
             return;
         }
         pump(waiting, r, w).await;
+    }
+
+    // A collect: the actor proves it holds a context key, and gets a grant
+    // for it once the person approved one, waiting for them while its ask
+    // does (and as long as it stays connected).
+    async fn collect(self: Arc<Self>, v: &Value, mut r: Reader, mut w: Writer) {
+        let (name, key) = match self.collect_ask(v) {
+            Ok(k) => k,
+            Err(e) => {
+                let _ = say_refused(&mut w, &e).await;
+                return;
+            }
+        };
+        let Ok(nonce) = random::<32>() else { return };
+        if write_json(&mut w, &json!({ "t": "challenge", "nonce": b64(&nonce) })).await.is_err() {
+            return;
+        }
+        let proof = tokio::time::timeout(TAKE_WAIT, read_record(&mut r)).await.ok().and_then(Result::ok).flatten();
+        let sig = proof.and_then(|p| serde_json::from_slice::<Value>(&p).ok()).and_then(|p| p.get("sig").and_then(Value::as_str).and_then(crate::codec::unb64));
+        let id = key.id();
+        if !sig.is_some_and(|s| key.verify(xenonet_id::sign::Purpose::FORWARD_COLLECT, &collect_words(&name, &id, &nonce), &s)) {
+            let _ = say_refused(&mut w, &refused("not-the-key", "that proof isn't the context key's signature over this challenge")).await;
+            return;
+        }
+        let end = tokio::time::Instant::now() + Duration::from_millis(ASK_MS.unsigned_abs());
+        let mut waited = false;
+        loop {
+            // Made before the grants are asked, so an answer between the
+            // two isn't missed.
+            let answered = self.answered.notified();
+            tokio::pin!(answered);
+            answered.as_mut().enable();
+            let e = match self.grants.collect(&name, &id) {
+                Ok(token) => {
+                    let _ = write_json(&mut w, &json!({ "t": "grant", "token": token })).await;
+                    let _ = w.shutdown().await;
+                    return;
+                }
+                Err(e) => e,
+            };
+            if e.code != "unapproved" {
+                let _ = say_refused(&mut w, &e).await;
+                return;
+            }
+            // Answered, and not with a grant: turned down.
+            if waited && !self.asks().iter().any(|a| a.alpn == name && a.key == id) {
+                let _ = say_refused(&mut w, &refused("denied", "the person didn't let that key have a grant here")).await;
+                return;
+            }
+            if !waited {
+                if let Err(e) = self.ask(&name, &id) {
+                    let _ = say_refused(&mut w, &e).await;
+                    return;
+                }
+                if write_json(&mut w, &json!({ "t": "waiting" })).await.is_err() {
+                    return;
+                }
+                waited = true;
+            }
+            tokio::select! {
+                () = &mut answered => {}
+                () = tokio::time::sleep_until(end) => {
+                    let _ = say_refused(&mut w, &refused("lapsed", "the ask waited ten minutes for the person; ask again")).await;
+                    return;
+                }
+                // The actor went: its ask stays for the window, and its
+                // next collect finds the person's answer.
+                _ = read_record(&mut r) => return,
+            }
+        }
+    }
+
+    fn collect_ask(&self, v: &Value) -> R<(String, xenonet_id::sign::VerifyingKey)> {
+        if v.get("v").and_then(Value::as_u64) != Some(VERSION) {
+            return Err(bad("version"));
+        }
+        let name = v.get("alpn").and_then(Value::as_str).ok_or_else(|| bad("alpn"))?;
+        let alpn = self.forwardable.get(name).ok_or_else(|| refused("not-forwardable", format!("{name} isn't forwarded by this machine")))?;
+        let key = v.get("key").and_then(xenonet_id::sign::VerifyingKey::parse).ok_or_else(|| bad("key"))?;
+        Ok((alpn.name().to_string(), key))
     }
 }
 
@@ -590,6 +823,10 @@ fn refusal(v: &Value) -> NetError {
         Some("no-connection") => "no-connection",
         Some("busy") => "busy",
         Some("unreachable") => "unreachable",
+        Some("not-the-key") => "not-the-key",
+        Some("unapproved") => "unapproved",
+        Some("denied") => "denied",
+        Some("lapsed") => "lapsed",
         _ => "refused",
     };
     let status = v.get("status").and_then(Value::as_u64).and_then(|s| u16::try_from(s).ok()).unwrap_or(403);
@@ -685,6 +922,11 @@ struct Client {
     incoming: tokio::sync::Mutex<mpsc::UnboundedReceiver<Arc<dyn Wire>>>,
     /// The session ended (the socket closed, or the grant was revoked).
     ended: watch::Sender<bool>,
+    /// When the grant ends, as XenoNet said at attach.
+    until: i64,
+    /// What XenoNet's composition root told the actor (`told`).
+    to_told: mpsc::UnboundedSender<Value>,
+    told: tokio::sync::Mutex<mpsc::UnboundedReceiver<Value>>,
 }
 
 impl Client {
@@ -735,8 +977,10 @@ impl ForwardDial {
         }
         let me = a.get("me").and_then(Value::as_str).and_then(unb64_n::<32>).map(PeerId).ok_or_else(|| bad("me"))?;
         let session = a.get("session").and_then(Value::as_str).and_then(unb64_n::<16>).ok_or_else(|| bad("session"))?;
+        let until = a.get("until").and_then(Value::as_i64).unwrap_or(0);
         let (to, mut out) = mpsc::unbounded_channel::<Value>();
         let (to_incoming, incoming) = mpsc::unbounded_channel();
+        let (to_told, told) = mpsc::unbounded_channel();
         let client = Arc::new(Client {
             me,
             alpn,
@@ -749,6 +993,9 @@ impl ForwardDial {
             headers: Mutex::default(),
             incoming: tokio::sync::Mutex::new(incoming),
             ended: watch::Sender::new(false),
+            until,
+            to_told,
+            told: tokio::sync::Mutex::new(told),
         });
         tokio::spawn(async move {
             while let Some(v) = out.recv().await {
@@ -796,6 +1043,60 @@ impl ForwardDial {
         let a = self.0.ask(json!({ "t": "chains" })).await?;
         Ok(a.get("chains").cloned().unwrap_or(Value::Null))
     }
+
+    /// When the grant it attached with ends, as XenoNet said.
+    pub fn until(&self) -> i64 {
+        self.0.until
+    }
+
+    /// Says `body` to XenoNet's composition root (`say`).
+    pub fn say(&self, body: Value) -> R<()> {
+        self.0.to.send(json!({ "t": "say", "body": body })).map_err(|_| ended())
+    }
+
+    /// The next thing XenoNet's composition root tells the actor, or None
+    /// once the session ends.
+    pub async fn told(&self) -> Option<Value> {
+        let mut ended = self.0.ended.subscribe();
+        let mut rx = self.0.told.lock().await;
+        tokio::select! {
+            v = rx.recv() => v,
+            _ = ended.wait_for(|e| *e) => None,
+        }
+    }
+
+    /// Collects a grant on `alpn` for the context key `key`, which `sign`
+    /// signs with (`Purpose::FORWARD_COLLECT`, over the words it's given),
+    /// once the person approves one at XenoNet's window: its text.
+    /// `waiting` hears when the ask waits for them. Refused (`denied`,
+    /// `lapsed`, `not-the-key`, …) otherwise.
+    pub async fn collect(
+        connect: &Connect,
+        alpn: Alpn,
+        key: &xenonet_id::sign::VerifyingKey,
+        sign: impl FnOnce(&[u8]) -> Option<Vec<u8>> + Send,
+        waiting: impl Fn() + Send,
+    ) -> R<String> {
+        let (mut r, mut w) = connect().await?;
+        write_json(&mut w, &json!({ "t": "collect", "v": VERSION, "alpn": alpn.name(), "key": key.to_json() })).await?;
+        let first = read_record(&mut r).await?.ok_or_else(ended)?;
+        let a: Value = serde_json::from_slice(&first).map_err(|_| bad("answer"))?;
+        if a["t"] != "challenge" {
+            return Err(refusal(&a));
+        }
+        let nonce = a.get("nonce").and_then(Value::as_str).and_then(unb64_n::<32>).ok_or_else(|| bad("nonce"))?;
+        let sig = sign(&collect_words(alpn.name(), &key.id(), &nonce)).ok_or_else(|| NetError::internal("the context key didn't sign"))?;
+        write_json(&mut w, &json!({ "t": "proof", "sig": b64(&sig) })).await?;
+        loop {
+            let rec = read_record(&mut r).await?.ok_or_else(ended)?;
+            let a: Value = serde_json::from_slice(&rec).map_err(|_| bad("answer"))?;
+            match a["t"].as_str() {
+                Some("waiting") => waiting(),
+                Some("grant") => return a.get("token").and_then(Value::as_str).map(str::to_string).ok_or_else(|| bad("token")),
+                _ => return Err(refusal(&a)),
+            }
+        }
+    }
 }
 
 impl Client {
@@ -830,6 +1131,11 @@ impl Client {
                 }
             }
             Some("revoked") => self.end(),
+            Some("told") => {
+                if let Some(b) = v.get("body") {
+                    let _ = self.to_told.send(b.clone());
+                }
+            }
             _ => {}
         }
     }

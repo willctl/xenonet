@@ -57,6 +57,10 @@ impl Purpose {
     /// project is theirs, so another machine can tell it may take an
     /// intent for any machine in that project.
     pub const CHECKOUT: Purpose = Purpose("xenonet-checkout/1");
+    /// An actor proving, on XenoNet's forward socket, that it holds the
+    /// context key a forward grant is collected for: over XenoNet's
+    /// challenge, so it counts for that one collect.
+    pub const FORWARD_COLLECT: Purpose = Purpose("xenonet-forward-collect/1");
     /// A signature nothing verifies, which the doctor times a key with:
     /// its own tag, so it can't be taken for any other.
     pub const PROBE: Purpose = Purpose("xenonet-probe/1");

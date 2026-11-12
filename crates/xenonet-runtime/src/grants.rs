@@ -7,10 +7,10 @@
 
 use crate::ground::{ground, EngineGround};
 use crate::runtime::Runtime;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_api::cores::Grants;
-use xenonet_authz::{decide, Act, Action, Door, Principal, ReadScope, Request, Resource, Token, ACTOR_PREFIX};
+use xenonet_api::cores::{Forwarding, Grants};
+use xenonet_authz::{decide, Act, Action, ActorGrant, ActorSlug, Door, Principal, ReadScope, Request, Resource, Schema, Token, ACTOR_PREFIX};
 use xenonet_id::codec::sha256;
 
 pub struct GrantsDriver(pub Arc<Runtime>);
@@ -29,7 +29,7 @@ pub fn scopes_hash(scopes: &Value) -> [u8; 32] {
 /// An act of the actor `slug` here, now.
 fn request(g: &EngineGround, slug: &str, act: Act) -> Option<Request> {
     let own = g.facts.machine.clone();
-    let slug = xenonet_authz::ActorSlug::new(slug).ok()?;
+    let slug = ActorSlug::new(slug).ok()?;
     Some(Request::new(Principal::Actor { slug, machine: own.clone() }, Resource::Machine(own), act, Door::Local, g.facts.now, None))
 }
 
@@ -83,9 +83,18 @@ impl Grants for GrantsDriver {
         }
     }
 
-    fn forward(&self, text: &str, alpn: &str) -> Result<(String, Vec<String>), &'static str> {
+    fn forward(&self, text: &str, alpn: &str) -> Result<Forwarding, &'static str> {
         let g = ground(&self.0, None).ok_or("no-grant")?;
         let f = forward_grant(&g, g.facts.now, text, alpn)?;
+        // The grant minted under what the person approved for its actor
+        // now, and none other: one minted before a renewal or a new
+        // approval forwards nothing, and neither does one minted outside
+        // the window's approval.
+        let approved = self.0.store.with(|s| s.db().forward_grant(&f.slug)).ok().flatten().ok_or("no-grant")?;
+        let current = approved.token.as_ref().is_some_and(|(id, _, _)| f.ids.first() == Some(id));
+        if !current || approved.alpn != alpn || f.key.as_deref() != Some(approved.key.as_str()) {
+            return Err("no-grant");
+        }
         // The context key the grant names is the one the map trusts a
         // space marker by (xenonet-store's `spaces`), for as long as the
         // grant lasts and isn't revoked.
@@ -94,7 +103,41 @@ impl Grants for GrantsDriver {
                 self.0.log("warn", "grants.forward", &format!("the context key {key} names couldn't be kept: {}", e.message));
             }
         }
-        Ok((f.slug, f.ids))
+        Ok(Forwarding { actor: f.slug, ids: f.ids, networks: Some(approved.networks), until: f.until })
+    }
+
+    fn approve_forward(&self, actor: &str, alpn: &str, key: &str, networks: &[String], rights: &[String], reason: &str) -> Result<Value, String> {
+        approve_forward(&self.0, true, actor, alpn, key, networks, rights, reason)
+    }
+
+    fn collect_forward(&self, actor: &str, alpn: &str, key: &str) -> Result<String, &'static str> {
+        collect_forward(&self.0, actor, alpn, key)
+    }
+
+    fn revoke_forward(&self, actor: &str) -> Result<Option<Value>, String> {
+        let had = self.0.store.with(|s| s.db().drop_forward_grant(actor)).map_err(|e| e.message)?;
+        if let Some((id, _, _)) = had.as_ref().and_then(|h| h.token.as_ref()) {
+            revoke(&self.0, actor, id, "removed")?;
+        }
+        Ok(had.map(|h| h.to_json()))
+    }
+
+    fn forward_grants(&self) -> Value {
+        let now = xenonet_text::time::now_ms() as i64;
+        let rows = self.0.store.with(|s| s.db().forward_grants()).unwrap_or_default();
+        Value::Array(
+            rows.iter()
+                .map(|r| {
+                    let mut v = r.to_json();
+                    v["state"] = json!(match &r.token {
+                        None => "approved",
+                        Some((_, _, until)) if *until < now => "lapsed",
+                        Some(_) => "granted",
+                    });
+                    v
+                })
+                .collect(),
+        )
     }
 
     fn cursor(&self, text: &str, bound: &str, after: Option<&str>) -> Result<String, String> {
@@ -124,6 +167,89 @@ impl Grants for GrantsDriver {
             _ => Err(BAD),
         }
     }
+}
+
+/// How long a forward grant lasts: an actor away longer than that asks the
+/// person again (its grant isn't renewed once it ended).
+pub const FORWARD_GRANT_MS: i64 = 30 * 86_400_000;
+
+/// The scopes hash the person's presence names for a forward grant: the
+/// networks it reaches (sorted, as JSON), with its context key and ALPN
+/// folded in (`Binding::scopes`), so a presence for one grant can't stand
+/// for another key, ALPN or wider networks.
+pub fn forward_scopes(key: &str, alpn: &str, networks: &[String]) -> Result<[u8; 32], String> {
+    let mut n = networks.to_vec();
+    n.sort();
+    n.dedup();
+    let rows = scopes_hash(&json!({ "networks": n }));
+    Ok(xenonet_authz::Binding::new(Some(key), Some(alpn)).map_err(|e| e.message)?.scopes(&rows))
+}
+
+/// The person approves a forward grant for `actor` (`Grants::approve_forward`):
+/// their presence for `register-actor` with those rights and scopes, at the
+/// window only. What was minted under an earlier approval is revoked: the
+/// actor collects a grant under this one.
+#[expect(clippy::too_many_arguments, reason = "what the person approves is each of these")]
+pub fn approve_forward(w: &Runtime, at_window: bool, actor: &str, alpn: &str, key: &str, networks: &[String], rights: &[String], reason: &str) -> Result<Value, String> {
+    let mut nets = networks.to_vec();
+    nets.sort();
+    nets.dedup();
+    if nets.is_empty() {
+        return Err("a forward grant reaches at least one network".into());
+    }
+    if let Some(n) = nets.iter().find(|n| xenonet_authz::NetworkId::new(n).is_err()) {
+        return Err(format!("{n} isn't a network id (net_…)"));
+    }
+    let scopes = forward_scopes(key, alpn, &nets)?;
+    let rights_of = actions(rights)?;
+    crate::ground::present(w, at_window, actor, rights_of, scopes, reason)?;
+    let db = w.store.with(|s| s.db().clone());
+    let had = db.forward_grant(actor).map_err(|e| e.message)?;
+    let now = xenonet_text::time::now_ms() as i64;
+    let g = xenonet_store::spaces::ForwardGrant { actor: actor.into(), alpn: alpn.into(), key: key.into(), networks: nets, rights: rights.to_vec(), approved: now, token: None };
+    db.approve_forward(&g).map_err(|e| e.message)?;
+    if let Some((id, _, _)) = had.and_then(|h| h.token) {
+        revoke(w, actor, &id, "rotated")?;
+    }
+    Ok(g.to_json())
+}
+
+/// A new grant for `actor` under what the person approved
+/// (`Grants::collect_forward`): for 30 days, naming the approval's key and
+/// ALPN, its rights, and no one network (the approval's networks are kept
+/// here and decided at the forward). The grant minted before it is revoked,
+/// so one stands at a time. Refused `unapproved` without an approval for
+/// that key and ALPN, `lapsed` when the last one ended unrenewed.
+pub fn collect_forward(w: &Runtime, actor: &str, alpn: &str, key: &str) -> Result<String, &'static str> {
+    let db = w.store.with(|s| s.db().clone());
+    let g = db.forward_grant(actor).ok().flatten().filter(|g| g.alpn == alpn && g.key == key).ok_or("unapproved")?;
+    let gov = crate::ground::governance(w).ok_or("unapproved")?;
+    let facts = gov.facts();
+    if g.token.as_ref().is_some_and(|(_, _, until)| *until < facts.now) {
+        return Err("lapsed");
+    }
+    let root = facts.identity.token_root(&facts.machine, facts.now).map_err(|_| "unapproved")?;
+    let until = (facts.now + FORWARD_GRANT_MS).min(root.certificate().until());
+    let grant = ActorGrant { actor: ActorSlug::new(actor).map_err(|_| "unapproved")?, network: None, rights: actions(&g.rights).map_err(|_| "unapproved")?, until };
+    let binding = xenonet_authz::Binding::new(Some(key), Some(alpn)).map_err(|_| "unapproved")?;
+    let token = root.mint_actor_with(&grant, &Schema::XENONET, &binding).map_err(|_| "unapproved")?;
+    let text = token.encode(ACTOR_PREFIX).map_err(|_| "unapproved")?;
+    let ids: Vec<String> = token.revocation_ids().iter().map(|i| xenonet_id::codec::hex(i)).collect();
+    db.set_forward_token(actor, &token.id(), &ids, until).map_err(|_| "unapproved")?;
+    if let Some((old, _, _)) = &g.token {
+        let _ = revoke(w, actor, old, "renewed");
+    }
+    if let Err(e) = db.set_context_key(key, actor, &ids, until, facts.now) {
+        w.log("warn", "grants.collect", &format!("the context key {key} names couldn't be kept: {}", e.message));
+    }
+    Ok(text)
+}
+
+// Revokes the token whose first revocation id is `id`: the store records
+// it, and what it forwards ends.
+fn revoke(w: &Runtime, actor: &str, id: &str, reason: &str) -> Result<(), String> {
+    let at = xenonet_text::time::now_ms();
+    w.store.with(|s| s.revoke_token(&json!({ "id": id, "actor": format!("actor:{actor}"), "reason": reason, "at": at }))).map_err(|e| e.to_string())
 }
 
 /// A grant to forward an ALPN, decided.

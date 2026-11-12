@@ -74,8 +74,10 @@ fn bins() -> (PathBuf, PathBuf) {
 }
 
 /// A forward is decided on the machine's own grants, as the engine's are:
-/// this machine's actor's token, in its time, forwarding exactly `alpn`.
-struct Machine(Arc<NetService>);
+/// this machine's actor's token, in its time, forwarding exactly `alpn`;
+/// and a grant is collected for a context key the person approved (the
+/// runtime's own path is xenonet-runtime's tests/forward_grants.rs).
+struct Machine(Arc<NetService>, Arc<Mutex<Vec<String>>>);
 
 impl Grants for Machine {
     fn decide(&self, token: &str, alpn: &str) -> R<Grant> {
@@ -87,14 +89,35 @@ impl Grants for Machine {
         if t.forward() != Some(alpn) {
             return Err(NetError::new(403, "other-alpn", "that grant forwards another ALPN"));
         }
-        Ok(Grant { actor: t.bearer().slug.as_str().to_string(), ids: vec![t.id()] })
+        Ok(Grant { actor: t.bearer().slug.as_str().to_string(), ids: vec![t.id()], networks: None, until: t.until() })
     }
+
+    fn collect(&self, alpn: &str, key: &str) -> R<String> {
+        if alpn != ALPN || !self.1.lock().unwrap().iter().any(|k| k == key) {
+            return Err(NetError::new(403, "unapproved", "not approved"));
+        }
+        Ok(mint(&self.0, Some(key)))
+    }
+}
+
+/// An actor grant of `svc`'s machine for its Xenolith: forward(sync/2),
+/// the ctx rights, and key(id) when `key` names one.
+fn mint(svc: &NetService, key: Option<&str>) -> String {
+    let identity = svc.nodes().common().identity.clone();
+    let facts = svc.node().shared().facts();
+    let now = now_ms() as i64;
+    let root = identity.token_root(facts.own_machine(), now).unwrap();
+    let g =
+        ActorGrant { actor: ActorSlug::new("xenolith").unwrap(), network: None, rights: vec![Action::CtxRead, Action::CtxAppend, Action::CtxWrite], until: now + 30 * 86_400_000 };
+    root.mint_actor_with(&g, &Schema::XENONET, &Binding::new(key, Some(ALPN)).unwrap()).unwrap().encode(ACTOR_PREFIX).unwrap()
 }
 
 struct Host {
     ctx: Arc<Ctx>,
     svc: Arc<NetService>,
     forwards: Arc<Forwards>,
+    /// The context keys the person approved a grant for here.
+    approved: Arc<Mutex<Vec<String>>>,
     socket: PathBuf,
     dir: PathBuf,
 }
@@ -140,14 +163,23 @@ impl Host {
         // The forwards as the service makes them: the ALPNs the composition
         // root registers, and the machine's grants deciding.
         let slot: Arc<Mutex<Option<Arc<NetService>>>> = Arc::default();
-        struct Late(Arc<Mutex<Option<Arc<NetService>>>>);
-        impl Grants for Late {
-            fn decide(&self, token: &str, alpn: &str) -> R<Grant> {
+        let approved: Arc<Mutex<Vec<String>>> = Arc::default();
+        struct Late(Arc<Mutex<Option<Arc<NetService>>>>, Arc<Mutex<Vec<String>>>);
+        impl Late {
+            fn machine(&self) -> R<Machine> {
                 let svc = self.0.lock().unwrap().clone().ok_or_else(|| NetError::new(503, "no-network", "not yet"))?;
-                Machine(svc).decide(token, alpn)
+                Ok(Machine(svc, self.1.clone()))
             }
         }
-        let forwards = Forwards::new(Forwardable::new(xenonet_service::compose::forward::FORWARDED).unwrap(), Arc::new(Late(slot.clone())));
+        impl Grants for Late {
+            fn decide(&self, token: &str, alpn: &str) -> R<Grant> {
+                self.machine()?.decide(token, alpn)
+            }
+            fn collect(&self, alpn: &str, key: &str) -> R<String> {
+                self.machine()?.collect(alpn, key)
+            }
+        }
+        let forwards = Forwards::new(Forwardable::new(xenonet_service::compose::forward::FORWARDED).unwrap(), Arc::new(Late(slot.clone(), approved.clone())));
         let svc = NetService::open(options(&dir, forwards.clone())).unwrap();
         *slot.lock().unwrap() = Some(svc.clone());
         let nodes = Arc::downgrade(svc.nodes());
@@ -156,7 +188,7 @@ impl Host {
         svc.start().await.unwrap();
         let socket = dir.join("f.sock");
         xenonet_service::compose::forward::listen(forwards.clone(), &socket, |_| {}).unwrap();
-        Host { ctx, svc, forwards, socket, dir }
+        Host { ctx, svc, forwards, approved, socket, dir }
     }
 
     async fn call(&self, method: &str, path: &str, body: Value) -> (u16, Value) {
@@ -168,20 +200,19 @@ impl Host {
         (r.status, r.body_json())
     }
 
-    /// An actor grant of this machine's for its Xenolith: forward(sync/2),
-    /// the ctx rights, and key(id) when `key` names one.
+    /// An actor grant of this machine's for its Xenolith, minted outside
+    /// the window's approval: forward(sync/2), the ctx rights, and key(id)
+    /// when `key` names one.
     fn grant(&self, key: Option<&str>) -> String {
-        let identity = self.svc.nodes().common().identity.clone();
-        let facts = self.svc.node().shared().facts();
-        let now = now_ms() as i64;
-        let root = identity.token_root(facts.own_machine(), now).unwrap();
-        let g = ActorGrant {
-            actor: ActorSlug::new("xenolith").unwrap(),
-            network: None,
-            rights: vec![Action::CtxRead, Action::CtxAppend, Action::CtxWrite],
-            until: now + 30 * 86_400_000,
-        };
-        root.mint_actor_with(&g, &Schema::XENONET, &Binding::new(key, Some(ALPN)).unwrap()).unwrap().encode(ACTOR_PREFIX).unwrap()
+        mint(&self.svc, key)
+    }
+
+    /// The person approves the grant `key` asked for, as at the window:
+    /// once its ask shows, so it's the key's own.
+    async fn approve(&self, key: &str) {
+        until("the Xenolith's ask for a grant", 30, || self.forwards.asks().iter().any(|a| a.key == key && a.alpn == ALPN)).await;
+        self.approved.lock().unwrap().push(key.to_string());
+        assert!(self.forwards.answered(ALPN, key));
     }
 
     /// The person's device signs a drafted space entry (`draft`: the entry,
@@ -361,9 +392,13 @@ async fn a_space_shared_into_one_network_reaches_its_members_alone_and_a_grant_w
 
     let (l, s, d) = (Lith::start("laptop", &laptop), Lith::start("studio", &studio), Lith::start("desk", &desk));
     let (lk, sk, dk) = (l.key(), s.key(), d.key());
-    // desk's grant names no context key: what its Xenolith says binds to nothing.
-    l.run(&["sync", "grant"], Some(&laptop.grant(Some(&lk))));
-    s.run(&["sync", "grant"], Some(&studio.grant(Some(&sk))));
+    // laptop's and studio's Xenoliths ask their XenoNets for a grant over
+    // the forward socket, proving their context keys, and collect it once
+    // the person approves. desk's is handed one by `xenolith sync grant`,
+    // minted outside an approval and naming no context key: what its
+    // Xenolith says binds to nothing.
+    laptop.approve(&lk).await;
+    studio.approve(&sk).await;
     d.run(&["sync", "grant"], Some(&desk.grant(None)));
     for x in [&l, &s, &d] {
         until(&format!("{}'s Xenolith attached to its XenoNet", x.name), 60, || x.status()["xenonet"]["mode"] == "attached").await;

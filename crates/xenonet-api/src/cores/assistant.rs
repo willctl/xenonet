@@ -44,11 +44,38 @@ pub trait Grants: Send + Sync {
         Err("invalid")
     }
     /// Whether `token` is a grant of this machine's actor, in its time and
-    /// not revoked, whose `forward(alpn)` names `alpn` exactly: the actor's
-    /// slug and the token's revocation ids (hex), or `no-grant`,
-    /// `other-alpn`, `revoked` or `expired`.
-    fn forward(&self, _token: &str, _alpn: &str) -> Result<(String, Vec<String>), &'static str> {
+    /// not revoked, whose `forward(alpn)` names `alpn` exactly, and the one
+    /// minted under what the person approved for that actor now: who it's
+    /// for and what it reaches, or `no-grant`, `other-alpn`, `revoked` or
+    /// `expired`.
+    fn forward(&self, _token: &str, _alpn: &str) -> Result<Forwarding, &'static str> {
         Err("no-grant")
+    }
+    /// The person approves, at the window and with their presence, a
+    /// forward grant for the actor `actor`: on `alpn`, speaking with the
+    /// context key `key`, reaching `networks`, with `rights`. What they
+    /// approved, as the window lists it; the grant itself is collected by
+    /// the actor over the forward socket (`collect`).
+    fn approve_forward(&self, _actor: &str, _alpn: &str, _key: &str, _networks: &[String], _rights: &[String], _reason: &str) -> Result<Value, String> {
+        Err(format!("{CONNECTIONS}'s grants aren't in the Rust service yet"))
+    }
+    /// A new grant for `actor` on `alpn` for the context key `key`, under
+    /// what the person approved, for 30 days: its text, which goes to the
+    /// actor over the forward socket alone. `unapproved` when there's no
+    /// approval for that key (or it's for another ALPN), `lapsed` when the
+    /// last grant minted under it ended unrenewed.
+    fn collect_forward(&self, _actor: &str, _alpn: &str, _key: &str) -> Result<String, &'static str> {
+        Err("unapproved")
+    }
+    /// Takes back the forward grant of `actor`: the approval goes, and the
+    /// grant minted under it is revoked, which ends its forward. What was
+    /// there, or None.
+    fn revoke_forward(&self, _actor: &str) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+    /// The forward grants the person approved, as the window lists them.
+    fn forward_grants(&self) -> Value {
+        Value::Array(Vec::new())
     }
     /// A page cursor: `token` narrowed to one read, bound to `bound` (the
     /// grant, the operation and its filters, as the reads write them), for
@@ -65,6 +92,17 @@ pub trait Grants: Send + Sync {
 }
 
 impl Grants for Pending {}
+
+/// A forward grant, decided (`Grants::forward`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Forwarding {
+    pub actor: String,
+    /// Its revocation ids, in hex.
+    pub ids: Vec<String>,
+    /// The networks it reaches, or None for every one this machine is in.
+    pub networks: Option<Vec<String>>,
+    pub until: i64,
+}
 
 #[async_trait]
 pub trait Connections: Send + Sync {

@@ -63,6 +63,19 @@ struct Sim {
     others: Vec<Value>,
     /// The relays this machine adds of its own.
     own: Vec<String>,
+    /// Xenolith's ask for a grant and the grants given (variant
+    /// "xenolith"), as GET /api/net/forwards lists them.
+    context: Value,
+}
+
+/// A made-up context key's id for the simulated Xenolith.
+const LITH_KEY: &str = "xns1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const LITH_ALPN: &str = "xenolith/sync/2";
+
+// What the simulated Xenolith asked: a grant for its key, a minute ago.
+fn made_up_context(variant: Option<&str>, now: f64) -> Value {
+    let asks = if variant == Some("xenolith") { json!([{ "alpn": LITH_ALPN, "key": LITH_KEY, "actor": "xenolith", "at": now - 60e3 }]) } else { json!([]) };
+    json!({ "forwardable": [LITH_ALPN], "socket": null, "forwards": [], "asks": asks, "grants": [] })
 }
 
 /// The state as a simulation serves it: every network in `networks`, the
@@ -204,7 +217,8 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         _ => Vec::new(),
     };
     let others = if variant == Some("networks") && state["network"].is_object() { vec![other_network(&state)] } else { Vec::new() };
-    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new() });
+    let context = made_up_context(variant, ctx.now());
+    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new(), context });
     for a in &asks {
         ctx.broadcast("ask", a);
     }
@@ -284,6 +298,11 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             }
             Ok(Some(Reply::json(200, reading)))
         }
+        ("GET", "/api/net/forwards") => {
+            let all = sims().locked();
+            let Some(sim) = all.get(&key(ctx)) else { return Ok(None) };
+            Ok(Some(Reply::json(200, sim.context.clone())))
+        }
         ("GET", "/api/net/svc") => {
             let all = sims().locked();
             let Some(sim) = all.get(&key(ctx)) else { return Ok(None) };
@@ -302,6 +321,9 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             | "/api/net/feeds/unfreeze"
             | "/api/net/svc/publish"
             | "/api/net/svc/unpublish"
+            | "/api/net/forwards/approve"
+            | "/api/net/forwards/deny"
+            | "/api/net/forwards/revoke"
             | "/api/net/relays",
         )
         | ("PUT", "/api/net/settings" | "/api/net/sharing") => {
@@ -936,6 +958,39 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             sim.services.push(json!({ "name": name, "target": target, "paths": paths, "hosts": hosts, "at": now }));
             Reply::json(200, json!({ "host": me, "services": sim.services }))
         }
+        "/api/net/forwards/approve" | "/api/net/forwards/deny" => {
+            let (alpn, key) = (body.get("alpn").and_then(Value::as_str).unwrap_or(""), body.get("key").and_then(Value::as_str).unwrap_or(""));
+            let Some(asks) = sim.context["asks"].as_array_mut() else { return fail(500, "error", "") };
+            let Some(i) = asks.iter().position(|a| a["alpn"] == alpn && a["key"] == key) else { return fail(404, "not-found", "no ask for a grant for that key waits") };
+            if path == "/api/net/forwards/deny" {
+                asks.remove(i);
+                return Reply::json(200, json!({ "denied": true }));
+            }
+            let mine: Vec<Value> = served(sim)["networks"].as_array().into_iter().flatten().map(|n| n["id"].clone()).collect();
+            let networks: Vec<Value> = body.get("networks").and_then(Value::as_array).cloned().unwrap_or_default();
+            if networks.is_empty() {
+                return fail(400, "bad-request", "name the networks it may reach (networks: [net_…])");
+            }
+            if let Some(n) = networks.iter().find(|n| !mine.contains(n)) {
+                return fail(400, "bad-request", format!("this machine isn't in {}", n.as_str().unwrap_or("that network")));
+            }
+            if let Some(a) = sim.context["asks"].as_array_mut() {
+                a.remove(i);
+            }
+            let grant = json!({ "actor": "xenolith", "alpn": alpn, "key": key, "networks": networks, "rights": ["ctx-read", "ctx-append", "ctx-write"], "approved": now, "until": now + 30.0 * 86_400e3, "state": "granted" });
+            sim.context["grants"] = json!([grant.clone()]);
+            sim.context["forwards"] = json!([{ "alpn": alpn, "actor": "xenolith", "networks": networks, "until": grant["until"], "connections": [] }]);
+            Reply::json(200, grant)
+        }
+        "/api/net/forwards/revoke" => {
+            let alpn = body.get("alpn").and_then(Value::as_str).unwrap_or("");
+            let Some(g) = sim.context["grants"].as_array().and_then(|g| g.iter().find(|g| g["alpn"] == alpn).cloned()) else {
+                return fail(404, "not-found", "xenolith has no grant here");
+            };
+            sim.context["grants"] = json!([]);
+            sim.context["forwards"] = json!([]);
+            Reply::json(200, json!({ "revoked": g }))
+        }
         "/api/net/svc/unpublish" => {
             let name = body.get("name").and_then(Value::as_str).unwrap_or("");
             let had = sim.services.len();
@@ -1396,7 +1451,7 @@ mod tests {
 
     fn sim(kind: &str) -> Sim {
         let (state, agents) = made_up(kind, None, 1.8e12).unwrap();
-        Sim { state, agents, asks: Vec::new(), services: Vec::new(), others: Vec::new(), own: Vec::new() }
+        Sim { state, agents, asks: Vec::new(), services: Vec::new(), others: Vec::new(), own: Vec::new(), context: made_up_context(Some("xenolith"), 0.0) }
     }
 
     #[test]

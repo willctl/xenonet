@@ -376,6 +376,12 @@ pub const RULES: &[Rule] = &[
     r("GET",    "/api/net/svc", YOU, Read(State)),
     // The actors forwarding an ALPN over this machine's endpoint, and to whom.
     r("GET",    "/api/net/forwards", YOU, Read(State)),
+    // An actor's grant to forward one (Xenolith's): approving its ask is
+    // issuing a grant, which asks you; turning it down or taking a grant
+    // back narrows.
+    r("POST",   "/api/net/forwards/approve", WINDOW, Doing::Act(Action::RegisterActor)),
+    r("POST",   "/api/net/forwards/deny", YOU, Nothing),
+    r("POST",   "/api/net/forwards/revoke", YOU, Nothing),
     r("POST",   "/api/net/create", YOU, Nothing),
     r("POST",   "/api/net/join", YOU, Nothing),
     r("POST",   "/api/net/leave", YOU, Nothing),
@@ -711,6 +717,9 @@ mod tests {
         assert_eq!(rule("PATCH", "/api/svc/desk/notes/x").unwrap().who, &[Program]);
         assert_eq!(rule("POST", "/api/checkouts/chk_x/confirm").unwrap().who, &[Window], "a checkout joins its project by the person's word alone");
         assert_eq!(rule("GET", "/api/net/forwards").unwrap().who, &[You], "who forwards what is the owner's to read");
+        assert_eq!(rule("POST", "/api/net/forwards/approve").unwrap().who, &[Window], "a forward grant is issued at the window alone");
+        assert_eq!(rule("POST", "/api/net/forwards/approve").unwrap().act, Doing::Act(Action::RegisterActor));
+        assert_eq!(rule("POST", "/api/net/forwards/revoke").unwrap().who, &[You]);
         // No row, no route: a path made up now, or a method a path doesn't take.
         assert!(rule("GET", "/api/brand-new").is_none());
         assert!(rule("PUT", "/api/graph").is_none());

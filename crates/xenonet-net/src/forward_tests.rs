@@ -19,6 +19,8 @@ const C: PeerId = PeerId([0xc3; 32]);
 #[derive(Default)]
 struct Fake {
     revoked: Mutex<BTreeSet<String>>,
+    /// The context keys the person approved a grant for.
+    approved: Mutex<BTreeSet<String>>,
 }
 
 impl Grants for Fake {
@@ -26,7 +28,7 @@ impl Grants for Fake {
         let (actor, forwards) = match token {
             "tok-a" => ("lith-a", "xenolith/sync/2"),
             "tok-a2" => ("lith-a2", "xenolith/sync/2"),
-            "tok-b" => ("lith-b", "xenolith/sync/2"),
+            "tok-b" | "tok-b-n2" => ("lith-b", "xenolith/sync/2"),
             "tok-other" => ("lith-a", "other/alpn/1"),
             _ => return Err(refused("no-grant", "no such grant")),
         };
@@ -36,8 +38,129 @@ impl Grants for Fake {
         if forwards != alpn {
             return Err(refused("other-alpn", "that grant forwards another ALPN"));
         }
-        Ok(Grant { actor: actor.into(), ids: vec![format!("id-{token}")] })
+        let networks = (token == "tok-b-n2").then(|| [N2.to_string()].into());
+        Ok(Grant { actor: actor.into(), ids: vec![format!("id-{token}")], networks, until: i64::MAX })
     }
+
+    fn collect(&self, alpn: &str, key: &str) -> R<String> {
+        if alpn != "xenolith/sync/2" {
+            return Err(refused("no-grant", "not that ALPN"));
+        }
+        if self.approved.locked().contains(key) {
+            Ok(format!("tok-for-{key}"))
+        } else {
+            Err(refused("unapproved", "the person hasn't approved one"))
+        }
+    }
+}
+
+const N2: &str = "net_00000000000000000000000000000002";
+
+#[test]
+fn a_collect_needs_the_keys_proof_waits_for_the_person_and_takes_their_answer() {
+    use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    rt.block_on(async {
+        let grants = Arc::new(Fake::default());
+        let f = forwards(grants.clone());
+        let connect = duplex(f.clone());
+        let lith = SeedSigner::from_seed(&[7; 32], KeyHome::File).unwrap();
+        let other = SeedSigner::from_seed(&[8; 32], KeyHome::File).unwrap();
+        let key = lith.public();
+        let id = key.id();
+        // Signed by another key than the one named: refused before any ask.
+        let forged = ForwardDial::collect(&connect, SYNC, &key, |m| other.sign(xenonet_id::sign::Purpose::FORWARD_COLLECT, m).ok(), || {}).await;
+        assert_eq!(forged.err().map(|e| e.code), Some("not-the-key"));
+        // The right key's signature, but for another purpose: refused too.
+        let wrong = ForwardDial::collect(&connect, SYNC, &key, |m| lith.sign(xenonet_id::sign::Purpose::SYNC_HELLO, m).ok(), || {}).await;
+        assert_eq!(wrong.err().map(|e| e.code), Some("not-the-key"));
+        assert!(f.asks().is_empty(), "no ask without the key's proof");
+        let not = ForwardDial::collect(&connect, Alpn::Link, &key, |m| lith.sign(xenonet_id::sign::Purpose::FORWARD_COLLECT, m).ok(), || {}).await;
+        assert_eq!(not.err().map(|e| e.code), Some("not-forwardable"));
+
+        // Unapproved: it waits, the ask shows, and the person's approval
+        // sends the grant down the same connection.
+        let waited = Arc::new(AtomicU64::new(0));
+        let w = waited.clone();
+        let (g, ff) = (grants.clone(), f.clone());
+        let k = id.clone();
+        let approve = async move {
+            until("the ask shows", || ff.asks().iter().any(|a| a.key == k && a.alpn == "xenolith/sync/2")).await.unwrap();
+            g.approved.locked().insert(k.clone());
+            assert!(ff.answered("xenolith/sync/2", &k));
+        };
+        let collect = ForwardDial::collect(
+            &connect,
+            SYNC,
+            &key,
+            |m| lith.sign(xenonet_id::sign::Purpose::FORWARD_COLLECT, m).ok(),
+            move || {
+                w.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+        let (got, ()) = tokio::join!(collect, approve);
+        assert_eq!(got.unwrap(), format!("tok-for-{id}"));
+        assert_eq!(waited.load(Ordering::SeqCst), 1);
+        assert!(f.asks().is_empty(), "answered, the ask goes");
+        // Approved, the next collect gets one at once.
+        assert_eq!(ForwardDial::collect(&connect, SYNC, &key, |m| lith.sign(xenonet_id::sign::Purpose::FORWARD_COLLECT, m).ok(), || {}).await.unwrap(), format!("tok-for-{id}"));
+
+        // Turned down: the waiting collect is refused.
+        let okey = other.public();
+        let oid = okey.id();
+        let ff = f.clone();
+        let o = oid.clone();
+        let deny = async move {
+            until("the second ask shows", || ff.asks().iter().any(|a| a.key == o)).await.unwrap();
+            ff.answered("xenolith/sync/2", &o);
+        };
+        let collect = ForwardDial::collect(&connect, SYNC, &okey, |m| other.sign(xenonet_id::sign::Purpose::FORWARD_COLLECT, m).ok(), || {});
+        let (got, ()) = tokio::join!(collect, deny);
+        assert_eq!(got.err().map(|e| e.code), Some("denied"));
+    });
+}
+
+#[test]
+fn a_grant_reaches_the_networks_it_names_alone() {
+    let g = Grant { actor: "lith".into(), ids: vec![], networks: Some([N2.to_string()].into()), until: 0 };
+    let both: BTreeSet<String> = [N1.to_string(), N2.to_string()].into();
+    assert_eq!(g.reached(&both), [N2.to_string()].into());
+    assert!(g.reached(&[N1.to_string()].into()).is_empty());
+    let any = Grant { networks: None, ..g };
+    assert_eq!(any.reached(&both), both);
+}
+
+#[test]
+fn a_member_of_a_network_the_grant_doesnt_name_is_refused_its_connection() {
+    let mut s = sim(3);
+    let seen = Arc::new(AtomicU64::new(0));
+    let sb = seen.clone();
+    s.host("b", move || {
+        let sb = sb.clone();
+        async move {
+            // B's actor's grant reaches N2 alone, and A is B's peer in N1.
+            let (_, f) = xenonet(B, &[A, B], Arc::default()).await?;
+            let dial = ForwardDial::attach(duplex(f), "tok-b-n2", SYNC).await?;
+            while dial.incoming().await.is_some() {
+                sb.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
+        }
+    });
+    s.client("a", async move {
+        let (mesh, _) = xenonet(A, &[A, B], Arc::default()).await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let link = loop {
+            match mesh.dial(B, SYNC).await {
+                Ok(l) => break l,
+                Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+            }
+        };
+        assert_eq!(link.closed().await, Some(Close::Refused));
+        Ok(())
+    });
+    s.run().unwrap();
+    assert_eq!(seen.load(Ordering::SeqCst), 0, "B's actor never heard of A's connection");
 }
 
 fn forwards(grants: Arc<Fake>) -> Arc<Forwards> {

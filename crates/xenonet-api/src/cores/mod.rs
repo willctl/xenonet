@@ -28,7 +28,7 @@ use xenonet_model::ops::Net;
 use xenonet_net::sink::SinkSlot;
 
 pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
-pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Grants, Tunnels};
+pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Forwarding, Grants, Tunnels};
 pub use delivery::{Policy, Router};
 pub use door::{Apps, LocalDoor};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};

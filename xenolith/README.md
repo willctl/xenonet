@@ -537,12 +537,18 @@ or a join needs it, and uses no relay and no mDNS unless `sync.relays` or
 
 **With XenoNet (shared mode).** On a machine where XenoNet runs, Xenolith also
 syncs over XenoNet's endpoint, with the members of the networks the machine is
-in, and needs no invite for them. XenoNet gives Xenolith an actor grant that
-names `forward(xenolith/sync/2)` and Xenolith's context key; keep it with
-`xenolith sync grant` (the grant on stdin). Xenolith then attaches to XenoNet's
-forward socket in XenoNet's runtime folder (`sync.xenonet.socket` names
-another; `"sync": {"xenonet": "off"}` turns shared mode off), after checking
-the socket and the process on it are your account's. XenoNet hands it copies of
+in, and needs no invite for them. Xenolith reaches XenoNet's forward socket in
+XenoNet's runtime folder (`sync.xenonet.socket` names another; `"sync":
+{"xenonet": "off"}` turns shared mode off), after checking the socket and the
+process on it are your account's, and asks there for an actor grant that names
+`forward(xenolith/sync/2)` and its context key, proving it holds that key.
+Allow it in XenoNet's window (Network settings, Shared context), with the
+networks it may reach ticked; it asks you once. The grant goes from XenoNet to
+Xenolith over the socket and into an owner-only file, never through a window,
+a command's output or a chat. It lasts 30 days and renews itself while
+Xenolith keeps coming back; taking it back in XenoNet's window ends shared
+mode at once. `xenolith sync grant` (the grant on stdin) keeps one made
+another way. XenoNet hands it copies of
 its networks' chains and the person chains of their owners, which Xenolith
 checks from genesis itself. A space reaches a network's members once its owner
 is the person and it's shared into that network, both signed by one of the

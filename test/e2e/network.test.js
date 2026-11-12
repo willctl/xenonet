@@ -716,7 +716,31 @@ test("a machine in two networks: each listed with its own host id, one shown at 
   await s.driver("network", "close");
 }));
 
-test("Start a network names its relay: none, the person's own iroh-relay, or n0's, named as n0's", { timeout: limit(60000) }, shoot("network-relay-choice", async () => {
+test("shared context: Xenolith's ask for a grant allowed for the network it's ticked for, and taken back; no grant ever reaches the page", { timeout: limit(60000) }, shoot("network-context", async () => {
+  await simulate("net-founder", { b: "xenolith" }, (n) => n.context?.asks.length === 1);
+  let { network: n } = await s.driver("network", "context");
+  const ask = n.context.asks[0];
+  assert.deepEqual([ask.actor, ask.alpn], ["xenolith", "xenolith/sync/2"]);
+  assert.match(n.text, /Shared context.*Xenolith asks to sync over the network/i);
+  const pair = `${ask.alpn}|${ask.key}`;
+  assert.ok(n.at.ctxNet[`${ask.key}|${n.networkId}`], "a box for this machine's network, ticked");
+  await clickAt(n.at.ctxAllow[pair], "Allow");
+  n = await until(async () => {
+    const got = await network();
+    return got.context.grants.length === 1 ? got : null;
+  });
+  assert.ok(n, "the grant is given");
+  assert.deepEqual(n.context.grants[0].networks, [n.networkId]);
+  assert.equal(n.context.asks.length, 0, "answered, the ask goes");
+  assert.doesNotMatch(JSON.stringify(n), /xenonet_actor_/, "the grant goes to Xenolith over its socket, never to the window");
+  n = (await s.driver("network", "context")).network;
+  assert.match(n.text, /Xenolith\s*attached\s*reaches home · syncing/i);
+  await clickAt(n.at.ctxRevoke[ask.alpn], "Take back");
+  assert.ok(await until(async () => (await network()).context.grants.length === 0), "taken back");
+  await s.driver("network", "close");
+}));
+
+test("Start a network names its relay: none, the person's own iroh-relay, or n0's, named as n0's",{ timeout: limit(60000) }, shoot("network-relay-choice", async () => {
   await simulate("net-none", {}, (n) => !n.inNetwork);
   await s.driver("network", "start");
   const text = (await network()).text;

@@ -32,6 +32,7 @@ import { hostOfId } from "./hosts.js";
 import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
 import { personOf, servicesOf, devicesHtml, servicesHtml, publishHtml, publishBody } from "./network-person.js";
+import { contextOf, contextHtml, approveBody } from "./network-context.js";
 import { stateOf, networksOf, inNetwork, clock, linkWords, hostLine, hostTags, inviteWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, INVITE_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
@@ -72,6 +73,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   let agents = [];
   // What this machine publishes to the network (GET /api/net/svc).
   let services = [];
+  // Xenolith's asks for a grant and the grants you gave (GET
+  // /api/net/forwards).
+  let context = contextOf(null);
   let read = false;
   let seq = 0;
   let timer = null;
@@ -119,7 +123,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
 
   // A call to the network's routes for the network the panel shows: what
   // acts on one network names it, since a machine may be in several.
-  const MACHINE_ROUTES = new Set(["/api/net/state", "/api/net/create", "/api/net/join", "/api/net/devices/revoke"]);
+  const MACHINE_ROUTES = new Set(["/api/net/state", "/api/net/create", "/api/net/join", "/api/net/devices/revoke", "/api/net/forwards/approve", "/api/net/forwards/deny", "/api/net/forwards/revoke"]);
   function netCall(method, path, body = {}) {
     const named = path.startsWith("/api/net/") && !MACHINE_ROUTES.has(path) && state.network?.id && body && typeof body === "object" && !("network" in body);
     return calls.call(method, path, named ? { ...body, network: state.network.id } : body);
@@ -145,10 +149,12 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const svcPath = next.network?.id ? `/api/net/svc?network=${encodeURIComponent(next.network.id)}` : "/api/net/svc";
     const published = inNetwork(next) ? servicesOf(await getJson(svcPath).catch(() => null)) : [];
     const projects = next.networks.length ? await projectsHere() : [];
+    const forwards = next.networks.length ? contextOf(await getJson("/api/net/forwards").catch(() => null)) : contextOf(null);
     if (n !== seq) return state;
     state = next;
     agents = remoteAgents(list);
     services = published;
+    context = forwards;
     shareable = projects;
     read = true;
     schedule();
@@ -290,6 +296,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       ${networksHtml()}
       ${devicesHtml(personOf(state), view.confirmDevice)}
       ${servicesHtml(services)}
+      ${contextHtml(context, state.networks)}
       ${errorHtml(view.error)}
       <div class="m-foot"><button class="act" data-net-go="start" data-net-another>Start another network…</button><button class="act" data-net-go="join">Join another…</button><span class="grow"></span><button class="act primary" data-net-go="add">Add a machine…</button></div>`;
   }
@@ -620,6 +627,19 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   }
 
   // Takes a service off the network: it asks nothing.
+  // Xenolith's grant: approve its ask (which asks you), turn it down, or
+  // take back the grant it holds.
+  async function contextAct(what, sent, done) {
+    return busyWith(async () => {
+      const r = await netCall("POST", `/api/net/forwards/${what}`, sent);
+      if (!r.ok) return failed(r);
+      sfx(what === "approve" ? "success" : "toggle");
+      toast(done);
+      await refresh();
+      return { ok: true };
+    });
+  }
+
   async function unpublish(name) {
     return busyWith(async () => {
       const r = await netCall("POST", "/api/net/svc/unpublish", { name });
@@ -835,6 +855,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (d.netRevoke) return go({ name: "main", confirmDevice: d.netRevoke });
     if (d.netRevokeYes) return revokeDevice(d.netRevokeYes);
     if (d.netUnpublish) return unpublish(d.netUnpublish);
+    if (d.netCtxAllow) return contextAct("approve", approveBody(body(), d.netCtxAllow), "Allowed: Xenolith collects its grant and syncs over the network.");
+    if (d.netCtxDeny) return contextAct("deny", { alpn: d.netCtxDeny.split("|")[0], key: d.netCtxDeny.split("|").slice(1).join("|") }, "Turned down.");
+    if (d.netCtxRevoke) return contextAct("revoke", { alpn: d.netCtxRevoke }, "Taken back: its sync over the network ends now.");
     if (t.closest("[data-net-publish]")) return publish();
     if (d.netReplace) return replace(d.netReplace);
     if (d.netApprove) return approve(d.netApprove);
@@ -898,7 +921,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   // driver: they're at its foot.
   async function reveal(what) {
     await open();
-    panel?.querySelector(what === "services" ? "[data-net-services]" : "[data-net-devices]")?.scrollIntoView({ block: "center" });
+    panel?.querySelector(what === "services" ? "[data-net-services]" : what === "context" ? "[data-net-context]" : "[data-net-devices]")?.scrollIntoView({ block: "center" });
     return driverState();
   }
 
@@ -982,6 +1005,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       // here; and what this machine publishes.
       person: personOf(state),
       services,
+      // Xenolith's asks for a grant and the grants you gave; never a grant.
+      context,
       // The Start a session box: what it's set to, whether Start is armed,
       // where each choice is; and the last start sent from it.
       session:
@@ -1003,7 +1028,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish"), pick: centres("data-net-pick"), shareAll: centre("[data-net-share-all]"), share: centres("data-net-share"), relayAdd: centre("[data-net-relay-add]"), ownAdd: centre("[data-net-own-add]"), relayRemove: centres("data-net-relay-remove"), ownRemove: centres("data-net-own-remove"), relayUrl: centre("[data-net-relay-url]"), relayKind: centre("[data-net-relay-kind]"), ctxAllow: centres("data-net-ctx-allow"), ctxDeny: centres("data-net-ctx-deny"), ctxRevoke: centres("data-net-ctx-revoke"), ctxNet: centres("data-net-ctx-net") } : null,
     };
   }
 

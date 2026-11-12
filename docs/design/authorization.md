@@ -319,6 +319,27 @@ only at the actor gateway, its MCP endpoint and A2A alike, which are
 decided at the gateway door. An actor token without `use-gateway` doesn't
 work there, and a gateway token doesn't work at a local door.
 
+**Forward grants** are the grant with `forward(alpn)`, so XenoNet carries
+that ALPN over its endpoint for the actor (`xenonet_net::forward`), and
+`key(id)`, the context key it speaks with: Xenolith's, for its shared
+mode. Xenolith asks for one on XenoNet's owner-only forward socket with
+`collect`, proving it holds the context key by signing XenoNet's
+challenge, and the ask shows in the window (Network settings › Shared
+context). Allow, with the networks it may reach ticked, is
+`register-actor` with the person's presence, its scopes hash binding the
+key, the ALPN and the networks (`forward_scopes`); it's recorded in the
+store's `forward_grants` table, and the waiting collect then gets a grant
+minted under it for 30 days, naming no one network (the networks are the
+row's, decided at each forward). The grant goes from the service to
+Xenolith over the socket alone, never through the window, a command's
+output or a log. A forward is decided only for the grant minted last
+under the row: Xenolith collects a new one when its grant has under ten
+days left, which revokes the one before, and one that ended unrenewed
+isn't renewed (the person approves again). Taking it back
+(`POST /api/net/forwards/revoke`) deletes the row and revokes the grant,
+which ends the forward. Collecting a grant records its context key in
+`context_keys`, which the map ties a space's marker by.
+
 **Page cursors** for a cloud assistant's lists are the grant narrowed to
 one read, its filters' hash and five minutes, holding where the last page
 ended as data that narrows nothing. A cursor can't be made up or changed,

@@ -1180,7 +1180,8 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
     }
     // A made-up network across machines; a is the host you're at, and b
     // "titles-only" has the others share titles only; "networks" puts this
-    // machine in a second network, work, too.
+    // machine in a second network, work, too; "xenolith" has Xenolith here
+    // ask for a grant to sync over the network.
     if kind_s.starts_with("net-") {
         return Ok(net_sim::simulate(ctx, &kind_s, a.as_deref(), b.as_deref()));
     }

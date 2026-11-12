@@ -210,14 +210,37 @@ async fn attach(
     stop: &Arc<tokio::sync::Notify>,
     wake: &mut tokio::sync::mpsc::UnboundedReceiver<()>,
 ) -> Result<(), Ended> {
-    let Some(grant) = xenolith_core::xenonet::read_grant(&cfg.paths) else {
-        return Err(waits("XenoNet hasn't given this Xenolith a grant yet (xenolith sync grant)"));
-    };
     if !path.exists() {
         return Err(waits(format!("XenoNet's forward socket isn't there ({}): is XenoNet running?", path.display())));
     }
-    let dial = ForwardDial::attach(connect_checked(path.to_path_buf()), &grant, protocol().alpn).await.map_err(|e| waits(format!("XenoNet refused the attach: {} ({})", e.message, e.code)))?;
+    // No grant yet: collected over the socket, once you approve it at XenoNet's window.
+    let grant = match xenolith_core::xenonet::read_grant(&cfg.paths) {
+        Some(g) => g,
+        None => match collect(cfg, path, shared, stop, Some(&mut *wake)).await? {
+            Some(g) => g,
+            None => return Ok(()),
+        },
+    };
+    let dial = match ForwardDial::attach(connect_checked(path.to_path_buf()), &grant, protocol().alpn).await {
+        Ok(d) => d,
+        // The grant kept here no longer stands (renewed elsewhere, revoked, past its end): a new
+        // one is collected for this context key, which asks you again only if your approval went.
+        Err(e) if matches!(e.code, "no-grant" | "revoked" | "expired" | "other-alpn") => {
+            let Some(g) = collect(cfg, path, shared, stop, Some(&mut *wake)).await? else { return Ok(()) };
+            ForwardDial::attach(connect_checked(path.to_path_buf()), &g, protocol().alpn).await.map_err(|e| waits(format!("XenoNet refused the attach: {} ({})", e.message, e.code)))?
+        }
+        Err(e) => return Err(waits(format!("XenoNet refused the attach: {} ({})", e.message, e.code))),
+    };
+    let grant = xenolith_core::xenonet::read_grant(&cfg.paths).unwrap_or(grant);
     let dial = Arc::new(dial);
+    // Near its end, the grant is renewed in the background: the new file wakes the loop below,
+    // which attaches with it.
+    if dial.until() - xenolith_core::text::now_ms() < RENEW_MS {
+        let (cfg, path, shared, stop) = (cfg.clone(), path.to_path_buf(), shared.clone(), stop.clone());
+        tokio::spawn(async move {
+            let _ = collect(&cfg, &path, &shared, &stop, None).await;
+        });
+    }
     let me = dial.me().0;
     let chains = dial.chains().await.map_err(|e| waits(e.message))?;
     let _ = jobs.send(Job::Chains { chains, me });
@@ -274,6 +297,57 @@ async fn attach(
         Some(mut e) => {
             e.attached = true;
             Err(e)
+        }
+    }
+}
+
+/// How long before its end a grant is renewed.
+pub const RENEW_MS: i64 = 10 * 86_400_000;
+
+/// A grant collected from XenoNet over the socket for this Xenolith's context key, and kept in
+/// its owner-only file: it waits for you to approve it at XenoNet's window, and goes from
+/// XenoNet's service to this process alone, never through a command's output or a log. None once
+/// the engine stops. A grant put in its file meanwhile (`xenolith sync grant`) is taken instead.
+#[cfg(unix)]
+async fn collect(
+    cfg: &Arc<Config>,
+    path: &Path,
+    shared: &Arc<engine::Shared>,
+    stop: &Arc<tokio::sync::Notify>,
+    wake: Option<&mut tokio::sync::mpsc::UnboundedReceiver<()>>,
+) -> Result<Option<String>, Ended> {
+    use xenonet_id::sign::{Purpose, Signer as _};
+    let key = cfg.keys.context.public();
+    let signer = cfg.clone();
+    let (asked, at) = (shared.clone(), path.to_string_lossy().into_owned());
+    let waiting = move || {
+        asked.set_xenonet(json!({ "mode": "asking", "socket": at, "why": "this Xenolith asked XenoNet for a grant to sync over this machine's networks: approve it in XenoNet's window (Network settings, Shared context)" }));
+    };
+    let connect = connect_checked(path.to_path_buf());
+    let got = tokio::select! {
+        r = ForwardDial::collect(&connect, protocol().alpn, &key, move |m| signer.keys.context.sign(Purpose::FORWARD_COLLECT, m).ok(), waiting) => r,
+        () = stop.notified() => return Ok(None),
+        g = put(cfg, wake) => return Ok(Some(g)),
+    };
+    let text = got.map_err(|e| match e.code {
+        "denied" => waits("you turned down this Xenolith's grant in XenoNet's window; it asks again when its service restarts"),
+        _ => waits(format!("XenoNet gave no grant: {} ({})", e.message, e.code)),
+    })?;
+    xenolith_core::xenonet::write_grant(&cfg.paths, &text).map_err(waits)?;
+    (cfg.log)("sync: XenoNet gave this Xenolith a grant to sync over its network");
+    Ok(Some(text))
+}
+
+// A grant that appears in its file while a collect waits.
+#[cfg(unix)]
+async fn put(cfg: &Config, wake: Option<&mut tokio::sync::mpsc::UnboundedReceiver<()>>) -> String {
+    let Some(wake) = wake else { return std::future::pending().await };
+    loop {
+        if wake.recv().await.is_none() {
+            return std::future::pending().await;
+        }
+        if let Some(g) = xenolith_core::xenonet::read_grant(&cfg.paths) {
+            return g;
         }
     }
 }

@@ -16,29 +16,93 @@ use xenonet_net::{NetError, R};
 /// Xenolith's sync/2, for its shared mode.
 pub const FORWARDED: &[&[u8]] = &[b"xenolith/sync/2"];
 
+/// Whose a forwarded ALPN is, and the rights its grant holds: Xenolith's
+/// sync/2 is the actor `xenolith`'s, reading, appending to and writing the
+/// spaces it's in.
+pub fn actor_of(alpn: &str) -> Option<(&'static str, &'static [&'static str])> {
+    match alpn {
+        "xenolith/sync/2" => Some(("xenolith", &["ctx-read", "ctx-append", "ctx-write"])),
+        _ => None,
+    }
+}
+
 /// A forward decided on the engine's grants.
 struct Decided(Arc<dyn GrantsCore>);
 
 impl Grants for Decided {
     fn decide(&self, token: &str, alpn: &str) -> R<Grant> {
         match self.0.forward(token, alpn) {
-            Ok((actor, ids)) => Ok(Grant { actor, ids }),
+            Ok(f) => Ok(Grant { actor: f.actor, ids: f.ids, networks: f.networks.map(|n| n.into_iter().collect()), until: f.until }),
             Err(code @ "other-alpn") => Err(NetError::new(403, code, format!("that grant forwards another ALPN than {alpn}"))),
             Err(code @ ("revoked" | "expired")) => Err(NetError::new(403, code, "that grant was revoked or is past its time")),
             Err(_) => Err(NetError::new(403, "no-grant", format!("no grant of this machine's actors forwards {alpn}"))),
         }
     }
+
+    fn collect(&self, alpn: &str, key: &str) -> R<String> {
+        let (actor, _) = actor_of(alpn).ok_or_else(|| NetError::new(403, "no-grant", format!("{alpn} has no actor here")))?;
+        match self.0.collect_forward(actor, alpn, key) {
+            Ok(text) => Ok(text),
+            // Away past its grant's end, it asks the person again.
+            Err("lapsed") => Err(NetError::new(403, "unapproved", "the last grant for that key ended unrenewed: the person approves it again")),
+            Err(_) => Err(NetError::new(403, "unapproved", "the person hasn't approved a grant for that key here")),
+        }
+    }
 }
 
-struct Core(Arc<Forwards>);
+struct Core {
+    forwards: Arc<Forwards>,
+    grants: Arc<dyn GrantsCore>,
+}
+
+fn refused(status: u16, code: &str, message: impl Into<String>) -> CoreError {
+    CoreError { status: Some(status), code: Some(code.to_string()), ..CoreError::new(message) }
+}
 
 impl ForwardsCore for Core {
     fn list(&self) -> Result<Value, CoreError> {
-        Ok(self.0.list())
+        let mut v = self.forwards.list();
+        v["grants"] = self.grants.forward_grants();
+        // Each ask with the actor it's for.
+        if let Some(asks) = v["asks"].as_array_mut() {
+            for a in asks {
+                a["actor"] = a["alpn"].as_str().and_then(actor_of).map_or(Value::Null, |(actor, _)| Value::from(actor));
+            }
+        }
+        Ok(v)
+    }
+
+    fn approve(&self, alpn: &str, key: &str, networks: &[String], window: bool) -> Result<Value, CoreError> {
+        if !window {
+            return Err(refused(403, "window", "a grant is approved at XenoNet's window, where it asks you"));
+        }
+        let (actor, rights) = actor_of(alpn).ok_or_else(|| refused(404, "not-found", format!("{alpn} isn't forwarded here")))?;
+        // The key proved it's held here (its collect's proof) before the
+        // person is asked for it.
+        if !self.forwards.asks().iter().any(|a| a.alpn == alpn && a.key == key) {
+            return Err(refused(404, "not-found", "no ask for a grant for that key waits"));
+        }
+        let rights: Vec<String> = rights.iter().map(|r| (*r).to_string()).collect();
+        let reason = format!("let {actor} on this machine sync over XenoNet's network");
+        let out = self.grants.approve_forward(actor, alpn, key, networks, &rights, &reason).map_err(|e| refused(409, "refused", e))?;
+        self.forwards.answered(alpn, key);
+        Ok(out)
+    }
+
+    fn deny(&self, alpn: &str, key: &str) -> Result<Value, CoreError> {
+        Ok(serde_json::json!({ "denied": self.forwards.answered(alpn, key) }))
+    }
+
+    fn revoke(&self, alpn: &str) -> Result<Value, CoreError> {
+        let (actor, _) = actor_of(alpn).ok_or_else(|| refused(404, "not-found", format!("{alpn} isn't forwarded here")))?;
+        match self.grants.revoke_forward(actor).map_err(|e| refused(500, "error", e))? {
+            Some(v) => Ok(serde_json::json!({ "revoked": v })),
+            None => Err(refused(404, "not-found", format!("{actor} has no grant here"))),
+        }
     }
 
     fn net(&self) -> Option<Arc<Forwards>> {
-        Some(self.0.clone())
+        Some(self.forwards.clone())
     }
 }
 
@@ -55,7 +119,7 @@ pub fn wire(cores: &mut Cores) {
             }
         }));
     }
-    cores.forwards = Arc::new(Core(forwards));
+    cores.forwards = Arc::new(Core { forwards, grants: cores.grants.clone() });
 }
 
 /// Copies of this machine's chains for its actors (`Forwards::set_chains`):
@@ -120,13 +184,35 @@ mod tests {
         assert!(Forwardable::new(FORWARDED).is_ok());
         struct Says(&'static str);
         impl GrantsCore for Says {
-            fn forward(&self, _token: &str, _alpn: &str) -> Result<(String, Vec<String>), &'static str> {
+            fn forward(&self, _token: &str, _alpn: &str) -> Result<xenonet_api::cores::Forwarding, &'static str> {
+                Err(self.0)
+            }
+            fn collect_forward(&self, _actor: &str, _alpn: &str, _key: &str) -> Result<String, &'static str> {
                 Err(self.0)
             }
         }
         for (said, code) in [("other-alpn", "other-alpn"), ("revoked", "revoked"), ("expired", "expired"), ("no-grant", "no-grant"), ("invalid", "no-grant")] {
             assert_eq!(Decided(Arc::new(Says(said))).decide("t", "xenolith/sync/2").unwrap_err().code, code);
         }
+        // Lapsed or never approved, a collect waits for the person.
+        for said in ["unapproved", "lapsed"] {
+            assert_eq!(Decided(Arc::new(Says(said))).collect("xenolith/sync/2", "k").unwrap_err().code, "unapproved");
+        }
+        assert_eq!(Decided(Arc::new(Says("unapproved"))).collect("other/alpn/1", "k").unwrap_err().code, "no-grant");
+    }
+
+    #[test]
+    fn approving_a_grant_is_the_windows_and_needs_a_proved_ask() {
+        let forwards = Forwards::new(Forwardable::new(FORWARDED).unwrap(), Arc::new(Decided(Arc::new(xenonet_api::cores::Pending))));
+        let core = Core { forwards: forwards.clone(), grants: Arc::new(xenonet_api::cores::Pending) };
+        let nets = ["net_00000000000000000000000000000001".to_string()];
+        assert_eq!(core.approve("xenolith/sync/2", "xns1_k", &nets, false).unwrap_err().code.as_deref(), Some("window"));
+        assert_eq!(core.approve("xenolith/sync/2", "xns1_k", &nets, true).unwrap_err().code.as_deref(), Some("not-found"), "no ask waits for that key");
+        forwards.ask("xenolith/sync/2", "xns1_k").unwrap();
+        assert_eq!(core.list().unwrap()["asks"][0]["actor"], "xenolith");
+        assert_eq!(core.approve("other/alpn/1", "xns1_k", &nets, true).unwrap_err().code.as_deref(), Some("not-found"));
+        assert_eq!(core.deny("xenolith/sync/2", "xns1_k").unwrap()["denied"], true);
+        assert_eq!(core.list().unwrap()["asks"], serde_json::json!([]));
     }
 
     #[cfg(unix)]

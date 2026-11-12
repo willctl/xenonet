@@ -98,7 +98,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         ("GET", "state" | "svc" | "forwards")
             | (
                 "POST",
-                "create" | "join" | "leave" | "invite" | "remove" | "replace" | "approve" | "svc/publish" | "svc/unpublish" | "devices/revoke" | "feeds/unfreeze" | "relays"
+                "forwards/approve" | "forwards/deny" | "forwards/revoke" | "create" | "join" | "leave" | "invite" | "remove" | "replace" | "approve" | "svc/publish" | "svc/unpublish" | "devices/revoke" | "feeds/unfreeze" | "relays"
             )
             | ("PUT", "settings" | "sharing")
     );
@@ -108,6 +108,12 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     // Who may is rules.rs's: yours, and an invite the window's.
     if rest == "forwards" {
         return match ctx.cores.forwards.list() {
+            Ok(v) => Reply::json(200, v),
+            Err(e) => refused(&e),
+        };
+    }
+    if let Some(what) = rest.strip_prefix("forwards/") {
+        return match forwards(ctx, req, what).await {
             Ok(v) => Reply::json(200, v),
             Err(e) => refused(&e),
         };
@@ -165,6 +171,34 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         // The window and the CLI say why and ask again.
         Err(e) if e.code.as_deref() == Some("waiting") => Reply::json(202, json!({ "waiting": true, "message": e.message })),
         Err(e) => refused(&e),
+    }
+}
+
+/// An actor's forward grant (Xenolith's, for its shared mode): `approve`
+/// the ask for one (`alpn`, `key`, and the `networks` it reaches, each one
+/// this machine is in), which asks the person, so it's the window's;
+/// `deny` it; `revoke` the grant on `alpn`, which ends its forward. The
+/// grant itself never comes back here: the actor collects it over the
+/// forward socket.
+async fn forwards(ctx: &Ctx, req: &mut Req, what: &str) -> Result<Value, CoreError> {
+    let body = req.json(16 << 10).await.map_err(|e| net_error(e.status, "bad-request", e.message))?;
+    let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let f = &ctx.cores.forwards;
+    match what {
+        "approve" => {
+            let Some(svc) = ctx.net.get().cloned() else { return Err(net_error(503, "no-network", "the network isn't available in this XenoNet")) };
+            let mine: Vec<String> = svc.state()["networks"].as_array().into_iter().flatten().filter_map(|n| n["id"].as_str().map(str::to_string)).collect();
+            let networks: Vec<String> = body.get("networks").and_then(Value::as_array).into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect();
+            if networks.is_empty() {
+                return Err(bad("name the networks it may reach (networks: [net_…])"));
+            }
+            if let Some(n) = networks.iter().find(|n| !mine.contains(n)) {
+                return Err(bad(format!("this machine isn't in {n}")));
+            }
+            f.approve(&text("alpn"), &text("key"), &networks, req.by.window)
+        }
+        "deny" => f.deny(&text("alpn"), &text("key")),
+        _ => f.revoke(&text("alpn")),
     }
 }
 
