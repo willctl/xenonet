@@ -107,7 +107,7 @@ A network's relays are in its chain, so every machine in it uses the same ones. 
   ```
 
   When your terminal can't ask you, the network starts without the relay and says so; add it from the window then.
-- **Later**: in **Network settings**, under **Relays**, type the URL and choose **Add to** the network. From a terminal, `xenonet net relay add https://relay.example.net` asks for it, and the founder or another window host approves it in their window.
+- **Later**: in **Network settings**, under **Relays**, type the URL and choose **Add to** the network. Adding asks you, so it's the window's: `xenonet net relay add https://relay.example.net` in a terminal says so. On a window host other than the founder, it waits for the founder or another window host to approve it in their window.
 - **Taking one out** is done at once, from either: `xenonet net relay remove https://relay.example.net`.
 
 `xenonet net relay` lists the relays as they stand, and `n0` in place of a URL names n0's public relays, run by n0 and rate-limited.

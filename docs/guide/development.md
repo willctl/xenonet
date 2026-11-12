@@ -189,7 +189,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | `a2a_rpc` | A2A's JSON-RPC requests and its event streams |
 | `feed_decode` | A machine's feed entries (`xenonet-feed/1`), decoded and offered to a receiver in any order, repeated, dropped or changed |
 
-The network's targets build well-formed frames, entries and requests from a made-up network with fixed keys, then change them, so a run reaches past the signature checks. They fail if a changed frame or request is ever taken.
+The network's targets build well-formed envelopes, entries and requests from a made-up network with fixed keys, then change them, so a run reaches past the signature checks. They fail if a changed envelope or request is ever taken.
 
 `fuzz/run.sh` keeps what a target learns in `fuzz/corpus/<target>` and reads the seeds in `fuzz/seeds/<target>` too. A crash is saved in `fuzz/artifacts/<target>`. Run the target on that file alone to see the crash again, and `cargo fuzz tmin --fuzz-dir fuzz <target> <file>` makes it smaller. The corpora and crashes stay out of git.
 
@@ -302,7 +302,7 @@ Golden files hold its contract with the outside, and the Rust tests replay them.
 | `crates/xenonet-cli/tests/golden/` | The HTTP API's reads and the command's output, over the made-up home in `tests/fixtures/home/` | `crates/xenonet-cli/tests/golden.rs` |
 | `crates/xenonet-state/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search, the map's refresh (`state.json`: the map, identities, projects, repos and the saved state, through `MapState` with its clock and ids fixed and git answered from the fixture) and the projects scan | `crates/xenonet-state/tests/golden.rs` |
 | `crates/xenonet-service/tests/fixtures/gateway.json` | The actor gateway's answers to 69 requests, byte for byte: the status, the headers that matter and the body | `crates/xenonet-service/tests/gateway.rs` |
-| `test/fixtures/net/` | The network's frames, signatures and sealing, as known answers | `crates/xenonet-net/tests/known_answers.rs` |
+| `test/fixtures/net/` | The network's keys, chain, envelopes and sealing, as known answers | `crates/xenonet-net/tests/known_answers.rs` |
 
 `schemas/` holds the JSON Schema of every record XenoNet reads or writes. XenoNet's own are written from the types in `crates/xenonet-model` (`XENONET_SCHEMAS_WRITE=1 cargo test -p xenonet-model` rewrites them, and the same test fails when a file is stale); the vendors' under `schemas/vendor/` are hand-kept. `crates/xenonet-schema` checks against them, and so do the page's tests (`test/harness/schema.js`).
 

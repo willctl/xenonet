@@ -123,7 +123,7 @@ It listens on this computer alone, on XenoNet's port plus 1010 (48850), or the p
 | ngrok | `ngrok`, with your authtoken added | Your ngrok domain, if you give it |
 | Your own | Anything that forwards `https://<your name>/mcp` to the gateway's port and passes the Host header on | The name you give |
 
-What goes public depends on the tunnel. Tailscale Funnel publishes the gateway's `/mcp` alone, and the panel says **public: /mcp alone**. The network's routes and A2A stay off the internet. Cloudflare's tunnels and ngrok forward the gateway's whole port, so they also carry the network's routes and, while it's on, A2A. For those, the panel says **public: its whole port**. If Funnel puts any other path on the internet, the panel shows it as a warning, `xenonet doctor` says which, and **Repair** sets Funnel back to `/mcp`.
+What goes public depends on the tunnel. Tailscale Funnel publishes the gateway's `/mcp` alone, and the panel says **public: /mcp alone**. A2A stays off the internet. Cloudflare's tunnels and ngrok forward the gateway's whole port, so they also carry A2A while it's on. For those, the panel says **public: its whole port**. If Funnel puts any other path on the internet, the panel shows it as a warning, `xenonet doctor` says which, and **Repair** sets Funnel back to `/mcp`.
 
 To set it up:
 

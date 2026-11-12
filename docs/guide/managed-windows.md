@@ -61,9 +61,11 @@ search index. Describe those writes in the approval request.
 
 The local console uses `127.0.0.1:47840`. The service also uses authenticated
 loopback connections whose port is recorded in its runtime descriptor.
-Network pairing introduces a separate gateway address. Record that exact
-address and port during the pilot. Do not open a broad inbound rule or
-enable a public tunnel as part of basic installation.
+Joining a network makes the service accept QUIC connections over UDP
+from the network's other machines, and connect out to them and to the
+relays the network names. Record the program path and the relays during
+the pilot. Do not open a broad inbound rule or enable a public tunnel as
+part of basic installation.
 
 XenoNet has command, terminal, messaging, provider and network features.
 XenoNet does not enforce an observation-only policy. Review those
