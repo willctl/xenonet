@@ -58,6 +58,30 @@ pub fn wire(cores: &mut Cores) {
     cores.forwards = Arc::new(Core(forwards));
 }
 
+/// Copies of this machine's chains for its actors (`Forwards::set_chains`):
+/// each network's roster, the person chains of their owners and this
+/// machine's own person, and its token roots' certificates. Public
+/// records, each verified by the actor from genesis; nothing secret.
+pub fn chains_of(nodes: &xenonet_net::nodes::Nodes) -> Value {
+    let common = nodes.common();
+    let identity = &common.identity;
+    let mut networks = Vec::new();
+    let mut owners: Vec<String> = identity.person_id().into_iter().collect();
+    for s in common.shareds() {
+        let Some(n) = s.network() else { continue };
+        let roster = s.roster();
+        if let Some(o) = roster.view_ref().and_then(|v| v.owner.clone()) {
+            if !owners.contains(&o) {
+                owners.push(o);
+            }
+        }
+        networks.push(serde_json::json!({ "id": n.id, "chain": roster.to_json() }));
+    }
+    let persons: Vec<Value> = owners.iter().filter_map(|p| identity.chain_of(p).map(|c| serde_json::json!({ "person": p, "chain": c.to_json() }))).collect();
+    let roots: Vec<Value> = identity.all_token_roots().iter().map(xenonet_authz::RootCertificate::to_json).collect();
+    serde_json::json!({ "networks": networks, "persons": persons, "roots": roots })
+}
+
 /// Where the actors reach the forwards of the service on `port`.
 pub fn socket_path(runtime_dir: &Path, port: u16) -> PathBuf {
     runtime_dir.join(format!("forward-{port}.sock"))

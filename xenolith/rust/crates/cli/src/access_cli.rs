@@ -5,6 +5,10 @@
 //!   xenolith spaces add <space> [--identity <name>]   start a space; a project's identities let
 //!                                                      identity:<name> grants reach it
 //!   xenolith spaces bind <space> [--project prj_…] [--repo <remote>] [--run] [--json]
+//!   xenolith spaces draft <space> (--move-owner prs_… | --share-network net_… [--level <l>])
+//!                     [--person-head <h>]        the next entry of a space this Xenolith curates,
+//!                                                for the person's device to sign (JSON)
+//!   xenolith spaces sequence <space>             appends the signed entry read from stdin
 //!                                                      tie a space made under its name to its
 //!                                                      project: what it would do, and with --run,
 //!                                                      do it through the service (the owner key)
@@ -68,7 +72,7 @@ fn positional(args: &[String]) -> Vec<&str> {
     for a in args {
         if skip {
             skip = false;
-        } else if matches!(a.as_str(), "--days" | "--identity" | "--label" | "--scope" | "--hours" | "--project" | "--repo") {
+        } else if matches!(a.as_str(), "--days" | "--identity" | "--label" | "--scope" | "--hours" | "--project" | "--repo" | "--move-owner" | "--share-network" | "--level" | "--person-head") {
             skip = true;
         } else if !a.starts_with("--") {
             out.push(a.as_str());
@@ -166,6 +170,44 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                     std::process::exit(0)
                 }
                 Ok((_, v)) => fail(&format!("not bound: {}", v["error"].as_str().unwrap_or("the service refused"))),
+                Err(e) => fail(&e),
+            }
+        }
+        ("spaces", ["draft", space]) => {
+            let id = SpaceId::parse(space).unwrap_or_else(|e| fail(&e.to_string()));
+            let mut body = json!({ "space": id.to_string() });
+            if let Some(to) = opts(args, "--move-owner").first() {
+                body["moveOwner"] = json!(to);
+            }
+            if let Some(n) = opts(args, "--share-network").first() {
+                body["shareNetwork"] = json!(n);
+                body["level"] = json!(opts(args, "--level").first().copied().unwrap_or("read"));
+            }
+            if let Some(h) = opts(args, "--person-head").first() {
+                body["personHead"] = json!(h);
+            }
+            match crate::owner_client::post("/api/spaces/draft", &body) {
+                Ok((200, v)) => {
+                    println!("{v}");
+                    std::process::exit(0)
+                }
+                Ok((_, v)) => fail(&format!("no draft: {}", v["error"].as_str().unwrap_or("the service refused"))),
+                Err(e) => fail(&e),
+            }
+        }
+        ("spaces", ["sequence", space]) => {
+            use std::io::Read as _;
+            let id = SpaceId::parse(space).unwrap_or_else(|e| fail(&e.to_string()));
+            let mut text = String::new();
+            let _ = std::io::stdin().read_to_string(&mut text);
+            let entry: Value = serde_json::from_str(text.trim()).unwrap_or_else(|_| fail("give the signed entry as JSON on stdin"));
+            let entry = if entry["entry"].is_object() { entry["entry"].clone() } else { entry };
+            match crate::owner_client::post("/api/spaces/sequence", &json!({ "space": id.to_string(), "entry": entry })) {
+                Ok((200, v)) => {
+                    println!("{v}");
+                    std::process::exit(0)
+                }
+                Ok((_, v)) => fail(&format!("not appended: {}", v["error"].as_str().unwrap_or("the service refused"))),
                 Err(e) => fail(&e),
             }
         }

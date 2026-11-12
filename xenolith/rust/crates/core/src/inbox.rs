@@ -119,12 +119,16 @@ impl By<'_> {
 
 /// The stamps the person's own notes carry (By::Owner).
 pub const OWNER_STAMPS: [&str; 2] = ["owner", "cli"];
+/// The stamp's start on a note from another of the person's machines: sync stamps it so only for
+/// a Xenolith bound to a machine whose device is the space owner's (sync::take).
+pub const PERSON_STAMP: &str = "person@";
 
 /// A note's source as the curator may trust it: "user" only on a note the person submitted
-/// (stamped by: owner or cli); any other note claiming it counts as "agent".
+/// (stamped by: owner or cli, or, from another of their machines, person@<machine>); any other
+/// note claiming it counts as "agent".
 pub fn trusted_source(source: &str, by: &str) -> &'static str {
     match norm_source(source) {
-        "user" if !OWNER_STAMPS.contains(&by) => "agent",
+        "user" if !OWNER_STAMPS.contains(&by) && !by.strip_prefix(PERSON_STAMP).is_some_and(|m| !m.is_empty() && !m.contains(char::is_whitespace)) => "agent",
         s => s,
     }
 }
@@ -277,7 +281,10 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
     meta.set("kind", kind);
     meta.set("app", app.clone());
     let stamp = by.stamp();
-    meta.set("source", trusted_source(&input.source, if matches!(by, By::Owner(_)) { &stamp } else { "" }));
+    // The owner's, or sync's stamp for the person's own note from another of their machines (no
+    // token's subject is shaped so).
+    let speaks = matches!(by, By::Owner(_)) || (matches!(by, By::Token(_)) && stamp.starts_with(PERSON_STAMP));
+    meta.set("source", trusted_source(&input.source, if speaks { &stamp } else { "" }));
     meta.set("by", stamp.clone());
     meta.set("title", title.clone());
     meta.set("tags", tags);

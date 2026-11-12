@@ -36,7 +36,7 @@ use xenolith_core::keys::Signer;
 use xenolith_core::spaces::SpaceId;
 use xenolith_core::sync::{self as cs, Follow};
 use xenonet_id::codec::{b64, sha256, unb64_n};
-use xenonet_log::space::{Space, SpacePolicy};
+use xenonet_log::space::Space;
 use xenonet_net::dial::{Alpn, Fut, PeerId};
 use xenonet_net::join::{Admit, Admitted, Invite, JoinTarget, Ticket, TicketId};
 use xenonet_net::{NetError, R};
@@ -280,7 +280,7 @@ pub fn accept(cfg: &Config, invite: &Invite, endpoint: &str, answer: &Value, cho
     let mut checked = vec![];
     for o in &offer.spaces {
         let chain = &answer["chains"][&o.space];
-        let space = Space::from_json(SpacePolicy::default(), chain).map_err(|e| wrong(&format!("{}'s chain doesn't check: {}", o.space, e.message)))?;
+        let space = Space::from_json(xenolith_core::xenonet::space_policy(&cfg.paths), chain).map_err(|e| wrong(&format!("{}'s chain doesn't check: {}", o.space, e.message)))?;
         let v = space.view();
         if space.id() != o.space || space.entries()[0].hash() != o.genesis {
             return Err(wrong(&format!("the chain sent for {} is another space's", o.space)));

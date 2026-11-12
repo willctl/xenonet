@@ -18,12 +18,16 @@
 //!   (revision 36), and the worker sends what goes back through the links, which take it from any
 //!   thread. A third thread watches the spaces' folders for changes (notify), so a curator's pages
 //!   and a member's notes and edits go out as they happen, not once a minute.
+//! - **Shared mode** (`shared`): beside the own endpoint, sync/2 over the XenoNet on this machine,
+//!   for the members of its networks; a space shared into a network reaches its members' Xenoliths
+//!   there, each bound to its machine by its XenoNet grant.
 //! - Nothing here runs until the upgrade from 1.x has run (xenolith_core::upgrade): the service
 //!   starts it only then.
 
 mod engine;
 pub mod hello;
 pub mod join;
+pub mod shared;
 
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -78,6 +82,8 @@ pub struct Engine {
     net: Arc<OnceLock<Net>>,
     status: Arc<Mutex<Value>>,
     stop: Arc<tokio::sync::Notify>,
+    stop_shared: Arc<tokio::sync::Notify>,
+    shared: Arc<engine::Shared>,
     threads: Vec<std::thread::JoinHandle<()>>,
 }
 
@@ -85,6 +91,7 @@ impl Drop for Engine {
     fn drop(&mut self) {
         let _ = self.jobs.send(engine::Job::Stop);
         self.stop.notify_one();
+        self.stop_shared.notify_one();
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
@@ -101,10 +108,21 @@ impl Engine {
         let (open_tx, open_rx) = mpsc::channel::<()>();
         let shared = Arc::new(engine::Shared::default());
         let stop = Arc::new(tokio::sync::Notify::new());
+        let stop_shared = Arc::new(tokio::sync::Notify::new());
         let pendings = join::Pendings::default();
-        let worker = engine::spawn(cfg.clone(), tx.clone(), rx, net.clone(), status.clone(), open_tx, shared.clone())?;
-        let endpoint = spawn_endpoint(cfg.clone(), tx.clone(), net.clone(), open_rx, shared, stop.clone(), pendings.clone())?;
-        Ok(Engine { cfg, pendings, jobs: tx, net, status, stop, threads: vec![worker, endpoint] })
+        let fwd = Arc::new(std::sync::RwLock::new(None));
+        let worker = engine::spawn(cfg.clone(), tx.clone(), rx, net.clone(), fwd.clone(), status.clone(), open_tx, shared.clone())?;
+        let xenonet = shared::spawn(cfg.clone(), tx.clone(), fwd, shared.clone(), stop_shared.clone())?;
+        let endpoint = spawn_endpoint(cfg.clone(), tx.clone(), net.clone(), open_rx, shared.clone(), stop.clone(), pendings.clone())?;
+        Ok(Engine { cfg, pendings, jobs: tx, net, status, stop, stop_shared, shared, threads: vec![worker, xenonet, endpoint] })
+    }
+
+    /// Keeps `text` as the grant XenoNet gave this Xenolith (shared mode attaches with it as soon
+    /// as XenoNet's socket is there), and says what it names once the chains check it.
+    pub fn set_grant(&self, text: &str) -> Result<Value, String> {
+        xenolith_core::xenonet::write_grant(&self.cfg.paths, text)?;
+        let _ = self.jobs.send(engine::Job::Changed);
+        Ok(json!({ "kept": true, "socket": shared::socket_path(&self.cfg).to_string_lossy() }))
     }
 
     /// The endpoint, opened now if it wasn't (an invite or a join needs it with no peer yet).
@@ -203,6 +221,14 @@ impl Engine {
     /// What /status shows of the sync.
     pub fn status(&self) -> Value {
         let mut s = self.status.lock().map(|s| s.clone()).unwrap_or(Value::Null);
+        // Shared mode: the attachment as its thread says, what it binds as the worker does.
+        let mut x = self.shared.xenonet.lock().map(|x| x.clone()).unwrap_or(Value::Null);
+        if let (Some(o), Some(w)) = (x.as_object_mut(), s.get("xenonet").and_then(Value::as_object)) {
+            for (k, v) in w {
+                o.insert(k.clone(), v.clone());
+            }
+        }
+        s["xenonet"] = x;
         if let Some(n) = self.net.get() {
             s["endpoint"] = json!({
                 "id": hex(n.links.mesh().me().0),
@@ -265,7 +291,7 @@ fn spawn_endpoint(
                     Err(e) => return (cfg.log)(&format!("sync: the endpoint didn't open on {bind}: {}", e.message)),
                 };
                 let mesh = Arc::new(Mesh::new(dial.clone(), admission));
-                let machine = engine::machine(&cfg, jobs.clone(), mesh.me().0, shared);
+                let machine = engine::machine(&cfg, jobs.clone(), mesh.me().0, shared, false);
                 let door = Arc::new(Door::to(join::TARGET, mesh.clone()));
                 let links = Links::over(protocol(), mesh, machine);
                 let inviting = Arc::new(join::Inviting { pendings: pendings.clone(), jobs: std::sync::Mutex::new(jobs.clone()) });

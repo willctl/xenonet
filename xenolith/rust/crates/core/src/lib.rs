@@ -38,6 +38,7 @@ pub mod text;
 pub mod upgrade;
 pub mod waker;
 pub mod wiki;
+pub mod xenonet;
 
 pub use wiki::{Error, Result};
 

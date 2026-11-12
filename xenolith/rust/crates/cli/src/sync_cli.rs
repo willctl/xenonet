@@ -1,7 +1,10 @@
 //! Sync between machines, from a terminal (xenolith-net's `xenolith/sync/2` and `xenolith/join/1`):
 //!
 //!   xenolith sync [status] [--json]          this Xenolith's key and endpoint, the spaces it syncs,
-//!                                            their members, who's connected
+//!                                            their members, who's connected, and shared mode
+//!   xenolith sync grant                      keeps the grant XenoNet gave this Xenolith, read
+//!                                            from stdin (never an argument): shared mode
+//!                                            attaches to XenoNet's forward with it
 //!   xenolith invite <space>... [--level read|append|write] [--json]
 //!                                            an invite for one other Xenolith to join these spaces
 //!                                            (this one curates them): the invite, its code and the
@@ -25,7 +28,7 @@ fn fail(msg: &str) -> ! {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith sync [status] [--json]\n       xenolith invite <space>... [--level read|append|write] [--json]\n       xenolith join <invite> [--at <ip:port>]... [--only <space>]... [--all] [--json]"
+        "usage: xenolith sync [status] [--json]\n       xenolith sync grant  (the grant on stdin)\n       xenolith invite <space>... [--level read|append|write] [--json]\n       xenolith join <invite> [--at <ip:port>]... [--only <space>]... [--all] [--json]"
     );
     std::process::exit(2)
 }
@@ -35,11 +38,30 @@ pub fn run(args: &[String]) -> ! {
     let words: Vec<&str> = args.iter().map(String::as_str).filter(|a| *a != "--json").collect();
     match words.first().copied() {
         None | Some("status") => status(json_out),
+        Some("grant") => grant(),
         Some(w @ ("share" | "follow")) => {
             eprintln!("xenolith sync {w}: gone; join with an invite instead (xenolith invite on the curator, xenolith join here)");
             std::process::exit(2)
         }
         _ => usage(),
+    }
+}
+
+/// `xenolith sync grant`: the grant from stdin, to the service.
+fn grant() -> ! {
+    use std::io::Read as _;
+    let mut text = String::new();
+    let _ = std::io::stdin().read_to_string(&mut text);
+    if text.trim().is_empty() {
+        fail("give the grant XenoNet made for this Xenolith on stdin");
+    }
+    match owner_client::post("/api/sync/grant", &json!({ "grant": text.trim() })) {
+        Ok((200, v)) => {
+            println!("Kept. Shared mode attaches to XenoNet's forward at {}.", v["socket"].as_str().unwrap_or("its socket"));
+            std::process::exit(0)
+        }
+        Ok((_, v)) => fail(v["error"].as_str().unwrap_or("refused")),
+        Err(e) => fail(&e),
     }
 }
 

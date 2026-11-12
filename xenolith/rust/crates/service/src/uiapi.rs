@@ -300,6 +300,9 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             "/api/tokens" => Some(("Making a token", ", or run `xenolith token create` in a terminal")),
             "/api/sync/invite" => Some(("Inviting another Xenolith", ", or run `xenolith invite` in a terminal")),
             "/api/sync/join" => Some(("Joining another Xenolith's spaces", ", or run `xenolith join` in a terminal")),
+            "/api/sync/grant" => Some(("Keeping XenoNet's grant", ", or run `xenolith sync grant` in a terminal")),
+            "/api/spaces/draft" => Some(("Drafting a space's entry", ", or run `xenolith spaces draft` in a terminal")),
+            "/api/spaces/sequence" => Some(("Appending a space's entry", ", or run `xenolith spaces sequence` in a terminal")),
             "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
             _ => None,
         };
@@ -538,6 +541,81 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         return match done {
             Ok(v) => {
                 entry.result = Some("space bound".into());
+                json_reply(200, &v)
+            }
+            Err(e) => json_reply(409, &json!({ "error": e })),
+        };
+    }
+    if path == "/api/sync/grant" && method == "POST" {
+        // The grant XenoNet gave this Xenolith (forward(xenolith/sync/2) and key(<its context
+        // key>)): kept owner-only; shared mode attaches with it (xenolith_net::shared). Never in
+        // the audit chain, which names only that one was kept.
+        let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+        let Some(text) = body["grant"].as_str() else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"grant\": \"xenonet_actor_…\"}" }));
+        };
+        let Some(engine) = app.sync.get() else {
+            return json_reply(409, &json!({ "error": "sync is off until the upgrade from 1.x has run (xenolith upgrade)" }));
+        };
+        let done = engine.set_grant(text);
+        audit::best_effort(&AppPaths::current(), "space", by, vec![("event", json!("xenonet-grant")), ("done", json!(done.is_ok()))]);
+        return match done {
+            Ok(v) => {
+                entry.result = Some("grant kept".into());
+                json_reply(200, &v)
+            }
+            Err(e) => json_reply(400, &json!({ "error": e })),
+        };
+    }
+    if path == "/api/spaces/draft" && method == "POST" {
+        // The next entry of a space this Xenolith curates, for a device of the person to sign with
+        // their presence (XenoNet's window): a move from the owner key to the person, signed with
+        // the owner key here, or a share into a network. Nothing is appended until `sequence`.
+        let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+        let space = body["space"].as_str().and_then(|s| xenolith_core::spaces::SpaceId::parse(s).ok());
+        let level = body["level"].as_str().map_or(Some(xenolith_core::chains::Level::Read), xenolith_core::chains::Level::parse);
+        let draft = match (body["moveOwner"].as_str(), body["shareNetwork"].as_str(), level) {
+            (Some(to), None, _) => Some(xenolith_core::chains::Draft::MoveOwner { to: to.to_string() }),
+            (None, Some(network), Some(level)) => Some(xenolith_core::chains::Draft::ShareNetwork { network: network.to_string(), level }),
+            _ => None,
+        };
+        let (Some(space), Some(draft)) = (space, draft) else {
+            return json_reply(
+                400,
+                &json!({ "error": "Send JSON: {\"space\": \"project:<name>\", \"moveOwner\": \"prs_…\"} or {\"space\": …, \"shareNetwork\": \"net_…\", \"level\": \"read|append|write\"}, with \"personHead\"" }),
+            );
+        };
+        let head = body["personHead"].as_str().map(String::from);
+        let done = app.signers().and_then(|(context, owner)| xenolith_core::chains::draft(&AppPaths::current(), &space, &draft, Some(owner), head, context, xenolith_core::text::now_ms()));
+        return match done {
+            Ok(v) => {
+                entry.result = Some("entry drafted".into());
+                json_reply(200, &v)
+            }
+            Err(e) => json_reply(409, &json!({ "error": e })),
+        };
+    }
+    if path == "/api/spaces/sequence" && method == "POST" {
+        // A drafted entry the person's device signed: appended as this Xenolith, the curator, if
+        // the space's chain takes it (the device by the person chain XenoNet sent, presence for
+        // what widens), then sent to the members.
+        let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+        let (Some(space), true) = (body["space"].as_str().and_then(|s| xenolith_core::spaces::SpaceId::parse(s).ok()), body["entry"].is_object()) else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"space\": \"project:<name>\", \"entry\": {…}}" }));
+        };
+        let done = app.signers().and_then(|(context, _)| xenolith_core::chains::sequence(&AppPaths::current(), wiki_dir, &space, &body["entry"], context));
+        audit::best_effort(
+            &AppPaths::current(),
+            "space",
+            by,
+            vec![("space", json!(space.to_string())), ("event", json!("sequence")), ("op", body["entry"]["op"].clone()), ("done", json!(done.is_ok()))],
+        );
+        if let (true, Some(engine)) = (done.is_ok(), app.sync.get()) {
+            engine.changed();
+        }
+        return match done {
+            Ok(v) => {
+                entry.result = Some("entry appended".into());
                 json_reply(200, &v)
             }
             Err(e) => json_reply(409, &json!({ "error": e })),

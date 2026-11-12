@@ -87,6 +87,11 @@ pub struct Settings {
     pub mdns: bool,
     /// `sync.endpoint: "off"` keeps the endpoint closed even with peers.
     pub off: bool,
+    /// Shared mode's socket (`sync.xenonet.socket`): XenoNet's forward socket; None: the one in
+    /// XenoNet's runtime folder for its default port (xenolith-net finds it).
+    pub xenonet_socket: Option<String>,
+    /// `sync.xenonet: "off"`: no shared mode, whatever XenoNet runs here.
+    pub xenonet_off: bool,
 }
 
 /// The UDP port the endpoint binds when `sync.bind` names none.
@@ -100,6 +105,8 @@ impl Settings {
             relays: s["relays"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|u| u.starts_with("https://")).map(String::from).collect(),
             mdns: s["mdns"].as_bool().unwrap_or(false),
             off: s["endpoint"].as_str() == Some("off"),
+            xenonet_socket: s["xenonet"]["socket"].as_str().filter(|p| !p.is_empty()).map(String::from),
+            xenonet_off: s["xenonet"].as_str() == Some("off"),
         }
     }
 }
@@ -843,7 +850,11 @@ impl Taken {
 /// its level by the space's chain, `id` the entry's id (what makes a second copy a duplicate), and
 /// `text` the text the body names. Its source is never the person's (`agent`): a standalone peer's
 /// note can't speak as the owner here (review revision 35).
-pub fn take(dir: &Path, kind: Kind, body: &Value, text: &str, who: &str, level: Level, id: &str) -> Taken {
+/// `person` is the machine (its id in the network) a note from a Xenolith bound to the person's
+/// own device came from (review revision 35): such a note keeps the `user` source it says, stamped
+/// `person@<machine>`; any other peer's is `agent`.
+#[allow(clippy::too_many_arguments)]
+pub fn take(dir: &Path, kind: Kind, body: &Value, text: &str, who: &str, level: Level, id: &str, person: Option<&str>) -> Taken {
     let page = if kind == Kind::CtxPropose { body.clone() } else { body["page"].clone() };
     let is_page = kind == Kind::CtxPropose || body["kind"] == "page";
     let mode = if is_page { page["mode"].as_str().unwrap_or("append") } else { "" };
@@ -877,7 +888,7 @@ pub fn take(dir: &Path, kind: Kind, body: &Value, text: &str, who: &str, level: 
         let s = |k: &str| body[k].as_str().unwrap_or("").to_string();
         let input = NoteInput {
             kind: if is_page { "page".into() } else { "log".into() },
-            source: "agent".into(),
+            source: if person.is_some() && body["source"] == "user" { "user".into() } else { "agent".into() },
             app: if kind == Kind::CtxPropose { "sync".into() } else { s("app") },
             title: if title.trim().is_empty() { slug.clone() } else { title },
             body: if content.trim().is_empty() { format!("# {slug}") } else { content },
@@ -894,7 +905,8 @@ pub fn take(dir: &Path, kind: Kind, body: &Value, text: &str, who: &str, level: 
             // The same entry taken twice is one note: by who sent it and the entry's id.
             idempotency_key: Some(format!("sync2:{who}:{id}")),
         };
-        let r = inbox::submit_note(dir, &input, "sync", &format!("sync {who}"), &By::Token(who))?;
+        let stamp = person.map(|m| format!("{}{m}", inbox::PERSON_STAMP));
+        let r = inbox::submit_note(dir, &input, "sync", &format!("sync {who}"), &By::Token(stamp.as_deref().unwrap_or(who)))?;
         Ok(if r.duplicate { Taken::Duplicate } else { Taken::Note(r.id) })
     })();
     r.unwrap_or_else(|e| Taken::Refused(e.to_string()))
@@ -1091,24 +1103,32 @@ mod tests {
         fs::write(dir.join("pages").join("db.md"), "---\ntitle: Atlas database\n---\n\n# Atlas database\n\nPostgres 16.\n").unwrap();
         let note = json!({ "id": "2026-11-11_09-00-00-000-abc123", "kind": "log", "app": "codex", "source": "user", "title": "Moving to 17", "tags": [], "pages": ["db"] });
         let who = "key:xns1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let Taken::Note(id) = take(&dir, Kind::CtxNote, &note, "Logical replication.", who, Level::Append, "e1") else { panic!() };
+        let Taken::Note(id) = take(&dir, Kind::CtxNote, &note, "Logical replication.", who, Level::Append, "e1", None) else { panic!() };
         let text = fs::read_to_string(dir.join("inbox").join(format!("{id}.md"))).unwrap();
         assert!(text.contains("source: agent"), "a peer's note never speaks as the person: {text}");
         assert!(text.contains("transport: sync"));
-        assert_eq!(take(&dir, Kind::CtxNote, &note, "Logical replication.", who, Level::Append, "e1"), Taken::Duplicate);
-        assert!(matches!(take(&dir, Kind::CtxNote, &note, "x", who, Level::Read, "e2"), Taken::Refused(_)), "a reader leaves no notes");
+        assert_eq!(take(&dir, Kind::CtxNote, &note, "Logical replication.", who, Level::Append, "e1", None), Taken::Duplicate);
+        assert!(matches!(take(&dir, Kind::CtxNote, &note, "x", who, Level::Read, "e2", None), Taken::Refused(_)), "a reader leaves no notes");
+        // From a Xenolith bound to the person's own device on another machine: the person's, named
+        // by that machine (review revision 35).
+        let Taken::Note(id) = take(&dir, Kind::CtxNote, &note, "Logical replication.", who, Level::Append, "e9", Some("laptop")) else { panic!() };
+        let text = fs::read_to_string(dir.join("inbox").join(format!("{id}.md"))).unwrap();
+        assert!(text.contains("source: user") && text.contains("person@laptop"), "{text}");
+        assert_eq!(crate::inbox::trusted_source("user", "person@laptop"), "user");
+        assert_eq!(crate::inbox::trusted_source("user", "person@"), "agent");
+        assert_eq!(crate::inbox::trusted_source("user", "key:xns1_x"), "agent");
 
         let page = "---\ntitle: Atlas database\n---\n\n# Atlas database\n\nPostgres 17 here.\n";
         let edit = Edit { slug: "db".into(), base: "0123456789abcdef".into(), text: Some(page.into()) };
-        assert!(matches!(take(&dir, Kind::CtxPropose, &edit.body(), page, who, Level::Append, "e3"), Taken::Refused(_)), "a replace needs write");
-        let Taken::Held { batch } = take(&dir, Kind::CtxPropose, &edit.body(), page, who, Level::Write, "e3") else { panic!("a stale replace is held") };
+        assert!(matches!(take(&dir, Kind::CtxPropose, &edit.body(), page, who, Level::Append, "e3", None), Taken::Refused(_)), "a replace needs write");
+        let Taken::Held { batch } = take(&dir, Kind::CtxPropose, &edit.body(), page, who, Level::Write, "e3", None) else { panic!("a stale replace is held") };
         let held = crate::held::list(&dir);
         assert!(held.iter().any(|h| h["batch"] == batch && h["kind"] == "sync"), "{held:?}");
         let current = page_version(&dir, "db");
         let fresh = Edit { slug: "db".into(), base: current, text: Some(page.into()) };
-        assert!(matches!(take(&dir, Kind::CtxPropose, &fresh.body(), page, who, Level::Write, "e4"), Taken::Note(_)), "against the page as it is: a note");
+        assert!(matches!(take(&dir, Kind::CtxPropose, &fresh.body(), page, who, Level::Write, "e4", None), Taken::Note(_)), "against the page as it is: a note");
         let gone = Edit { slug: "db".into(), base: page_version(&dir, "db"), text: None };
-        assert_eq!(take(&dir, Kind::CtxPropose, &gone.body(), "", who, Level::Write, "e5"), Taken::Removed);
+        assert_eq!(take(&dir, Kind::CtxPropose, &gone.body(), "", who, Level::Write, "e5", None), Taken::Removed);
         assert!(!dir.join("pages").join("db.md").exists());
         let _ = fs::remove_dir_all(home);
     }

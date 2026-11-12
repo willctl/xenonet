@@ -209,6 +209,7 @@ impl Machine for RogueSide {
             &link.peer().0,
             &[],
             &xenolith_net::hello::Where::default(),
+            None,
             link.exporter(xenolith_net::hello::EXPORTER).as_ref(),
             xenolith_core::text::now_ms(),
         )

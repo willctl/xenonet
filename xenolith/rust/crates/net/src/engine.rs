@@ -13,6 +13,14 @@
 //! holder took the requester's chain, so a holder that is behind learns first (an Unshare among
 //! it, say). Entries travel only over authenticated QUIC between admitted members, unsealed: a
 //! space has no mailboxes, so nothing of it is sealed for rest.
+//!
+//! **Shared mode** (`crate::shared`). Over XenoNet's forward a peer is the XenoNet of another
+//! machine, admitted when it's a member of a network this machine is in (by the rosters XenoNet
+//! sent, verified here), and bound to a context key by its hello's grant (`Bound`). It's in a
+//! space only by a `Share{network}` of a network both are in (`Worker::role`), never by a share to
+//! a key: those are the own endpoint's (review revision 16c). A member that holds nothing of a
+//! space yet takes its chain from its curator when the space's owner is the person who owns a
+//! network both are in (revision 6).
 
 use crate::hello::{self, Bindings, Nonces, Told, Where};
 use crate::{Config, Net, hex, unhex};
@@ -27,6 +35,7 @@ use xenolith_core::keys::{Keys, Signer};
 use xenolith_core::spaces::{self, SpaceId};
 use xenolith_core::sync::{self as cs, Addrs, Feeds, Follow, Ledger, Outbox, PageAt, Relay, Taken};
 use xenolith_core::text::{hash_text, now_ms};
+use xenolith_core::xenonet::{Bound, Known};
 use xenonet_id::sign::VerifyingKey;
 use xenonet_log::feed::{Feed, FeedEntry, Kind, Offer, Pos};
 use xenonet_log::space::Space;
@@ -42,6 +51,8 @@ const SETTLE: Duration = Duration::from_millis(150);
 /// How long a follow record's addresses are kept in the endpoint's lookup.
 const ADDR_TTL: Duration = Duration::from_secs(365 * 24 * 3600);
 
+// Shared mode (and so `Chains`, `Attached`, `Detached`) is built on Unix alone.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) enum Job {
     /// The engine stops.
     Stop,
@@ -71,7 +82,17 @@ pub(crate) enum Job {
         key: VerifyingKey,
         told: Vec<Told>,
         at: Where,
+        /// Over the forward: the machine its grant binds the key to.
+        bound: Option<Bound>,
     },
+    /// The chains XenoNet sent, and XenoNet's endpoint id here.
+    Chains {
+        chains: Value,
+        me: [u8; 32],
+    },
+    /// Shared mode attached to XenoNet's forward, or its session ended.
+    Attached,
+    Detached,
     /// A holder has none of what was asked of it.
     DontHave {
         peer: PeerId,
@@ -118,12 +139,33 @@ struct Snap {
     /// to it were last.
     at: Vec<String>,
     peers: BTreeMap<String, Vec<(String, Vec<String>)>>,
+    /// Over the forward: what to tell each machine's endpoint (XenoNet's), the chains XenoNet
+    /// sent, as verified, and the copy of this Xenolith's grant its hellos carry.
+    fwd_tell: BTreeMap<String, Vec<Told>>,
+    known: Arc<Known>,
+    /// The grant XenoNet gave: a narrowed copy goes in each hello, made as it goes (`hello_ext`).
+    raw_grant: Option<String>,
+    /// XenoNet's endpoint id here, once attached.
+    fwd_me: Option<String>,
 }
 
 #[derive(Default)]
 pub(crate) struct Shared {
     snap: RwLock<Snap>,
     nonces: Nonces,
+    /// What /status says of shared mode's attachment.
+    pub(crate) xenonet: Mutex<Value>,
+    /// Asks shared mode's thread for XenoNet's chains again: a connection came from a machine
+    /// the chains held don't name.
+    pub(crate) rechain: tokio::sync::Notify,
+}
+
+impl Shared {
+    pub(crate) fn set_xenonet(&self, v: Value) {
+        if let Ok(mut x) = self.xenonet.lock() {
+            *x = v;
+        }
+    }
 }
 
 fn now() -> u64 {
@@ -147,10 +189,12 @@ struct Side {
     jobs: Mutex<mpsc::Sender<Job>>,
     shared: Arc<Shared>,
     me: [u8; 32],
+    /// Over XenoNet's forward (shared mode), not the own endpoint.
+    forwarded: bool,
 }
 
-pub(crate) fn machine(cfg: &Arc<Config>, jobs: mpsc::Sender<Job>, me: [u8; 32], shared: Arc<Shared>) -> Arc<dyn Machine> {
-    Arc::new(Side { cfg: cfg.clone(), jobs: Mutex::new(jobs), shared, me })
+pub(crate) fn machine(cfg: &Arc<Config>, jobs: mpsc::Sender<Job>, me: [u8; 32], shared: Arc<Shared>, forwarded: bool) -> Arc<dyn Machine> {
+    Arc::new(Side { cfg: cfg.clone(), jobs: Mutex::new(jobs), shared, me, forwarded })
 }
 
 impl Side {
@@ -167,8 +211,9 @@ impl Machine for Side {
     }
 
     fn hello(&self, _peer: PeerId, network: &str) -> Option<NetHello> {
+        // A network's own group (shared mode admits its members by it) has nothing to say.
         let snap = self.shared.snap.read().ok()?;
-        let (digest, feeds) = snap.groups.get(network).cloned().unwrap_or((None, vec![]));
+        let (digest, feeds) = snap.groups.get(network).cloned()?;
         Some(NetHello { network: network.to_string(), chain: digest, feeds })
     }
 
@@ -209,24 +254,53 @@ impl Machine for Side {
 
     fn hello_ext(&self, link: &Link) -> Option<Value> {
         let peer = link.peer();
-        let (tell, at) = {
+        let (tell, at, grant) = {
             let snap = self.shared.snap.read().ok()?;
             let ep = hex(peer.0);
-            (snap.tell.get(&ep).cloned().unwrap_or_default(), Where { at: snap.at.clone(), peers: snap.peers.get(&ep).cloned().unwrap_or_default() })
+            if self.forwarded {
+                // XenoNet's addresses are XenoNet's to know: a hello over the forward names none.
+                let grant = match (&snap.raw_grant, &snap.fwd_me) {
+                    (Some(text), Some(me)) => xenolith_core::xenonet::hello_grant(&snap.known, me, text, now_ms()).ok().map(|(text, root, _)| hello::Grant { text, root }),
+                    _ => None,
+                };
+                (snap.fwd_tell.get(&ep).cloned().unwrap_or_default(), Where::default(), grant)
+            } else {
+                (snap.tell.get(&ep).cloned().unwrap_or_default(), Where { at: snap.at.clone(), peers: snap.peers.get(&ep).cloned().unwrap_or_default() }, None)
+            }
         };
-        hello::make(&self.cfg.keys.context, &self.me, &peer.0, &tell, &at, link.exporter(hello::EXPORTER).as_ref(), now_ms())
+        hello::make(&self.cfg.keys.context, &self.me, &peer.0, &tell, &at, grant.as_ref(), link.exporter(hello::EXPORTER).as_ref(), now_ms())
     }
 
     fn hello_ext_in(&self, link: &Link, ext: Option<&Value>) -> R<()> {
         let peer = link.peer();
         let checked = hello::check(ext, &self.me, &peer.0, link.exporter(hello::EXPORTER).as_ref(), &self.shared.nonces, now_ms()).map_err(|e| NetError::new(403, "refused", e))?;
+        if self.forwarded {
+            let known = self.shared.snap.read().map(|s| s.known.clone()).unwrap_or_default();
+            let ep = hex(peer.0);
+            if known.members_at(&ep).is_empty() {
+                // A machine that joined since the chains came: ask for them again.
+                self.shared.rechain.notify_one();
+            }
+            let g = checked.grant.as_ref();
+            return match xenolith_core::xenonet::bind_hello(&known, &ep, &checked.key.id(), g.map(|g| g.text.as_str()), g.map(|g| &g.root), now_ms()) {
+                Ok(b) => {
+                    self.job(Job::Hello { peer, key: checked.key, told: checked.spaces, at: Where::default(), bound: Some(b) });
+                    Ok(())
+                }
+                Err(why) => {
+                    let why = format!("{ep} spoke as {} over XenoNet's forward, and {why}", checked.key.id());
+                    self.log(&format!("a hello was refused: {why}"));
+                    Err(NetError::new(403, "not-bound", why))
+                }
+            };
+        }
         let bound = self.shared.snap.read().is_ok_and(|s| s.bind.get(&hex(peer.0)).is_some_and(|keys| keys.contains_key(&checked.key.id())));
         if !bound {
             let why = format!("{} spoke as {}, which no space here binds to that endpoint", hex(peer.0), checked.key.id());
             self.log(&format!("a hello was refused: {why}"));
             return Err(NetError::new(403, "not-a-member", why));
         }
-        self.job(Job::Hello { peer, key: checked.key, told: checked.spaces, at: Where { at: checked.at, peers: checked.peers } });
+        self.job(Job::Hello { peer, key: checked.key, told: checked.spaces, at: Where { at: checked.at, peers: checked.peers }, bound: None });
         Ok(())
     }
 }
@@ -298,6 +372,20 @@ struct Worker {
     cfg: Arc<Config>,
     shared: Arc<Shared>,
     net: Arc<OnceLock<Net>>,
+    /// Shared mode's links, while attached to XenoNet's forward.
+    fwd: Arc<RwLock<Option<crate::shared::Fwd>>>,
+    /// XenoNet's endpoint id on this machine, once attached.
+    fwd_me: Option<String>,
+    /// The chains XenoNet sent, verified.
+    known: Arc<Known>,
+    /// The peers over the forward whose hello bound them to their machine.
+    bound: BTreeMap<PeerId, Bound>,
+    /// Spaces a bound peer told of that this Xenolith holds nothing of, by the endpoints that
+    /// told: admitted for them until the chain comes (revision 6).
+    offered: BTreeMap<String, BTreeSet<String>>,
+    fwd_groups: BTreeSet<String>,
+    /// What the grant XenoNet gave names, as the chains check it.
+    grant_said: Value,
     status: Arc<Mutex<Value>>,
     open: Option<mpsc::Sender<()>>,
     me: String,
@@ -331,13 +419,26 @@ pub(crate) fn spawn(
     tx: mpsc::Sender<Job>,
     rx: mpsc::Receiver<Job>,
     net: Arc<OnceLock<Net>>,
+    fwd: Arc<RwLock<Option<crate::shared::Fwd>>>,
     status: Arc<Mutex<Value>>,
     open: mpsc::Sender<()>,
     shared: Arc<Shared>,
 ) -> Result<std::thread::JoinHandle<()>, String> {
     let endpoint = hex(host_key(&cfg.keys)?.public().sign);
     let watch = Watch::new(&cfg, &tx);
+    let known = Arc::new(Known::load(&cfg.paths));
+    if let Ok(mut s) = shared.snap.write() {
+        s.known = known.clone();
+    }
+    shared.set_xenonet(crate::shared::idle());
     let mut w = Worker {
+        fwd,
+        fwd_me: None,
+        known,
+        bound: BTreeMap::new(),
+        offered: BTreeMap::new(),
+        fwd_groups: BTreeSet::new(),
+        grant_said: Value::Null,
         me: cfg.keys.context.public().id(),
         endpoint,
         cfg,
@@ -514,8 +615,30 @@ impl Worker {
         self.net.get().map(|n| &n.links)
     }
 
+    /// Shared mode's links, while attached.
+    fn fwd_links(&self) -> Option<Arc<xenonet_net::link2::Links>> {
+        self.fwd.read().ok()?.as_ref().map(|f| f.links.clone())
+    }
+
+    /// The networks this machine is in, by the rosters XenoNet sent; none unattached.
+    fn my_networks(&self) -> BTreeSet<String> {
+        self.fwd_me.as_ref().map(|m| self.known.networks_of(m)).unwrap_or_default()
+    }
+
+    fn bound_at(&self, ep: &str) -> Option<&Bound> {
+        self.bound.iter().find(|(p, _)| hex(p.0) == ep).map(|(_, b)| b)
+    }
+
+    // Each peer by its transport: one over the forward to the forward's links, any other to the
+    // own endpoint's.
     fn send(&self, peer: PeerId, out: Out) {
-        let Some(l) = self.links() else { return };
+        let fwd = self.fwd_links();
+        let l = match (fwd, self.links()) {
+            (Some(f), _) if self.bound.contains_key(&peer) || f.is_connected(peer) => f,
+            (_, Some(l)) => l.clone(),
+            (Some(f), None) => f,
+            (None, None) => return,
+        };
         // A peer that isn't connected gets it from its next hello.
         if let Err(e) = l.send(peer, out)
             && e.code != "not-connected"
@@ -553,6 +676,9 @@ impl Worker {
 
     /// What `key` (a peer's context key id, from `ep`) is in space `id`.
     fn role(&self, id: &str, key: &str, ep: &str) -> Option<Role> {
+        if let Some(b) = self.bound_at(ep) {
+            return (b.key == key).then(|| self.network_role(id, b)).flatten();
+        }
         if self.curates(id) {
             let h = self.held.get(id)?;
             return chains::members(&h.space).into_iter().find(|m| m.key == key && m.endpoint == ep).map(|m| Role::Member(m.level));
@@ -565,9 +691,29 @@ impl Worker {
         chains::members(&h.space).into_iter().find(|m| m.key == key && m.endpoint == ep && m.key != self.me && m.level >= Level::Read).map(|m| Role::Holder(m.level))
     }
 
+    /// What a peer bound over the forward is in space `id`: in by a share into a network both are
+    /// in, at the highest such level, or the curator by its key. Never by a share to a key, which
+    /// is the own endpoint's (review revision 16c).
+    fn network_role(&self, id: &str, b: &Bound) -> Option<Role> {
+        let h = self.held.get(id)?;
+        let mine = self.my_networks();
+        let level = chains::network_shares(&h.space).into_iter().filter(|(n, _)| mine.contains(n) && b.networks.contains(n)).map(|(_, l)| l).max();
+        if self.curates(id) {
+            return level.map(Role::Member);
+        }
+        if b.key == h.space.view().curator.id() {
+            return Some(Role::Curator);
+        }
+        level.filter(|l| *l >= Level::Read).map(Role::Holder)
+    }
+
     /// Whether this Xenolith is connected to the curator of `id`.
     fn curator_connected(&self, id: &str) -> bool {
-        self.curator_endpoint(id).is_some_and(|(k, e)| self.peers.iter().any(|(p, pk)| hex(p.0) == e && pk.id() == k))
+        let over_forward = self.held.get(id).is_some_and(|h| {
+            let c = h.space.view().curator.id();
+            self.bound.iter().any(|(p, b)| b.key == c && self.peers.contains_key(p))
+        });
+        over_forward || self.curator_endpoint(id).is_some_and(|(k, e)| self.peers.iter().any(|(p, pk)| hex(p.0) == e && pk.id() == k))
     }
 
     fn relay(&mut self, id: &str) -> &mut Relay {
@@ -684,8 +830,47 @@ impl Worker {
                 keep.insert(f.endpoint.clone());
             }
         }
+        // Over the forward (shared mode): each network this machine is in admits its members, and
+        // a space shared into one of them is told of to them; a curator keeps a connection to
+        // each, a member to its curator once it's bound (revision 16c).
+        let mut fwd_tell: BTreeMap<String, Vec<Told>> = BTreeMap::new();
+        let mut fwd_admit: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut fwd_keep: BTreeSet<String> = BTreeSet::new();
+        if let Some(me) = self.fwd_me.clone() {
+            let mine = self.known.networks_of(&me);
+            for n in &mine {
+                fwd_admit.insert(n.clone(), self.known.endpoints_in(n).into_iter().filter(|e| *e != me).collect());
+            }
+            for id in &ids {
+                let h = &self.held[id];
+                let told = Told { space: id.clone(), genesis: h.space.entries()[0].hash(), digest: chains::digest(&h.space) };
+                for (n, _) in chains::network_shares(&h.space).into_iter().filter(|(n, _)| mine.contains(n)) {
+                    for ep in self.known.endpoints_in(&n).into_iter().filter(|e| *e != me) {
+                        let t = fwd_tell.entry(ep.clone()).or_default();
+                        if !t.iter().any(|x| x.space == *id) {
+                            t.push(told.clone());
+                        }
+                        fwd_admit.entry(id.clone()).or_default().insert(ep.clone());
+                        if self.curates(id) {
+                            fwd_keep.insert(ep);
+                        }
+                    }
+                }
+                let c = h.space.view().curator.id();
+                for (p, b) in &self.bound {
+                    if b.key == c && c != self.me {
+                        fwd_admit.entry(id.clone()).or_default().insert(hex(p.0));
+                        fwd_keep.insert(hex(p.0));
+                    }
+                }
+            }
+            for (id, eps) in &self.offered {
+                fwd_admit.entry(id.clone()).or_default().extend(eps.iter().cloned());
+            }
+        }
         let mut groups = BTreeMap::new();
-        for id in admit.keys() {
+        let group_ids: Vec<String> = admit.keys().chain(fwd_admit.keys().filter(|g| self.held.contains_key(*g) || self.offered.contains_key(*g))).cloned().collect();
+        for id in &group_ids {
             let digest = self.held.get(id).map(|h| chains::digest(&h.space));
             let heads = self.feeds(id).heads();
             groups.insert(id.clone(), (digest, heads));
@@ -694,8 +879,15 @@ impl Worker {
         // only in a hello: its connection closes, and its next dial carries a hello that names
         // the space (revision 6).
         let mut grew = vec![];
+        let mut fwd_grew = vec![];
         let mut changed = vec![];
         if let Ok(mut s) = self.shared.snap.write() {
+            for (ep, told) in &fwd_tell {
+                let before: BTreeSet<&str> = s.fwd_tell.get(ep).map(|t| t.iter().map(|x| x.space.as_str()).collect()).unwrap_or_default();
+                if told.iter().any(|t| !before.contains(t.space.as_str())) {
+                    fwd_grew.extend(unhex(ep).map(PeerId));
+                }
+            }
             // A chain this Xenolith curates that changed (a share, an unshare) goes to the members
             // connected now, so each admits, or stops admitting, the others at once.
             for (id, (digest, _)) in &groups {
@@ -709,8 +901,25 @@ impl Worker {
                     grew.extend(unhex(ep).map(PeerId));
                 }
             }
-            *s = Snap { groups, bind: bind.clone(), tell, at: self.at.clone(), peers };
+            let raw_grant = s.raw_grant.take();
+            *s = Snap { groups, bind: bind.clone(), tell, at: self.at.clone(), peers, fwd_tell, known: self.known.clone(), raw_grant, fwd_me: self.fwd_me.clone() };
         }
+        if let Some(f) = self.fwd_links() {
+            for p in fwd_grew.into_iter().filter(|p| self.peers.contains_key(p)) {
+                if let Some(link) = f.mesh().link(p, crate::protocol().alpn) {
+                    link.close(Close::Done);
+                }
+            }
+            let mesh = f.mesh();
+            for (g, eps) in &fwd_admit {
+                mesh.set_members(g, eps.iter().filter_map(|e| unhex(e)).map(PeerId));
+            }
+            for gone in self.fwd_groups.iter().filter(|g| !fwd_admit.contains_key(*g)) {
+                mesh.leave(gone);
+            }
+            f.keep(fwd_keep.iter().filter_map(|e| unhex(e)).map(PeerId));
+        }
+        self.fwd_groups = fwd_admit.keys().cloned().collect();
         for id in changed {
             for (peer, _, _) in self.connected_in(&id) {
                 self.send(peer, Out::Control(Control::Group { network: id.clone(), body: self.chain_body(&id) }));
@@ -772,16 +981,29 @@ impl Worker {
                     "address": h.address.to_string(),
                     "role": if self.curates(id) { "curator" } else { "member" },
                     "curator": v.curator.id(),
+                    "owner": match &v.owner { xenonet_log::space::Owner::Person(p) => format!("person:{p}"), xenonet_log::space::Owner::Key(k) => format!("key:{}", k.id()) },
                     "epoch": v.epoch,
                     "members": members,
+                    "networks": chains::network_shares(&h.space).into_iter().map(|(n, l)| json!({ "network": n, "level": l.as_str() })).collect::<Vec<_>>(),
                     "curatorConnected": curator.as_ref().is_some_and(|(k, e)| self.peers.iter().any(|(p, pk)| hex(p.0) == *e && pk.id() == *k)),
                 })
             })
             .collect();
         let follows: Vec<Value> = self.follows.iter().map(|f| json!({ "space": f.space, "curator": f.curator, "endpoint": f.endpoint, "held": self.held.contains_key(&f.space) })).collect();
+        // Shared mode as the worker sees it; Engine::status puts the live mode beside it.
+        let mut xenonet = json!({ "grant": self.grant_said });
+        if self.fwd_me.is_some() {
+            xenonet["networks"] = json!(self.my_networks());
+            xenonet["peers"] = json!(
+                self.bound
+                    .iter()
+                    .map(|(p, b)| json!({ "endpoint": hex(p.0), "machine": b.machine, "key": b.key, "networks": b.networks, "connected": self.peers.contains_key(p) }))
+                    .collect::<Vec<_>>()
+            );
+        }
         if let Ok(mut s) = self.status.lock() {
             let endpoint = s.get("endpoint").cloned().unwrap_or(Value::Null);
-            *s = json!({ "key": self.me, "endpointId": self.endpoint, "endpoint": endpoint, "spaces": spaces, "follows": follows });
+            *s = json!({ "key": self.me, "endpointId": self.endpoint, "endpoint": endpoint, "spaces": spaces, "follows": follows, "xenonet": xenonet });
         }
     }
 
@@ -790,6 +1012,12 @@ impl Worker {
     /// Looks at every space's folder: a curator publishes what changed in it, a member sends its
     /// waiting notes and its copy's edits.
     fn scan(&mut self) {
+        // A space founded since (a folder made here): its chain is read, and what it's shared
+        // with admitted.
+        let indexed: BTreeSet<String> = chains::Index::load(&self.cfg.paths).ok().flatten().map(|i| i.spaces.into_iter().map(|p| p.id).collect()).unwrap_or_default();
+        if indexed != self.held.keys().cloned().collect::<BTreeSet<_>>() {
+            self.refresh();
+        }
         let ids: Vec<String> = self.held.keys().cloned().collect();
         for id in &ids {
             if self.curates(id) {
@@ -806,7 +1034,7 @@ impl Worker {
         let year = xenolith_core::text::local_date(&xenolith_core::text::now()).get(..4).unwrap_or("").to_string();
         let mut paths = vec![];
         for id in ids {
-            let synced = self.held.get(id).is_some_and(|h| !chains::members(&h.space).is_empty() || !self.curates(id));
+            let synced = self.held.get(id).is_some_and(|h| chains::is_shared(&h.space) || !self.curates(id));
             let Some(dir) = self.dir_of(id).filter(|_| synced) else { continue };
             paths.extend([dir.join("pages"), dir.join("inbox"), dir.join("log").join(&year)]);
         }
@@ -822,7 +1050,7 @@ impl Worker {
     fn publish(&mut self, id: &str) {
         let Some(dir) = self.dir_of(id) else { return };
         // A space nobody else is in yet has nothing to publish to; it publishes when one comes.
-        if chains::members(&self.held[id].space).is_empty() {
+        if !chains::is_shared(&self.held[id].space) {
             return;
         }
         let epoch = self.held[id].space.view().epoch;
@@ -948,7 +1176,20 @@ impl Worker {
                 let _ = reply.send(r);
             }
             Job::Forget { text, ignore_case } => self.forget(&text, ignore_case),
-            Job::Hello { peer, key, told, at } => self.hello(peer, key, told, at),
+            Job::Hello { peer, key, told, bound: Some(b), .. } => self.bound_hello(peer, key, &told, b),
+            Job::Hello { peer, key, told, at, bound: None } => self.hello(peer, key, told, at),
+            Job::Chains { chains, me } => self.chains(&chains, me),
+            Job::Attached => {
+                self.refresh();
+                self.scan();
+            }
+            Job::Detached => {
+                for p in std::mem::take(&mut self.bound).into_keys() {
+                    self.peers.remove(&p);
+                }
+                self.fwd_me = None;
+                self.refresh();
+            }
             Job::DontHave { peer, group, author } => {
                 let holders = self.holders_for(&group, &author);
                 if let Some(ask) = self.fetching.fetches.lacks(&group, &author, peer, &holders, now()) {
@@ -961,6 +1202,7 @@ impl Worker {
             Job::Group { peer, group, body } => self.group(peer, &group, &body),
             Job::Down(peer) => {
                 self.peers.remove(&peer);
+                self.bound.remove(&peer);
                 self.behind.retain(|(p, _), _| *p != peer);
                 self.parked.retain(|(p, ..)| *p != peer);
                 for ahead in self.fetching.ahead.values_mut() {
@@ -1027,6 +1269,108 @@ impl Worker {
         self.write_status();
     }
 
+    /// The chains XenoNet sent: verified, kept for the next start, and what the hellos over the
+    /// forward carry of the grant checked against them.
+    fn chains(&mut self, chains: &Value, me: [u8; 32]) {
+        let (k, why) = Known::verify(chains);
+        for w in why {
+            self.log(&w);
+        }
+        if let Err(e) = k.save(&self.cfg.paths) {
+            self.log(&e);
+        }
+        self.known = Arc::new(k);
+        let me = hex(me);
+        self.fwd_me = Some(me.clone());
+        let raw = xenolith_core::xenonet::read_grant(&self.cfg.paths);
+        let mut said = Value::Null;
+        if let Some(text) = &raw {
+            match xenolith_core::xenonet::hello_grant(&self.known, &me, text, now_ms()) {
+                Ok((_, _, key)) if key.as_deref() == Some(self.me.as_str()) => said = json!({ "key": key }),
+                Ok((_, _, key)) => {
+                    let names = key.map_or_else(|| "no context key (key(id))".to_string(), |k| format!("another context key ({k})"));
+                    self.log(&format!("XenoNet's grant for this Xenolith names {names}, not this Xenolith's {}: its peers bind nothing to it", self.me));
+                    said = json!({ "key": null, "problem": format!("the grant names {names}") });
+                }
+                Err(e) => {
+                    self.log(&format!("XenoNet's grant for this Xenolith doesn't check against its chains: {e}"));
+                    said = json!({ "problem": e });
+                }
+            }
+        }
+        if let Ok(mut s) = self.shared.snap.write() {
+            s.raw_grant = raw;
+            s.fwd_me = Some(me);
+            s.known = self.known.clone();
+        }
+        self.grant_said = said;
+        self.refresh();
+        self.scan();
+    }
+
+    /// A peer's hello over the forward, bound to its machine: its spaces this Xenolith holds
+    /// nothing of yet are asked for (revision 6), and its curator's chain decides once it's here.
+    fn bound_hello(&mut self, peer: PeerId, key: VerifyingKey, told: &[Told], b: Bound) {
+        let ep = hex(peer.0);
+        let new = self.bound.get(&peer) != Some(&b);
+        self.log(&format!("{} on {} ({ep}) is bound to its machine by its XenoNet grant", key.id(), b.machine));
+        self.bound.insert(peer, b.clone());
+        self.peers.insert(peer, key);
+        let mine = self.my_networks();
+        let mut asked = vec![];
+        if b.networks.iter().any(|n| mine.contains(n)) {
+            for t in told.iter().filter(|t| !self.held.contains_key(&t.space)) {
+                self.offered.entry(t.space.clone()).or_default().insert(ep.clone());
+                asked.push(t.space.clone());
+            }
+        }
+        if new || !asked.is_empty() {
+            self.refresh();
+        }
+        for s in asked {
+            self.send(peer, Out::Control(Control::Group { network: s, body: json!({ "digest": "-" }) }));
+        }
+        self.write_status();
+    }
+
+    /// The chain of a space a bound peer told of, which this Xenolith holds nothing of: taken when
+    /// the peer is its curator, it's shared into a network this machine is in, and its owner is
+    /// the person who owns a network both are in (revision 6; what a space is about is the
+    /// owner's to say, revision 8).
+    fn take_offered(&mut self, peer: PeerId, group: &str, b: &Bound, chain: &Value) {
+        let space = match Space::from_json(self.known.space_policy(), chain) {
+            Ok(s) if s.id() == group => s,
+            Ok(_) => return self.log(&format!("{} sent a chain that isn't {group}'s; it wasn't taken", b.key)),
+            Err(e) => return self.log(&format!("{group}'s chain from {} doesn't check: {}", b.key, e.message)),
+        };
+        let v = space.view();
+        let mine = self.my_networks();
+        let shared_here = chains::network_shares(&space).into_iter().any(|(n, l)| mine.contains(&n) && l >= Level::Read);
+        let owner_ok = v.owner.person().is_some_and(|p| mine.iter().filter(|n| b.networks.contains(*n)).any(|n| self.known.owner_of_network(n) == Some(p)));
+        if v.curator.id() != b.key || !shared_here || !owner_ok {
+            return self.log(&format!(
+                "{group} from {} wasn't taken: {}",
+                b.key,
+                if v.curator.id() != b.key {
+                    "it isn't the space's curator"
+                } else if !shared_here {
+                    "it isn't shared into a network this machine is in"
+                } else {
+                    "its owner isn't the person whose network this is"
+                }
+            ));
+        }
+        match chains::receive(&self.cfg.paths, &self.cfg.root, chain, &self.cfg.keys.context) {
+            Ok(address) => {
+                self.log(&format!("{group} came from {} over XenoNet's forward and is in {address}", b.key));
+                self.offered.remove(group);
+                self.refresh();
+                self.send(peer, Out::Control(Control::Want { network: group.to_string(), author: b.key.clone(), inc: 0, from: 1 }));
+            }
+            Err(e) => self.log(&format!("{group} from {} wasn't taken: {e}", b.key)),
+        }
+    }
+
     fn chain_body(&self, id: &str) -> Value {
         match self.held.get(id) {
             Some(h) => json!({ "digest": chains::digest(&h.space), "chain": h.space.to_json() }),
@@ -1061,6 +1405,12 @@ impl Worker {
 
     fn group(&mut self, peer: PeerId, group: &str, body: &Value) {
         let Some(key) = self.peer_key(peer) else { return };
+        if !self.held.contains_key(group)
+            && body["chain"].is_object()
+            && let Some(b) = self.bound.get(&peer).cloned()
+        {
+            return self.take_offered(peer, group, &b, &body["chain"]);
+        }
         let Some(role) = self.role(group, &key.id(), &hex(peer.0)) else { return };
         let theirs = body["digest"].as_str().unwrap_or("-").to_string();
         if body["chain"].is_object() {
@@ -1080,7 +1430,7 @@ impl Worker {
             } else if role == Role::Curator {
                 // The chain of a space this Xenolith follows, from its curator: only that space's
                 // (its genesis makes its id), and it gets a folder here.
-                let ok = Space::from_json(xenonet_log::space::SpacePolicy::default(), &body["chain"]).is_ok_and(|s| s.id() == group);
+                let ok = Space::from_json(self.known.space_policy(), &body["chain"]).is_ok_and(|s| s.id() == group);
                 if !ok {
                     self.log(&format!("{} sent a chain that isn't {group}'s; it wasn't taken", key.id()));
                     return;
@@ -1218,7 +1568,11 @@ impl Worker {
         match role {
             Role::Member(level) => {
                 let who = format!("key:{}", key.id());
-                let r = cs::take(&dir, e.kind, &e.body, text.as_deref().unwrap_or(""), &who, level, &e.id());
+                // The person's own note from another of their machines keeps its source (revision 35).
+                let owner = self.held.get(id).and_then(|h| h.space.view().owner.person().map(String::from));
+                let person =
+                    self.bound.values().find(|b| b.key == key.id()).filter(|b| owner.as_deref().is_some_and(|o| xenolith_core::xenonet::speaks_for(&self.known, b, o))).map(|b| b.machine.clone());
+                let r = cs::take(&dir, e.kind, &e.body, text.as_deref().unwrap_or(""), &who, level, &e.id(), person.as_deref());
                 let what = match &r {
                     Taken::Note(n) => format!("a note from {who} is in {id}'s inbox ({n})"),
                     Taken::Held { batch } => format!("a change from {who} to {id} against an older version waits for your OK ({batch})"),

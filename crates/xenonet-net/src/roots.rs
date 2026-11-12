@@ -53,6 +53,12 @@ impl TokenRoots {
         Ok(root)
     }
 
+    /// Every certificate kept, unverified: what this machine's actors are
+    /// given of its roots (`forward`'s chains).
+    pub fn all(&self) -> Vec<RootCertificate> {
+        self.certs.reading().clone()
+    }
+
     /// The certificates kept whose key id is `key_id`, unverified.
     pub fn certificates(&self, key_id: u32) -> Vec<RootCertificate> {
         self.certs.reading().iter().filter(|c| c.key_id() == key_id).cloned().collect()

@@ -298,6 +298,25 @@ mod tests {
     }
 
     #[test]
+    fn the_copy_of_a_grant_a_hello_carries_is_refused_at_every_door() {
+        let context = key(5);
+        let root = TokenRoot::new(Me::of(&context).unwrap().machine, &context, T - 1000, T + ROOT_MS).unwrap();
+        let mut p = policy(&context, Some(&root));
+        p.grant("actor:hermes", sc("ctx:read:project:atlas"), 86_400_000, "you", T).unwrap();
+        let (token, _) = mint(&root, "actor:hermes", &[sc("ctx:read:project:atlas")], T + 86_400_000).unwrap();
+        let rows = [sc("ctx:read:project:atlas")];
+        assert!(decide(&p, Some((&token, "actor:hermes", &rows[..])), &sp("project:atlas"), Level::Read, T).is_ok());
+        let copy = crate::xenonet::narrow_for_hello(&token, T).unwrap();
+        let space = sp("project:atlas");
+        let g = Facts { policy: &p, rows: Some(("actor:hermes", &rows[..], &space)), now: T };
+        let principal = Principal::Actor { slug: ActorSlug::new("hermes").unwrap(), machine: p.me.machine.clone() };
+        for door in Door::ALL {
+            let r = Request::new(principal.clone(), Resource::Space(xenonet_authz::SpaceId::new("project:atlas").unwrap()), Act::Ctx(SpaceLevel::Read), door, T, None);
+            assert!(!xenonet_authz::decide(Some(&copy), &r, &g, None).is_allow(), "{door:?}");
+        }
+    }
+
+    #[test]
     fn this_machine_gets_what_local_says() {
         let mut p = policy(&key(3), None);
         assert_eq!(level(&p, None, &sp("machine:local"), T), Some(Level::Admin));

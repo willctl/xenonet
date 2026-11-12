@@ -6199,6 +6199,7 @@ dependencies = [
  "xenonet-log",
  "xenonet-model",
  "xenonet-net",
+ "xenonet-os",
 ]
 
 [[package]]

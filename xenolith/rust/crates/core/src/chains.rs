@@ -196,7 +196,7 @@ pub fn load_space(paths: &AppPaths, id: &str) -> Result<Space, String> {
     let file = chain_file(paths, id);
     let text = fs::read_to_string(&file).map_err(|e| format!("cannot read {}: {e}", wiki::disp(&file)))?;
     let v: Value = serde_json::from_str(&text).map_err(|_| format!("{} isn't JSON", wiki::disp(&file)))?;
-    let space = Space::from_json(SpacePolicy::default(), &v).map_err(|e| format!("{}: {}", wiki::disp(&file), e.message))?;
+    let space = Space::from_json(crate::xenonet::space_policy(paths), &v).map_err(|e| format!("{}: {}", wiki::disp(&file), e.message))?;
     if space.id() != id {
         return Err(format!("{} holds another space, {}", wiki::disp(&file), space.id()));
     }
@@ -486,7 +486,7 @@ pub fn address_for(root: &Path, index: &Index, kind: &str, name: &str, id: &str)
 /// checked from its founding) and gives it a folder here, beside any space of the same name.
 /// Returns its address; a space held already keeps the one it has.
 pub fn receive(paths: &AppPaths, root: &Path, chain: &Value, context: &dyn Signer) -> Result<SpaceId, String> {
-    let space = Space::from_json(SpacePolicy::default(), chain).map_err(|e| e.message)?;
+    let space = Space::from_json(crate::xenonet::space_policy(paths), chain).map_err(|e| e.message)?;
     locked(paths, || {
         let mut index = Index::load(paths)?.unwrap_or_default();
         if let Some(p) = index.by_id(space.id()) {
@@ -586,6 +586,97 @@ pub fn members(space: &Space) -> Vec<Member> {
             _ => None,
         })
         .collect()
+}
+
+/// The networks a space is shared into, each at its level, unshared ones left out: shared mode
+/// admits the members' Xenoliths, each bound to its machine, over XenoNet's forward alone.
+pub fn network_shares(space: &Space) -> Vec<(String, Level)> {
+    space
+        .view()
+        .shares
+        .values()
+        .filter_map(|(subject, _)| match subject {
+            Subject::Network(n) => space.level(subject).map(|l| (n.clone(), l)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether anyone but this Xenolith is in the space by its chain.
+pub fn is_shared(space: &Space) -> bool {
+    !members(space).is_empty() || !network_shares(space).is_empty()
+}
+
+/// What `draft` makes for the person's device to sign.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Draft {
+    /// The space goes from the standalone owner key to the person `to` (review revision 21).
+    MoveOwner { to: String },
+    /// The space is shared into a network at `level`: its members' bound Xenoliths read it
+    /// (revision 7's explicit Share, offered at the window).
+    ShareNetwork { network: String, level: Level },
+}
+
+/// The next entry of `address`'s chain for `d`, for a device of the person to sign with their
+/// presence and `sequence` to append: this Xenolith curates it. A move from the owner key carries
+/// the owner key's signature already (`owner`, for a request with the owner key); what widens a
+/// person's space carries none, since the person's device is the owner's. Returns the entry and
+/// the act (its digest) the presence block approves.
+pub fn draft(paths: &AppPaths, address: &SpaceId, d: &Draft, owner: Option<&dyn Signer>, person_head: Option<String>, context: &dyn Signer, now: i64) -> Result<Value, String> {
+    let (id, space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet"))?;
+    let v = space.view();
+    if v.curator.id() != context.public().id() {
+        return Err(format!("{address} is curated by another Xenolith ({}): its curator sequences its entries", v.curator.id()));
+    }
+    let op = match d {
+        Draft::MoveOwner { to } => {
+            if !xenonet_model::ids::is_person_id(to) {
+                return Err(format!("{to} isn't a person (prs_…)"));
+            }
+            if !v.weaker() {
+                return Err(format!("{address} is a person's already; a space moves from the owner key to a person once"));
+            }
+            Op::MoveOwner { to: to.clone() }
+        }
+        Draft::ShareNetwork { network, level } => {
+            if v.weaker() {
+                return Err(format!("{address} is owned by this Xenolith's owner key: move it to the person first (a key's space shares into no network)"));
+            }
+            let subject = Subject::parse(&format!("network:{network}")).ok_or_else(|| format!("{network} isn't a network id (net_…)"))?;
+            let after = space.unshares_of(&subject);
+            Op::Share { subject, level: *level, endpoint: None, after }
+        }
+    };
+    let mut e = space.next(op, person_head, now);
+    if let (Draft::MoveOwner { .. }, Owner::Key(k)) = (d, &v.owner) {
+        let owner = owner.filter(|o| o.public().id() == k.id()).ok_or("moving a space from the owner key needs the owner key")?;
+        e.sign(&k.id(), owner, None).map_err(|e| e.message)?;
+    }
+    Ok(json!({ "space": id, "address": address.to_string(), "entry": e.to_json(), "act": b64(&e.digest()), "presenceFor": xenonet_log::space::WIDEN }))
+}
+
+/// Appends `entry`, a draft the person's device signed, to `address`'s chain as its curator: this
+/// Xenolith signs it too, and the chain's own rules decide (the device, by the person chain
+/// XenoNet sent; presence for what widens).
+pub fn sequence(paths: &AppPaths, root: &Path, address: &SpaceId, entry: &Value, context: &dyn Signer) -> Result<Value, String> {
+    let mut e = xenonet_log::space::Entry::parse(entry).map_err(|e| e.message)?;
+    locked(paths, || {
+        let (id, mut space) = of_address(paths, address).ok_or_else(|| format!("{address} has no chain here yet"))?;
+        if space.view().curator.id() != context.public().id() {
+            return Err(format!("{address} is curated by another Xenolith ({})", space.view().curator.id()));
+        }
+        if e.space != id {
+            return Err("that entry is for another space".into());
+        }
+        e.sign(&context.public().id(), context, None).map_err(|e| e.message)?;
+        match space.offer(e).map_err(|e| e.message)? {
+            xenonet_log::space::Placed::Applied => {}
+            _ => return Err("that entry doesn't follow the chain as it is now (it moved since the draft): draft it again".into()),
+        }
+        save_space(paths, &space, &mut unrecorded)?;
+        mark(root, address, &space, context, &mut unrecorded)?;
+        Ok(describe(&space))
+    })
 }
 
 /// What a holder has of a space, as two holders compare it: the ids of every entry and side entry

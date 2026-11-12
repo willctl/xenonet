@@ -41,12 +41,21 @@
 //! - `attach {token, alpn}`: the actor's session. The answer is
 //!   `attached {me, session}` (this machine's endpoint id and the
 //!   session's secret) or `refused {code, error}`. Then, from XenoNet:
-//!   `incoming {conn, peer, networks}`, `dialled {req, conn, networks}`,
-//!   `failed {req, code, error}`, `stream {conn, stream, bi}`,
-//!   `opened {req, stream}`, `closed {conn, code}`, `revoked`; from the
-//!   actor: `dial {req, peer}`, `open {req, conn, bi}`, `close {conn,
-//!   code}`. The header of a connection names the remote's endpoint id
-//!   and the networks both are in, by this machine's chains.
+//!   `incoming {conn, peer, networks, exporter}`, `dialled {req, conn,
+//!   networks, exporter}`, `failed {req, code, error}`, `stream {conn,
+//!   stream, bi}`, `opened {req, stream}`, `closed {conn, code}`,
+//!   `chains {req, chains}`, `revoked`; from the actor: `dial {req,
+//!   peer}`, `open {req, conn, bi}`, `close {conn, code}`, `chains {req}`.
+//!   The header of a connection names the remote's endpoint id, the
+//!   networks both are in, by this machine's chains, and the connection's
+//!   keying material under `EXPORTER` (both ends derive the same bytes),
+//!   so what the actor signs is bound to the QUIC connection XenoNet
+//!   terminates and can't be spliced onto another (phase 6, revision 16d).
+//! - `chains`: copies of the chains this machine holds (its networks', the
+//!   persons' that own them, its token roots' certificates), as the
+//!   composition root gives them (`Forwards::set_chains`). The actor
+//!   verifies them from genesis itself: XenoNet's word counts only for a
+//!   connection's remote endpoint id (revision 22).
 //! - `take {session, stream}`: one stream, by the number `stream` or
 //!   `opened` gave it, answered `taken` and then its bytes, as they are,
 //!   both ways (one way for a uni stream).
@@ -75,6 +84,17 @@ pub const TAKE_WAIT: Duration = Duration::from_secs(10);
 /// The most streams waiting to be taken, per session: a remote that opens
 /// more has them reset.
 pub const MAX_WAITING: usize = 256;
+/// The label a forwarded connection's keying material is derived under,
+/// for its header.
+pub const EXPORTER: &[u8] = b"xenonet/forward/1";
+
+/// What the composition root says of this machine's chains, for the
+/// actors (`chains`).
+pub type Chains = Arc<dyn Fn() -> Value + Send + Sync>;
+
+fn exporter_of(link: &Link) -> Value {
+    link.exporter(EXPORTER).map_or(Value::Null, |e| Value::String(b64(&e)))
+}
 
 fn refused(code: &'static str, words: impl Into<String>) -> NetError {
     NetError::new(403, code, words)
@@ -187,6 +207,7 @@ pub struct Forwards {
     /// Where the actors reach these forwards (the local socket), or why
     /// they can't.
     socket: Mutex<Option<Result<String, String>>>,
+    chains: RwLock<Option<Chains>>,
 }
 
 impl Forwards {
@@ -199,6 +220,7 @@ impl Forwards {
             state: Mutex::default(),
             next: AtomicU64::new(1),
             socket: Mutex::new(None),
+            chains: RwLock::new(None),
         })
     }
 
@@ -249,6 +271,16 @@ impl Forwards {
     /// person looks for forwards.
     pub fn set_socket(&self, at: Result<String, String>) {
         *self.socket.locked() = Some(at);
+    }
+
+    /// Where the copies of this machine's chains the actors ask for come
+    /// from: the composition root's.
+    pub fn set_chains(&self, chains: Chains) {
+        *self.chains.writing() = Some(chains);
+    }
+
+    fn chains_now(&self) -> Value {
+        self.chains.reading().as_ref().map_or_else(|| json!({ "networks": [], "persons": [], "roots": [] }), |c| c())
     }
 
     /// A grant was revoked, by one of its revocation ids (hex): every
@@ -304,7 +336,7 @@ impl Forwards {
             return;
         };
         let conn = self.adopt(&s, &link);
-        s.send(json!({ "t": "incoming", "conn": conn, "peer": b64(&link.peer().0), "networks": link.networks() }));
+        s.send(json!({ "t": "incoming", "conn": conn, "peer": b64(&link.peer().0), "networks": link.networks(), "exporter": exporter_of(&link) }));
     }
 
     // The connection's number in the session, and the task that hands its
@@ -464,7 +496,7 @@ impl Forwards {
                         Ok(link) => {
                             let Some(f) = me.upgrade() else { return };
                             let conn = f.adopt(&s, &link);
-                            s.send(json!({ "t": "dialled", "req": req, "conn": conn, "networks": link.networks() }));
+                            s.send(json!({ "t": "dialled", "req": req, "conn": conn, "networks": link.networks(), "exporter": exporter_of(&link) }));
                         }
                         Err(e) => s.send(json!({ "t": "failed", "req": req, "code": e.code, "error": e.message })),
                     }
@@ -485,6 +517,7 @@ impl Forwards {
                     }
                 });
             }
+            Some("chains") => s.send(json!({ "t": "chains", "req": req, "chains": self.chains_now() })),
             Some("close") => {
                 let conn = c.get("conn").and_then(Value::as_u64).unwrap_or(0);
                 let why = c.get("code").and_then(Value::as_u64).and_then(Close::from_code).unwrap_or(Close::Done);
@@ -756,13 +789,21 @@ impl ForwardDial {
     pub fn networks(&self, peer: PeerId) -> BTreeSet<String> {
         self.0.headers.locked().get(&peer).cloned().unwrap_or_default()
     }
+
+    /// Copies of the chains XenoNet holds now (`chains`), for the actor to
+    /// verify.
+    pub async fn chains(&self) -> R<Value> {
+        let a = self.0.ask(json!({ "t": "chains" })).await?;
+        Ok(a.get("chains").cloned().unwrap_or(Value::Null))
+    }
 }
 
 impl Client {
-    fn wire(self: &Arc<Self>, conn: u64, peer: PeerId) -> Arc<ForwardWire> {
+    fn wire(self: &Arc<Self>, conn: u64, peer: PeerId, header: &Value) -> Arc<ForwardWire> {
         let state = ConnState::new();
         self.conns.locked().insert(conn, state.clone());
-        Arc::new(ForwardWire { conn, peer, alpn: self.alpn, client: self.clone(), state })
+        let exporter = header.get("exporter").and_then(Value::as_str).and_then(unb64_n::<32>);
+        Arc::new(ForwardWire { conn, peer, alpn: self.alpn, client: self.clone(), state, exporter })
     }
 
     fn event(self: &Arc<Self>, v: &Value, incoming: &mpsc::UnboundedSender<Arc<dyn Wire>>) {
@@ -771,9 +812,9 @@ impl Client {
             Some("incoming") => {
                 let Some(peer) = v.get("peer").and_then(Value::as_str).and_then(unb64_n::<32>).map(PeerId) else { return };
                 self.headers.locked().insert(peer, networks_of(v));
-                let _ = incoming.send(self.wire(n("conn"), peer) as Arc<dyn Wire>);
+                let _ = incoming.send(self.wire(n("conn"), peer, v) as Arc<dyn Wire>);
             }
-            Some("dialled" | "failed" | "opened") => {
+            Some("dialled" | "failed" | "opened" | "chains") => {
                 if let Some(tx) = self.asks.locked().remove(&n("req")) {
                     let _ = tx.send(v.clone());
                 }
@@ -809,6 +850,8 @@ pub struct ForwardWire {
     alpn: Alpn,
     client: Arc<Client>,
     state: Arc<ConnState>,
+    /// The connection's keying material, as XenoNet's header gave it.
+    exporter: Option<[u8; 32]>,
 }
 
 impl std::fmt::Debug for ForwardWire {
@@ -883,6 +926,17 @@ impl Wire for ForwardWire {
     fn is_closed(&self) -> bool {
         self.state.closed.borrow().is_closed()
     }
+
+    // Derived from the header's, under `label`: both actors derive the
+    // same bytes from the one QUIC connection their XenoNets terminate.
+    fn exporter(&self, label: &[u8]) -> Option<[u8; 32]> {
+        let x = self.exporter?;
+        let mut m = b"xenonet forward exporter\n".to_vec();
+        m.extend_from_slice(label);
+        m.push(b'\n');
+        m.extend_from_slice(&x);
+        Some(xenonet_id::codec::sha256(&m))
+    }
 }
 
 impl Dial for ForwardDial {
@@ -898,7 +952,7 @@ impl Dial for ForwardDial {
             let a = self.0.ask(json!({ "t": "dial", "peer": b64(&peer.0) })).await?;
             let conn = a.get("conn").and_then(Value::as_u64).ok_or_else(|| bad("conn"))?;
             self.0.headers.locked().insert(peer, networks_of(&a));
-            Ok(self.0.wire(conn, peer) as Arc<dyn Wire>)
+            Ok(self.0.wire(conn, peer, &a) as Arc<dyn Wire>)
         })
     }
 

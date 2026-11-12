@@ -163,6 +163,10 @@ fn a_forwarded_protocol_reaches_members_only_one_actor_holds_an_alpn_and_revokin
         let (_, f) = xenonet(A, &[A, B], grants.clone()).await?;
         let dial = ForwardDial::attach(duplex(f.clone()), "tok-a", SYNC).await?;
         assert_eq!(dial.me(), A);
+        // The chains the composition root hands out, as asked for.
+        assert_eq!(dial.chains().await?, json!({ "networks": [], "persons": [], "roots": [] }), "none set: empty lists");
+        f.set_chains(Arc::new(|| json!({ "networks": [{ "id": N1 }], "persons": [], "roots": [] })));
+        assert_eq!(dial.chains().await?["networks"][0]["id"], N1);
         let second = ForwardDial::attach(duplex(f.clone()), "tok-a2", SYNC).await.err().map(|e| e.code);
         assert_eq!(second, Some("taken"), "one actor per ALPN");
         // Refused before anything is forwarded: C is in none of A's networks.
@@ -175,6 +179,7 @@ fn a_forwarded_protocol_reaches_members_only_one_actor_holds_an_alpn_and_revokin
             }
         };
         assert_eq!(dial.networks(B), [N1.to_string()].into(), "the header names the networks both are in");
+        assert_eq!(wire.exporter(b"x"), None, "the simulated transport has no keying material, so the header has none");
         let (mut w, mut r) = wire.open_bi().await?;
         w.write_all(b"hello over the forward").await.unwrap();
         w.shutdown().await.unwrap();

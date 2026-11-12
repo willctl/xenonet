@@ -18,6 +18,11 @@
 //! It also says where the sender's endpoint is (`addrs`) and, from a curator, where the other members
 //! of those spaces were last (`peers`), so members can reach each other with the curator away
 //! (revision 14's holders). Those are hints: QUIC checks the endpoint id at every dial.
+//!
+//! Over XenoNet's forward (shared mode) the endpoint ids are the two machines' XenoNets', the
+//! keying material is what XenoNet's header gave for the connection it terminates, and the hello
+//! also carries a narrowed copy of the sender's grant and its root's certificate (`Grant`), which
+//! the receiver checks against its own copies of the network chains (xenolith_core::xenonet).
 
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, VecDeque};
@@ -44,13 +49,22 @@ pub struct Told {
 }
 
 /// A hello that checked: the peer's context key, the spaces it told of, where it is and where it
-/// says the other members it told of are.
+/// says the other members it told of are, and the grant it carried, if any.
 #[derive(Clone, Debug)]
 pub struct Checked {
     pub key: VerifyingKey,
     pub spaces: Vec<Told>,
     pub at: Vec<String>,
     pub peers: Vec<(String, Vec<String>)>,
+    pub grant: Option<Grant>,
+}
+
+/// What a hello over the forward carries of the sender's grant: the narrowed copy's text and its
+/// root's certificate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Grant {
+    pub text: String,
+    pub root: Value,
 }
 
 /// Where a hello says endpoints are: its own addresses, and other members'.
@@ -78,7 +92,8 @@ fn message(fields: &Map<String, Value>, exporter: Option<&[u8; 32]>) -> Vec<u8> 
 
 /// This Xenolith's hello to `to` from `from` (endpoint ids), at `now` (ms), on a connection whose
 /// keying material is `exporter`.
-pub fn make(key: &dyn Signer, from: &[u8; 32], to: &[u8; 32], spaces: &[Told], at: &Where, exporter: Option<&[u8; 32]>, now: i64) -> Option<Value> {
+#[allow(clippy::too_many_arguments)]
+pub fn make(key: &dyn Signer, from: &[u8; 32], to: &[u8; 32], spaces: &[Told], at: &Where, grant: Option<&Grant>, exporter: Option<&[u8; 32]>, now: i64) -> Option<Value> {
     let mut f = Map::new();
     f.insert("v".into(), json!(1));
     f.insert("key".into(), key.public().to_json());
@@ -90,6 +105,9 @@ pub fn make(key: &dyn Signer, from: &[u8; 32], to: &[u8; 32], spaces: &[Told], a
     f.insert("spaces".into(), json!(spaces.iter().map(|t| json!({ "space": t.space, "genesis": t.genesis, "digest": t.digest })).collect::<Vec<_>>()));
     f.insert("addrs".into(), json!(at.at.iter().take(MAX_AT).collect::<Vec<_>>()));
     f.insert("peers".into(), json!(at.peers.iter().take(MAX_PEERS).map(|(ep, a)| json!({ "endpoint": ep, "at": a.iter().take(MAX_AT).collect::<Vec<_>>() })).collect::<Vec<_>>()));
+    if let Some(g) = grant {
+        f.insert("grant".into(), json!({ "text": g.text, "root": g.root }));
+    }
     let sig = key.sign(Purpose::SYNC_HELLO, &message(&f, exporter)).ok()?;
     f.insert("sig".into(), json!(b64(&sig)));
     Some(Value::Object(f))
@@ -158,11 +176,18 @@ pub fn check(v: Option<&Value>, me: &[u8; 32], from: &[u8; 32], exporter: Option
         let ep = p.get("endpoint").and_then(Value::as_str).filter(|e| xenonet_log::space::is_endpoint_id(e)).ok_or_else(|| refused("its peers"))?;
         peers.push((ep.to_string(), addrs(p.get("at")).ok_or_else(|| refused("its peers"))?));
     }
+    let grant = match v.get("grant") {
+        None => None,
+        Some(g) => Some(Grant {
+            text: g.get("text").and_then(Value::as_str).filter(|t| t.len() <= 16 * 1024).ok_or_else(|| refused("its grant"))?.to_string(),
+            root: g.get("root").filter(|r| r.is_object()).cloned().ok_or_else(|| refused("its grant"))?,
+        }),
+    };
     // Last, so a hello refused for anything else doesn't use up its nonce.
     if !nonces.take(nonce, now) {
         return Err(refused("it was taken before (a replay)"));
     }
-    Ok(Checked { key, spaces, at, peers })
+    Ok(Checked { key, spaces, at, peers, grant })
 }
 
 /// Which keys each endpoint may speak as, and in which spaces, by this Xenolith's chains and
@@ -194,7 +219,7 @@ mod tests {
     fn a_hello_checks_on_its_own_connection_once() {
         let k = key(7);
         let x1 = [9u8; 32];
-        let h = make(&k, &A, &B, &told(), &here(), Some(&x1), T).unwrap();
+        let h = make(&k, &A, &B, &told(), &here(), None, Some(&x1), T).unwrap();
         let nonces = Nonces::default();
         let c = check(Some(&h), &B, &A, Some(&x1), &nonces, T + 1000).unwrap();
         assert_eq!((c.key.id(), c.spaces), (k.public().id(), told()));
@@ -209,7 +234,7 @@ mod tests {
     #[test]
     fn a_hello_is_refused_for_another_pair_a_stale_time_a_changed_field_or_none() {
         let k = key(7);
-        let h = make(&k, &A, &B, &told(), &here(), None, T).unwrap();
+        let h = make(&k, &A, &B, &told(), &here(), None, None, T).unwrap();
         let n = Nonces::default();
         assert!(check(Some(&h), &A, &B, None, &n, T).is_err(), "from and to swapped");
         assert!(check(Some(&h), &B, &[3; 32], None, &n, T).is_err(), "from another endpoint");
@@ -225,5 +250,20 @@ mod tests {
         assert!(check(Some(&other), &B, &A, None, &n, T).unwrap_err().contains("signature"), "another key's name on it");
         assert!(check(None, &B, &A, None, &n, T).is_err());
         assert!(check(Some(&h), &B, &A, None, &n, T).is_ok(), "the refusals used up no nonce");
+    }
+
+    #[test]
+    fn a_grant_rides_signed_and_another_one_put_on_breaks_the_signature() {
+        let k = key(7);
+        let g = Grant { text: "xenonet_actor_abc".into(), root: json!({ "machine": "laptop" }) };
+        let h = make(&k, &A, &B, &told(), &here(), Some(&g), Some(&[5; 32]), T).unwrap();
+        let n = Nonces::default();
+        let mut swapped = h.clone();
+        swapped["grant"]["text"] = json!("xenonet_actor_other");
+        assert!(check(Some(&swapped), &B, &A, Some(&[5; 32]), &n, T).unwrap_err().contains("signature"));
+        let mut dropped = h.clone();
+        dropped.as_object_mut().unwrap().remove("grant");
+        assert!(check(Some(&dropped), &B, &A, Some(&[5; 32]), &n, T).unwrap_err().contains("signature"), "nor taken off");
+        assert_eq!(check(Some(&h), &B, &A, Some(&[5; 32]), &n, T).unwrap().grant, Some(g));
     }
 }

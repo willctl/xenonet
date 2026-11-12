@@ -165,6 +165,11 @@ impl Identity {
         self.roots.root(machine, key.as_ref(), now)
     }
 
+    /// Every token root certificate of this machine's kept.
+    pub fn all_token_roots(&self) -> Vec<xenonet_authz::RootCertificate> {
+        self.roots.all()
+    }
+
     /// This machine's token root certificates whose key id is `key_id`.
     pub fn token_roots(&self, key_id: u32) -> Vec<xenonet_authz::RootCertificate> {
         self.roots.certificates(key_id)
