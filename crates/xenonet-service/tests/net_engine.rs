@@ -1560,6 +1560,40 @@ fn has_handoff(h: &Host, n: u32) -> bool {
     h.world.store.with(|s| s.handoff(&format!("hof_00000000-0000-4000-8000-{n:012}")).unwrap().is_some())
 }
 
+fn handoff_state(h: &Host, n: u32) -> Option<String> {
+    h.world.store.with(|s| s.handoff(&format!("hof_00000000-0000-4000-8000-{n:012}")).unwrap().and_then(|r| r.text("state").map(str::to_string)))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_compaction_ends_what_its_live_set_no_longer_holds() {
+    use xenonet_net::feed::Kind as EntryKind;
+    let root = std::env::temp_dir().join(format!("xenonet-net-compact-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let (a, b, c) = three(&root, [vec![], vec![], vec![]]).await;
+    let laptop = b.svc.node().shared().clone();
+    // desk takes laptop's offer, which is open there.
+    let e1 = laptop.write_entry(EntryKind::Handoff, offer(1)).unwrap();
+    hand(&b, &c, &e1, None);
+    until("desk has the offer", 20, || async { handoff_state(&c, 1).as_deref() == Some("open") }).await;
+    // laptop settles it, and desk never hears: then laptop compacts on its
+    // clock's look, and the offer isn't live.
+    let mut taken = offer(1);
+    taken["op"] = json!("taken");
+    laptop.write_entry(EntryKind::Handoff, taken).unwrap();
+    let compact = laptop.compact_if_due(true).expect("a compaction drops the settled offer");
+    assert_eq!(compact.compact().unwrap().live, Vec::<u64>::new());
+    // desk is behind the compact entry: it asks, gets the compaction, and
+    // the offer it applied before ends there.
+    until("the offer ended at desk", 20, || async { handoff_state(&c, 1).as_deref().is_some_and(|s| s != "open") }).await;
+    assert_eq!(handoff_state(&c, 1).as_deref(), Some("lapsed"));
+    // A second look finds nothing more to drop.
+    assert!(laptop.compact_if_due(true).is_none());
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_on_a_fork() {
     use xenonet_id::sign::{KeyHome, SeedSigner, Signer};

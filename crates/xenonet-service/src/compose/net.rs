@@ -11,7 +11,7 @@
 use serde_json::Value;
 use std::sync::Arc;
 use xenonet_id::codec::{b64, unb64_n};
-use xenonet_net::feed::{FeedEntry, Fork, Pos};
+use xenonet_net::feed::{Compacted, FeedEntry, Fork, Pos};
 use xenonet_net::files::NetFile;
 use xenonet_net::holder::Held;
 use xenonet_net::identity::person::{self, PersonPolicy};
@@ -104,6 +104,9 @@ impl Persist for StorePersist {
     }
     fn feed_out_after(&self, network: &str, after: Pos, limit: usize) -> R<Vec<FeedEntry>> {
         self.0.feed_out_after(network, after, limit).map_err(store)
+    }
+    fn feed_compacted(&self, network: &str, after: Pos) -> R<Option<Compacted>> {
+        self.0.feed_compacted(network, after).map_err(store)
     }
     fn feed_ack(&self, network: &str, member: &str) -> R<Option<Pos>> {
         self.0.feed_ack(network, member).map_err(store)

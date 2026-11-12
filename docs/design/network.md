@@ -618,11 +618,37 @@ claims, reports, handoffs); an intent stays in `live`, with its cancel,
 until its `until`. Nothing that revokes goes in a feed: revocations stay
 in chains, kept forever.
 
+**When** (`compaction.rs`, `Shared::compact_if_due`). Each machine
+compacts its own feed in each network on its own: after 256 kept entries
+since its last compact entry (`compaction::AFTER`, checked as it writes
+one), and on a look every six hours (`compaction::EVERY_MS`) for entries
+whose retention ran out while nothing was written. It writes a compact
+entry only when one would drop something besides an earlier compact
+entry. Which claims and handoffs are still open is read from the feed
+itself: a claim until a later claim or release of the same agent, project
+and path (a release with no path lets all of them go) or its expiry, a
+handoff offer until a later entry names the same handoff. The compact
+entry goes to every member as any kept entry does, and the store drops the
+rest of the range, keeping the headers (`feed_out`).
+
 A `Want` below an author's floor gets a `Compacted` answer: the compact
 entry, the live entries wanted, and the header chain of the range, which
 the receiver checks from the signed id at `upto` down to what it holds,
-so a fork inside a compacted range still shows. Mailboxes prune their
-queues by the same week.
+so a fork inside a compacted range still shows. The author answers so
+whenever what a member wants, or its hello says it lacks, is below the
+floor (`resend_sealed`), then sends what came after; a holder answers so
+for history the requester wasn't there for.
+
+**The receiver** checks every entry of a `Compacted`, from the author or a
+holder, against the author's machine signing key in its own chain, and
+offers it whole to the feed (`Feed::offer_compacted`, in the store's
+transaction): the live entries it lacks apply, what it held in the range
+that isn't live is dropped and never applied later, and what the compact
+entry leaves out of what it applied before ends: a claim is released, a
+handoff offer lapses (`compose/runtime/network.rs`, `ended`). A cancelled
+intent ends by its cancel, which stays live with it. Then it acks, or asks
+again when the answer was short. Mailboxes prune their queues by the same
+week.
 
 ## svc/2: services and window reads
 
@@ -1021,11 +1047,14 @@ in several.
   its own iroh endpoint on loopback, joined by invites: `net.rs` (the
   routes), `net_engine.rs` (the real engine: presence, messages and
   receipts, gaps, a fork, broadcasts, claims, handoffs, the person's acts,
-  A2A, removal), `net_map.rs` (cards from presence, window reads, load),
+  A2A, removal, a cancel that stops a run through a compaction, and a
+  compaction that ends a handoff its live set no longer holds), `net_map.rs` (cards from presence, window reads, load),
   `net_svc.rs` (services), `net_many.rs` (nothing of N1 reaches an
   N2-only member, removal from one network leaves the other flowing, a
-  mailbox named at the window and taken off by itself, and a rekeyed
-  machine that stays a member while its old key is refused)
+  mailbox named at the window and taken off by itself, a rekeyed
+  machine that stays a member while its old key is refused, and a machine
+  a week behind that takes the live set from a compaction made on its own,
+  never the claim it held behind a gap that the compaction dropped)
   and `xenolith.rs` (sync/2 over the forward).
 - `formal/delivery.qnt` ([formal/README.md](../../formal/README.md)): at
   most once, per-author order, gaps detected, revoked proofs refused, with
@@ -1037,10 +1066,6 @@ in several.
 
 ## Not built yet
 
-- **Compaction on its own.** Nothing writes a compact entry on a schedule
-  (`Node::compact_entry` exists, for the tests), and a receiver sets a
-  `Compacted` answer aside, so a holder's counts as "don't have" and the
-  author is asked.
 - **mDNS on link/2.** The setting is asked nowhere yet, so link/2 runs
   without mDNS; join/2 uses it with `--mdns`.
 - **Relays.** No command installs `relay-ca.pem` or sets a relay's auth

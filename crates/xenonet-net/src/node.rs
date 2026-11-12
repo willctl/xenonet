@@ -76,6 +76,9 @@ pub struct Options {
     /// members of this machine's networks on their ALPNs too, and hands
     /// those connections to them. None: nothing is forwarded.
     pub forwards: Option<Arc<crate::forward::Forwards>>,
+    /// Kept entries written since this machine's last compact entry that
+    /// make a compaction of its feed due (`compaction::AFTER`).
+    pub compact_after: u64,
 }
 
 impl Options {
@@ -93,6 +96,7 @@ impl Options {
             bind: None,
             lan: crate::endpoint::LanLookup::Unasked,
             forwards: None,
+            compact_after: crate::compaction::AFTER,
         }
     }
 }
@@ -914,6 +918,55 @@ impl Shared {
         Ok(e)
     }
 
+    /// Compacts this machine's feed in its network when that's due: after
+    /// `compact_after` kept entries since its last compact entry, or on the
+    /// clock's look (`tick`), and only when the compaction drops something.
+    /// What stays live is the kinds' retention, with which claims and
+    /// handoffs are still open read from the feed itself; the compact entry
+    /// goes to every member as any kept entry does.
+    pub fn compact_if_due(&self, tick: bool) -> Option<FeedEntry> {
+        let net = self.network()?;
+        if self.is_removed() {
+            return None;
+        }
+        let (inc, kept) = {
+            let mut slot = self.writer.locked();
+            let w = self.writer_in(&mut slot, &net).ok()?;
+            (w.inc(), w.kept())
+        };
+        if kept == 0 {
+            return None;
+        }
+        let held = match self.opts.persist.feed_out_after(&net.id, Pos::new(inc, 0), usize::MAX) {
+            Ok(h) => h,
+            Err(e) => {
+                self.log("net.feed", &format!("this machine's feed couldn't be read to compact: {}", e.message));
+                return None;
+            }
+        };
+        if !tick && crate::compaction::since_last(&held, kept) < self.opts.compact_after {
+            return None;
+        }
+        let now = self.now().max(0.0) as u64;
+        let open = crate::compaction::open_set(&held, now);
+        let live = xenonet_log::feed::live_set(&held, inc, now, |e| open.contains(&e.seq)).ok()?;
+        if !crate::compaction::drops(&held, &live) {
+            return None;
+        }
+        let e = match self.compact_entry(|e| open.contains(&e.seq)) {
+            Ok(e) => e,
+            Err(err) => {
+                self.log("net.feed", &format!("this machine's feed wasn't compacted: {}", err.message));
+                return None;
+            }
+        };
+        let others: Vec<String> = self.roster().view_ref().map(|v| v.members.keys().filter(|h| **h != net.host).cloned().collect()).unwrap_or_default();
+        self.link2_entry(&net, &e, &others, None);
+        let live = e.compact().map_or(0, |c| c.live.len());
+        self.log("net.feed", &format!("this machine compacted its feed in {} up to {}.{}: {live} entries stay live", net.name, e.inc, e.seq - 1));
+        Some(e)
+    }
+
     /// A body the engine sends as an entry of this machine's feed: a loose
     /// one to the host it's for (or every other host), a kept one to every
     /// member, whoever the engine named.
@@ -945,6 +998,9 @@ impl Shared {
         }
         let e = self.write_entry(kind, out.body).map_err(|e| e.message)?;
         self.link2_entry(net, &e, &others, out.authority.as_ref());
+        if e.class() == Class::Kept {
+            self.compact_if_due(false);
+        }
         Ok(())
     }
 

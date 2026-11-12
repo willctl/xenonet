@@ -62,6 +62,7 @@
 
 pub mod admission;
 pub mod codec;
+pub mod compaction;
 pub mod dial;
 pub mod doctor;
 pub mod endpoint;

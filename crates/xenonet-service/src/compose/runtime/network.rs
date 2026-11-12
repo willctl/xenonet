@@ -59,7 +59,7 @@ use xenonet_engine::network::{is_remote, new_id};
 use xenonet_model::ids::{parse_actor_id, AgentId, YOU};
 use xenonet_model::ops::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
 use xenonet_net::feed::{Feed, Kind as EntryKind, Offer};
-use xenonet_net::sink::{Arrived, Feeds};
+use xenonet_net::sink::{Arrived, CompactedIn, Feeds};
 use xenonet_os::sync::Locked;
 use xenonet_store::engine::EngineStore;
 use xenonet_store::sql::Row;
@@ -230,6 +230,12 @@ impl Feeds for EngineSink {
         self.run(move |w| {
             let network = arrived.entry.group.clone();
             xenonet_net::ground::within(&network, || entry_in(w, arrived));
+        });
+    }
+    fn compacted(&self, arrived: CompactedIn) {
+        self.run(move |w| {
+            let network = arrived.compacted.compact().group.clone();
+            xenonet_net::ground::within(&network, || compacted_in(w, arrived));
         });
     }
     // On the caller's thread: the window waits for it, and the store's
@@ -441,12 +447,7 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
                     apply(w, &host, e, auth);
                 }
             }
-            // What a compact entry ended: the feed closed those places.
-            // XenoNet takes no kept kind that stays open here yet besides
-            // handoffs, which don't record their place, so this is noted.
-            if !entries.ended.is_empty() {
-                w.log("info", "net.feed", &format!("{host} compacted its feed: {} entries applied here before are no longer open", entries.ended.len()));
-            }
+            ended(w, &db, &host, &author, &network, &entries.ended);
         }
         Ok(offer)
     });
@@ -484,6 +485,91 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
         Ok(Offer::Stale) => ack(w),
         Ok(Offer::Expired) => w.log("info", "net.feed", &format!("a {} from {host} was refused: it was signed longer ago than its feed keeps entries", kind.as_str())),
         Err(e) => w.log("warn", "net.feed", &format!("an entry from {host} wasn't taken: {e}")),
+    }
+}
+
+/// A compacted range of another member's feed (its answer to a Want below
+/// its floor), which the network checked against the member's key:
+/// offered whole to the author's feed in the store, in one transaction:
+/// the live entries this machine lacks applied, what it held there that
+/// isn't live dropped, never applied later, and what the compact entry
+/// leaves out ended. Then this machine acks what it holds, or asks again.
+pub fn compacted_in(w: &Runtime, a: CompactedIn) {
+    if net(w).me().is_none() {
+        return;
+    }
+    let Some(db) = w.setup.db.clone() else { return };
+    let _one = w.net.taking.locked();
+    let CompactedIn { host, compacted, .. } = a;
+    let (author, network) = (compacted.compact().author.clone(), compacted.compact().group.clone());
+    let mut after = Vec::new();
+    let offered = db.transaction(|| -> std::result::Result<Offer, xenonet_store::sql::SqlError> {
+        let offer = Feed::new(db.feeds()).offer_compacted(compacted).map_err(kept_error)?;
+        if let Offer::New(entries) = &offer {
+            for e in entries {
+                if waits_on_others(e) {
+                    after.push(e.clone());
+                } else {
+                    apply(w, &host, e, &json!({}));
+                }
+            }
+            ended(w, &db, &host, &author, &network, &entries.ended);
+        }
+        Ok(offer)
+    });
+    if offered.is_ok() {
+        for e in &after {
+            apply(w, &host, e, &json!({}));
+        }
+    }
+    match offered {
+        Ok(Offer::New(_) | Offer::Duplicate | Offer::Stale) => match Feed::new(db.feeds()).ack(&author, &network) {
+            Ok(Some(a)) => net(w).ack(&network, &host, a.inc, a.high),
+            Ok(None) => {}
+            Err(e) => w.log("warn", "net.feed", &format!("where this machine stands with {host}'s feed wasn't read: {}", e.message)),
+        },
+        Ok(Offer::Gap(want)) => net(w).want(&network, &host, want.inc, want.from),
+        Ok(Offer::Fork(f)) => w.log(
+            "warn",
+            "net.feed",
+            &format!("{host} signed two different entries at {}.{} of its feed: nothing more from it is taken until you unfreeze it in XenoNet's window", f.at.inc, f.at.seq),
+        ),
+        Ok(Offer::Frozen(_) | Offer::Expired) => w.log("info", "net.feed", &format!("a compacted range from {host} was dropped: its feed is frozen here")),
+        Err(e) => w.log("warn", "net.feed", &format!("a compacted range from {host} wasn't taken: {e}")),
+    }
+}
+
+/// What `author`'s compact entry ended here: the entries it applied
+/// before that the live set leaves out, of the kinds its machine may end
+/// alone. A claim is released, a handoff offer lapses; a report ends with
+/// nothing to do.
+fn ended(w: &Runtime, db: &xenonet_store::Db, host: &str, author: &str, network: &str, places: &[xenonet_net::feed::Pos]) {
+    for at in places {
+        let Ok(Some((e, _))) = db.feed_in_from(author, network, *at, 1).map(|v| v.into_iter().next()) else { continue };
+        if e.pos() != *at {
+            continue;
+        }
+        let done = match e.kind {
+            EntryKind::Claim if s(&e.body, "op").as_deref() == Some("claim") => {
+                let (agent, project, path) = (s(&e.body, "agent").unwrap_or_default(), s(&e.body, "project").unwrap_or_default(), s(&e.body, "path"));
+                store(w, |st| st.release_remote(host, &agent, &project, path.as_deref())).map(|_| ())
+            }
+            EntryKind::Handoff if s(&e.body, "op").as_deref() == Some("offer") => {
+                let id = s(&e.body, "id").unwrap_or_default();
+                match store(w, |st| st.handoff(&id)) {
+                    Ok(Some(r)) if r.text("host") == Some(host) && r.text("state") == Some("open") => store(w, |st| st.settle_handoff(&id, "lapsed", None, now_ms())),
+                    Ok(_) => Ok(()),
+                    Err(f) => Err(f),
+                }
+            }
+            _ => Ok(()),
+        };
+        if let Err(f) = done {
+            w.log("warn", "net.feed", &format!("what {host}'s compaction ended at {}.{} wasn't ended here: {}", at.inc, at.seq, why(&f)));
+        }
+    }
+    if !places.is_empty() {
+        w.log("info", "net.feed", &format!("{host} compacted its feed: {} entries applied here before are no longer open", places.len()));
     }
 }
 

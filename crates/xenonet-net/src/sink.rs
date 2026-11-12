@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
-use xenonet_log::feed::{Feed, Kind as EntryKind, MemoryStore, Offer, Verified};
+use xenonet_log::feed::{Feed, Kind as EntryKind, MemoryStore, Offer, Verified, VerifiedCompacted};
 use xenonet_model::ops::{Incoming, Kind, Sink};
 use xenonet_os::sync::{Locked, ReadWrite};
 
@@ -31,10 +31,29 @@ pub struct Arrived {
     pub window: bool,
 }
 
+/// A compacted range of another member's feed, as this machine took it:
+/// the author's answer to a Want below its floor, from the author or a
+/// holder, every entry of it checked against the key the network's chain
+/// lists for the member, which is `host`.
+#[derive(Debug, Clone)]
+pub struct CompactedIn {
+    pub host: String,
+    pub compacted: VerifiedCompacted,
+    /// Whether the chain makes `host` a window host.
+    pub window: bool,
+}
+
 /// Where other members' feed entries go.
 pub trait Feeds: Send + Sync {
     /// An entry to offer to the author's feed here and apply.
     fn entry(&self, arrived: Arrived);
+    /// A compacted range to offer to the author's feed here
+    /// (`Feed::offer_compacted`): the live entries it lacks applied, what
+    /// it held there that isn't live dropped, and what the compact entry
+    /// leaves out ended.
+    fn compacted(&self, arrived: CompactedIn) {
+        let _ = arrived;
+    }
     /// Takes `author`'s feed in `network` again after a fork, keeping the
     /// entry this machine had: the person's alone, from the window. How
     /// many held entries it applied.
@@ -100,6 +119,24 @@ impl SinkSlot {
             return;
         }
         let offered = self.memory.locked().offer(a.entry);
+        if let Ok(Offer::New(entries)) = offered {
+            for e in entries {
+                let Some(kind) = kind_of(e.kind) else { continue };
+                self.receive(Incoming { network: e.group.clone(), from: a.host.clone(), kind, body: e.body, at: e.at as f64, from_window_host: a.window });
+            }
+        }
+    }
+
+    /// A compacted range of another member's feed: to the engine's feeds,
+    /// or, with none set, applied in memory, its live entries handed to the
+    /// sink.
+    pub fn compacted(&self, a: CompactedIn) {
+        let feeds = self.feeds.reading().clone();
+        if let Some(f) = feeds {
+            f.compacted(a);
+            return;
+        }
+        let offered = self.memory.locked().offer_compacted(a.compacted);
         if let Ok(Offer::New(entries)) = offered {
             for e in entries {
                 let Some(kind) = kind_of(e.kind) else { continue };

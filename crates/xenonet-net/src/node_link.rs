@@ -34,8 +34,12 @@
 //! **Load.** Each machine's load goes live to the window hosts of the
 //! networks that share it (`load`), and the latest of each is kept here.
 //!
-//! What link/2 doesn't carry yet: Compacted answers, which are set aside (a holder's counts as "don't have", so the next
-//! holder or the author is asked).
+//! **Compaction** (`compaction`): this machine compacts its own feed on
+//! its own, and a member that wants what it compacted away gets a
+//! `Compacted` answer (`resend_sealed`): the compact entry, the live
+//! entries and the range's header chain. A `Compacted` from the author or
+//! a holder is checked against the author's key in this machine's chain
+//! and offered to the feed whole (`Feed::offer_compacted`).
 //!
 //! **Finding members.** Each machine signs an address record (its endpoint
 //! id and direct addresses, under its machine signing key) and sends it on
@@ -587,6 +591,17 @@ impl Shared {
     /// sealed for `m`.
     fn resend_sealed(&self, net: &NetFile, m: &Member, after: Pos) -> Vec<Out> {
         let mut out = Vec::new();
+        let mut after = after;
+        // Below the floor of this machine's latest compact entry: the
+        // compaction first, then what came after it.
+        match (self.opts.persist.feed_compacted(&net.id, after), self.machine_id()) {
+            (Ok(Some(c)), Some(me)) => {
+                after = c.compact.pos();
+                out.push(Out::Control(Control::Compacted { network: net.id.clone(), author: me, body: c.to_json() }));
+            }
+            (Err(e), _) => self.log("net.link2", &format!("this machine's compaction couldn't be read to send: {}", e.message)),
+            _ => {}
+        }
         let mut from = Pos::new(after.inc, after.seq.saturating_add(1));
         loop {
             let entries = match self.opts.persist.range(&net.id, from, RESEND) {
@@ -801,11 +816,29 @@ impl Machine for NodeMachine {
                 n.log("net.link2", &format!("{} doesn't hold what was wanted of a feed ({})", m.id, why.as_str()));
                 n.link2_lacks(&network, &author, peer);
             }
-            // Taking a compaction is commit 17's: until then the next
-            // holder, or the author, is asked.
-            Control::Compacted { network, author, .. } => {
-                n.log("net.link2", &format!("a compacted range from {} was set aside: not taken yet", m.id));
-                n.link2_lacks(&network, &author, peer);
+            // The author's compaction, from it or a holder: every entry is
+            // checked against the author's key in this machine's chain, and
+            // the feed decides the rest, as with any entry.
+            Control::Compacted { network, author, body } => {
+                let view = n.roster().view();
+                let Some(by) = view.by_machine(&author).cloned() else {
+                    n.log("net.link2", &format!("{} sent a compacted range of a feed whose author isn't a member", m.id));
+                    return;
+                };
+                let checked = holder::compacted_of(&body).ok_or_else(|| "it doesn't read".to_string()).and_then(|c| c.verify(&by.machine).map_err(|e| e.message)).and_then(|c| {
+                    if c.compact().group == network && c.compact().author == author {
+                        Ok(c)
+                    } else {
+                        Err("it's of another feed".into())
+                    }
+                });
+                match checked {
+                    Ok(c) => n.sink.compacted(crate::sink::CompactedIn { host: by.id.clone(), compacted: c, window: view.is_window(&by.id) }),
+                    Err(why) => {
+                        n.log("net.link2", &format!("a compacted range from {} was refused: {why}", m.id));
+                        n.link2_lacks(&network, &author, peer);
+                    }
+                }
             }
             Control::Held { network, body } => {
                 let (Some(me), Some(t)) = (n.machine_id(), n.link2()) else { return };

@@ -70,13 +70,15 @@ impl Heard {
 }
 
 struct Host {
+    /// Added to the clock this machine's node reads, in ms.
+    offset: Arc<std::sync::atomic::AtomicI64>,
     ctx: Arc<Ctx>,
     svc: Arc<NetService>,
     heard: Arc<Heard>,
     dir: PathBuf,
 }
 
-fn options(dir: &std::path::Path) -> Options {
+fn options(dir: &std::path::Path, offset: &Arc<std::sync::atomic::AtomicI64>, compact_after: u64) -> Options {
     let who = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let mut o = Options::new(
         dir.join("state").join("network"),
@@ -89,7 +91,9 @@ fn options(dir: &std::path::Path) -> Options {
             }
         }),
     );
-    o.clock = Arc::new(now_ms);
+    let offset = offset.clone();
+    o.clock = Arc::new(move || now_ms() + offset.load(std::sync::atomic::Ordering::SeqCst) as f64);
+    o.compact_after = compact_after;
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.bind = Some("127.0.0.1:0".parse().unwrap());
     o
@@ -97,6 +101,11 @@ fn options(dir: &std::path::Path) -> Options {
 
 impl Host {
     async fn new(test: &str, name: &str) -> Host {
+        Host::compacting(test, name, xenonet_net::compaction::AFTER).await
+    }
+
+    /// One that compacts its feed after `compact_after` kept entries.
+    async fn compacting(test: &str, name: &str, compact_after: u64) -> Host {
         let dir = std::env::temp_dir().join(format!("xenonet-net-many-{test}-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -112,12 +121,13 @@ impl Host {
         xenonet_service::serve::wire_root(&mut cores);
         cores.verify = Arc::new(You);
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
-        let svc = NetService::open(options(&dir)).unwrap();
+        let offset = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let svc = NetService::open(options(&dir, &offset, compact_after)).unwrap();
         let heard = Arc::new(Heard::default());
         svc.sinks().set(heard.clone());
         let _ = ctx.net.set(svc.clone());
         svc.start().await.unwrap();
-        Host { ctx, svc, heard, dir }
+        Host { offset, ctx, svc, heard, dir }
     }
 
     async fn call(&self, method: &str, path: &str, body: Value) -> (u16, Value) {
@@ -423,4 +433,61 @@ async fn a_rekeyed_machine_stays_in_its_network_and_its_old_key_is_refused() {
         Ok(l) => assert_eq!(tokio::time::timeout(Duration::from_secs(10), l.closed()).await.expect("closed"), Some(Close::Refused)),
     }
     mesh.close().await;
+}
+
+fn claim(op: &str, path: &str) -> Value {
+    json!({ "schema": "network/claim/v1", "op": op, "project": "prj_web", "path": path, "agent": "claude:web" })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_machine_a_week_behind_catches_up_from_a_compaction_made_on_its_own() {
+    // studio compacts its feed after four kept entries since its last
+    // compact entry.
+    let studio = Host::compacting("compact", "studio", 4).await;
+    let laptop = Host::new("compact", "laptop").await;
+    network(&studio, &laptop, "home", "studio", "laptop").await;
+    let row = |st: &Value, of: &str| st["hosts"].as_array().and_then(|h| h.iter().find(|x| x["id"] == of).cloned()).unwrap_or(Value::Null);
+    until("studio reaches laptop", 15, || row(&futures_lite(studio.state()), "laptop")["path"] == "direct").await;
+    laptop.svc.stop();
+    until("laptop away", 15, || row(&futures_lite(studio.state()), "laptop")["online"] == false).await;
+
+    // While laptop is away: a claim that stays, one made and let go, and a
+    // report signed eight days ago, which its week's retention drops.
+    let s = studio.svc.node().shared().clone();
+    studio.send(None, To::All, Kind::Claims, claim("claim", "src/")).unwrap();
+    studio.send(None, To::All, Kind::Claims, claim("claim", "lib/")).unwrap();
+    let kept = common::kept(&studio.dir.join("state"));
+    let net = s.network().unwrap().id;
+    let out = || kept.feed_out_after(&net, xenonet_net::feed::Pos::ORIGIN, 100).unwrap();
+    let let_go = out().last().cloned().unwrap();
+    assert_eq!(let_go.seq, 2);
+    studio.offset.store(-8 * 24 * 3_600_000, std::sync::atomic::Ordering::SeqCst);
+    s.write_entry(xenonet_net::feed::Kind::Report, json!({ "schema": "network/report/v1", "text": "eight days ago" })).unwrap();
+    studio.offset.store(0, std::sync::atomic::Ordering::SeqCst);
+    // The fourth: the compaction comes on its own, keeping the first claim.
+    studio.send(None, To::All, Kind::Claims, claim("release", "lib/")).unwrap();
+    let c = out().into_iter().find(|e| e.kind == xenonet_net::feed::Kind::Compact).expect("compacted");
+    assert_eq!(c.kind, xenonet_net::feed::Kind::Compact, "a compact entry after the fourth");
+    assert_eq!(c.compact().unwrap().live, [1], "only the claim that stays");
+
+    // laptop held the let-go claim behind a gap before it went away, as if
+    // it had come alone: a compaction that drops it, it never applies.
+    let n = laptop.svc.node().shared().clone();
+    let machine = n.identity().machine_key().unwrap().public().id();
+    let env = xenonet_net::envelope::Envelope::seal_act(&let_go, &machine, n.key().unwrap().public(), None, None).unwrap();
+    n.envelope_from("studio", env);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let claims = || laptop.heard.all().into_iter().filter(|h| h.2 == "claims" && h.1 == "studio").map(|h| h.3["path"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+    assert!(claims().is_empty(), "held behind its gap");
+
+    // Back: the author answers with its compaction, and laptop takes the
+    // live claim and nothing it dropped.
+    laptop.svc.start().await.unwrap();
+    until("laptop took the live claim", 20, || claims() == ["src/"]).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert_eq!(claims(), ["src/"], "neither the let-go claim, its release nor the old report");
+    assert!(!laptop.heard.all().iter().any(|h| h.2 == "report"), "the report aged out");
+    // Caught up: the next entry applies at once.
+    studio.send(None, To::All, Kind::Claims, claim("claim", "docs/")).unwrap();
+    until("the next claim", 15, || claims() == ["src/", "docs/"]).await;
 }

@@ -18,7 +18,7 @@ use crate::{roster, R};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-use xenonet_log::feed::{FeedEntry, Fork, Link, Pos};
+use xenonet_log::feed::{Compacted, FeedEntry, Fork, Kind, Link, Pos};
 use xenonet_log::person;
 use xenonet_os::sync::Locked;
 
@@ -92,6 +92,14 @@ pub trait Persist: Send + Sync {
     /// hello says it hasn't got.
     fn range(&self, network: &str, from: Pos, limit: usize) -> R<Vec<FeedEntry>> {
         self.feed_out_after(network, Pos::new(from.inc, from.seq.saturating_sub(1)), limit)
+    }
+    /// The answer to a member that wants this machine's feed in `network`
+    /// from after `after`, when that's below the floor its latest compact
+    /// entry set: the compact entry, the live entries from there on and the
+    /// headers of the range. None when nothing the member lacks was
+    /// compacted. A store that keeps no compaction has none.
+    fn feed_compacted(&self, _network: &str, _after: Pos) -> R<Option<Compacted>> {
+        Ok(None)
     }
     /// How far `member` said it holds this machine's feed.
     fn feed_ack(&self, network: &str, member: &str) -> R<Option<Pos>>;
@@ -169,6 +177,8 @@ struct Kept {
     roots: Vec<Value>,
     writers: BTreeMap<String, WriterAt>,
     out: BTreeMap<String, Vec<FeedEntry>>,
+    /// The places of `out` a compact entry dropped: their headers stay.
+    dropped: std::collections::BTreeSet<(String, Pos)>,
     acks: BTreeMap<(String, String), Pos>,
     sharing: BTreeMap<String, Sharing>,
     mail: Vec<Mail>,
@@ -270,11 +280,33 @@ impl Persist for Memory {
         k.writers.insert(network.to_string(), at);
         if let Some(e) = kept {
             k.out.entry(network.to_string()).or_default().push(e.clone());
+            // A compact entry drops what of its range it doesn't keep live.
+            if let Some(c) = e.compact() {
+                let gone: Vec<Pos> = k.out[network].iter().map(FeedEntry::pos).filter(|p| p.inc == c.inc && p.seq <= c.upto && !c.keeps(*p)).collect();
+                k.dropped.extend(gone.into_iter().map(|p| (network.to_string(), p)));
+            }
         }
         Ok(())
     }
     fn feed_out_after(&self, network: &str, after: Pos, limit: usize) -> R<Vec<FeedEntry>> {
-        Ok(self.0.locked().out.get(network).map(|es| es.iter().filter(|e| e.pos() > after).take(limit).cloned().collect()).unwrap_or_default())
+        let k = self.0.locked();
+        let kept = |e: &&FeedEntry| !k.dropped.contains(&(network.to_string(), e.pos()));
+        Ok(k.out.get(network).map(|es| es.iter().filter(|e| e.pos() > after).filter(kept).take(limit).cloned().collect()).unwrap_or_default())
+    }
+    fn feed_compacted(&self, network: &str, after: Pos) -> R<Option<Compacted>> {
+        let k = self.0.locked();
+        let Some(es) = k.out.get(network) else { return Ok(None) };
+        let dropped = |e: &FeedEntry| k.dropped.contains(&(network.to_string(), e.pos()));
+        let Some(compact) = es.iter().rev().find(|e| e.kind == Kind::Compact && !dropped(e)) else { return Ok(None) };
+        let Some(body) = compact.compact() else { return Ok(None) };
+        if after.inc > body.inc || after >= Pos::new(body.inc, body.upto) {
+            return Ok(None);
+        }
+        let lo = if after.inc == body.inc { after.seq + 1 } else { 1 };
+        let range: Vec<&FeedEntry> = es.iter().filter(|e| e.inc == body.inc && (lo..=body.upto).contains(&e.seq)).collect();
+        let headers = range.iter().map(|e| e.header()).collect();
+        let live = range.iter().filter(|e| !dropped(e)).map(|e| (*e).clone()).collect();
+        Ok(Some(Compacted { compact: compact.clone(), live, headers }))
     }
     fn feed_ack(&self, network: &str, member: &str) -> R<Option<Pos>> {
         Ok(self.0.locked().acks.get(&(network.to_string(), member.to_string())).copied())

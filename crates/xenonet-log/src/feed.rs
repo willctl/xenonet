@@ -816,6 +816,13 @@ pub struct VerifiedCompacted {
     headers: Vec<Header>,
 }
 
+impl VerifiedCompacted {
+    /// The compact entry it carries: its author, group and place.
+    pub fn compact(&self) -> &Verified {
+        &self.compact
+    }
+}
+
 /// The author's side: numbers and signs its entries in one group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Writer {

@@ -84,6 +84,9 @@ pub struct Nodes {
     empty: Arc<Node>,
     /// link/2's task, while it runs.
     link2: Mutex<Option<JoinHandle<()>>>,
+    /// The look at every feed for a compaction due, every
+    /// `compaction::EVERY_MS`, while the machine runs.
+    compactor: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Nodes {
@@ -99,7 +102,7 @@ impl Nodes {
             nets.push(Node::open_in(opts.clone(), sink.clone(), common.clone(), Some(net))?);
         }
         let empty = Node::open_in(opts.clone(), sink.clone(), common.clone(), None)?;
-        let nodes = Arc::new_cyclic(|this| Nodes { this: this.clone(), opts, sink, common, nets: RwLock::new(nets), empty, link2: Mutex::new(None) });
+        let nodes = Arc::new_cyclic(|this| Nodes { this: this.clone(), opts, sink, common, nets: RwLock::new(nets), empty, link2: Mutex::new(None), compactor: Mutex::new(None) });
         nodes.listed();
         // What the person appends here, every network's other machines hear.
         let weak = Arc::downgrade(&nodes);
@@ -171,6 +174,10 @@ impl Nodes {
             n.start()?;
         }
         self.start_link2();
+        let mut c = self.compactor.locked();
+        if c.as_ref().is_none_or(JoinHandle::is_finished) {
+            *c = Some(tokio::spawn(compact_clock(Arc::downgrade(&self.common))));
+        }
         Ok(())
     }
 
@@ -179,6 +186,9 @@ impl Nodes {
             n.stop();
         }
         if let Some(t) = self.link2.locked().take() {
+            t.abort();
+        }
+        if let Some(t) = self.compactor.locked().take() {
             t.abort();
         }
         link2n::stop(&self.common);
@@ -485,6 +495,19 @@ impl Nodes {
 
 fn names(nets: &[Arc<Node>]) -> String {
     nets.iter().filter_map(|n| n.shared().network()).map(|f| format!("{} ({})", f.name, f.id)).collect::<Vec<_>>().join(", ")
+}
+
+// Every `compaction::EVERY_MS`, each network's feed of this machine's is
+// compacted when that's due: entries whose retention ran out while nothing
+// was written go then.
+async fn compact_clock(common: Weak<Common>) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(crate::compaction::EVERY_MS)).await;
+        let Some(c) = common.upgrade() else { return };
+        for s in c.shareds() {
+            s.compact_if_due(true);
+        }
+    }
 }
 
 // link/2 for every network, started again when the relays it needs go

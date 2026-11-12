@@ -228,7 +228,7 @@ On the map, a project space is tied to its project by the project's id only when
 
 ## When a machine is away
 
-Each machine keeps working for its own sessions. Messages, receipts, claims and handoffs for a machine that's away wait for it: at a mailbox, if the network has one, or on the machine that sent them, for up to a week. They go once it's back, each delivered once. A machine that missed something fills the gap from any machine of the network that holds it, not only the one that sent it. Other machines' sessions stay in `peers`, marked offline, and the Network panel says since when.
+Each machine keeps working for its own sessions. Messages, receipts, claims and handoffs for a machine that's away wait for it: at a mailbox, if the network has one, or on the machine that sent them, for up to a week. They go once it's back, each delivered once. A machine that missed something fills the gap from any machine of the network that holds it, not only the one that sent it. Each machine also trims what it keeps of its own, on its own: what's still open (claims, handoffs on offer, intents until they end) stays, and the rest goes once it's settled or a week old. A machine back after longer gets what's still open, and what it had of the rest ends there: a claim let go meanwhile is released, an offer settled meanwhile lapses. Other machines' sessions stay in `peers`, marked offline, and the Network panel says since when.
 
 ## Removing a machine
 
