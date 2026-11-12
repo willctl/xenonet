@@ -142,6 +142,10 @@ struct Party {
     /// What another host's task asks of this machine, done on its own
     /// simulated host: a socket is written only from the host it's on.
     own: OnceLock<mpsc::UnboundedSender<Job>>,
+    /// The protocol it speaks: link/2, or another shaped like it.
+    protocol: Protocol,
+    /// The machines whose hello's addition it refuses (`hello_ext_in`).
+    refuses: Mutex<BTreeSet<u8>>,
 }
 
 type Job = Box<dyn FnOnce(&Arc<Links>) + Send>;
@@ -152,7 +156,14 @@ impl Party {
     }
 
     fn with_clock(n: u8, networks: &[(&str, &[u8])], offset: i64) -> Arc<Party> {
+        Party::on(LINK2, n, networks, offset)
+    }
+
+    /// A machine speaking `protocol`, for the groups `networks` names.
+    fn on(protocol: Protocol, n: u8, networks: &[(&str, &[u8])], offset: i64) -> Arc<Party> {
         Arc::new_cyclic(|this| Party {
+            protocol,
+            refuses: Mutex::new(BTreeSet::new()),
             this: this.clone(),
             n,
             transport: transport(n),
@@ -196,14 +207,15 @@ impl Party {
     /// networks admitted, and kept connected.
     async fn start(self: &Arc<Self>) -> R<Arc<Links>> {
         let dial = SimDial::bind(peer(self.n), hosts()).await?;
-        let mesh = Arc::new(Mesh::new(Arc::new(dial), Arc::new(Admission::new())));
+        let admission = if self.protocol == LINK2 { Admission::new() } else { Admission::with(crate::admission::Doors { members: vec![self.protocol.alpn], join: None }) };
+        let mesh = Arc::new(Mesh::new(Arc::new(dial), Arc::new(admission)));
         let mut everyone = BTreeSet::new();
         for (id, v) in self.views.locked().iter() {
             let members: Vec<PeerId> = v.members.values().map(|m| PeerId(m.keys.sign)).collect();
             everyone.extend(members.iter().copied());
             mesh.set_members(id, members);
         }
-        let links = Links::new(mesh, self.clone());
+        let links = Links::over(self.protocol, mesh, self.clone());
         let _ = self.links.set(links.clone());
         tokio::spawn(links.clone().accept());
         tokio::spawn(links.clone().keep_up());
@@ -434,6 +446,23 @@ impl Machine for Party {
     fn now_ms(&self) -> u64 {
         let ms = T + u64::try_from(turmoil::elapsed().as_millis()).unwrap();
         ms.saturating_add_signed(self.offset)
+    }
+
+    // On another protocol, the hello says which machine it is beside its
+    // groups, as Xenolith's says its context key.
+    fn hello_ext(&self, _peer: PeerId) -> Option<Value> {
+        (self.protocol != LINK2).then(|| json!({ "n": self.n }))
+    }
+
+    fn hello_ext_in(&self, _peer: PeerId, ext: Option<&Value>) -> R<()> {
+        if self.protocol == LINK2 {
+            return Ok(());
+        }
+        let n = ext.and_then(|e| e.get("n")).and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok()).ok_or_else(|| NetError::bad("no addition"))?;
+        if self.refuses.locked().contains(&n) {
+            return Err(NetError::new(403, "refused", "that hello's addition isn't taken here"));
+        }
+        Ok(())
     }
 
     fn hello(&self, _peer: PeerId, network: &str) -> Option<NetHello> {
@@ -695,7 +724,8 @@ async fn until(what: &str, ok: impl Fn() -> bool) -> R<()> {
 async fn settled(x: &Arc<Party>, y: &Arc<Party>) -> R<()> {
     until("one connection, hellos exchanged", || {
         let (Some(xl), Some(yl)) = (x.links.get(), y.links.get()) else { return false };
-        let (lx, ly) = (xl.mesh().link(peer(y.n), Alpn::Link), yl.mesh().link(peer(x.n), Alpn::Link));
+        let alpn = x.protocol.alpn;
+        let (lx, ly) = (xl.mesh().link(peer(y.n), alpn), yl.mesh().link(peer(x.n), alpn));
         let same = matches!((&lx, &ly), (Some(a), Some(b)) if a.dialled_by() == b.dialled_by());
         let hello = |m: &Arc<Party>, o: u8| m.links().peers().get(&peer(o)).is_some_and(|p| p.skew_ms.is_some());
         same && hello(x, y.n) && hello(y, x.n)
@@ -1099,7 +1129,7 @@ fn a_clock_ahead_shows_as_skew_its_entries_are_taken_and_only_its_presence_dropp
 
 #[test]
 fn records_read_back_and_a_record_past_the_limit_is_refused() {
-    let hello = Control::Hello { at: T, networks: vec![NetHello { network: N1.into(), chain: Some("h".into()), feeds: vec![(author(A), Pos::new(T, 4))] }] };
+    let hello = Control::Hello { at: T, networks: vec![NetHello { network: N1.into(), chain: Some("h".into()), feeds: vec![(author(A), Pos::new(T, 4))] }], ext: None };
     let want = Control::Want { network: N1.into(), author: author(A), inc: T, from: 3 };
     let ack = Control::Ack { network: N2.into(), author: author(B), inc: T, high: 9 };
     let held = Control::Held { network: N1.into(), body: json!({ "ids": [] }) };
@@ -1122,6 +1152,75 @@ fn records_read_back_and_a_record_past_the_limit_is_refused() {
         });
         assert_eq!(read_record(&mut r).await.unwrap_err().code, "bad-request");
     });
+}
+
+// ---------- another program's protocol, shaped like link/2 ----------
+
+const SYNC: Protocol = Protocol { alpn: Alpn::App(b"xenolith/sync/2"), group: Group::Space, name: "sync/2" };
+const S1: &str = "spc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+#[test]
+fn records_name_only_their_protocols_kind_of_group_and_a_hellos_addition_reads_back() {
+    let want = |g: &str| format!(r#"{{"t":"want","network":"{g}","author":"{}","inc":1,"from":1}}"#, author(A));
+    assert!(Control::decode(want(N1).as_bytes()).is_ok());
+    assert!(Control::decode(want(S1).as_bytes()).is_err(), "link/2 carries networks alone");
+    assert!(Control::decode_in(&SYNC, want(S1).as_bytes()).is_ok());
+    let e = Control::decode_in(&SYNC, want(N1).as_bytes()).unwrap_err();
+    assert!(e.message.contains("sync/2"), "{}", e.message);
+    let hello = Control::Hello { at: T, networks: vec![NetHello { network: S1.into(), chain: None, feeds: Vec::new() }], ext: Some(json!({ "key": "k" })) };
+    assert_eq!(Control::decode_in(&SYNC, &hello.encode()).unwrap(), hello);
+    // link/2's hello has no addition, so its bytes are as they were.
+    let plain = Control::Hello { at: T, networks: Vec::new(), ext: None };
+    assert_eq!(plain.to_json(), json!({ "t": "hello", "v": 2, "at": T, "networks": [] }));
+    assert!(Control::decode(br#"{"t":"hello","v":2,"at":1,"networks":[],"ext":"x"}"#).is_err(), "an addition is an object");
+}
+
+#[test]
+fn a_space_feed_goes_over_another_programs_protocol_as_a_networks_does_over_link2() {
+    for seed in [31, 32] {
+        let mut s = sim(seed);
+        let a = Party::on(SYNC, A, &[(S1, &[A, B])], 0);
+        let b = Party::on(SYNC, B, &[(S1, &[A, B])], 0);
+        serve(&mut s, &b);
+        let (a2, b2) = (a.clone(), b.clone());
+        s.client("a", async move {
+            a2.start().await?;
+            settled(&a2, &b2).await?;
+            assert!(a2.links().mesh().link(peer(B), Alpn::Link).is_none(), "nothing on XenoNet's protocol");
+            for i in 0..12 {
+                let e = a2.claim(S1, i);
+                a2.send(&e, B);
+            }
+            until("b holds all 12", || b2.kept_from(A, S1).len() == 12).await?;
+            Ok(())
+        });
+        s.run().unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        assert!(in_order(&b.kept_from(A, S1)), "seed {seed}");
+        assert_eq!(b.hellos.locked().first().map(String::as_str), Some(S1));
+    }
+}
+
+#[test]
+fn a_hello_whose_addition_is_refused_ends_the_connection_before_anything_of_its_groups_is_read() {
+    let mut s = sim(33);
+    let a = Party::on(SYNC, A, &[(S1, &[A, B])], 0);
+    let b = Party::on(SYNC, B, &[(S1, &[A, B])], 0);
+    b.refuses.locked().insert(A);
+    serve(&mut s, &b);
+    let (a2, b2) = (a.clone(), b.clone());
+    s.client("a", async move {
+        a2.start().await?;
+        for i in 0..5 {
+            let e = a2.claim(S1, i);
+            a2.send(&e, B);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(b2.hellos.locked().is_empty(), "no part of a refused hello is read");
+        assert!(b2.applied.locked().is_empty(), "nothing taken from it");
+        Ok(())
+    });
+    s.run().unwrap();
 }
 
 #[path = "holder_tests.rs"]

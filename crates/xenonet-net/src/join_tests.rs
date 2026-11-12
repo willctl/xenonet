@@ -65,6 +65,83 @@ fn both_proofs_cover_the_ticket_the_network_both_endpoints_and_the_add() {
     assert!(!check_joiner(&hash, &b, &i));
 }
 
+// ---------- another program's join ----------
+
+const JOIN1: Alpn = Alpn::App(b"xenolith/join/1");
+
+// A join to the inviter itself, which names no target: Xenolith's join/1.
+const OTHER: JoinTarget = JoinTarget {
+    alpn: JOIN1,
+    prefix: "xlj1_",
+    label: "xenolith-join/1",
+    schema: "xenolith/join/v1",
+    how: "xenolith invite",
+    target_len: 0,
+    target_bytes: |id| id.is_empty().then(Vec::new),
+    target_of: |_| Some(String::new()),
+    relay_ok: crate::roster::is_relay_url,
+};
+
+#[test]
+fn another_targets_invites_and_proofs_are_its_own_and_never_a_networks() {
+    let inv = Invite { network: String::new(), inviter: A, relay: Some("https://relay.example.net/".into()), ticket: TicketId([7; 16]) };
+    let text = inv.encode_for(&OTHER).unwrap();
+    assert!(text.starts_with("xlj1_"), "{text}");
+    assert_eq!(Invite::parse_for(&OTHER, &text).unwrap(), inv);
+    assert!(Invite::parse(&text).is_err(), "not a network's invite");
+    let e = Invite::parse_for(&OTHER, &invite(TicketId([7; 16])).encode()).unwrap_err();
+    assert!(e.message.contains("xenolith invite"), "{}", e.message);
+    assert_eq!(Invite { network: NET.into(), ..inv.clone() }.encode_for(&OTHER), None, "a target it can't carry");
+
+    let hash = ticket::hash(CODE);
+    let (t, add) = (TicketId([1; 16]), sha256(b"add"));
+    let b = Bound { ticket: &t, network: "", inviter: &A, joiner: &B, add: &add };
+    let p = OTHER.joiner_proof(&hash, &b);
+    assert!(OTHER.check_joiner(&hash, &b, &p));
+    assert!(!NETWORK.check_joiner(&hash, &b, &p), "a proof for one target is none for another");
+    assert!(!OTHER.check_joiner(&hash, &b, &NETWORK.joiner_proof(&hash, &b)));
+    assert!(!OTHER.check_inviter(&hash, &b, &p));
+}
+
+#[test]
+fn a_machine_joins_another_programs_target_on_its_own_door_and_xenonets_stays_shut() {
+    let mut sim = sim(7);
+    let slot = Arc::new(Mutex::new(None));
+    let served = Arc::new(Mutex::new(Vec::new()));
+    let admit = Arc::new(Fixed { answer: json!({ "share": "s" }), calls: AtomicUsize::new(0) });
+    let doors = || crate::admission::Doors { members: Vec::new(), join: Some(JOIN1) };
+    let (at_a, done) = (slot.clone(), served.clone());
+    let fixed = admit.clone();
+    sim.host("a", move || {
+        let (slot, served, admit) = (at_a.clone(), done.clone(), fixed.clone());
+        async move {
+            let mesh = Arc::new(Mesh::new(Arc::new(SimDial::bind(A, hosts()).await?), Arc::new(Admission::with(doors()))));
+            let door = Door::to(OTHER, mesh.clone());
+            let id = door.open("", "laptop", false, CODE, NOW + 600_000)?;
+            assert_eq!(mesh.admission().offered(), [JOIN1]);
+            *slot.locked() = Some(Invite { network: String::new(), inviter: A, relay: None, ticket: id });
+            while let Some(link) = mesh.accept().await {
+                assert_eq!(link.alpn(), JOIN1);
+                let s = door.serve(&link, admit.as_ref(), NOW).await?;
+                served.locked().push(s);
+            }
+            Ok(())
+        }
+    });
+    let at_b = slot.clone();
+    sim.client("b", async move {
+        let inv = wait_for(&at_b).await;
+        let mesh = Arc::new(Mesh::new(Arc::new(SimDial::bind(B, hosts()).await?), Arc::new(Admission::with(doors()))));
+        // XenoNet's join/2 isn't a door of this mesh, nor of the inviter's.
+        assert_eq!(ask(&mesh, &inv, CODE, ADD).await.unwrap_err().code, "no-door");
+        let answer = ask_to(&OTHER, &mesh, &inv, CODE, ADD).await?;
+        assert_eq!(answer, Answer::Joined(json!({ "share": "s" })));
+        Ok(())
+    });
+    sim.run().unwrap();
+    assert_eq!(*served.locked(), [Served::Joined { host: "laptop".into() }]);
+}
+
 // ---------- the door on the simulated network ----------
 
 fn hosts() -> BTreeMap<PeerId, String> {
@@ -192,7 +269,7 @@ fn wrong_codes_get_no_proof_and_five_retire_the_ticket() {
         // With no ticket id, and with one that isn't open: refused, and
         // nothing counted against the ticket.
         for ticket in [None, Some(TicketId([9; 16]).to_string())] {
-            let mut a = json!({ "schema": SCHEMA, "network": NET, "add": ADD, "proof": "x" });
+            let mut a = json!({ "schema": NETWORK.schema, "network": NET, "add": ADD, "proof": "x" });
             if let Some(t) = ticket {
                 a["ticket"] = json!(t);
             }
@@ -236,12 +313,12 @@ fn a_wrong_codes_answer_carries_no_proof() {
         let add_hash = sha256(ADD.as_bytes());
         let bound = Bound { ticket: &inv.ticket, network: NET, inviter: &A, joiner: &B, add: &add_hash };
         let wrong = joiner_proof(&ticket::hash("KX7Q49MZT3"), &bound);
-        let v = attempt(&mesh, &json!({ "schema": SCHEMA, "ticket": inv.ticket.to_string(), "network": NET, "add": ADD, "proof": wrong })).await?;
+        let v = attempt(&mesh, &json!({ "schema": NETWORK.schema, "ticket": inv.ticket.to_string(), "network": NET, "add": ADD, "proof": wrong })).await?;
         assert_eq!((v["refused"].clone(), v["left"].clone()), (json!("wrong-code"), json!(4)), "{v}");
         assert!(v.get("proof").is_none() && v.get("answer").is_none(), "nothing of the inviter's: {v}");
         // The right code, on the same ticket: the proof comes, and checks.
         let right = joiner_proof(&ticket::hash(CODE), &bound);
-        let v = attempt(&mesh, &json!({ "schema": SCHEMA, "ticket": inv.ticket.to_string(), "network": NET, "add": ADD, "proof": right })).await?;
+        let v = attempt(&mesh, &json!({ "schema": NETWORK.schema, "ticket": inv.ticket.to_string(), "network": NET, "add": ADD, "proof": right })).await?;
         assert!(check_inviter(&ticket::hash(CODE), &bound, v["proof"].as_str().unwrap()), "{v}");
         // The proof binds the add: the same code for another add is wrong.
         Ok(())

@@ -438,23 +438,89 @@ pub fn serve(
     limits: &mut Limits,
     now: u64,
 ) -> Vec<crate::link2::Out> {
+    serve_in(&Network { view, admitted_at }, requester, want, held, limits, now)
+}
+
+/// A member asking a holder for entries, as the holder's own copy of the
+/// group's chain has it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Requester {
+    /// Its own feed's author id: a holder never serves a member its own.
+    pub author: String,
+    /// When it was admitted (ms): what was signed before goes only as the
+    /// live set.
+    pub admitted_at: u64,
+}
+
+/// A group as a holder decides on it: this machine's own copy of the
+/// group's chain. A network's roster is one (`serve`); another program
+/// brings its own (Xenolith: a space's chain, which admits a requester only
+/// at read or above, rev 14).
+pub trait Holds {
+    /// The group's id.
+    fn group(&self) -> &str;
+    /// The current member at `peer`'s endpoint id that may be served the
+    /// group's entries, or None.
+    fn requester(&self, peer: PeerId) -> Option<Requester>;
+    /// Whether `author` writes a feed in the group.
+    fn writes(&self, author: &str) -> bool;
+    /// `entry` in an envelope for the requester at `peer` (sealed for it).
+    fn envelope(&self, entry: &FeedEntry, peer: PeerId, to: &Requester) -> Option<crate::envelope::Envelope>;
+}
+
+/// A Want for `author`'s feed in `want.0` from `want.1` on, from the peer
+/// `requester`, answered as a holder of `group`: to a current member of it
+/// alone, in an envelope for it, with only the live set of what was signed
+/// before it was admitted, within its rate limit. `held` reads what this
+/// machine applied of the feed from a place on.
+pub fn serve_in(group: &impl Holds, requester: PeerId, want: (&str, &str, Pos), held: impl FnOnce(Pos) -> Vec<Held>, limits: &mut Limits, now: u64) -> Vec<crate::link2::Out> {
     let (network, author, from) = want;
     let no = |l: Lack| records(Answer::DontHave(l), network, author, from, 1, |_| None);
-    let Some(member) = (view.network == network).then(|| view.members.values().find(|m| m.keys.sign == requester.0)).flatten() else {
+    let Some(member) = (group.group() == network).then(|| group.requester(requester)).flatten() else {
         return no(Lack::Refused);
     };
-    if view.by_machine(author).is_none() || member.machine.id() == author {
+    if !group.writes(author) || member.author == author {
         return no(Lack::None);
     }
-    let a = answer(from, &held(from), admitted_at(member), SERVE);
+    let a = answer(from, &held(from), member.admitted_at, SERVE);
     let n = match &a {
         Answer::Entries(es) => es.len(),
         Answer::Compacted(_, after) => after.len() + 1,
         Answer::DontHave(_) => 1,
     };
     let room = limits.records(requester, n, now);
-    let (to, keys) = (member.machine.id(), member.keys);
-    records(a, network, author, from, room, |e| crate::envelope::Envelope::seal_entry(e, &to, &keys, None).ok())
+    records(a, network, author, from, room, |e| group.envelope(e, requester, &member))
+}
+
+// A network's roster as a holder decides on it.
+struct Network<'a, F> {
+    view: &'a crate::roster::View,
+    admitted_at: F,
+}
+
+impl<'a, F: Fn(&crate::roster::Member) -> u64> Network<'a, F> {
+    fn member(&self, peer: PeerId) -> Option<&'a crate::roster::Member> {
+        self.view.members.values().find(|m| m.keys.sign == peer.0)
+    }
+}
+
+impl<F: Fn(&crate::roster::Member) -> u64> Holds for Network<'_, F> {
+    fn group(&self) -> &str {
+        &self.view.network
+    }
+
+    fn requester(&self, peer: PeerId) -> Option<Requester> {
+        self.member(peer).map(|m| Requester { author: m.machine.id(), admitted_at: (self.admitted_at)(m) })
+    }
+
+    fn writes(&self, author: &str) -> bool {
+        self.view.by_machine(author).is_some()
+    }
+
+    fn envelope(&self, entry: &FeedEntry, peer: PeerId, to: &Requester) -> Option<crate::envelope::Envelope> {
+        let m = self.member(peer)?;
+        crate::envelope::Envelope::seal_entry(entry, &to.author, &m.keys, None).ok()
+    }
 }
 
 /// A `Compacted` body from a holder, read back.

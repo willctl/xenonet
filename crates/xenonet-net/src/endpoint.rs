@@ -359,7 +359,7 @@ struct EarlyCut {
 
 impl EarlyCut {
     fn admits(&self, peer: &EndpointId, alpn: &[u8], side: Side) -> bool {
-        Alpn::parse(alpn).is_some_and(|a| self.admission.check(&PeerId(*peer.as_bytes()), a, side).is_ok())
+        self.admission.alpn(alpn).is_some_and(|a| self.admission.check(&PeerId(*peer.as_bytes()), a, side).is_ok())
     }
 }
 
@@ -396,7 +396,7 @@ struct Door {
 impl ProtocolHandler for Door {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         let peer = PeerId(*conn.remote_id().as_bytes());
-        if Alpn::parse(conn.alpn()) != Some(self.alpn) || self.admission.check(&peer, self.alpn, Side::Accepted).is_err() {
+        if conn.alpn() != self.alpn.bytes() || self.admission.check(&peer, self.alpn, Side::Accepted).is_err() {
             conn.close(VarInt::from_u32(Close::Refused.code()), Close::Refused.reason());
             return Ok(());
         }
@@ -643,7 +643,7 @@ impl IrohDial {
         let endpoint = b.bind().await.map_err(|e| NetError::internal(format!("the network's endpoint didn't start: {e}")))?;
         let (to, from) = mpsc::channel(64);
         let mut router = Router::builder(endpoint.clone());
-        for alpn in Alpn::ALL {
+        for alpn in admission.protocols() {
             router = router.accept(alpn.bytes(), Door { alpn, admission: admission.clone(), to: to.clone() });
         }
         let router = router.spawn();

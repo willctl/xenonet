@@ -36,12 +36,19 @@ const UNI: u8 = 3;
 // The hello: kind, the connection's dialler, its ALPN, its number.
 const HELLO: usize = 1 + 32 + 1 + 8;
 
+// Another program's ALPN is a byte from its bytes, read back among the
+// ones the listener offers: enough to tell the few a test speaks apart.
 fn alpn_byte(a: Alpn) -> u8 {
     match a {
         Alpn::Link => 0,
         Alpn::Join => 1,
         Alpn::Svc => 2,
+        Alpn::App(b) => 0x80 | (b.iter().fold(0u8, |h, x| h.wrapping_mul(31).wrapping_add(*x)) & 0x7f),
     }
+}
+
+fn alpn_of(byte: u8, offered: &[Alpn]) -> Option<Alpn> {
+    Alpn::ALL.into_iter().chain(offered.iter().copied()).find(|a| alpn_byte(*a) == byte)
 }
 
 fn hello(kind: u8, dialler: PeerId, alpn: Alpn, id: u64) -> [u8; HELLO] {
@@ -53,13 +60,14 @@ fn hello(kind: u8, dialler: PeerId, alpn: Alpn, id: u64) -> [u8; HELLO] {
     h
 }
 
-fn read_hello(h: &[u8; HELLO]) -> Option<(u8, PeerId, Alpn, u64)> {
+// The ALPN comes as its byte: only a connection's hello needs it read.
+fn read_hello(h: &[u8; HELLO]) -> (u8, PeerId, u8, u64) {
     let mut dialler = [0u8; 32];
     dialler.copy_from_slice(&h[1..33]);
-    let alpn = Alpn::ALL.into_iter().find(|a| alpn_byte(*a) == h[33])?;
+    let alpn = h[33];
     let mut id = [0u8; 8];
     id.copy_from_slice(&h[34..]);
-    Some((h[0], PeerId(dialler), alpn, u64::from_be_bytes(id)))
+    (h[0], PeerId(dialler), alpn, u64::from_be_bytes(id))
 }
 
 fn io(e: std::io::Error) -> NetError {
@@ -310,10 +318,11 @@ async fn listen(listener: TcpListener, hosts: BTreeMap<PeerId, String>, shared: 
         if stream.read_exact(&mut h).await.is_err() {
             continue;
         }
-        let Some((kind, dialler, alpn, id)) = read_hello(&h) else { continue };
+        let (kind, dialler, alpn, id) = read_hello(&h);
         let key = (dialler, id);
         match kind {
             CONN => {
+                let Some(alpn) = alpn_of(alpn, &shared.locked().offered) else { continue };
                 // An ALPN not offered fails as iroh's handshake would.
                 let offered = shared.locked().offered.contains(&alpn);
                 let Some(host) = hosts.get(&dialler).cloned() else { continue };

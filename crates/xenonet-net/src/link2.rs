@@ -41,8 +41,17 @@
 //!
 //! What a machine does with what arrives, and what it sends back, is its
 //! `Machine`'s: this module is the wire, and the reconnects.
+//!
+//! **Another program's protocol.** The streams, records and reconnects are
+//! the same for any protocol shaped like link/2 whose groups have feeds
+//! (`Protocol`): XenoNet's link/2 (`LINK2`: networks, on `xenonet/link/2`),
+//! or Xenolith's sync/2 (spaces, on `xenolith/sync/2`), each over a `Mesh`
+//! with its own `Admission`. A record naming a group of another kind than
+//! the protocol's is refused as it's read. What the hello says beyond its
+//! groups (Xenolith's signed part: its context key, its grant, the spaces
+//! it can tell the peer of) is the `Machine`'s (`hello_ext`), checked by
+//! the receiver before anything of the hello's groups is read.
 
-use crate::codec::is_network_id;
 use crate::dial::{Alpn, Close, Link, Mesh, PeerId, Reader, Writer};
 use crate::envelope::{Class, Envelope, MAX_ENVELOPE};
 use crate::holder::Lack;
@@ -54,9 +63,32 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinSet;
-use xenonet_log::feed::Pos;
+use xenonet_log::feed::{Group, Pos};
 use xenonet_log::person::is_key_id;
 use xenonet_os::sync::Locked;
+
+/// A protocol shaped like link/2: its ALPN, the kind of group its records
+/// name, and what the log calls it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Protocol {
+    pub alpn: Alpn,
+    pub group: Group,
+    pub name: &'static str,
+}
+
+/// XenoNet's link/2: networks' feeds, messages and presence.
+pub const LINK2: Protocol = Protocol { alpn: Alpn::Link, group: Group::Network, name: "link/2" };
+
+impl Protocol {
+    /// Whether `id` names a group of this protocol's kind.
+    pub fn names(&self, id: &str) -> bool {
+        Group::of(id) == Some(self.group)
+    }
+
+    fn bad(&self, what: &str) -> NetError {
+        NetError::bad(format!("a {} record's {what} isn't right", self.name))
+    }
+}
 
 /// The most bytes a record takes: an envelope's limit.
 pub const MAX_RECORD: usize = MAX_ENVELOPE;
@@ -75,11 +107,11 @@ const MAX_NETWORKS: usize = 64;
 const MAX_FEEDS: usize = 4096;
 
 fn bad(what: &str) -> NetError {
-    NetError::bad(format!("a link/2 record's {what} isn't right"))
+    LINK2.bad(what)
 }
 
-fn not_connected(peer: PeerId) -> NetError {
-    NetError::new(503, "not-connected", format!("{peer} has no link/2 connection now"))
+fn not_connected(p: &Protocol, peer: PeerId) -> NetError {
+    NetError::new(503, "not-connected", format!("{peer} has no {} connection now", p.name))
 }
 
 // ---------- records ----------
@@ -116,11 +148,12 @@ pub async fn read_record(r: &mut Reader) -> R<Option<Vec<u8>>> {
     Ok(Some(record))
 }
 
-/// One network's part of a hello.
+/// One network's part of a hello (one group's, on another protocol: a
+/// space's on sync/2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetHello {
     pub network: String,
-    /// The hash of the sender's head of the network's chain.
+    /// The hash of the sender's head of the network's (the group's) chain.
     pub chain: Option<String>,
     /// How far the sender applied each author's kept entries, by the
     /// author's machine signing key id.
@@ -139,26 +172,28 @@ impl NetHello {
         json!({ "network": self.network, "chain": self.chain, "feeds": feeds })
     }
 
-    fn parse(v: &Value) -> R<NetHello> {
-        let network = network_of(v)?;
+    fn parse(p: &Protocol, v: &Value) -> R<NetHello> {
+        let network = network_of(p, v)?;
         let chain = match v.get("chain") {
             None | Some(Value::Null) => None,
-            Some(c) => Some(c.as_str().ok_or_else(|| bad("chain"))?.to_string()),
+            Some(c) => Some(c.as_str().ok_or_else(|| p.bad("chain"))?.to_string()),
         };
-        let feeds = v.get("feeds").and_then(Value::as_array).ok_or_else(|| bad("feeds"))?;
+        let feeds = v.get("feeds").and_then(Value::as_array).ok_or_else(|| p.bad("feeds"))?;
         if feeds.len() > MAX_FEEDS {
-            return Err(bad("feeds"));
+            return Err(p.bad("feeds"));
         }
-        let feeds = feeds.iter().map(|f| Ok((author_of(f)?, pos_of(f, "seq")?))).collect::<R<Vec<_>>>()?;
+        let feeds = feeds.iter().map(|f| Ok((author_of(p, f)?, pos_of(p, f, "seq")?))).collect::<R<Vec<_>>>()?;
         Ok(NetHello { network, chain, feeds })
     }
 }
 
-/// A record on the control stream. Each but the hello names its network.
+/// A record on the control stream. Each but the hello names its network
+/// (its group).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
-    /// The sender's clock (ms) and each network it shares with the peer.
-    Hello { at: u64, networks: Vec<NetHello> },
+    /// The sender's clock (ms), each network it shares with the peer, and
+    /// what its `Machine` adds (`Machine::hello_ext`; none on link/2).
+    Hello { at: u64, networks: Vec<NetHello>, ext: Option<Value> },
     /// Every kept entry of `author`'s feed in `network` from (`inc`,
     /// `from`) on.
     Want { network: String, author: String, inc: u64, from: u64 },
@@ -180,20 +215,20 @@ pub enum Control {
     Address { network: String, record: Value },
 }
 
-fn network_of(v: &Value) -> R<String> {
-    v.get("network").and_then(Value::as_str).filter(|n| is_network_id(n)).map(str::to_string).ok_or_else(|| bad("network"))
+fn network_of(p: &Protocol, v: &Value) -> R<String> {
+    v.get("network").and_then(Value::as_str).filter(|n| p.names(n)).map(str::to_string).ok_or_else(|| p.bad("network"))
 }
 
-fn author_of(v: &Value) -> R<String> {
-    v.get("author").and_then(Value::as_str).filter(|a| is_key_id(a)).map(str::to_string).ok_or_else(|| bad("author"))
+fn author_of(p: &Protocol, v: &Value) -> R<String> {
+    v.get("author").and_then(Value::as_str).filter(|a| is_key_id(a)).map(str::to_string).ok_or_else(|| p.bad("author"))
 }
 
-fn n(v: &Value, k: &str) -> R<u64> {
-    v.get(k).and_then(Value::as_u64).ok_or_else(|| bad(k))
+fn n(p: &Protocol, v: &Value, k: &str) -> R<u64> {
+    v.get(k).and_then(Value::as_u64).ok_or_else(|| p.bad(k))
 }
 
-fn pos_of(v: &Value, seq: &str) -> R<Pos> {
-    Ok(Pos::new(n(v, "inc")?, n(v, seq)?))
+fn pos_of(p: &Protocol, v: &Value, seq: &str) -> R<Pos> {
+    Ok(Pos::new(n(p, v, "inc")?, n(p, v, seq)?))
 }
 
 impl Control {
@@ -213,7 +248,13 @@ impl Control {
 
     pub fn to_json(&self) -> Value {
         match self {
-            Control::Hello { at, networks } => json!({ "t": "hello", "v": 2, "at": at, "networks": networks.iter().map(NetHello::to_json).collect::<Vec<_>>() }),
+            Control::Hello { at, networks, ext } => {
+                let mut v = json!({ "t": "hello", "v": 2, "at": at, "networks": networks.iter().map(NetHello::to_json).collect::<Vec<_>>() });
+                if let (Some(o), Some(ext)) = (v.as_object_mut(), ext) {
+                    o.insert("ext".into(), ext.clone());
+                }
+                v
+            }
             Control::Want { network, author, inc, from } => json!({ "t": "want", "network": network, "author": author, "inc": inc, "from": from }),
             Control::Ack { network, author, inc, high } => json!({ "t": "ack", "network": network, "author": author, "inc": inc, "high": high }),
             Control::DontHave { network, author, inc, from, why } => {
@@ -230,42 +271,63 @@ impl Control {
         self.to_json().to_string().into_bytes()
     }
 
+    /// A link/2 record from its JSON.
     pub fn parse(v: &Value) -> R<Control> {
-        let body = |k: &str| v.get(k).filter(|b| b.is_object()).cloned().ok_or_else(|| bad(k));
+        Control::parse_in(&LINK2, v)
+    }
+
+    /// A record of protocol `p` from its JSON: every group it names is of
+    /// `p`'s kind.
+    pub fn parse_in(p: &Protocol, v: &Value) -> R<Control> {
+        let body = |k: &str| v.get(k).filter(|b| b.is_object()).cloned().ok_or_else(|| p.bad(k));
+        let network = || network_of(p, v);
+        let author = || author_of(p, v);
+        let n = |k: &str| n(p, v, k);
         match v.get("t").and_then(Value::as_str) {
             Some("hello") => {
                 if v.get("v") != Some(&json!(2)) {
-                    return Err(bad("version"));
+                    return Err(p.bad("version"));
                 }
-                let nets = v.get("networks").and_then(Value::as_array).ok_or_else(|| bad("networks"))?;
+                let nets = v.get("networks").and_then(Value::as_array).ok_or_else(|| p.bad("networks"))?;
                 if nets.len() > MAX_NETWORKS {
-                    return Err(bad("networks"));
+                    return Err(p.bad("networks"));
                 }
-                Ok(Control::Hello { at: n(v, "at")?, networks: nets.iter().map(NetHello::parse).collect::<R<_>>()? })
+                let ext = match v.get("ext") {
+                    None => None,
+                    Some(e @ Value::Object(_)) => Some(e.clone()),
+                    Some(_) => return Err(p.bad("ext")),
+                };
+                Ok(Control::Hello { at: n("at")?, networks: nets.iter().map(|h| NetHello::parse(p, h)).collect::<R<_>>()?, ext })
             }
-            Some("want") => Ok(Control::Want { network: network_of(v)?, author: author_of(v)?, inc: n(v, "inc")?, from: n(v, "from")? }),
-            Some("ack") => Ok(Control::Ack { network: network_of(v)?, author: author_of(v)?, inc: n(v, "inc")?, high: n(v, "high")? }),
+            Some("want") => Ok(Control::Want { network: network()?, author: author()?, inc: n("inc")?, from: n("from")? }),
+            Some("ack") => Ok(Control::Ack { network: network()?, author: author()?, inc: n("inc")?, high: n("high")? }),
             Some("dont-have") => Ok(Control::DontHave {
-                network: network_of(v)?,
-                author: author_of(v)?,
-                inc: n(v, "inc")?,
-                from: n(v, "from")?,
-                why: v.get("why").and_then(Value::as_str).and_then(Lack::parse).ok_or_else(|| bad("why"))?,
+                network: network()?,
+                author: author()?,
+                inc: n("inc")?,
+                from: n("from")?,
+                why: v.get("why").and_then(Value::as_str).and_then(Lack::parse).ok_or_else(|| p.bad("why"))?,
             }),
-            Some("compacted") => Ok(Control::Compacted { network: network_of(v)?, author: author_of(v)?, body: body("body")? }),
-            Some("held") => Ok(Control::Held { network: network_of(v)?, body: body("body")? }),
+            Some("compacted") => Ok(Control::Compacted { network: network()?, author: author()?, body: body("body")? }),
+            Some("held") => Ok(Control::Held { network: network()?, body: body("body")? }),
             Some("took") => {
-                let ids = v.get("ids").and_then(Value::as_array).filter(|i| i.len() <= crate::mailbox::HAND).ok_or_else(|| bad("ids"))?;
-                Ok(Control::Took { network: network_of(v)?, ids: ids.iter().map(|i| i.as_str().map(str::to_string).ok_or_else(|| bad("ids"))).collect::<R<_>>()? })
+                let ids = v.get("ids").and_then(Value::as_array).filter(|i| i.len() <= crate::mailbox::HAND).ok_or_else(|| p.bad("ids"))?;
+                Ok(Control::Took { network: network()?, ids: ids.iter().map(|i| i.as_str().map(str::to_string).ok_or_else(|| p.bad("ids"))).collect::<R<_>>()? })
             }
-            Some("address") => Ok(Control::Address { network: network_of(v)?, record: body("record")? }),
-            _ => Err(bad("kind")),
+            Some("address") => Ok(Control::Address { network: network()?, record: body("record")? }),
+            _ => Err(p.bad("kind")),
         }
     }
 
+    /// A link/2 record from the bytes it came as.
     pub fn decode(bytes: &[u8]) -> R<Control> {
-        let v: Value = serde_json::from_slice(bytes).map_err(|_| bad("JSON"))?;
-        Control::parse(&v)
+        Control::decode_in(&LINK2, bytes)
+    }
+
+    /// A record of protocol `p` from the bytes it came as.
+    pub fn decode_in(p: &Protocol, bytes: &[u8]) -> R<Control> {
+        let v: Value = serde_json::from_slice(bytes).map_err(|_| p.bad("JSON"))?;
+        Control::parse_in(p, &v)
     }
 }
 
@@ -322,6 +384,16 @@ pub trait Machine: Send + Sync {
     fn up(&self, _peer: PeerId, _up: bool) {}
     /// Something the log should say.
     fn log(&self, _words: &str) {}
+    /// What this machine's hello adds for `peer` beyond its groups: another
+    /// program's own part (Xenolith's signed Hello). None on link/2.
+    fn hello_ext(&self, _peer: PeerId) -> Option<Value> {
+        None
+    }
+    /// The peer's hello's addition (None when it has none), checked before
+    /// anything of the hello's groups is read: an error ends the connection.
+    fn hello_ext_in(&self, _peer: PeerId, _ext: Option<&Value>) -> R<()> {
+        Ok(())
+    }
 }
 
 /// How a peer's connection stands.
@@ -338,11 +410,21 @@ struct Conn {
     link: Arc<Link>,
     tx: mpsc::UnboundedSender<Out>,
     skew: Mutex<Option<i64>>,
+    /// Whether the peer's hello was taken: None until it's read. Nothing
+    /// on a uni stream is read before, and nothing at all after a hello
+    /// that was refused.
+    hello: tokio::sync::watch::Sender<Option<bool>>,
 }
 
 impl Conn {
     fn push(&self, out: Out) {
         let _ = self.tx.send(out);
+    }
+
+    /// Waits for the peer's hello: whether it was taken.
+    async fn hello_taken(&self) -> bool {
+        let mut rx = self.hello.subscribe();
+        rx.wait_for(Option::is_some).await.ok().and_then(|v| *v).unwrap_or(false)
     }
 }
 
@@ -359,9 +441,11 @@ struct Keep {
     failing: BTreeSet<PeerId>,
 }
 
-/// This machine's link/2 connections, over its mesh.
+/// This machine's link/2 connections (or another protocol's), over its
+/// mesh.
 pub struct Links {
     this: Weak<Links>,
+    protocol: Protocol,
     mesh: Arc<Mesh>,
     machine: Arc<dyn Machine>,
     conns: Mutex<BTreeMap<PeerId, Arc<Conn>>>,
@@ -370,8 +454,19 @@ pub struct Links {
 }
 
 impl Links {
+    /// link/2's connections.
     pub fn new(mesh: Arc<Mesh>, machine: Arc<dyn Machine>) -> Arc<Links> {
-        Arc::new_cyclic(|this| Links { this: this.clone(), mesh, machine, conns: Mutex::new(BTreeMap::new()), keep: Mutex::new(Keep::default()), changed: Notify::new() })
+        Links::over(LINK2, mesh, machine)
+    }
+
+    /// `protocol`'s connections, over `mesh`, whose admission has a door
+    /// for its ALPN.
+    pub fn over(protocol: Protocol, mesh: Arc<Mesh>, machine: Arc<dyn Machine>) -> Arc<Links> {
+        Arc::new_cyclic(|this| Links { this: this.clone(), protocol, mesh, machine, conns: Mutex::new(BTreeMap::new()), keep: Mutex::new(Keep::default()), changed: Notify::new() })
+    }
+
+    pub fn protocol(&self) -> &Protocol {
+        &self.protocol
     }
 
     pub fn mesh(&self) -> &Arc<Mesh> {
@@ -404,17 +499,17 @@ impl Links {
     /// connection carries. Nothing waits for a peer that isn't connected:
     /// its kept entries go again on the next connect, from the hello.
     pub fn send(&self, peer: PeerId, out: Out) -> R<()> {
-        let conn = self.conn(peer).ok_or_else(|| not_connected(peer))?;
+        let conn = self.conn(peer).ok_or_else(|| not_connected(&self.protocol, peer))?;
         if let Some(n) = out.network() {
             conn.link.check(n)?;
         }
-        conn.tx.send(out).map_err(|_| not_connected(peer))
+        conn.tx.send(out).map_err(|_| not_connected(&self.protocol, peer))
     }
 
     /// Takes the connections peers dial in, until the mesh closes.
     pub async fn accept(self: Arc<Self>) {
         while let Some(link) = self.mesh.accept().await {
-            if link.alpn() == Alpn::Link {
+            if link.alpn() == self.protocol.alpn {
                 self.adopt(link);
             } else {
                 // join/2 and svc/2 are other doors' (phase 5's commits 14
@@ -429,7 +524,9 @@ impl Links {
         if self.is_connected(peer) {
             return Ok(());
         }
-        let link = tokio::time::timeout(DIAL_TIMEOUT, self.mesh.dial(peer, Alpn::Link)).await.map_err(|_| NetError::new(504, "unreachable", format!("{peer} didn't answer")))??;
+        let link = tokio::time::timeout(DIAL_TIMEOUT, self.mesh.dial(peer, self.protocol.alpn))
+            .await
+            .map_err(|_| NetError::new(504, "unreachable", format!("{peer} didn't answer")))??;
         self.adopt(link);
         Ok(())
     }
@@ -495,7 +592,7 @@ impl Links {
                             let first = k.failing.insert(p);
                             drop(k);
                             if first {
-                                links.machine.log(&format!("link/2 to {p} didn't connect, and is tried again with a growing wait: {}", e.message));
+                                links.machine.log(&format!("{} to {p} didn't connect, and is tried again with a growing wait: {}", links.protocol.name, e.message));
                             }
                         }
                     }
@@ -521,7 +618,7 @@ impl Links {
     fn adopt(&self, link: Arc<Link>) {
         let peer = link.peer();
         let (tx, rx) = mpsc::unbounded_channel();
-        let conn = Arc::new(Conn { link: link.clone(), tx, skew: Mutex::new(None) });
+        let conn = Arc::new(Conn { link: link.clone(), tx, skew: Mutex::new(None), hello: tokio::sync::watch::Sender::new(None) });
         {
             let mut conns = self.conns.locked();
             if conns.get(&peer).is_some_and(|c| Arc::ptr_eq(&c.link, &link)) {
@@ -537,7 +634,7 @@ impl Links {
 
     fn hello_for(&self, link: &Link) -> Control {
         let networks = link.networks().iter().filter_map(|n| self.machine.hello(link.peer(), n)).collect();
-        Control::Hello { at: self.machine.now_ms(), networks }
+        Control::Hello { at: self.machine.now_ms(), networks, ext: self.machine.hello_ext(link.peer()) }
     }
 
     async fn serve(self: Arc<Self>, conn: Arc<Conn>, rx: mpsc::UnboundedReceiver<Out>) {
@@ -557,7 +654,7 @@ impl Links {
                     _ = link.closed() => {}
                     done = tasks.join_next() => {
                         if let Some(Ok(Err(e))) = done {
-                            self.machine.log(&format!("link/2 with {peer} ended: {}", e.message));
+                            self.machine.log(&format!("{} with {peer} ended: {}", self.protocol.name, e.message));
                         }
                         // A stream that ended is mostly the peer closing:
                         // its close says why, so it gets a moment to.
@@ -567,7 +664,7 @@ impl Links {
                 }
             }
             Err(e) => {
-                self.machine.log(&format!("link/2 with {peer} had no control stream: {}", e.message));
+                self.machine.log(&format!("{} with {peer} had no control stream: {}", self.protocol.name, e.message));
                 link.close(Close::Done);
             }
         }
@@ -583,10 +680,23 @@ impl Links {
 
     async fn read_control(self: Arc<Self>, conn: Arc<Conn>, mut r: Reader) -> R<()> {
         let peer = conn.link.peer();
-        let first = read_record(&mut r).await?.ok_or_else(|| bad("hello"))?;
-        let Control::Hello { at, networks } = Control::decode(&first)? else {
-            return Err(bad("hello"));
+        let p = self.protocol;
+        let hello = async {
+            let first = read_record(&mut r).await?.ok_or_else(|| p.bad("hello"))?;
+            let Control::Hello { at, networks, ext } = Control::decode_in(&p, &first)? else {
+                return Err(p.bad("hello"));
+            };
+            self.machine.hello_ext_in(peer, ext.as_ref())?;
+            Ok((at, networks))
         };
+        let (at, networks) = match hello.await {
+            Ok(h) => h,
+            Err(e) => {
+                conn.hello.send_replace(Some(false));
+                return Err(e);
+            }
+        };
+        conn.hello.send_replace(Some(true));
         // Signed: the peer's clock less this one's.
         let skew = i64::try_from(at).unwrap_or(i64::MAX).saturating_sub(i64::try_from(self.machine.now_ms()).unwrap_or(i64::MAX));
         *conn.skew.locked() = Some(skew);
@@ -600,7 +710,7 @@ impl Links {
             }
         }
         while let Some(rec) = read_record(&mut r).await? {
-            let c = match Control::decode(&rec) {
+            let c = match Control::decode_in(&p, &rec) {
                 Ok(c) => c,
                 Err(e) => {
                     self.machine.log(&format!("a control record from {peer} was dropped: {}", e.message));
@@ -614,7 +724,7 @@ impl Links {
                 }
             }
             match c {
-                Control::Hello { .. } => return Err(bad("second hello")),
+                Control::Hello { .. } => return Err(p.bad("second hello")),
                 Control::Want { network, author, inc, from } => {
                     for out in self.machine.want_in(peer, &network, &author, Pos::new(inc, from)) {
                         conn.push(out);
@@ -646,6 +756,9 @@ impl Links {
             },
             _ => return,
         };
+        if !conn.hello_taken().await {
+            return;
+        }
         loop {
             let rec = match read_record(&mut r).await {
                 Ok(Some(rec)) => rec,
@@ -666,7 +779,7 @@ impl Links {
                 self.machine.log(&format!("a {} envelope on {peer}'s {} stream was dropped", env.class.as_str(), class.as_str()));
                 continue;
             }
-            if conn.link.check(&env.network).is_err() {
+            if !self.protocol.names(&env.network) || conn.link.check(&env.network).is_err() {
                 self.machine.log(&format!("an envelope for {} from {peer}, which isn't in it for this machine, was dropped", env.network));
                 continue;
             }

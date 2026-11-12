@@ -49,7 +49,10 @@
 //! - `link2`: `xenonet/link/2`, members' feeds, messages and presence
 //!   between machines on one connection per peer: a hello with each
 //!   shared network's heads, Want/Ack, kept, loose and live streams, every
-//!   record checked against the networks the connection carries.
+//!   record checked against the networks the connection carries. The same
+//!   engine runs another program's protocol shaped like it (`Protocol`,
+//!   over a `Mesh` with that program's `admission::Doors`): Xenolith's
+//!   sync/2, whose groups are spaces.
 //! - `holder`: filling a feed's gap from any member that holds it, one
 //!   holder at a time; serving the entries this machine applied, to
 //!   current members only.
@@ -59,8 +62,9 @@
 //!   valid while the connection is up.
 //! - `join`: joining over `xenonet/join/2`: the invite, the code apart
 //!   from it, proofs both ways, the inviter's tickets, and the joiner's
-//!   check of the chain from its genesis. `ticket`'s gateway proofs stay
-//!   beside it for the gateway's join route until the gateway goes.
+//!   check of the chain from its genesis; another program's join is a
+//!   `JoinTarget` of its own. `ticket`'s gateway proofs stay beside it for
+//!   the gateway's join route until the gateway goes.
 
 pub mod admission;
 pub mod codec;

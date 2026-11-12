@@ -44,13 +44,14 @@
 //! within a window of recent ids; past it, a feed takes each entry once
 //! by its place or id anyway.
 
-use crate::codec::{b64, hash_b64, is_b64, is_network_id, sha256, unb64};
+use crate::codec::{b64, hash_b64, is_b64, sha256, unb64};
 use crate::frame::{open, seal, seal_with};
 use crate::keys::{HostKey, PublicKeys};
 use crate::roster::View;
 use crate::{NetError, R};
 use serde_json::{json, Map, Value};
 use std::collections::{HashSet, VecDeque};
+use xenonet_id::sign::VerifyingKey;
 use xenonet_log::feed::{self, FeedEntry, Pos, Verified};
 // A machine signing key's id, `xns1_…`.
 use xenonet_log::person::is_key_id;
@@ -237,7 +238,9 @@ impl Envelope {
     /// What `parse` holds an envelope to: the head's fields each in its
     /// shape, and the class, seal, recipient and place in agreement.
     pub fn well_formed(&self) -> R<()> {
-        if !is_network_id(&self.network) {
+        // A network's, or a space's: which kind a protocol takes is its own
+        // to check (`link2::Protocol`).
+        if feed::Group::of(&self.network).is_none() {
             return Err(bad("network"));
         }
         if !is_id(&self.id) {
@@ -353,6 +356,20 @@ impl Envelope {
             return Err(NetError::new(403, "wrong-recipient", "that envelope is for another machine"));
         }
         let author = view.by_machine(&self.author).ok_or_else(|| NetError::new(403, "not-member", "that envelope's author isn't in the network"))?;
+        self.open_entry_by(me, &author.machine)
+    }
+
+    /// `open_entry` for a group whose chain isn't a network's (another
+    /// program's: a space): `author` is the key the caller's own copy of
+    /// the group's chain lists for the envelope's author, which the caller
+    /// found a member of the group the envelope names.
+    pub fn open_entry_by(&self, me: &Me<'_>, author: &VerifyingKey) -> R<Verified> {
+        if self.class == Class::Live {
+            return Err(NetError::bad("a live envelope carries no feed entry"));
+        }
+        if self.to != To::Machine(me.machine.into()) {
+            return Err(NetError::new(403, "wrong-recipient", "that envelope is for another machine"));
+        }
         let plain = open(me.key, &self.sealing_head(), &self.body).map_err(|_| NetError::new(400, "unsealed", "that envelope wasn't sealed for this machine, or was changed"))?;
         let entry = FeedEntry::decode(&plain).map_err(|e| NetError::bad(e.message))?;
         let checks: [(&str, bool); 7] = [
@@ -367,7 +384,7 @@ impl Envelope {
         if let Some((what, _)) = checks.iter().find(|(_, ok)| !ok) {
             return Err(mismatch(what));
         }
-        entry.verify(&author.machine).map_err(|e| NetError::new(403, "refused", e.message))
+        entry.verify(author).map_err(|e| NetError::new(403, "refused", e.message))
     }
 
     /// A live envelope's body, taken only from a connection whose peer
@@ -381,7 +398,17 @@ impl Envelope {
             return Err(NetError::new(403, "not-member", "that envelope is for another network"));
         }
         let author = view.by_machine(&self.author).ok_or_else(|| NetError::new(403, "not-member", "that envelope's author isn't in the network"))?;
-        if author.keys.sign != *from {
+        self.open_live_by(from, &author.keys.sign)
+    }
+
+    /// `open_live` for a group whose chain isn't a network's: `author` is
+    /// the endpoint id the caller's own copy of the group's chain lists for
+    /// the envelope's author.
+    pub fn open_live_by(&self, from: &[u8; 32], author: &[u8; 32]) -> R<Value> {
+        if self.class != Class::Live {
+            return Err(NetError::bad("only a live envelope is read from its connection"));
+        }
+        if author != from {
             return Err(NetError::new(403, "not-forwarded", "a live envelope comes from its author's own connection"));
         }
         let body: Value = serde_json::from_slice(&self.body).map_err(|_| bad("body"))?;

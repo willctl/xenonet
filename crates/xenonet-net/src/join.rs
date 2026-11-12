@@ -32,6 +32,16 @@
 //! genesis (`verify`): every entry from the `found` one, the network the
 //! invite named, the inviter in it, and itself added with the keys it
 //! asked for.
+//!
+//! **Another program's join.** The ticket, the code, the proofs in their
+//! order and the five wrong codes are the same for whatever is joined; what
+//! differs is a `JoinTarget`: the ALPN, the invite's prefix, the label the
+//! proofs start with (so a proof for one is none for another), the records'
+//! schema, and how the invite carries the target's id. XenoNet's is
+//! `NETWORK`; Xenolith's join/1 brings its own (`xenolith/join/1`, its own
+//! prefix, the Share entry it asks for as the `add`). What the inviter
+//! signs once a code checks is its `Admit`'s, and what the joiner checks
+//! of the answer is its own (`verify` is the network's).
 
 use crate::codec::{b64, sha256, unb64, unb64_n};
 use crate::dial::{Alpn, Fut, Link, Mesh, PeerId, Reader, Writer};
@@ -53,7 +63,68 @@ pub const INVITE_PREFIX: &str = "xni2_";
 pub const MAX_WRONG: u32 = 5;
 /// How long either side waits for the other's record.
 pub const STEP: Duration = Duration::from_secs(30);
-const SCHEMA: &str = "network/join/v2";
+/// The most bytes an invite carries for its target's id.
+pub const MAX_TARGET: usize = 64;
+
+/// What a join is to: the protocol it runs on, its invites' and proofs'
+/// words, and how an invite carries the target's id (`target_len` bytes,
+/// fixed per target, so an invite's layout never depends on its content).
+#[derive(Clone, Copy, Debug)]
+pub struct JoinTarget {
+    pub alpn: Alpn,
+    /// What an invite starts with.
+    pub prefix: &'static str,
+    /// The proofs' first line.
+    pub label: &'static str,
+    /// The records' schema.
+    pub schema: &'static str,
+    /// What a person runs to get an invite, for the error that names it.
+    pub how: &'static str,
+    pub target_len: usize,
+    /// The target's id as the invite's bytes; None for an id it can't
+    /// carry.
+    pub target_bytes: fn(&str) -> Option<Vec<u8>>,
+    /// The target's id from the invite's bytes.
+    pub target_of: fn(&[u8]) -> Option<String>,
+    /// Whether an invite may name `url` as its relay.
+    pub relay_ok: fn(&str) -> bool,
+}
+
+/// XenoNet's join/2, to a network: its id's 16 bytes.
+pub const NETWORK: JoinTarget = JoinTarget {
+    alpn: Alpn::Join,
+    prefix: INVITE_PREFIX,
+    label: "xenonet-join/2",
+    schema: "network/join/v2",
+    how: "xenonet net invite",
+    target_len: 16,
+    // An id that isn't a network's encodes as zeros, as it always has.
+    target_bytes: |network| Some(hex_bytes(network.strip_prefix("net_").unwrap_or("")).unwrap_or_default().to_vec()),
+    target_of: |bytes| Some(format!("net_{}", xenonet_id::codec::hex(bytes))),
+    relay_ok: crate::roster::is_relay_url,
+};
+
+impl JoinTarget {
+    /// The joiner's proof that it holds the code: keyed by the code's hash.
+    pub fn joiner_proof(&self, hash: &[u8; 32], b: &Bound<'_>) -> String {
+        ticket::mac(hash, &b.text(self.label, "joiner"))
+    }
+
+    pub fn check_joiner(&self, hash: &[u8; 32], b: &Bound<'_>, proof: &str) -> bool {
+        ticket::check(hash, &b.text(self.label, "joiner"), proof)
+    }
+
+    /// The inviter's proof that it knew the code too, sent only after the
+    /// joiner's checked.
+    pub fn inviter_proof(&self, hash: &[u8; 32], b: &Bound<'_>) -> String {
+        ticket::mac(hash, &b.text(self.label, "inviter"))
+    }
+
+    pub fn check_inviter(&self, hash: &[u8; 32], b: &Bound<'_>, proof: &str) -> bool {
+        ticket::check(hash, &b.text(self.label, "inviter"), proof)
+    }
+}
+
 const ASK_MAX: usize = 64 << 10;
 // The chain and the owner's person chain.
 const ANSWER_MAX: usize = 8 << 20;
@@ -86,9 +157,11 @@ impl fmt::Debug for TicketId {
     }
 }
 
-/// An invite to a network, as `xenonet net invite` shows it.
+/// An invite to a network, as `xenonet net invite` shows it (or to another
+/// program's target, `encode_for`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Invite {
+    /// The network's id, or the target's.
     pub network: String,
     pub inviter: PeerId,
     pub relay: Option<String>,
@@ -111,31 +184,46 @@ impl Invite {
     /// endpoint id (32), the network id's 16 bytes, and the relay URL's
     /// bytes, if there is one.
     pub fn encode(&self) -> String {
-        let mut bytes = Vec::with_capacity(64 + self.relay.as_ref().map_or(0, String::len));
+        self.encode_for(&NETWORK).unwrap_or_default()
+    }
+
+    /// The invite to `target`: its prefix and, in base64url, the ticket id
+    /// (16 bytes), the inviter's endpoint id (32), the target's id
+    /// (`target_len`), and the relay URL's bytes, if there is one. None when
+    /// `network` is no id the target can carry.
+    pub fn encode_for(&self, target: &JoinTarget) -> Option<String> {
+        let id = (target.target_bytes)(&self.network).filter(|b| b.len() == target.target_len)?;
+        let mut bytes = Vec::with_capacity(48 + id.len() + self.relay.as_ref().map_or(0, String::len));
         bytes.extend_from_slice(&self.ticket.0);
         bytes.extend_from_slice(&self.inviter.0);
-        bytes.extend_from_slice(&hex_bytes(self.network.strip_prefix("net_").unwrap_or("")).unwrap_or_default());
+        bytes.extend_from_slice(&id);
         if let Some(r) = &self.relay {
             bytes.extend_from_slice(r.as_bytes());
         }
-        format!("{INVITE_PREFIX}{}", b64(&bytes))
+        Some(format!("{}{}", target.prefix, b64(&bytes)))
     }
 
     /// An invite as it was pasted: surrounding spaces forgiven.
     pub fn parse(text: &str) -> R<Invite> {
-        let bad = || NetError::bad("that isn't an invite: it starts with xni2_, as xenonet net invite shows it");
-        let bytes = text.trim().strip_prefix(INVITE_PREFIX).and_then(unb64).ok_or_else(bad)?;
-        if bytes.len() < 64 || bytes.len() > 64 + 300 {
+        Invite::parse_for(&NETWORK, text)
+    }
+
+    /// An invite to `target`, as it was pasted.
+    pub fn parse_for(target: &JoinTarget, text: &str) -> R<Invite> {
+        let bad = || NetError::bad(format!("that isn't an invite: it starts with {}, as {} shows it", target.prefix, target.how));
+        let bytes = text.trim().strip_prefix(target.prefix).and_then(unb64).ok_or_else(bad)?;
+        let head = 48 + target.target_len.min(MAX_TARGET);
+        if bytes.len() < head || bytes.len() > head + 300 {
             return Err(bad());
         }
         let mut ticket = [0u8; 16];
         ticket.copy_from_slice(&bytes[..16]);
         let mut inviter = [0u8; 32];
         inviter.copy_from_slice(&bytes[16..48]);
-        let network = format!("net_{}", xenonet_id::codec::hex(&bytes[48..64]));
-        let relay = match &bytes[64..] {
+        let network = (target.target_of)(&bytes[48..head]).ok_or_else(bad)?;
+        let relay = match &bytes[head..] {
             [] => None,
-            r => Some(String::from_utf8(r.to_vec()).ok().filter(|u| crate::roster::is_relay_url(u)).ok_or_else(bad)?),
+            r => Some(String::from_utf8(r.to_vec()).ok().filter(|u| (target.relay_ok)(u)).ok_or_else(bad)?),
         };
         Ok(Invite { network, inviter: PeerId(inviter), relay, ticket: TicketId(ticket) })
     }
@@ -152,28 +240,29 @@ pub struct Bound<'a> {
 }
 
 impl Bound<'_> {
-    fn text(&self, role: &str) -> String {
-        format!("xenonet-join/2\n{role}\n{}\n{}\n{}\n{}\n{}", self.ticket, self.network, b64(&self.inviter.0), b64(&self.joiner.0), b64(self.add))
+    fn text(&self, label: &str, role: &str) -> String {
+        format!("{label}\n{role}\n{}\n{}\n{}\n{}\n{}", self.ticket, self.network, b64(&self.inviter.0), b64(&self.joiner.0), b64(self.add))
     }
 }
 
-/// The joiner's proof that it holds the code: keyed by the code's hash.
+/// The joiner's proof that it holds the code, for a network: keyed by the
+/// code's hash.
 pub fn joiner_proof(hash: &[u8; 32], b: &Bound<'_>) -> String {
-    ticket::mac(hash, &b.text("joiner"))
+    NETWORK.joiner_proof(hash, b)
 }
 
 pub fn check_joiner(hash: &[u8; 32], b: &Bound<'_>, proof: &str) -> bool {
-    ticket::check(hash, &b.text("joiner"), proof)
+    NETWORK.check_joiner(hash, b, proof)
 }
 
 /// The inviter's proof that it knew the code too, sent only after the
 /// joiner's checked.
 pub fn inviter_proof(hash: &[u8; 32], b: &Bound<'_>) -> String {
-    ticket::mac(hash, &b.text("inviter"))
+    NETWORK.inviter_proof(hash, b)
 }
 
 pub fn check_inviter(hash: &[u8; 32], b: &Bound<'_>, proof: &str) -> bool {
-    ticket::check(hash, &b.text("inviter"), proof)
+    NETWORK.check_inviter(hash, b, proof)
 }
 
 /// An open ticket, at the inviter.
@@ -235,13 +324,25 @@ struct Book {
 /// The inviter's tickets, kept in step with the `Mesh`: join/2 is offered
 /// while any is open.
 pub struct Door {
+    target: JoinTarget,
     mesh: Arc<Mesh>,
     book: Mutex<Book>,
 }
 
 impl Door {
+    /// The door for joins to a network.
     pub fn new(mesh: Arc<Mesh>) -> Door {
-        Door { mesh, book: Mutex::new(Book::default()) }
+        Door::to(NETWORK, mesh)
+    }
+
+    /// The door for joins to `target`, on a mesh whose admission has
+    /// `target.alpn` as its join door.
+    pub fn to(target: JoinTarget, mesh: Arc<Mesh>) -> Door {
+        Door { target, mesh, book: Mutex::new(Book::default()) }
+    }
+
+    pub fn target(&self) -> &JoinTarget {
+        &self.target
     }
 
     pub fn mesh(&self) -> &Arc<Mesh> {
@@ -367,47 +468,47 @@ impl Door {
         // Nothing is counted against a ticket the attempt doesn't name: only
         // someone holding the invite can burn one.
         let Some(id) = TicketId::parse(s("ticket")) else {
-            return refuse(w, "no-ticket", "a join names its invite's ticket", Value::Null).await;
+            return refuse(w, self.target.schema, "no-ticket", "a join names its invite's ticket", Value::Null).await;
         };
         let Some(t) = self.get(&id, now) else {
-            return refuse(w, "no-ticket", "that invite was used or retired, or it's past its ten minutes: ask for a new one", Value::Null).await;
+            return refuse(w, self.target.schema, "no-ticket", "that invite was used or retired, or it's past its ten minutes: ask for a new one", Value::Null).await;
         };
         let add_text = s("add");
         let add_hash = sha256(add_text.as_bytes());
         let me = self.mesh.me();
         let joiner = link.peer();
         let bound = Bound { ticket: &id, network: &t.network, inviter: &me, joiner: &joiner, add: &add_hash };
-        if !check_joiner(&t.hash, &bound, s("proof")) {
+        if !self.target.check_joiner(&t.hash, &bound, s("proof")) {
             let (tries, retired) = self.wrong(&id, now);
             if retired {
-                return refuse(w, "retired", "that code was wrong five times, so the invite was retired: ask for a new one", Value::Null).await;
+                return refuse(w, self.target.schema, "retired", "that code was wrong five times, so the invite was retired: ask for a new one", Value::Null).await;
             }
             let left = MAX_WRONG - tries;
-            return refuse(w, "wrong-code", &format!("that code doesn't match the invite: {left} tries left"), json!({ "left": left })).await;
+            return refuse(w, self.target.schema, "wrong-code", &format!("that code doesn't match the invite: {left} tries left"), json!({ "left": left })).await;
         }
-        let proof = inviter_proof(&t.hash, &bound);
+        let proof = self.target.inviter_proof(&t.hash, &bound);
         let add: Value = match serde_json::from_str(add_text) {
             Ok(v @ Value::Object(_)) => v,
-            _ => return refuse(w, "bad-ask", "the machine joining asked for no add entry", Value::Null).await,
+            _ => return refuse(w, self.target.schema, "bad-ask", "the machine joining asked for no add entry", Value::Null).await,
         };
         match admit.admit(&t, joiner, &add).await {
             Ok(Admitted::Joined(answer)) => {
-                write(w, &json!({ "schema": SCHEMA, "proof": proof, "answer": answer })).await?;
+                write(w, &json!({ "schema": self.target.schema, "proof": proof, "answer": answer })).await?;
                 self.close(&id);
                 Ok(Served::Joined { host: t.host })
             }
             Ok(Admitted::Waiting(why)) => {
-                write(w, &json!({ "schema": SCHEMA, "proof": proof, "waiting": why })).await?;
+                write(w, &json!({ "schema": self.target.schema, "proof": proof, "waiting": why })).await?;
                 Ok(Served::Waiting { host: t.host })
             }
-            Err(e) => refuse(w, e.code, &e.message, json!({ "status": e.status })).await,
+            Err(e) => refuse(w, self.target.schema, e.code, &e.message, json!({ "status": e.status })).await,
         }
     }
 }
 
 // A refusal, with no proof of the inviter's in it.
-async fn refuse(w: &mut Writer, code: &'static str, words: &str, extra: Value) -> R<Served> {
-    let mut v = json!({ "schema": SCHEMA, "refused": code, "error": words });
+async fn refuse(w: &mut Writer, schema: &str, code: &'static str, words: &str, extra: Value) -> R<Served> {
+    let mut v = json!({ "schema": schema, "refused": code, "error": words });
     if let (Some(o), Value::Object(e)) = (v.as_object_mut(), extra) {
         o.extend(e);
     }
@@ -443,30 +544,35 @@ fn refusal(v: &Value) -> NetError {
 /// exact text sent, which the proofs cover). The dial goes to the endpoint
 /// id the invite names alone.
 pub async fn ask(mesh: &Mesh, invite: &Invite, code: &str, add: &str) -> R<Answer> {
+    ask_to(&NETWORK, mesh, invite, code, add).await
+}
+
+/// `ask`, to `target`: on its ALPN, with its schema and proofs.
+pub async fn ask_to(target: &JoinTarget, mesh: &Mesh, invite: &Invite, code: &str, add: &str) -> R<Answer> {
     let code = ticket::normalize(code).ok_or_else(|| NetError::bad("a code is 10 letters and digits, as KX7Q-49MZ-T2"))?;
     mesh.begin_join(invite.inviter);
-    let out = ask_once(mesh, invite, &code, add).await;
+    let out = ask_once(target, mesh, invite, &code, add).await;
     mesh.end_join(&invite.inviter);
     out
 }
 
-async fn ask_once(mesh: &Mesh, invite: &Invite, code: &str, add: &str) -> R<Answer> {
-    let link = mesh.dial(invite.inviter, Alpn::Join).await?;
+async fn ask_once(target: &JoinTarget, mesh: &Mesh, invite: &Invite, code: &str, add: &str) -> R<Answer> {
+    let link = mesh.dial(invite.inviter, target.alpn).await?;
     let out = async {
         let (mut w, mut r) = within(link.open_bi()).await?;
         let hash = ticket::hash(code);
         let add_hash = sha256(add.as_bytes());
         let me = mesh.me();
         let bound = Bound { ticket: &invite.ticket, network: &invite.network, inviter: &invite.inviter, joiner: &me, add: &add_hash };
-        let proof = joiner_proof(&hash, &bound);
-        write(&mut w, &json!({ "schema": SCHEMA, "ticket": invite.ticket.to_string(), "network": invite.network, "add": add, "proof": proof })).await?;
+        let proof = target.joiner_proof(&hash, &bound);
+        write(&mut w, &json!({ "schema": target.schema, "ticket": invite.ticket.to_string(), "network": invite.network, "add": add, "proof": proof })).await?;
         let _ = w.shutdown().await;
         let reply = within(read(&mut r, ANSWER_MAX)).await?;
         let v: Value = serde_json::from_slice(&reply).map_err(|_| bad_answer("the inviter's answer isn't JSON"))?;
         if v.get("refused").is_some() {
             return Err(refusal(&v));
         }
-        let ok = v.get("proof").and_then(Value::as_str).is_some_and(|p| check_inviter(&hash, &bound, p));
+        let ok = v.get("proof").and_then(Value::as_str).is_some_and(|p| target.check_inviter(&hash, &bound, p));
         if !ok {
             return Err(bad_answer("the inviter couldn't prove it knew the code"));
         }

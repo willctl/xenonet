@@ -55,7 +55,10 @@ impl fmt::Debug for PeerId {
     }
 }
 
-/// The protocols machines speak to each other, by their ALPN.
+/// The protocols machines speak to each other, by their ALPN: XenoNet's
+/// three, and another program's (`App`), which whoever runs a mesh names
+/// in its `Admission` (Xenolith's `xenolith/sync/2` on its own endpoint,
+/// or forwarded over XenoNet's).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Alpn {
     /// Members' feeds, messages and presence.
@@ -64,9 +67,13 @@ pub enum Alpn {
     Join,
     /// Requests to the services members publish.
     Svc,
+    /// Another program's protocol, by its bytes. Made with `Alpn::named`,
+    /// so XenoNet's own never come as `App`.
+    App(&'static [u8]),
 }
 
 impl Alpn {
+    /// XenoNet's own protocols.
     pub const ALL: [Alpn; 3] = [Alpn::Link, Alpn::Join, Alpn::Svc];
 
     pub const fn bytes(self) -> &'static [u8] {
@@ -74,11 +81,29 @@ impl Alpn {
             Alpn::Link => b"xenonet/link/2",
             Alpn::Join => b"xenonet/join/2",
             Alpn::Svc => b"xenonet/svc/2",
+            Alpn::App(b) => b,
         }
     }
 
+    /// One of XenoNet's own protocols, by its bytes.
     pub fn parse(alpn: &[u8]) -> Option<Alpn> {
         Alpn::ALL.into_iter().find(|a| a.bytes() == alpn)
+    }
+
+    /// The protocol `alpn` names: XenoNet's own when it is one of them,
+    /// another program's otherwise.
+    pub fn named(alpn: &'static [u8]) -> Alpn {
+        Alpn::parse(alpn).unwrap_or(Alpn::App(alpn))
+    }
+
+    /// Whether this is one of XenoNet's own protocols.
+    pub fn is_xenonet(self) -> bool {
+        !matches!(self, Alpn::App(_))
+    }
+
+    /// The protocol's name, for the log and errors.
+    pub fn name(self) -> &'static str {
+        std::str::from_utf8(self.bytes()).unwrap_or("?")
     }
 }
 
@@ -418,7 +443,7 @@ impl Mesh {
         let mut links = self.links.locked();
         links.retain(|_, l| !l.is_closed());
         links.retain(|(peer, alpn), l| {
-            if *alpn == Alpn::Join {
+            if !self.admission.is_members(*alpn) {
                 return true;
             }
             let shared = self.admission.shared(peer);
@@ -442,7 +467,11 @@ mod tests {
             assert_eq!(Alpn::parse(a.bytes()), Some(a));
         }
         assert_eq!(Alpn::parse(b"xenonet/link/1"), None);
-        assert_eq!(Alpn::parse(b"xenolith/sync/2"), None, "reserved for phase 6, not spoken yet");
+        assert_eq!(Alpn::parse(b"xenolith/sync/2"), None, "another program's, not XenoNet's");
+        assert_eq!(Alpn::named(b"xenonet/link/2"), Alpn::Link);
+        assert_eq!(Alpn::named(b"xenolith/sync/2"), Alpn::App(b"xenolith/sync/2"));
+        assert!(!Alpn::named(b"xenolith/sync/2").is_xenonet() && Alpn::Svc.is_xenonet());
+        assert_eq!(Alpn::App(b"xenolith/sync/2").name(), "xenolith/sync/2");
         for c in [Close::Done, Close::Refused, Close::Crossed, Close::Removed] {
             assert_eq!(Close::from_code(u64::from(c.code())), Some(c));
         }
