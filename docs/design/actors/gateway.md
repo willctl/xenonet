@@ -41,9 +41,7 @@ the internet.
    Tailscale on PATH, in the Mac app and in Homebrew's folders. It uses the
    copy whose version is the daemon's (`status --json` → `Version`).
 4. **Funnel publishes `/mcp` alone, and what it already serves is left
-   alone.** The network's routes (`/net/v1/…`) and A2A stay off the
-   internet, so a network whose gateway uses Funnel takes a tailnet or LAN
-   address, never the Funnel name. Before it runs anything, XenoNet reads
+   alone.** A2A stays off the internet. Before it runs anything, XenoNet reads
    `tailscale funnel status --json` for port 443 of the computer's name:
    - **nothing there**: XenoNet sets it up;
    - **this gateway's `/mcp` alone**: nothing to do;

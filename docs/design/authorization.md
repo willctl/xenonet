@@ -53,7 +53,7 @@ The network crate (`crates/xenonet-net`) holds the person on the machine
 
 | Principal | Who | Proven by |
 |---|---|---|
-| Machine | One XenoNet service: one OS user on one host | At a local door, being this service; from the network, the frame's signature by a member's host key |
+| Machine | One XenoNet service: one OS user on one host | At a local door, being this service; from the network, its entries' signatures by a member's machine signing key in the receiver's chain, whoever passed them on; live presence, by the member's own connection |
 | Agent | A harness session (Claude Code, Codex, Grok Build…) on a machine | Its machine vouches for it with an attestation: `Unchecked`, `ProcessChecked` or `HarnessSigned`. From another machine, the attestation is that machine's statement |
 | Actor | A registered program, a bot such as Grok Bot or Hermes, a cloud assistant | Its grant, a token minted at its own machine |
 | Person | The person, at one of their devices | A device signature over the act, from a device their chain holds unrevoked |
@@ -117,8 +117,8 @@ Secure Enclave it lives there, without biometry: it can't leave the Mac,
 though any program of the account can ask it to sign. Elsewhere it's a
 file. It signs network chain entries, feed entries and address records.
 The **host key** (`<state>/network/host.key`) is the transport key: it
-authenticates the machine's connections (QUIC, and today's frames) and
-holds the X25519 key envelopes are sealed to. iroh needs it raw, so it is
+authenticates the machine's QUIC connections (its Ed25519 half is the
+iroh endpoint id) and holds the X25519 key envelopes are sealed to. iroh needs it raw, so it is
 always a file, and it signs no entry. The network chain binds the two, and
 a `rekey` entry replaces a stolen transport key.
 
@@ -162,7 +162,7 @@ to the device key:
 | Making a network | none beyond setting up your identity |
 | Adding a machine: signing it in when it joins | 1 to admit, and 2 more to pair its device (the presence, and opening the root) when this machine holds the root |
 | Approving an entry that admits or widens | 1 |
-| Widening a machine's start or wake, making a window host, moving the gateway | 1 for each admin that signs |
+| Widening a machine's start or wake, making a window host, adding a relay or a mailbox | 1 for each admin that signs |
 | Issuing or widening your delegation | 2 (the presence, and the entry's signature) |
 | Narrowing or ending your delegation | 1 (the entry's signature) |
 | Setting a machine to `delegate` when no delegation names its device | the widening's 1, and 2 for the delegation |
@@ -199,7 +199,6 @@ under (`personHead`).
 | `add` an admin | the founder, or two admins, each with presence (`admit`) |
 | `window` on | the founder, or two admins, each with presence (`widen`) |
 | `window` off, `remove` an admin | the founder, or two admins |
-| `gateway` | the founder, or two admins, each with presence (`widen`) |
 | `remove` a machine that isn't an admin | any admin, or the machine itself |
 | `remove` the founder | nobody |
 | `settings` that narrow | any admin, or the machine itself |
@@ -214,8 +213,9 @@ An admin's signature counts toward an admit or a widening only with a
 presence block from that admin's device, the one its `add` entry named,
 and only when the owner's chain had that device active at the head the
 entry names. A live receiver refuses a head older than the one it holds.
-An entry signed rightly but by too few waits at the gateway as a proposal
-for the founder or a second admin to approve. Signers sign with their
+An entry signed rightly but by too few waits as a proposal, which every
+member keeps, for the founder or a second admin to approve. The policy
+still reads a `gateway` op, which nothing writes. Signers sign with their
 machine signing keys, never their host keys. A relay URL in the chain
 carries no credential: a relay's auth token is a setting of the machine
 that uses it, since the chain is kept forever and sent to every member.
@@ -370,7 +370,7 @@ also be the one its actor holds now.
 **Acts on another machine.** An actor's own token is decided at its own
 machine. For an act that goes on (a message, a start), its machine mints a
 token for that act's right alone, in the network, for eight days (past the
-week the outbox keeps a message), and sends it with its root's
+week a message waits for a machine that's away), and sends it with its root's
 certificate (`authority.token` and `authority.root`). The receiver checks
 the certificate against the sender's machine signing key in the network
 chain and decides the act as that actor.
@@ -597,7 +597,7 @@ check that the window called, so no prompt starts from anywhere else.
 
 ## Refused from under an agent
 
-- **The window's alone:** adding a machine (its ticket), every act that
+- **The window's alone:** adding a machine (its invite), every act that
   asks the person (setting up the identity, pairing, admitting, widening,
   delegation, a start or message as you, Allow, publishing a service,
   revoking a device), issuing or widening an actor's grant, gateway
@@ -605,8 +605,8 @@ check that the window called, so no prompt starts from anywhere else.
   pairing and turning on remote connections, and answering permission
   prompts (the window or an actor with the right).
 - **Yours, from the window or your own terminal:** creating, joining and
-  leaving a network, removing and replacing machines, approving, moving
-  the gateway, a machine's settings, taking a service off, revoking and
+  leaving a network, removing and replacing machines, approving, a
+  machine's settings, the projects a network sees, taking a relay out, taking a service off, revoking and
   removing actors, connecting your agents, and `xenonet service install`.
 - **Reads that matter** (transcripts, search, the engine's state, delivery,
   other machines' state) from an unchecked caller.
@@ -628,13 +628,14 @@ check that the window called, so no prompt starts from anywhere else.
   root and mint tokens for this machine's actors. Running the service as
   its own OS user is the hardening for that, and isn't built.
 - **The host key** is a file. A program of the account that copies it can
-  authenticate as this machine, send frames as it and speak for its
-  agents, and open what is sealed to it, until the person rekeys it. It
-  signs no chain entry, feed entry or address record: those take the
-  machine signing key.
+  connect as this machine, send its presence, fetch and open what is
+  sealed to it, and call services published to it, until the machine is
+  replaced. It signs no chain entry, feed entry, address record or mailbox
+  receipt: those take the machine signing key.
 - **No nonce on start and message acts.** A device's signature over a
   start or a message as you covers the act and its target, not a nonce or
-  a time, so the receiver relies on the frame's own replay checks.
+  a time, so the receiver relies on the feed's own replay checks (each
+  entry once, by its id or place).
 - **Pairing needs the root's machine.** The root key isn't copied to other
   devices yet, so only the machine holding it pairs a device. A machine
   added by another admin joins as a plain member and does nothing as the
@@ -650,8 +651,9 @@ check that the window called, so no prompt starts from anywhere else.
   Only a run XenoNet started asks a permission prompt, and the ask keeps
   what the process check found of its caller: one it couldn't see is
   unchecked, so only the person may Allow it.
-- **Governance freshness** is the last chain sync from any member, as the
-  gateway's link reports it.
+- **Governance freshness** is per network: a machine is in contact while
+  it holds a link/2 connection to a member, or exchanged chain heads with
+  one within ten minutes.
 - **Hardware keys** (FIDO2) for the widest acts aren't built.
 
 ## Alignment check
