@@ -7,8 +7,8 @@
 //!
 //! - *control*, the one bi stream, opened by the machine that dialled: a
 //!   hello from each side first, then Want, Ack, DontHave and Compacted
-//!   for feeds, Held receipts and Took for mailboxes, and address records,
-//!   each naming its network;
+//!   for feeds, Held receipts and Took for mailboxes, address records, and
+//!   the network's chain (Chain and ChainWant), each naming its network;
 //! - *kept*, a uni stream each way: kept feed entries, in their gapless
 //!   order;
 //! - *loose*, a uni stream each way: messages and receipts;
@@ -217,6 +217,13 @@ pub enum Control {
     /// space chains), for its `Machine::other_in`. Never on XenoNet's own
     /// protocols, which refuse it as it's read.
     Group { network: String, body: Value },
+    /// Entries of the network's chain (`entries`, in order), the owner's
+    /// person chain they're checked against (`person`), and entries that
+    /// wait for a second admin (`proposals`). XenoNet's protocols alone.
+    Chain { network: String, body: Value },
+    /// Every entry of the network's chain from `from` (its length at the
+    /// sender) on. XenoNet's protocols alone.
+    ChainWant { network: String, from: u64 },
 }
 
 fn network_of(p: &Protocol, v: &Value) -> R<String> {
@@ -247,7 +254,9 @@ impl Control {
             | Control::Held { network, .. }
             | Control::Took { network, .. }
             | Control::Address { network, .. }
-            | Control::Group { network, .. } => Some(network),
+            | Control::Group { network, .. }
+            | Control::Chain { network, .. }
+            | Control::ChainWant { network, .. } => Some(network),
         }
     }
 
@@ -270,6 +279,8 @@ impl Control {
             Control::Took { network, ids } => json!({ "t": "took", "network": network, "ids": ids }),
             Control::Address { network, record } => json!({ "t": "address", "network": network, "record": record }),
             Control::Group { network, body } => json!({ "t": "group", "network": network, "body": body }),
+            Control::Chain { network, body } => json!({ "t": "chain", "network": network, "body": body }),
+            Control::ChainWant { network, from } => json!({ "t": "chain-want", "network": network, "from": from }),
         }
     }
 
@@ -322,6 +333,8 @@ impl Control {
             }
             Some("address") => Ok(Control::Address { network: network()?, record: body("record")? }),
             Some("group") if !p.alpn.is_xenonet() => Ok(Control::Group { network: network()?, body: body("body")? }),
+            Some("chain") if p.alpn.is_xenonet() => Ok(Control::Chain { network: network()?, body: body("body")? }),
+            Some("chain-want") if p.alpn.is_xenonet() => Ok(Control::ChainWant { network: network()?, from: n("from")? }),
             _ => Err(p.bad("kind")),
         }
     }
@@ -385,7 +398,8 @@ pub trait Machine: Send + Sync {
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out>;
     /// The peer holds `author`'s feed in `network` up to `at`.
     fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos);
-    /// A DontHave, Compacted, Held, Took, Address or Group record.
+    /// A DontHave, Compacted, Held, Took, Address, Group, Chain or
+    /// ChainWant record.
     fn other_in(&self, _peer: PeerId, _record: Control) {}
     /// A connection to the peer came up, or went.
     fn up(&self, _peer: PeerId, _up: bool) {}

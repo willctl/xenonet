@@ -445,6 +445,147 @@ async fn link2_runs_beside_the_gateway_and_the_second_copy_of_an_entry_is_silent
     assert_eq!(feeds.0.lock().unwrap().len(), sent, "each once into the feeds");
 }
 
+/// Each entry of a member's feed as it arrived, with what its act rests on.
+#[derive(Default)]
+struct HeldFeeds(Mutex<Vec<(String, Value, Value)>>);
+
+impl xenonet_net::sink::Feeds for HeldFeeds {
+    fn entry(&self, a: xenonet_net::sink::Arrived) {
+        self.0.lock().unwrap().push((a.host.clone(), a.entry.body.clone(), a.authority.clone()));
+    }
+    fn unfreeze(&self, _author: &str, _network: &str) -> Result<usize, String> {
+        Ok(0)
+    }
+}
+
+impl HeldFeeds {
+    fn texts(&self) -> Vec<String> {
+        self.0.lock().unwrap().iter().filter_map(|(_, b, _)| b["body"].as_str().map(str::to_string)).collect()
+    }
+}
+
+/// The host `of` in a state's hosts.
+fn host_in(s: &Value, of: &str) -> Value {
+    s["hosts"].as_array().unwrap().iter().find(|h| h["id"] == of).cloned().unwrap_or(Value::Null)
+}
+
+/// studio makes a network with no gateway's address, so it runs on
+/// link/2 alone; laptop (a window host) and desk join with invites from
+/// its window, found at the address the invite's door gives.
+async fn network2(test: &str) -> (Host, Host, Host) {
+    let a = Host::new(test, "studio", 0.0, Caps::default()).await;
+    let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio" }), true).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["gateway"]["link"], "live", "{v}");
+    let mut joined = Vec::new();
+    for (name, window) in [("laptop", true), ("desk", false)] {
+        let (s, inv) = a.call("POST", "/api/net/invite", json!({ "host": name, "window": window }), true).await;
+        assert_eq!(s, 200, "{inv}");
+        let at = inv["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
+        let h = Host::new(test, name, 0.0, Caps::default()).await;
+        let (s, v) = h.call("POST", "/api/net/join", json!({ "invite": inv["invite"], "code": inv["code"], "at": at }), true).await;
+        assert_eq!(s, 200, "{v}");
+        joined.push(h);
+    }
+    let c = joined.pop().unwrap();
+    let b = joined.pop().unwrap();
+    for h in [&a, &b, &c] {
+        let mut ok = false;
+        for _ in 0..600 {
+            let s = h.state().await;
+            let hosts = s["hosts"].as_array().map_or(0, Vec::len);
+            if hosts == 3 && s["hosts"].as_array().unwrap().iter().all(|h| h["online"] == true) {
+                ok = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(ok, "never all three online: {}", h.state().await);
+    }
+    (a, b, c)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_network_runs_on_link2_alone_its_chain_messages_and_acts_included() {
+    let (a, b, c) = network2("link2-alone").await;
+    // The chain reached every member, though desk joined after laptop and
+    // only studio signed it in; desk found laptop by the address record
+    // studio passed on.
+    let len = a.roster().len();
+    assert_eq!(len, 3);
+    until("the chain everywhere", 10, || b.roster().len() == len && c.roster().len() == len).await;
+    let s = c.state().await;
+    assert_eq!(s["gateway"]["address"], "", "{s}");
+    assert_eq!(host_in(&s, "laptop")["path"], "direct", "{s}");
+
+    // A message, and one whose act rests on an authority: each reaches
+    // desk once, with what it rests on, over link/2 alone.
+    let feeds = Arc::new(HeldFeeds::default());
+    c.svc.sinks().set_feeds(feeds.clone());
+    b.send("desk", Kind::Message, "plain");
+    let authority = json!({ "presence": { "what": "start", "sig": "c2ln" } });
+    let body = json!({ "schema": "network/message/v1", "body": "with authority" });
+    b.svc.net().send(Outgoing { network: None, authority: Some(authority.clone()), to: To::Host("desk".into()), kind: Kind::Message, body }).unwrap();
+    until("both at desk", 20, || feeds.texts().len() == 2).await;
+    let got = feeds.0.lock().unwrap().clone();
+    assert_eq!((got[0].0.as_str(), got[0].2.clone()), ("laptop", json!({})));
+    assert_eq!(got[1].2, authority, "the act's authority came with it");
+
+    // desk goes away: a message for it waits at laptop, and goes when desk
+    // is back.
+    let (dir, shift, caps) = (c.dir.clone(), c.shift, c.caps);
+    c.svc.stop();
+    drop(c);
+    let mut away = false;
+    for _ in 0..800 {
+        if host_in(&b.state().await, "desk")["online"] == false {
+            away = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(away, "laptop never saw desk go: {}", b.state().await);
+    b.send("desk", Kind::Message, "while away");
+    let c = Host::open(dir, shift, caps).await;
+    let feeds = Arc::new(HeldFeeds::default());
+    c.svc.sinks().set_feeds(feeds.clone());
+    until("the waiting message at desk", 30, || feeds.texts().contains(&"while away".to_string())).await;
+
+    // A widening laptop signs alone waits for a second admin: studio sees
+    // it, approves it, and the entry reaches every member.
+    let (s, v) = b.call("PUT", "/api/net/settings", json!({ "start": "network" }), true).await;
+    assert_eq!((s, v["proposed"].clone()), (200, json!(true)), "{v}");
+    let mut id = Value::Null;
+    for _ in 0..200 {
+        let pending = host_in(&a.state().await, "laptop")["reach"]["pending"].clone();
+        if let Some(p) = pending.as_array().and_then(|p| p.first()) {
+            id = p["id"].clone();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(id.is_string(), "studio never saw laptop's proposal: {}", a.state().await);
+    let (s, v) = a.call("POST", "/api/net/approve", json!({ "id": id }), true).await;
+    assert_eq!(s, 200, "{v}");
+    for h in [&a, &b, &c] {
+        until("the approved entry everywhere", 10, || h.roster().len() == len + 1).await;
+    }
+
+    // studio removes desk: desk hears it, and laptop's chain has it.
+    let (s, v) = a.call("POST", "/api/net/remove", json!({ "host": "desk" }), true).await;
+    assert_eq!(s, 200, "{v}");
+    until("laptop holds the removal", 10, || b.roster().len() == len + 2).await;
+    let mut removed = false;
+    for _ in 0..200 {
+        if c.state().await["removed"].is_object() {
+            removed = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(removed, "desk never heard it was removed: {}", c.state().await);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head() {
     use xenonet_log::person;

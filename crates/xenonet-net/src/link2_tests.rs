@@ -1178,6 +1178,14 @@ fn records_name_only_their_protocols_kind_of_group_and_a_hellos_addition_reads_b
     assert_eq!(Control::decode_in(&SYNC, &group.encode()).unwrap(), group);
     let on_link = Control::Group { network: N1.into(), body: json!({}) };
     assert!(Control::decode(&on_link.encode()).is_err(), "link/2 has no group records");
+    // The network's chain is link/2's alone.
+    let chain = Control::Chain { network: N1.into(), body: json!({ "entries": [], "person": null, "proposals": [] }) };
+    assert_eq!(Control::decode(&chain.encode()).unwrap(), chain);
+    let want = Control::ChainWant { network: N1.into(), from: 3 };
+    assert_eq!(Control::decode(&want.encode()).unwrap(), want);
+    for c in [Control::Chain { network: S1.into(), body: json!({}) }, Control::ChainWant { network: S1.into(), from: 0 }] {
+        assert!(Control::decode_in(&SYNC, &c.encode()).is_err(), "another program's protocol carries no network chain");
+    }
 }
 
 #[test]

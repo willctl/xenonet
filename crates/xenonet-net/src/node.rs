@@ -308,6 +308,8 @@ pub struct Common {
     /// This machine's own API, as window reads read it: the composition
     /// root's.
     pub(crate) reads: RwLock<Option<Arc<dyn svc2::LocalReads>>>,
+    /// Address records a join brought, by network, until link/2 takes them.
+    pub(crate) joined: Mutex<Vec<(String, Vec<Value>)>>,
 }
 
 impl Common {
@@ -324,6 +326,7 @@ impl Common {
             window: Mutex::new(None),
             nonces: Mutex::new(svc2::Nonces::default()),
             reads: RwLock::new(None),
+            joined: Mutex::new(Vec::new()),
         })
     }
 
@@ -427,6 +430,8 @@ impl Outbox {
 
 /// How many kept entries are read at a time to go to a member again.
 const RESEND: usize = 500;
+/// Entries waiting for approval, at most.
+pub const MAX_PROPOSALS: usize = 16;
 
 /// How long after its chain was last synced with a member a network still
 /// counts as in contact (question 3, revision 21).
@@ -520,6 +525,11 @@ impl Recent {
 /// entries between machines: taken by the node, never by the engine.
 pub const PERSON_TARGET: &str = "xenonet:person";
 
+/// The reserved target the person's acts at another machine travel to
+/// (`network/operator/v2`, an answer to its ask), as message entries:
+/// taken by the node, which hands the act to the engine as one.
+pub const OPERATOR_TARGET: &str = "xenonet:operator";
+
 /// A message entry's body to `xenonet:person` carrying `text`.
 fn person_body(text: &str) -> Value {
     json!({ "target": PERSON_TARGET, "body": text })
@@ -545,6 +555,12 @@ fn not_in() -> NetError {
 impl Shared {
     pub fn now(&self) -> f64 {
         (self.opts.clock)()
+    }
+
+    /// Whether this network has a gateway this machine links through, or
+    /// is: one with an address. Without one it runs on link/2 alone.
+    pub fn gatewayed(&self) -> bool {
+        self.network().is_some_and(|n| n.gateway.address.is_some())
     }
 
     /// Now by the gateway's clock, as frames and requests are timed.
@@ -980,6 +996,18 @@ impl Shared {
     /// Adds an entry to this host's roster and acts on it: a removed host's
     /// frames go, and the engine hears; this host removed stops.
     pub fn append(&self, e: Entry) -> R<Offered> {
+        self.append_from(e, None)
+    }
+
+    /// `append`, for an entry that came from `from` on link/2 (None: made
+    /// here, or by the gateway's path). An entry this machine hadn't held
+    /// goes on to every other member connected on link/2, so the chain
+    /// reaches each member from any other; a removal reaches the machine
+    /// it removes first, while its connection still carries the network.
+    pub fn append_from(&self, e: Entry, from: Option<crate::dial::PeerId>) -> R<Offered> {
+        if e.op == Op::Remove {
+            self.chain_to_removed(&e);
+        }
         let offered = {
             let mut r = self.roster.writing();
             let o = r.offer(e.clone())?;
@@ -1011,6 +1039,7 @@ impl Shared {
             _ => {}
         }
         self.members_changed();
+        self.chain_out(std::slice::from_ref(&e), &[], from);
         Ok(offered)
     }
 
@@ -1041,19 +1070,55 @@ impl Shared {
         self.relink.notified()
     }
 
-    /// Entries waiting for approval, as the gateway passed them on.
+    /// Entries waiting for approval, made here or as another member passed
+    /// them on.
     pub fn note_proposals(&self, entries: Vec<Entry>) {
+        self.note_proposals_from(entries, None);
+    }
+
+    /// `note_proposals`, for entries from `from` on link/2. Each is kept
+    /// only when this machine's own chain would take it but for a second
+    /// signer (`needs-approval`): one signed wrongly, or by a machine that
+    /// may not, is dropped, so no member can put a proposal in the window
+    /// that its signers didn't make. One signed by enough already is
+    /// appended. What's new here goes on to the other members connected.
+    pub fn note_proposals_from(&self, entries: Vec<Entry>, from: Option<crate::dial::PeerId>) {
         let len = self.roster().len();
-        let mut waiting = self.proposals.locked();
-        waiting.retain(|p| p.n == len);
+        let mut new = Vec::new();
         for e in entries.into_iter().filter(|e| e.n == len) {
-            match waiting.iter_mut().find(|p| p.signing_bytes() == e.signing_bytes()) {
-                Some(p) => p.merge_signers(&e),
-                None => waiting.push(e),
+            let verdict = self.roster().would_take(&e);
+            match verdict {
+                Ok(()) => {
+                    if let Err(err) = self.append_from(e, from) {
+                        self.log("net.roster", &format!("an entry passed on for approval, signed by enough, was refused: {}", err.message));
+                    }
+                    continue;
+                }
+                Err(err) if err.code == "needs-approval" => {}
+                Err(err) => {
+                    self.log("net.roster", &format!("an entry passed on for approval was dropped: {}", err.message));
+                    continue;
+                }
             }
+            let mut waiting = self.proposals.locked();
+            waiting.retain(|p| p.n == len);
+            match waiting.iter_mut().find(|p| p.signing_bytes() == e.signing_bytes()) {
+                Some(p) => {
+                    let had = p.signers.len();
+                    p.merge_signers(&e);
+                    if p.signers.len() > had {
+                        new.push(p.clone());
+                    }
+                }
+                None => {
+                    waiting.push(e.clone());
+                    new.push(e);
+                }
+            }
+            let extra = waiting.len().saturating_sub(MAX_PROPOSALS);
+            waiting.drain(..extra);
         }
-        let extra = waiting.len().saturating_sub(crate::gateway::MAX_PROPOSALS);
-        waiting.drain(..extra);
+        self.chain_out(&[], &new, from);
     }
 
     /// What waits for approval and could still be taken.
@@ -1415,6 +1480,16 @@ impl Shared {
         self.sink.receive(Incoming { network: net.id.clone(), from: from.to_string(), kind: Kind::Presence, body, at: self.now(), from_window_host: window });
     }
 
+    /// Whether `host`, a member, has a link/2 connection up: it's online
+    /// while one is, and was seen when it came or went.
+    pub(crate) fn peer_up(&self, host: &str, up: bool) {
+        let now = self.now();
+        let mut peers = self.peers.locked();
+        let p = peers.entry(host.to_string()).or_default();
+        p.online = up;
+        p.seen = Some(now);
+    }
+
     /// `from`'s act at this machine, decided on its own facts: a member of
     /// the network, which a frame it signed came from. Why it was refused.
     fn decide(&self, from: &str, resource: xenonet_authz::Resource, act: xenonet_authz::Act) -> Result<(), String> {
@@ -1563,8 +1638,11 @@ impl Shared {
         Ok(e)
     }
 
-    /// A frame of `body` for `to`, into the outbox.
+    /// A frame of `body` for `to`, into the outbox: none without a gateway.
     fn queue(&self, net: &NetFile, key: &HostKey, to: &str, body: &Value) -> Result<(), String> {
+        if !self.gatewayed() {
+            return Ok(());
+        }
         let keys = {
             let r = self.roster();
             r.view_ref().and_then(|v| v.member(to).map(|m| m.keys)).ok_or_else(|| format!("{to} isn't in the network"))?
@@ -1991,10 +2069,27 @@ impl Net for Shared {
         if out.kind == Kind::Relay && body.to_string().len() > RELAY_BODY {
             return Err(format!("a relay body is at most {} MiB", RELAY_BODY >> 20));
         }
+        // The person's act at another machine (an answer to its ask): a
+        // message entry of this machine's feed to `xenonet:operator`, for
+        // that one machine, with what it rests on beside it, so it goes on
+        // link/2 as every message does and is decided there.
+        if out.kind == Kind::Operator {
+            let To::Host(_) = &out.to else { return Err("the person's act goes to one machine".into()) };
+            let authority = body.as_object_mut().and_then(|o| o.remove("authority")).or(out.authority);
+            let entry = json!({ "target": OPERATOR_TARGET, "body": body });
+            let r = self.send_entry(&net, &key, Outgoing { network: out.network, to: out.to, kind: Kind::Message, body: entry, authority });
+            self.wake.notify_one();
+            return r;
+        }
         if out.kind.fed() {
             let r = self.send_entry(&net, &key, Outgoing { body, ..out });
             self.wake.notify_one();
             return r;
+        }
+        // Without a gateway, presence goes on link/2 alone (`Nodes`' send),
+        // and the map's relay goes nowhere.
+        if !self.gatewayed() {
+            return if out.kind == Kind::Relay { Err("this network has no gateway to carry the map's relay".into()) } else { Ok(()) };
         }
         let targets: Vec<(String, PublicKeys)> = {
             let r = self.roster();
@@ -2121,6 +2216,15 @@ impl Node {
         let n = &self.shared;
         let Some(net) = n.network() else { return Ok(()) };
         if n.is_removed() {
+            return Ok(());
+        }
+        // With no gateway's address, the network runs on link/2 alone: this
+        // machine is in it as soon as its endpoint runs, and each member is
+        // online while its connection is up.
+        if !n.gatewayed() {
+            n.set("live", None);
+            n.sink.linked(true);
+            n.members_changed();
             return Ok(());
         }
         let mut tasks = Vec::new();
@@ -2415,8 +2519,11 @@ impl Node {
         if let Some(g) = n.gateway() {
             return g.append(n, e);
         }
-        let t = self.transport()?;
-        link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "person": n.person_json() })).await?;
+        // Without a gateway, here first, and on to the members from here.
+        if n.gatewayed() {
+            let t = self.transport()?;
+            link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "person": n.person_json() })).await?;
+        }
         match n.append(e) {
             Ok(o) => Ok(o),
             Err(err) if err.code == "roster-fork" => Ok(Offered::Duplicate),
@@ -2631,13 +2738,7 @@ impl Node {
         match verdict {
             Ok(()) => {}
             Err(err) if err.code == "needs-approval" => {
-                if let Some(g) = n.gateway() {
-                    g.propose(n, e, n.now())?;
-                } else {
-                    let t = self.transport()?;
-                    link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "propose": true, "person": n.person_json() })).await?;
-                    n.note_proposals(vec![e]);
-                }
+                self.propose(e).await?;
                 n.log("net.settings", waits);
                 let mut out = self.state();
                 out["proposed"] = json!(true);
@@ -2647,6 +2748,21 @@ impl Node {
         }
         self.submit(e).await?;
         Ok(self.state())
+    }
+
+    /// An entry signed by too few, for another admin to approve: kept here
+    /// and passed on to the members (the gateway, when there is one).
+    pub(super) async fn propose(&self, e: Entry) -> R<()> {
+        let n = &self.shared;
+        if let Some(g) = n.gateway() {
+            return g.propose(n, e, n.now());
+        }
+        if n.gatewayed() {
+            let t = self.transport()?;
+            link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "propose": true, "person": n.person_json() })).await?;
+        }
+        n.note_proposals(vec![e]);
+        Ok(())
     }
 
     /// This network as `network/state/v1`'s `networks` lists it: its id
@@ -3055,6 +3171,10 @@ pub mod link2n;
 
 #[path = "node_svc.rs"]
 mod svc2n;
+
+// The network's chain on link/2.
+#[path = "node_chain.rs"]
+mod chain2;
 
 #[cfg(test)]
 mod tests {

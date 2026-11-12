@@ -15,8 +15,8 @@
 //! gives (`at`), such as a tailnet or LAN address.
 
 use super::{
-    identity, is_host_id, json, link, not_in, ticket, Arc, Duration, HostKey, JoinHandle, Locked, Mutex, NetError, NetFile, NetworkPolicy, Node, Notify, Op, Pin, PublicKeys,
-    Shared, Value, Weak, KEY, R,
+    identity, is_host_id, json, not_in, ticket, Arc, Duration, HostKey, JoinHandle, Locked, Mutex, NetError, NetFile, NetworkPolicy, Node, Notify, Op, Pin, PublicKeys, Shared,
+    Value, Weak, KEY, R,
 };
 use crate::admission::Admission;
 use crate::dial::{Close, Dial, Mesh, PeerId};
@@ -143,11 +143,6 @@ impl Node {
         }
         if !view.is_window(&net.host) {
             return Err(NetError::new(403, "not-window", "an invite is made on a window host"));
-        }
-        // The new machine links through the gateway until it goes, so it
-        // has to know where the gateway is.
-        if net.gateway.address.is_none() {
-            return Err(NetError::new(409, "no-address", "the gateway has no address yet: give it its tailnet or LAN address (xenonet net set --lan <ip:port>)"));
         }
         let code = ticket::make()?;
         let expires = n.now() as i64 + ticket::TICKET_MS as i64;
@@ -321,7 +316,11 @@ impl Node {
             joined: n.now() as i64,
         };
         let name = net.name.clone();
+        let network = net.id.clone();
         self.adopt(net, key, roster)?;
+        // Where the inviter and the members it knows are, for link/2.
+        let records: Vec<Value> = v.get("addresses").and_then(Value::as_array).cloned().unwrap_or_default();
+        n.common.found_at_join(&network, records);
         self.start()?;
         n.log("net.join", &format!("this machine joined the network {name} with an invite, as {host}"));
         Ok(self.state())
@@ -420,13 +419,7 @@ impl Admit for NodeAdmit {
                 // A window host added by an admin that isn't the founder
                 // waits for a second admin.
                 Err(err) if err.code == "needs-approval" => {
-                    if let Some(g) = n.gateway() {
-                        g.propose(n, e, n.now())?;
-                    } else {
-                        let t = node.transport()?;
-                        link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "propose": true, "person": n.person_json() })).await?;
-                        n.note_proposals(vec![e]);
-                    }
+                    node.propose(e).await?;
                     return Ok(Admitted::Waiting(waiting_words(&ticket.host)));
                 }
                 Err(err) => return Err(err.into()),
@@ -444,11 +437,15 @@ fn waiting_words(host: &str) -> String {
 }
 
 // What the joiner is sent once it's in: the chain, the owner's person
-// chain, and where the gateway is, which it links through until the
-// gateway goes.
+// chain, where the gateway is when the network has one, and the address
+// records of this machine and of the members it knows, each signed by its
+// member, so the joiner finds them on link/2.
 fn answer(n: &Shared, t: &Ticket) -> R<Value> {
     let net = n.network().ok_or_else(not_in)?;
+    let mut addresses: Vec<Value> = n.address_record().into_iter().collect();
+    addresses.extend(n.records_for(&net.id, &t.host));
     Ok(json!({
+        "addresses": addresses,
         "network": { "id": net.id, "name": net.name },
         "host": t.host,
         "window": t.window,

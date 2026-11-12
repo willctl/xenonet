@@ -4,9 +4,10 @@
 //! The node runs an iroh endpoint keyed by host.key, admits the members of
 //! its network's chain on it, and keeps a connection to each one it can
 //! reach. Everything the engine sends goes both ways: frames through the
-//! gateway as before, and envelopes on link/2. A kept entry a peer missed
-//! goes again on the next connect, from its hello; a loose one the gateway
-//! carries anyway.
+//! gateway, when the network has one, and envelopes on link/2. A kept
+//! entry a peer missed goes again on the next connect, from its hello. A
+//! network with no gateway's address runs on link/2 alone, its chain
+//! included (`chain2`).
 //!
 //! **Two copies.** Each entry may arrive twice, once each way. The copy
 //! that comes second, by the other way, is dropped here, by the entry's id,
@@ -42,10 +43,19 @@
 //! holder or the author is asked).
 //!
 //! **Finding members.** Each machine signs an address record (its endpoint
-//! id and direct addresses, under its machine signing key) and puts it in
-//! its presence, which the gateway carries sealed, and on each link/2
-//! connection's control stream. mDNS on the LAN joins in when the machine's
-//! setting is on. A relay is used only when the network's chain lists one.
+//! id and direct addresses, under its machine signing key) and sends it on
+//! each link/2 connection's control stream, with the records it holds of
+//! the other members, which each member signed, so a machine that reached
+//! one member finds the rest. The inviter sends the ones it holds to a
+//! machine that joins. They're kept with the network's files, so after a
+//! restart a machine dials the members where they were last. mDNS on the
+//! LAN joins in when the machine's setting is on. A relay is used only
+//! when the network's chain lists one.
+//!
+//! **Away members.** A loose entry for a member that isn't connected goes
+//! to the network's mailboxes; when no mailbox takes it, it waits here, a
+//! week at most, and goes when the member connects. Each member is online
+//! here while its connection is up.
 //!
 //! **Several networks.** The endpoint is the machine's, one for every
 //! network it is in, with one connection per peer: each connection carries
@@ -71,6 +81,8 @@ use xenonet_log::feed::{FeedEntry, Pos, Verified};
 
 /// How long this machine's address record holds.
 const ADDRESS_TTL_S: u64 = 600;
+/// Where the members' address records are kept, in the network's folder.
+const ADDRESSES: &str = "addresses.json";
 /// How many entry ids are remembered to tell the second copy from the
 /// first.
 const TAKEN: usize = 65_536;
@@ -140,6 +152,31 @@ pub struct Transport2 {
     pub presence: std::sync::Mutex<Live>,
     /// The actors' forwards, which take the connections on their ALPNs.
     pub forwards: Option<Arc<crate::forward::Forwards>>,
+    /// The latest address record of each member, by network and host id,
+    /// as it checked: passed on to the other members on each connect, so
+    /// a machine that reached one member finds the rest.
+    records: std::sync::Mutex<HashMap<(String, String), (u64, Value)>>,
+    /// Loose entries for members that weren't connected and that no
+    /// mailbox took, oldest first: they go when the member connects.
+    waiting: std::sync::Mutex<HashMap<PeerId, VecDeque<(Instant, Envelope)>>>,
+}
+
+/// Loose entries kept for one member that isn't connected, at most; the
+/// oldest go first.
+const WAITING: usize = 1000;
+/// How long one is kept: the week a feed's messages are kept.
+const WAITING_FOR: Duration = Duration::from_hours(7 * 24);
+
+impl Transport2 {
+    /// The loose entries that waited for `peer` in `network`, still in
+    /// their week: they go now it's connected.
+    fn waited(&self, peer: PeerId, network: &str) -> Vec<Out> {
+        let mut w = self.waiting.locked();
+        let Some(q) = w.get_mut(&peer) else { return Vec::new() };
+        let (mine, rest): (VecDeque<_>, VecDeque<_>) = std::mem::take(q).into_iter().partition(|(_, e)| e.network == network);
+        *q = rest;
+        mine.into_iter().filter(|(at, _)| at.elapsed() < WAITING_FOR).map(|(_, e)| Out::Envelope(e)).collect()
+    }
 }
 
 /// This machine's clock, and how far its HLC is ahead of it.
@@ -200,6 +237,20 @@ impl Shared {
         if v.kind == xenonet_log::feed::Kind::Message && v.body.get("target").and_then(Value::as_str) == Some(super::PERSON_TARGET) {
             return self.decide_member(&host) && self.person_in(&host, &v.body);
         }
+        // The person's act from another machine: to the engine as one, with
+        // what it rests on back in its body, which the engine decides.
+        if v.kind == xenonet_log::feed::Kind::Message && v.body.get("target").and_then(Value::as_str) == Some(super::OPERATOR_TARGET) {
+            let mut body = v.body.get("body").cloned().unwrap_or(Value::Null);
+            if let Some(o) = body.as_object_mut() {
+                o.insert("authority".into(), authority);
+            }
+            let at = (v.at as f64).min(self.now());
+            xenonet_model::ops::Sink::receive(
+                self.sink.as_ref(),
+                xenonet_model::ops::Incoming { network: v.group.clone(), from: host, kind: xenonet_model::ops::Kind::Operator, body, at, from_window_host: window },
+            );
+            return false;
+        }
         self.sink.entry(crate::sink::Arrived { host, entry: v, authority, window });
         false
     }
@@ -240,12 +291,22 @@ impl Shared {
                 let _ = t.links.send(peer, Out::Envelope(env));
                 continue;
             }
-            // Away: to the network's mailboxes that are connected.
+            // Away: to the network's mailboxes that are connected; a loose
+            // entry no mailbox took waits here for the member to connect (a
+            // kept one goes again from its hello anyway).
             match mailbox::route(&view, &net.host, &m.id, |p| t.links.is_connected(p), authority) {
                 Ok(boxes) => {
                     let sent = boxes.iter().filter(|p| t.links.send(**p, Out::Envelope(env.clone())).is_ok()).count();
                     if sent > 0 && e.class() == xenonet_log::feed::Class::Kept {
                         t.post.locked().handed.handed(&net.id, &m.machine.id(), &e.id(), e.pos());
+                    }
+                    if sent == 0 && e.class() == xenonet_log::feed::Class::Loose {
+                        let mut w = t.waiting.locked();
+                        let q = w.entry(peer).or_default();
+                        q.push_back((Instant::now(), env));
+                        while q.len() > WAITING {
+                            q.pop_front();
+                        }
                     }
                 }
                 Err(why) => self.log("net.link2", &why.message),
@@ -345,14 +406,10 @@ impl Shared {
     }
 
     /// A peer whose presence this network's node took has had no
-    /// connection for 30 s: its presence ends here. While the gateway's
-    /// link is up, its path carries presence and says who is online, so
-    /// this is link/2's alone once it goes (phase 5's commit 20).
+    /// connection for 30 s: its presence ends here, since presence holds
+    /// only while a connection is up.
     fn presence_ended(&self, e: live::Ended) {
         let Some(net) = self.network() else { return };
-        if self.is_live() {
-            return;
-        }
         if let Some(p) = self.peers.locked().get_mut(&e.host) {
             p.online = false;
         }
@@ -421,17 +478,73 @@ impl Shared {
                 None => Err("this machine's chain is empty".into()),
             }
         };
-        if let Err(why) = checked.and_then(|()| if r.host == from { Ok(()) } else { Err(format!("{from} sent {}'s address record", r.host)) }) {
+        // Another member's record, passed on: signed by that member's own
+        // machine key, which `verify` checked, so whoever passes it on can
+        // withhold it but not change it. Never one of this machine's.
+        let me = self.network().map(|n| n.host);
+        let how = if r.host == from { how } else { "forwarded" };
+        if let Err(why) = checked.and_then(|()| if me.as_deref() == Some(r.host.as_str()) { Err(format!("{from} sent this machine's own address record")) } else { Ok(()) }) {
             self.log("net.link2", &format!("an address record from {from} was refused: {why}"));
             return;
         }
+        {
+            let mut held = t.records.locked();
+            let key = (r.network.clone(), r.host.clone());
+            if held.get(&key).is_some_and(|(at, _)| *at > r.at) {
+                return;
+            }
+            held.insert(key, (r.at, record.clone()));
+        }
+        self.keep_records(&r.network);
         let direct: Vec<std::net::SocketAddr> = r.addrs.iter().filter_map(|a| a.parse().ok()).collect();
         let ttl = Duration::from_millis(r.until().saturating_sub(now));
         let peer = PeerId(r.endpoint);
         if t.dial.addresses().put(peer, &direct, r.relay.as_deref(), ttl).is_ok() {
-            t.found.locked().entry((r.network.clone(), from.to_string())).or_default().insert(how);
+            t.found.locked().entry((r.network.clone(), r.host.clone())).or_default().insert(how);
             t.links.nudge(peer);
         }
+    }
+
+    /// The members' address records, kept with the network's files: after
+    /// a restart, with no gateway to meet at, this machine dials the
+    /// members where they were last, and hears where they are now.
+    fn keep_records(&self, network: &str) {
+        let records: Vec<Value> = self.link2().map(|t| t.records.locked().iter().filter(|((n, _), _)| n == network).map(|(_, (_, v))| v.clone()).collect()).unwrap_or_default();
+        let kept = self.dir.net_file(network, ADDRESSES).and_then(|p| Ok(std::fs::write(p, Value::Array(records).to_string())?));
+        if let Err(e) = kept {
+            self.log("net.link2", &format!("where the members were found wasn't kept: {}", e.message));
+        }
+    }
+
+    /// The address records kept for this network, as hints where to dial:
+    /// each still signed by its member and that member's endpoint now,
+    /// whatever its age, since a machine that hasn't moved is still there.
+    pub(super) fn load_records(&self) {
+        let (Some(t), Some(net)) = (self.link2(), self.network()) else { return };
+        let Ok(path) = self.dir.net_file(&net.id, ADDRESSES) else { return };
+        let Some(records) = std::fs::read(path).ok().and_then(|b| serde_json::from_slice::<Vec<Value>>(&b).ok()) else { return };
+        let view = self.roster().view();
+        for v in records {
+            let Ok(r) = AddressRecord::parse(&v) else { continue };
+            if r.host == net.host || r.verify(&view, r.at).is_err() {
+                continue;
+            }
+            let direct: Vec<std::net::SocketAddr> = r.addrs.iter().filter_map(|a| a.parse().ok()).collect();
+            let peer = PeerId(r.endpoint);
+            if t.dial.addresses().put(peer, &direct, r.relay.as_deref(), Duration::from_secs(ADDRESS_TTL_S)).is_ok() {
+                t.found.locked().entry((net.id.clone(), r.host.clone())).or_default().insert("kept");
+                t.records.locked().entry((net.id.clone(), r.host.clone())).or_insert((r.at, v.clone()));
+                t.links.nudge(peer);
+            }
+        }
+    }
+
+    /// The other members' address records this machine holds in `network`,
+    /// but `host`'s own: what it passes on to `host` when they connect.
+    pub(super) fn records_for(&self, network: &str, host: &str) -> Vec<Value> {
+        let Some(t) = self.link2() else { return Vec::new() };
+        let held = t.records.locked();
+        held.iter().filter(|((n, h), _)| n == network && h != host).map(|(_, (_, v))| v.clone()).collect()
     }
 
     /// The holders for `author`'s feed in `network`, best first, among the
@@ -578,8 +691,20 @@ impl Machine for NodeMachine {
             out.extend(n.live_for(&net, peer, &snap).map(Out::Envelope));
         }
         out.extend(n.resend_sealed(&net, &m, at));
+        if let Some(t) = n.link2() {
+            out.extend(t.waited(peer, &net.id));
+        }
+        // The chain, where the heads differ, and what waits for approval.
+        out.extend(n.chain_hello(hello.chain.as_deref()));
+        if !n.proposals().is_empty() {
+            out.extend(n.chain_since(u64::MAX));
+        }
+        // Where this machine is, and where the other members are.
         if let Some(record) = n.address_record() {
-            out.push(Out::Control(Control::Address { network: net.id, record }));
+            out.push(Out::Control(Control::Address { network: net.id.clone(), record }));
+        }
+        for record in n.records_for(&net.id, &m.id) {
+            out.push(Out::Control(Control::Address { network: net.id.clone(), record }));
         }
         out
     }
@@ -680,6 +805,8 @@ impl Machine for NodeMachine {
         let Some(m) = n.member_at(peer) else { return };
         match record {
             Control::Address { record, .. } => n.address_in(&m.id, &record, "record"),
+            Control::Chain { body, .. } => n.chain_in(peer, &m.id, &body),
+            Control::ChainWant { from, .. } => n.chain_want_in(peer, from),
             Control::DontHave { network, author, why, .. } => {
                 n.log("net.link2", &format!("{} doesn't hold what was wanted of a feed ({})", m.id, why.as_str()));
                 n.link2_lacks(&network, &author, peer);
@@ -711,6 +838,15 @@ impl Machine for NodeMachine {
 
     fn up(&self, peer: PeerId, up: bool) {
         let Some(n) = self.any() else { return };
+        // Who is online, in each network the peer is a member of: one with
+        // a connection up.
+        if let Some(c) = self.0.upgrade() {
+            for s in c.shareds() {
+                if let Some(m) = s.member_at(peer) {
+                    s.peer_up(&m.id, up);
+                }
+            }
+        }
         if let Some(t) = n.link2() {
             if up {
                 t.presence.locked().theirs.up(peer);
@@ -727,6 +863,40 @@ impl Machine for NodeMachine {
         if let Some(n) = self.any() {
             n.log("net.link2", words);
         }
+    }
+}
+
+impl Common {
+    /// The address records a join brought for `network`: the inviter's
+    /// and the members' it knew, each signed by its member. Taken once
+    /// link/2 runs and the network's node is listed.
+    pub(crate) fn found_at_join(&self, network: &str, records: Vec<Value>) {
+        if !records.is_empty() {
+            self.joined.locked().push((network.to_string(), records));
+        }
+        self.take_joined();
+    }
+
+    /// What joins brought, taken now that link/2 runs, for the networks
+    /// listed; the rest wait.
+    pub(crate) fn take_joined(&self) {
+        if self.link2.reading().is_none() {
+            return;
+        }
+        let pending = std::mem::take(&mut *self.joined.locked());
+        let mut left = Vec::new();
+        for (network, records) in pending {
+            let Some(s) = self.shared_of(&network) else {
+                left.push((network, records));
+                continue;
+            };
+            for r in &records {
+                if let Some(host) = r.get("host").and_then(Value::as_str) {
+                    s.address_in(host, r, "invite");
+                }
+            }
+        }
+        self.joined.locked().extend(left);
     }
 }
 
@@ -866,6 +1036,8 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
         tokio::spawn(crate::svc2::serve(link, served.clone()));
     }));
     let t = Arc::new(Transport2 {
+        records: std::sync::Mutex::default(),
+        waiting: std::sync::Mutex::default(),
         dial,
         mesh,
         links: links.clone(),
@@ -878,6 +1050,10 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>) {
         forwards,
     });
     *common.link2.writing() = Some(t);
+    common.take_joined();
+    for n in common.shareds() {
+        n.load_records();
+    }
     for n in common.shareds() {
         n.members_changed();
     }

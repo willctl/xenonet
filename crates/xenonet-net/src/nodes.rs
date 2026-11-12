@@ -369,6 +369,7 @@ impl Nodes {
         self.nets.writing().push(node);
         self.listed();
         self.start_link2();
+        self.common.take_joined();
     }
 
     /// `xenonet net leave`: the network `which` names goes; the others stay
