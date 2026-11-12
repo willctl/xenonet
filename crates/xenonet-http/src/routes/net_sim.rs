@@ -160,7 +160,7 @@ pub fn simulated_net_state(ctx: &Ctx) -> Option<Value> {
     let now = ctx.now();
     let mut all = sims().locked();
     let sim = all.get_mut(&key(ctx))?;
-    if let Some(t) = sim.state["invites"]["open"].as_array_mut() {
+    if let Some(t) = sim.state.pointer_mut("/invites/open").and_then(Value::as_array_mut) {
         t.retain(|t| t["expires"].as_f64().is_some_and(|e| e > now));
     }
     Some(served(sim))
@@ -741,7 +741,7 @@ fn invite_for(sim: &mut Sim, host: &str, window: bool, now: f64) -> Value {
     let code = code_words();
     let invite = format!("xni2_simulated{}", code.replace('-', "").to_lowercase());
     let expires = now + INVITE_MS;
-    if let Some(t) = sim.state["invites"]["open"].as_array_mut() {
+    if let Some(t) = sim.state.pointer_mut("/invites/open").and_then(Value::as_array_mut) {
         t.push(json!({ "host": host, "window": window, "expires": expires, "wrong": 0 }));
     }
     json!({
@@ -1562,6 +1562,17 @@ mod tests {
         assert_eq!(get(ctx.clone()).await.status, 503);
         // Nothing simulated: the rest is the real routes'.
         assert!(route(&ctx, &mut Req::fake("POST", "/api/net/invite", &[], Some("{}"))).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_machine_on_its_own_is_served_as_network_state_v1_has_it_with_no_invites() {
+        let ctx = dev_ctx();
+        simulate(&ctx, "net-none", None, None).unwrap();
+        for _ in 0..2 {
+            let s = simulated_net_state(&ctx).unwrap();
+            assert!(s.get("invites").is_none(), "reading it leaves nothing behind: {s}");
+        }
+        clear(&ctx);
     }
 
     #[tokio::test]
