@@ -1,23 +1,18 @@
 // Other machines in a network on the map, from presence (docs/design/
-// network.md, section 7). While a console is open, the service subscribes
-// to each machine's own map and draws it from that snapshot, live or kept
-// (network: "relay" on its nodes), with its projects, sessions, wiki and
-// bridges between clones. Until a machine's first snapshot comes, it's
-// drawn here from what its presence says, as a constellation the way the
-// SSH hosts prototype draws one (hosts.js, hosts-draw.js): its host node, a
-// project for each repo (or each folder that isn't one), named by the
-// repo's last part, and its sessions under them with their app, title,
-// state and what waits on you (network: true). A machine that's away dims,
-// as a host that isn't live does.
+// network.md, section 7): each is drawn from what its presence says, as a
+// constellation (hosts.js, hosts-draw.js): its host node, a project for
+// each repo (or each folder that isn't one), named by the repo's last
+// part, and its sessions under them with their app, title, state and what
+// waits on you (network: true). A session's transcript and stats open
+// through the window, which reads them from its machine over svc/2. A
+// machine that's away dims, as a host that isn't live does.
 //
 // Every id is qualified @<host>:… as the hosts merge qualifies a host's,
 // and every node is made here field by field from the network panel's
 // agents (network-model.js's remoteAgents): nothing another machine sent
 // is put on the map as it came. Its text is shown escaped where the map
-// shows text, and never reaches an agent. A machine that's on the map
-// already, from its relay's snapshot, keeps that view,
-// which has more in it. No DOM here; main.js merges the part into the map
-// before it's drawn.
+// shows text, and never reaches an agent. No DOM here; main.js merges the
+// part into the map before it's drawn.
 import { HOST_ID } from "./network-model.js";
 import { hostNodeId } from "./hosts.js";
 
@@ -29,6 +24,12 @@ const PROJECT_ACTIVE_MS = 3600e3;
 
 const list = (v) => (Array.isArray(v) ? v : []);
 const placed = { fx: null, fy: null, fz: null, pinned: false, actions: [] };
+// What a session there offers: its transcript and stats, read through the
+// window from its machine.
+const READS = [
+  { id: "preview", label: "Preview transcript", client: true },
+  { id: "stats", label: "Stats", client: true },
+];
 
 // The last part of a repo's key or a folder: what the project is called.
 function lastPart(path) {
@@ -100,6 +101,7 @@ export function networkPart(state, agents, now = Date.now()) {
         // what it said last and why it seems stuck.
         presence: { state: a.status ?? null, focus: a.focus ?? null, waits: !!a.waits, kind: a.waits ? (a.kind ?? "question") : null, question: a.text ?? null, since: a.since ?? null, lastMessage: a.lastMessage ?? null, stuck: a.stuck ?? null },
         ...placed,
+        actions: READS.map((r) => ({ ...r })),
       });
       part.links.push({ source: parent, target: a.id, kind: "session" });
       if (parent !== hostId) {
@@ -160,13 +162,11 @@ export function partKey(part) {
 
 // The map with the network's other machines in it: their nodes after this
 // machine's, their host links, their machines among the map's hosts, and
-// this machine named. A machine the map has already (over SSH) is left as
-// it is. The map given isn't changed.
+// this machine named. The map given isn't changed.
 export function withNetwork(graph, part) {
   if (!graph || !part?.hosts.length) return graph;
   const have = new Set(list(graph.nodes).map((n) => n.id));
-  const known = new Set(list(graph.hosts).map((x) => x.id));
-  const fresh = new Set(part.hosts.filter((x) => !known.has(x.id) && !have.has(hostNodeId(x.id))).map((x) => x.id));
+  const fresh = new Set(part.hosts.filter((x) => !have.has(hostNodeId(x.id))).map((x) => x.id));
   if (!fresh.size) return graph;
   const nodes = part.nodes.filter((n) => fresh.has(n.host) && !have.has(n.id));
   const ids = new Set(nodes.map((n) => n.id));

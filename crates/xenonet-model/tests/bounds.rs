@@ -1,5 +1,4 @@
-//! The bounds in the schemas of what another machine, an actor or a relay
-//! sends hold as it's read: for each such document, values are made from
+//! The bounds in the schemas of what another machine or an actor sends hold as it's read: for each such document, values are made from
 //! its schema (every property, and each branch of every union), each one
 //! reads, and each with one bound pushed past (a string too long or too
 //! short, a pattern not matched, a number out of range or not whole, a list
@@ -11,7 +10,7 @@ mod made {
     use serde_json::{Map, Value};
     use std::collections::{BTreeMap, BTreeSet};
     use xenonet_model::schema::{self, Document};
-    use xenonet_model::{actor, host, network};
+    use xenonet_model::{actor, network};
 
     pub type Read = fn(&Value) -> Result<(), String>;
 
@@ -29,8 +28,8 @@ mod made {
         Doc { id: T::ID, schema: schema::document::<T>(), read: read::<T> }
     }
 
-    /// Every document read from outside: another host's frames, a relay's
-    /// hello, and what actors send.
+    /// Every document read from outside: what another host sends, and
+    /// what actors send.
     pub fn untrusted() -> Vec<Doc> {
         vec![
             doc::<network::Claim>(),
@@ -39,12 +38,10 @@ mod made {
             doc::<network::Operator>(),
             doc::<network::Presence>(),
             doc::<network::Receipt>(),
-            doc::<network::Relay>(),
             doc::<network::RosterEntry>(),
             doc::<network::SendBody>(),
             doc::<network::State>(),
             doc::<network::Svc>(),
-            doc::<host::Hello>(),
             doc::<actor::Registration>(),
             doc::<actor::Report>(),
             doc::<actor::Console>(),
@@ -71,7 +68,6 @@ mod made {
             "^prs_[a-z2-7]{32}$" => "prs_abcdefghijklmnopqrstuvwxyz234567",
             "^net_[0-9a-f]{32}$" => "net_0123456789abcdef0123456789abcdef",
             "^(net_[0-9a-f]{32}|spc_[a-z2-7]{32})$" => "net_0123456789abcdef0123456789abcdef",
-            "^sub_[0-9a-f]{32}$" => "sub_0123456789abcdef0123456789abcdef",
             "^svq_[0-9a-f]{32}$" => "svq_0123456789abcdef0123456789abcdef",
             "^msg_[0-9a-f-]{36}$" => "msg_00000000-0000-4000-8000-000000000000",
             "^frm_[0-9a-f-]{36}$" => "frm_00000000-0000-4000-8000-000000000000",

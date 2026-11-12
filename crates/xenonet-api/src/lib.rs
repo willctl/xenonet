@@ -2,8 +2,8 @@
 //! for its cores (docs/design/direction.md, "The target shape"): the core
 //! traits the routes call, JSON-shaped for now (cores/); who an event is
 //! from, the sink a driver's events and log lines reach the service
-//! through, and what every driver is given (wire.rs); the event stream a
-//! relay follows (events.rs); who sent a request (peer.rs); and the client
+//! through, and what every driver is given (wire.rs); who sent a request
+//! (peer.rs); and the client
 //! that reaches a running XenoNet over its HTTP API (client.rs, over the
 //! HTTP/1.1 of http.rs), which the command, the hook and the MCP servers
 //! use, with the instances XenoNet Dev runs as (instances.rs) and what a
@@ -21,7 +21,6 @@ pub mod bearer;
 pub mod client;
 pub mod cores;
 pub mod credentials;
-pub mod events;
 pub mod http;
 pub mod instances;
 pub mod limits;

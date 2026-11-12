@@ -377,12 +377,11 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       ${head}
       ${p.focus ? `<div class="sub-k">doing</div><div class="net-said">${h(p.focus)}</div>` : ""}
       ${p.lastMessage ? `<div class="sub-k">said last</div><div class="net-said">${h(p.lastMessage)}</div>` : ""}
-      <div class="net-from">From ${h(node.host)}'s presence. Its transcript and stats stay on ${h(node.host)}.</div>`;
+      <div class="net-from">From ${h(node.host)}'s presence. Its transcript and stats are read from ${h(node.host)} through this window.</div>`;
   }
 
   function liveSectionHtml(node) {
-    // Drawn from presence (network-map.js); one drawn from its host's relay
-    // snapshot (network: "relay") has the live state, as an SSH host's does.
+    // Another machine's session: drawn from its presence (network-map.js).
     if (node.network === true) return presenceHtml(node);
     const s = liveById.get(node.id);
     if (!s) return `<div class="live-none">No activity in the last 24 hours</div>`;

@@ -27,7 +27,6 @@ pub mod doctor;
 pub mod drift;
 pub mod engine;
 pub mod graph;
-pub mod host;
 pub mod identity;
 pub mod ids;
 pub mod live;
@@ -56,7 +55,6 @@ pub const DOCUMENTS: &[&[schema::Writer]] = &[
     drift::DOCUMENTS,
     engine::DOCUMENTS,
     graph::DOCUMENTS,
-    host::DOCUMENTS,
     identity::DOCUMENTS,
     live::DOCUMENTS,
     network::DOCUMENTS,

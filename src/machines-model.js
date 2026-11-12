@@ -2,9 +2,9 @@
 // (system-panel.js) and the Machines view (machines.js) show them. On its
 // own, that's this computer. In a network (network mode) it's every
 // machine of the roster, in the roster's order: this one's reading from
-// GET /api/system, the others' from GET /api/system?hosts=1, which each
-// machine's relay sends while a window host's console watches it (their
-// load reaches window hosts' consoles only). No DOM here: the panel, the
+// GET /api/system, the others' from GET /api/system?hosts=1: the load each
+// machine sends on link/2 to the window hosts of a network that shares it
+// (their load reaches window hosts' consoles only). No DOM here: the panel, the
 // view, the driver and the tests share it.
 import { inNetwork } from "./network-model.js";
 import { HERE } from "./hosts.js";
@@ -12,8 +12,8 @@ import { HERE } from "./hosts.js";
 // The host palette's size: --host-0 … --host-5 in style.css, clear of the
 // accent, the apps' colors and violet, which the rings and the map use.
 export const HOST_COLORS = 6;
-// Another machine's reading older than this isn't counted: its relay sends
-// one every 5 s while it's watched.
+// Another machine's reading older than this isn't counted: it sends one
+// every 5 s while a window host is connected.
 export const STALE_MS = 30e3;
 export const OS_NAME = { darwin: "macOS", win32: "Windows", linux: "Linux" };
 export const PLATFORMS = ["darwin", "win32", "linux"];

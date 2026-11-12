@@ -78,8 +78,8 @@ use xenonet_log::person::is_key_id;
 pub const TAG: &str = "xenonet-net/2";
 /// The most bytes an envelope's JSON takes: a link/2 record's limit.
 pub const MAX_ENVELOPE: usize = 1 << 20;
-/// What a live envelope may carry.
-pub const LIVE_KINDS: [&str; 1] = ["presence"];
+/// What a live envelope may carry: presence, and a machine's load (`load`).
+pub const LIVE_KINDS: [&str; 2] = ["presence", crate::load::KIND];
 /// How many envelope ids `Seen` keeps by default.
 pub const SEEN: usize = 65_536;
 

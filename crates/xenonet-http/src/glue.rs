@@ -5,7 +5,6 @@
 //! to.
 
 use crate::ctx::Ctx;
-use crate::events::Local;
 use serde_json::{json, Value};
 use xenonet_api::wire::EventSink;
 use xenonet_os::sync::Locked;
@@ -45,19 +44,12 @@ pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
         (From::State, "pulse" | "activity" | "tokens") => ctx.broadcast(name, &data),
         (From::State, "refusal") => refusal(ctx, data),
         (From::State, "graph") => {
-            // The map goes out with other hosts' in it, with hosts on.
-            match &cores.hub {
-                Some(h) => ctx.events.broadcast("graph", &h.graph(data.clone()), Local::Own(&data)),
-                None => ctx.broadcast("graph", &data),
-            }
+            ctx.broadcast("graph", &data);
             if let Some(a) = &cores.actors {
                 a.refresh();
             }
         }
-        (From::State, "live") => match &cores.hub {
-            Some(h) => ctx.events.broadcast("live", &h.live(data.clone()), Local::Own(&data)),
-            None => ctx.broadcast("live", &data),
-        },
+        (From::State, "live") => ctx.broadcast("live", &data),
         (From::Engine, "message") => {
             ctx.broadcast("agent-message", &data);
             // A message an actor sent becomes its said event, never its text.
@@ -126,7 +118,6 @@ pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
             let n = if unread == 1.0 { "a message".to_string() } else { format!("{} messages", xenonet_text::json::number_string(unread)) };
             ctx.notify_desktop(json!({ "type": "notify", "key": format!("actor-mail:{}", js(&data["actor"])), "command": "actors", "title": format!("{name} has {n} waiting"), "subtitle": format!("Nothing can wake {name}, so it reads them when it next checks"), "body": "Ask it to check its XenoNet inbox, or set up a wake in the Actors panel." }));
         }
-        (From::Hub, _) => ctx.events.broadcast(name, &data, Local::None),
         // The window reads how they stand with its key; this says only that
         // it changed.
         (From::Tunnels, "changed") => ctx.broadcast("assistant", &json!({ "at": xenonet_text::json::number(ctx.now()) })),

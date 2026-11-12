@@ -31,8 +31,10 @@
 //! person's presence goes only to a recipient that's connected, never to
 //! a mailbox (`mailbox::route`).
 //!
-//! What link/2 doesn't carry yet: the map's relay; and Compacted answers,
-//! which are set aside (a holder's counts as "don't have", so the next
+//! **Load.** Each machine's load goes live to the window hosts of the
+//! networks that share it (`load`), and the latest of each is kept here.
+//!
+//! What link/2 doesn't carry yet: Compacted answers, which are set aside (a holder's counts as "don't have", so the next
 //! holder or the author is asked).
 //!
 //! **Finding members.** Each machine signs an address record (its endpoint
@@ -698,6 +700,13 @@ impl Machine for NodeMachine {
         let window = view.is_window(&m.id);
         if env.class == EnvClass::Live {
             match env.open_live(&peer.0, &view) {
+                // A member's load, for this window host's Machines panel:
+                // the latest kept, shaped, in memory.
+                Ok(body) if env.kind == crate::load::KIND => {
+                    if view.is_window(&net.host) {
+                        n.common.loads.locked().insert((net.id.clone(), m.id.clone()), crate::load::kept(&m.id, &body));
+                    }
+                }
                 Ok(body) => {
                     let counter = body.get("counter").and_then(Value::as_f64).map_or(0, |c| c.max(0.0) as u64);
                     if let Some(t) = n.link2() {
@@ -907,6 +916,62 @@ pub(crate) fn link2_presence(c: &Common, body: &Value) {
             let _ = t.links.send(peer, Out::Envelope(env));
         }
     }
+}
+
+/// The connected peers that take this machine's load: window hosts of the
+/// network `presence_node` picks for each, while that network shares it.
+fn load_peers(c: &Common, t: &Transport2) -> Vec<(PeerId, Arc<Shared>, NetFile)> {
+    let mut out = Vec::new();
+    for peer in t.links.peers().into_keys() {
+        let Some(n) = presence_node(c, peer) else { continue };
+        let Some(net) = n.network().filter(|net| net.share_load) else { continue };
+        let Some(m) = n.member_at(peer) else { continue };
+        if n.roster().view_ref().is_some_and(|v| v.is_window(&m.id)) {
+            out.push((peer, n, net));
+        }
+    }
+    out
+}
+
+/// Whether any connected peer takes this machine's load now.
+pub(crate) fn wants_load(c: &Common) -> bool {
+    c.link2.reading().clone().is_some_and(|t| !load_peers(c, &t).is_empty())
+}
+
+/// This machine's load (system/v1), shaped, to each connected window host
+/// of a network that shares it: live, never kept or passed on.
+pub(crate) fn link2_load(c: &Common, reading: &Value) {
+    let Some(t) = c.link2.reading().clone() else { return };
+    let body = crate::load::shape(reading);
+    for (peer, n, net) in load_peers(c, &t) {
+        let Some(author) = n.machine_id() else { continue };
+        match Envelope::live(&net.id, &author, crate::load::KIND, n.now().max(0.0) as u64, &body) {
+            Ok(env) => {
+                let _ = t.links.send(peer, Out::Envelope(env));
+            }
+            Err(e) => n.log("net.link2", &format!("this machine's load didn't go on link/2: {}", e.message)),
+        }
+    }
+}
+
+/// The latest load each other member of this machine's networks sent,
+/// once a host: only members still in a network's roster.
+pub(crate) fn loads(c: &Common) -> Vec<Value> {
+    let kept = c.loads.locked().clone();
+    let mut out: Vec<Value> = Vec::new();
+    for s in c.shareds() {
+        let Some(net) = s.network() else { continue };
+        let roster = s.roster();
+        let Some(view) = roster.view_ref() else { continue };
+        for m in view.members.values().filter(|m| m.id != net.host) {
+            if let Some(v) = kept.get(&(net.id.clone(), m.id.clone())) {
+                if !out.iter().any(|o| o["host"] == m.id.as_str()) {
+                    out.push(v.clone());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// What a peer may see of this machine changed: each connected peer is

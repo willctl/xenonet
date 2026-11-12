@@ -140,13 +140,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "hosts"
-path = "fuzz_targets/hosts.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "misc"
 path = "fuzz_targets/misc.rs"
 test = false

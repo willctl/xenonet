@@ -1,27 +1,14 @@
-//! The hub that shows the other machines of this one's network on its
-//! map, through the network's gateway (docs/design/network.md, section 7),
-//! and this machine's own API as the relay that serves its map reads it.
+//! This machine's own API, read as any local program reads it: what the
+//! window reads of another machine (docs/design/network.md, section 7,
+//! over svc/2) reads on the machine it's for.
 
-use super::{pending, Pending, R};
-use crate::events::EventStream;
 use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::Arc;
 use std::time::Duration;
-use xenonet_model::ops::Net;
-use xenonet_net::sink::SinkSlot;
-
-const HUB: &str = "the hub";
-
-/// A host's answer through its relay: `{ status, body }`.
-pub struct HubAnswer {
-    pub status: u16,
-    pub body: Value,
-}
 
 /// This machine's own API, read as any local program reads it: a GET with
-/// no key, so its routes' own checks and the relay's allowlist both apply.
-/// The relay that serves this host's map to another host reads through it.
+/// no key, so its routes' own checks apply. A window read from another
+/// machine reads through it.
 #[async_trait]
 pub trait SelfApi: Send + Sync {
     /// The status and JSON of `path`, or why there was none and the status
@@ -29,11 +16,11 @@ pub trait SelfApi: Send + Sync {
     async fn get(&self, path: &str) -> Result<(u16, Value), (String, u16)>;
 }
 
-/// The API over HTTP on 127.0.0.1, as the relay reads it. It sends
+/// The API over HTTP on 127.0.0.1, as a window read reads it. It sends
 /// no window key and no token. It carries the API's credential, as any
-/// program here does, and with `own`, the service's own key: the hub reads
-/// for another machine of the network only what the network decided that
-/// machine may read, so its read of this service is the service's own.
+/// program here does, and with `own`, the service's own key: the network
+/// decided what the other machine may read, so the read of this service
+/// is the service's own.
 pub struct HttpApi {
     pub port: u16,
     /// A read's longest wait, and its biggest answer.
@@ -64,7 +51,7 @@ impl SelfApi for HttpApi {
         })?;
         let body = a.body.map_err(|e| (e.to_string(), 502))?;
         if body.len() > max {
-            return Err(("too big to relay".into(), 413));
+            return Err(("too big to send to another machine".into(), 413));
         }
         let text = String::from_utf8_lossy(&body);
         if text.is_empty() {
@@ -77,70 +64,15 @@ impl SelfApi for HttpApi {
     }
 }
 
-/// What the hub needs of the network once the service has it: the network
-/// itself, where its relay sinks go, and, for the relay that serves this
-/// host's map to a console on another host, this machine's event stream
-/// and its own API.
-pub struct HubNet {
-    pub net: Arc<dyn Net>,
-    pub sinks: Arc<SinkSlot>,
-    pub events: Arc<dyn EventStream>,
-    pub api: Arc<dyn SelfApi>,
-    pub home: String,
-    pub version: String,
-    pub platform: String,
-    pub demo: bool,
-}
-
-#[async_trait]
-pub trait Hub: Send + Sync {
-    fn has(&self, _host: &str) -> bool {
-        false
-    }
-    async fn get(&self, _host: &str, _path: &str) -> R<HubAnswer> {
-        pending(HUB)
-    }
-    /// This machine's map with other hosts' in it.
-    fn graph(&self, g: Value) -> Value {
-        g
-    }
-    fn live(&self, s: Value) -> Value {
-        s
-    }
-    fn summary(&self, s: Value) -> Value {
-        s
-    }
-    /// The latest load each other host sent (system/v1, under `host`), for
-    /// GET /api/system?hosts=1: a network host's relay sends one every few
-    /// seconds while this console watches it, unless it doesn't share it.
-    fn systems(&self) -> Value {
-        Value::Array(Vec::new())
-    }
-    /// The host-… simulations (dev only).
-    fn simulate(&self, _kind: &str, _args: &Value) -> R<Option<Value>> {
-        pending(HUB)
-    }
-    /// The network, once the service has it: the hub's relay sinks go in,
-    /// and its network hosts come from the roster.
-    fn plug_net(&self, _net: HubNet) {}
-    /// Whether a console is open here: Desktop's window (shown, hidden or
-    /// closed, as it last said), and how many pages read the event stream.
-    /// The hub subscribes to network hosts' maps only while one is.
-    fn console(&self, _window: Option<&str>, _pages: usize) {}
-    fn stop(&self) {}
-}
-
-impl Hub for Pending {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{Read, Write};
 
-    // The relay's reads of this machine's own API carry no window key and
-    // no token, and the service's own key only when it's given one.
+    // A read of this machine's own API carries no window key and no
+    // token, and the service's own key only when it's given one.
     #[tokio::test]
-    async fn the_relays_own_reads_carry_no_key() {
+    async fn own_reads_carry_no_key() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let seen = std::thread::spawn(move || {

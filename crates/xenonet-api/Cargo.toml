@@ -13,8 +13,6 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
-# The event stream's frames (events.rs).
-bytes.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 xenonet-model.workspace = true

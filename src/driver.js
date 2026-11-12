@@ -819,7 +819,7 @@ export function createDriver(app) {
     },
 
     // Other machines on the map (hosts.js: your network's, from their
-    // presence or their relays): each host with how it stands, its node and where that is on screen, its
+    // presence): each host with how it stands, its node and where that is on screen, its
     // constellation, and the machines' chips under Filters with the ones
     // picked; the bridges between checkouts of one repo, drawn or not.
     hosts() {

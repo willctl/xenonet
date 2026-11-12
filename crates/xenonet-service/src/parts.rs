@@ -222,4 +222,7 @@ impl parts::Network for NetService {
         let body = serde_json::from_slice::<Value>(&a.body).unwrap_or_else(|_| json!({ "error": "that machine answered with something that isn't JSON" }));
         Some((a.status, body))
     }
+    fn loads(&self) -> Vec<Value> {
+        self.nodes().loads()
+    }
 }

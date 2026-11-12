@@ -5686,7 +5686,6 @@ name = "xenonet-api"
 version = "0.2.0"
 dependencies = [
  "async-trait",
- "bytes",
  "serde_json",
  "tokio",
  "xenonet-actors",
@@ -6248,7 +6247,6 @@ dependencies = [
  "xenonet-runtime",
  "xenonet-schema",
  "xenonet-sources",
- "xenonet-state",
  "xenonet-store",
  "xenonet-text",
 ]

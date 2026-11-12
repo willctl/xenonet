@@ -187,9 +187,15 @@ pub trait Network: Send + Sync {
     async fn svc_call(&self, host: &str, name: &str, call: SvcCall) -> SvcAnswer;
     /// The window's read of `path` (a session's transcript or stats) on
     /// `host`, over svc/2 under the window's key: its status and JSON, or
-    /// None when this machine reads other machines some other way (its
-    /// endpoint isn't running). Only the window reaches this.
+    /// None when this machine's endpoint isn't running. Only the window
+    /// reaches this.
     async fn window_read(&self, _host: &str, _path: &str) -> Option<(u16, Value)> {
         None
+    }
+    /// The latest load each other machine sent on link/2 (system/v1's
+    /// fields, with `host`), for GET /api/system?hosts=1: only machines of
+    /// this one's networks that share it, and only to a window host.
+    fn loads(&self) -> Vec<Value> {
+        Vec::new()
     }
 }

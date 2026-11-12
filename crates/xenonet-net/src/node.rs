@@ -211,6 +211,8 @@ pub struct Common {
     pub(crate) reads: RwLock<Option<Arc<dyn svc2::LocalReads>>>,
     /// Address records a join brought, by network, until link/2 takes them.
     pub(crate) joined: Mutex<Vec<(String, Vec<Value>)>>,
+    /// The latest load each member sent (`load`), by network and host id.
+    pub(crate) loads: Mutex<HashMap<(String, String), Value>>,
 }
 
 impl Common {
@@ -227,6 +229,7 @@ impl Common {
             nonces: Mutex::new(svc2::Nonces::default()),
             reads: RwLock::new(None),
             joined: Mutex::new(Vec::new()),
+            loads: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1199,10 +1202,6 @@ impl Net for Shared {
             self.own_presence(body);
             return Ok(());
         }
-        if out.kind == Kind::Relay {
-            return Err("the map's relay isn't carried between machines: other machines show from their presence, and the window reads them on svc/2".into());
-        }
-
         // The person's act at another machine (an answer to its ask): a
         // message entry of this machine's feed to `xenonet:operator`, for
         // that one machine, with what it rests on beside it, so it goes on

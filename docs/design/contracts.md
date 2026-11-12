@@ -27,7 +27,7 @@ reason in the commit.
   `actor/credentials`, `actor/gateway-credentials`, `actor/gateway-ask`,
   `actor/report`, `actor/me`, `actor/events`, `actor/console`,
   `actor/requests`, `actor/tokens`, `actor/connection`, `drift/record`,
-  `drift/log`, `host/hello`, `app` (an entry of the app registry,
+  `drift/log`, `app` (an entry of the app registry,
   `src/shared/apps.js`), `assistant/result` and `assistant/error`
   (section 6), the `network/…` documents (section 7), `tray/status` and
   `tray/event` (section 8), and `system`, a computer's load as
@@ -477,7 +477,7 @@ One network across machines ([network.md](network.md); what's next is in
   the act's authority), `network/receipt/v1`, `network/claim/v1`,
   `network/handoff/v1` and `network/operator/v2` (answers only). Then
   `network/roster-entry/v2`, one entry of the network's chain;
-  `network/relay/v1`, `network/send/v1` and `network/svc/v2`; and
+  `network/send/v1` and `network/svc/v2`; and
   `network/state/v1`, what `GET /api/net/state` answers the window.
 - Ids: a network is `net_<32 hex>`, a frame `frm_<uuid>`, a message
   `msg_<uuid>`, a handoff `hof_<uuid>`, a machine's transport key id

@@ -1014,7 +1014,7 @@ struct Stream(tokio::sync::mpsc::UnboundedReceiver<bytes::Bytes>, Vec<(String, V
 
 impl Stream {
     fn of(h: &Host) -> Stream {
-        Stream(h.ctx.events.subscribe(false), Vec::new())
+        Stream(h.ctx.events.subscribe(), Vec::new())
     }
 
     /// The next `name` event whose data `ok` takes, within `secs`.

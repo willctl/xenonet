@@ -77,9 +77,9 @@ test("merged into the map: after this machine's nodes, with the machines among i
   const layout = hostLayout({ random: () => 0.5 });
   assert.equal(layout.prepare(merged.nodes, merged.links), true);
   assert.deepEqual(layout.systems.map((x) => x.host), ["laptop"]);
-  // A machine on the map over SSH already keeps that view.
-  const ssh = { ...g, nodes: [...g.nodes, { id: "@laptop:core", kind: "host", host: "laptop", state: "live" }], hosts: [{ id: "laptop", state: "live" }] };
-  assert.equal(withNetwork(ssh, networkPart(s, agents(), NOW)), ssh);
+  // A machine whose host node is on the map already isn't drawn twice.
+  const twice = { ...g, nodes: [...g.nodes, { id: "@laptop:core", kind: "host", host: "laptop", state: "live" }] };
+  assert.equal(withNetwork(twice, networkPart(s, agents(), NOW)), twice);
 });
 
 test("the part's key changes with what the map shows of it, and not with a machine's pings", () => {

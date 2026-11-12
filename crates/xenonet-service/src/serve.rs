@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -319,9 +319,7 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         f.set_socket(at);
     }
     let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
-    // Desktop's window, as it last said: shown, hidden or closed.
-    let window: Arc<Mutex<Option<String>>> = Arc::default();
-    plug_hub(&ctx, parts.net.as_ref(), port, &window);
+    plug_net(&ctx, parts.net.as_ref(), port);
 
     if config.standalone {
         // No app started this service, so the Desktop that connects is the
@@ -331,17 +329,12 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         let tray = ctx.clone();
         let you = ctx.clone();
         let stop = stop_tx.clone();
-        let shown = window.clone();
         let hooks = Hooks {
             version: version.clone(),
             window_key: ctx.window_key.clone(),
             window_state: Arc::new(move |v: &Value| {
                 if let Some(a) = &you.cores.actors {
                     a.you_window(v);
-                }
-                *shown.locked() = v.as_str().map(str::to_string);
-                if let Some(h) = &you.cores.hub {
-                    h.console(v.as_str(), you.events.pages());
                 }
             }),
             shutdown: Arc::new(move || {
@@ -499,42 +492,27 @@ async fn signal() {
     }
 }
 
-/// The hub and the network, once both are there and the service listens:
-/// the hub hears the map's relay frames, and serves this host's own map to
-/// the window hosts that subscribe, reading this service's API on `port`
-/// with the service's own key (the network decided what they may read). Every two seconds it's told
-/// whether a console is open here, from Desktop's window as it last said
-/// and the pages reading the event stream.
-fn plug_hub(ctx: &Arc<Ctx>, net: Option<&Arc<NetService>>, port: u16, window: &Arc<Mutex<Option<String>>>) {
+/// The network's sides that read this service, once both are there and it
+/// listens: window reads from other machines (svc/2) read its API on
+/// `port` with the service's own key (the network decided what they may
+/// read), and while a window host that takes it is connected, this
+/// machine's load goes to it every few seconds.
+fn plug_net(ctx: &Arc<Ctx>, net: Option<&Arc<NetService>>, port: u16) {
+    let Some(svc) = net else { return };
     let api: Arc<dyn crate::cores::SelfApi> =
         Arc::new(crate::cores::HttpApi { port, timeout: Duration::from_secs(20), max_bytes: 8 << 20, own: Some(ctx.self_key.reveal().to_string()) });
-    // Window reads from other machines (svc/2) read this service as the
-    // relay does: the network decided what they may read.
-    if let Some(svc) = net {
-        svc.nodes().common().set_reads(Arc::new(SelfReads(api.clone())));
-    }
-    let Some(hub) = ctx.cores.hub.clone() else { return };
-    if let Some(svc) = net {
-        hub.plug_net(crate::cores::HubNet {
-            net: svc.net(),
-            sinks: svc.sinks().clone(),
-            events: ctx.events.clone(),
-            api,
-            home: ctx.config.home.clone(),
-            version: ctx.version.clone(),
-            platform: crate::borrowed::platform().to_string(),
-            demo: ctx.config.demo,
-        });
-    }
-    let (c, w) = (Arc::downgrade(ctx), window.clone());
+    svc.nodes().common().set_reads(Arc::new(SelfReads(api)));
+    let (c, nodes) = (Arc::downgrade(ctx), svc.nodes().clone());
     tokio::spawn(async move {
-        let mut every = tokio::time::interval(Duration::from_secs(2));
+        let mut every = tokio::time::interval(Duration::from_millis(xenonet_net::load::EVERY_MS));
         loop {
             every.tick().await;
             let Some(ctx) = c.upgrade() else { return };
-            let shown = w.locked().clone();
-            if let Some(h) = &ctx.cores.hub {
-                h.console(shown.as_deref(), ctx.events.pages());
+            if !nodes.wants_load() {
+                continue;
+            }
+            if let Ok(reading) = ctx.cores.system.read().await {
+                nodes.send_load(&reading);
             }
         }
     });
@@ -570,9 +548,6 @@ fn shutdown(ctx: &Arc<Ctx>, parts: &Parts) {
     ctx.components.locked().take();
     if let Some(comp) = &parts.components {
         comp.close();
-    }
-    if let Some(h) = &c.hub {
-        h.stop();
     }
     if let Some(a) = &c.actors {
         a.stop();

@@ -27,8 +27,6 @@ pub enum From {
     Registration,
     /// Wakes: mail (a message for an actor nothing can wake).
     Wakes,
-    /// The hub: graph, live, activity, tokens, pulse, agent-message, hosts.
-    Hub,
     /// The assistant's tunnels: changed.
     Tunnels,
     /// The doctor: result, problems.

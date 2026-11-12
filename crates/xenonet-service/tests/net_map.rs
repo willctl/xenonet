@@ -8,7 +8,7 @@
 // on svc/2's window-read service, read on laptop as any local program
 // reads its API: an agent on studio is refused, desk (no window host) is
 // refused at laptop, and a machine that shares titles only keeps its
-// transcripts.
+// transcripts. Each machine's load reaches the window hosts alone.
 //
 // NET_TEST_LOG=1 prints what each host logs.
 
@@ -309,6 +309,29 @@ async fn other_machines_show_from_presence_and_their_transcripts_open_through_th
     assert_eq!(s, 403, "{v}");
     let (s, _) = a.window("GET", &format!("/api/session/{}/stats", enc(&remote)), Value::Null).await;
     assert_eq!(s, 200);
+
+    // Each machine's load goes live to the window hosts alone, shaped to
+    // system/v1's fields: laptop's reaches studio, studio's reaches laptop,
+    // and desk, no window host, gets none.
+    let reading = json!({ "at": 1, "platform": "linux", "hostname": "laptop.local", "cpu": { "model": "made up", "threads": 8, "usage": 0.25, "cores": [0.1] }, "memory": { "total": 16, "used": 4 }, "gpus": [] });
+    assert!(b.svc.nodes().wants_load() && a.svc.nodes().wants_load(), "a window host is connected to each");
+    b.svc.nodes().send_load(&reading);
+    a.svc.nodes().send_load(&reading);
+    c.svc.nodes().send_load(&reading);
+    until("laptop's load at studio and studio's at laptop", 10, || async {
+        a.svc.nodes().loads().iter().any(|l| l["host"] == "laptop") && b.svc.nodes().loads().iter().any(|l| l["host"] == "studio")
+    })
+    .await;
+    until("desk's load at studio", 10, || async { a.svc.nodes().loads().iter().any(|l| l["host"] == "desk") }).await;
+    let at_studio = a.svc.nodes().loads();
+    let l = at_studio.iter().find(|l| l["host"] == "laptop").unwrap();
+    assert_eq!(l["cpu"], json!({ "model": "made up", "threads": 8, "usage": 0.25 }));
+    assert!(l.get("hostname").is_none(), "only the declared fields: {l}");
+    assert!(c.svc.nodes().loads().is_empty(), "desk is no window host: {:?}", c.svc.nodes().loads());
+    // "Share load with the network" off: laptop sends none.
+    let (s, v) = b.window("PUT", "/api/net/settings", json!({ "shareLoad": false })).await;
+    assert_eq!(s, 200, "{v}");
+    assert!(!b.svc.nodes().wants_load());
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }

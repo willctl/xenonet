@@ -30,7 +30,6 @@ use crate::borrowed::{attest, platform, Sender};
 use crate::cores::settings::{MAX_BRIEF, NEEDS_INPUT_URL};
 use crate::cores::{ok, CoreError, Kind};
 use crate::ctx::{pending_reply, Answer, Ctx};
-use crate::events::Local;
 use crate::http::{decode_uri_component, Reply, Req};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -166,7 +165,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return a;
         }
     }
-    if let Some(r) = (hosts::HostRoutes { hub: cores.hub.clone(), net: ctx.net.get().cloned() }).route(req).await {
+    if let Some(r) = (hosts::HostRoutes { net: ctx.net.get().cloned() }).route(req).await {
         return Ok(r);
     }
 
@@ -230,10 +229,11 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     if m == "GET" && route == "/api/system" {
         let mut reading = cores.system.read().await?;
-        // With ?hosts=1, the latest each other machine sent (the Machines
-        // panel), whether or not hosts over SSH are on.
+        // With ?hosts=1, the latest load each other machine of the network
+        // sent on link/2 (the Machines panel): system/v1's fields with
+        // `host`, and nothing from a machine that doesn't share it.
         if req.param("hosts") == Some("1") && reading.is_object() {
-            reading["hosts"] = cores.hub.as_ref().map_or_else(|| Value::Array(Vec::new()), |h| h.systems());
+            reading["hosts"] = Value::Array(ctx.net.get().map(|n| n.loads()).unwrap_or_default());
         }
         return Ok(Reply::json(200, reading));
     }
@@ -417,31 +417,15 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(Reply::json(200, json!({ "app": app, "model": model, "dir": dir, "folder": xenonet_os::paths::tilde(&dir, &ctx.config.home), "command": line })));
     }
 
-    // With hosts on, other hosts' maps and live state are in them, except
-    // for ?hosts=0, this machine's own.
-    let merged = cores.hub.as_ref().filter(|_| req.param("hosts") != Some("0"));
     if m == "GET" && route == "/api/graph" {
         let graph = match cores.state.graph()? {
             Some(g) => g,
             None => cores.state.refresh().await?,
         };
-        return Ok(Reply::json(
-            200,
-            match merged {
-                Some(hub) => hub.graph(graph),
-                None => graph,
-            },
-        ));
+        return Ok(Reply::json(200, graph));
     }
     if m == "GET" && route == "/api/live" {
-        let live = cores.state.live_snapshot()?;
-        return Ok(Reply::json(
-            200,
-            match merged {
-                Some(hub) => hub.live(live),
-                None => live,
-            },
-        ));
+        return Ok(Reply::json(200, cores.state.live_snapshot()?));
     }
     // Event history (last 24h) for replay and digests.
     if m == "GET" && route == "/api/history" {
@@ -596,16 +580,14 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
     }
 
-    // With hosts on, live hosts' alerts count in the tray too; the actors
-    // waiting on you and how many programs ask to be actors come with it, a
-    // count, never who asked, since this route has no key.
+    // The actors waiting on you and how many programs ask to be actors
+    // come with it, a count, never who asked, since this route has no key.
     if m == "GET" && route == "/api/summary" {
         return Ok(Reply::json(200, summary(ctx)?));
     }
 
     if m == "GET" && route == "/api/events" {
-        let own_only = cores.hub.is_some() && req.param("hosts") == Some("0");
-        let rx = ctx.events.subscribe(own_only);
+        let rx = ctx.events.subscribe();
         return Ok(Reply::stream(200, &[("content-type", "text/event-stream"), ("cache-control", "no-store"), ("connection", "keep-alive")], rx));
     }
 
@@ -924,18 +906,12 @@ pub(crate) fn current_theme(ctx: &Ctx) -> Result<Value, CoreError> {
     ctx.cores.themes.current(&ctx.themes_dir, &*ctx.cores.store)
 }
 
-/// What waits on you apart from sessions: the actors waiting on you, and
-/// how many programs ask to be actors.
-/// What /api/summary answers: the map's summary, with live hosts' alerts
-/// when hosts are on, the actors waiting on you, and how many programs
-/// ask to be actors. The tray's status is built from it too.
+/// What /api/summary answers: the map's summary, the actors waiting on
+/// you, and how many programs ask to be actors. The tray's status is built from it too.
 pub(crate) fn summary(ctx: &Ctx) -> Result<Value, CoreError> {
     let cores = &ctx.cores;
     let summary = cores.state.summary()?;
-    let mut out = match &cores.hub {
-        Some(h) => h.summary(summary),
-        None => summary,
-    };
+    let mut out = summary;
     if let Value::Object(waits) = waits_on_you(ctx)? {
         for (k, v) in waits {
             out[k] = v;
@@ -1172,12 +1148,6 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
             None => Ok(None),
         };
     }
-    if kind_s.starts_with("host-") {
-        return match &cores.hub {
-            Some(h) => h.simulate(&kind_s, body),
-            None => Ok(None),
-        };
-    }
     // A made-up network across machines; a is the host you're at, and b
     // "titles-only" has the others share titles only; "networks" puts this
     // machine in a second network, work, too; "xenolith" has Xenolith here
@@ -1212,7 +1182,7 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
         net_sim::clear(ctx);
     }
     let Some(done) = cores.state.simulate(&kind_s, a, b)? else { return Ok(None) };
-    ctx.events.broadcast("live", &cores.state.live_snapshot()?, Local::Same);
+    ctx.events.send("live", &cores.state.live_snapshot()?);
     Ok(Some(done))
 }
 

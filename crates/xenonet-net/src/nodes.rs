@@ -272,6 +272,23 @@ impl Nodes {
         Ok(out)
     }
 
+    /// Whether a window host that takes this machine's load is connected
+    /// now, so the service reads its load only then.
+    pub fn wants_load(&self) -> bool {
+        link2n::wants_load(&self.common)
+    }
+
+    /// This machine's load (system/v1) to the connected window hosts of
+    /// the networks that share it.
+    pub fn send_load(&self, reading: &Value) {
+        link2n::link2_load(&self.common, reading);
+    }
+
+    /// The latest load each other machine of this one's networks sent.
+    pub fn loads(&self) -> Vec<Value> {
+        link2n::loads(&self.common)
+    }
+
     /// What the person shares into the network `which` names: `sharing` is
     /// "all" or a list of project ids. Sharing more publishes what another
     /// network's members see, so it's the window's; less is done anywhere.

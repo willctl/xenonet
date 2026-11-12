@@ -1,7 +1,7 @@
 //! The app's cores, made and put in place: opening things and the
 //! xenonet command, refusals, the decision model and OpenRouter's spend,
-//! the system panel, the MCP catalog, the network's hub, remote actors'
-//! connections, reads and tunnels, the integrations and the doctor. Each
+//! the system panel, the MCP catalog, remote actors' connections, reads
+//! and tunnels, the integrations and the doctor. Each
 //! is its domain crate's; the demo's are made up or kept in memory, and
 //! never reach your machine's own credential store or apps.
 
@@ -19,7 +19,6 @@ use xenonet_components::runtime::xenonet_bin_here;
 use xenonet_console::cores::system;
 use xenonet_doctor::runtime as doctor;
 use xenonet_integrations::runtime::{self as integrations, decide, mcp};
-use xenonet_runtime::remote::runtime as remote;
 use xenonet_sources::refusals::runtime as refusals;
 
 /// What these cores run with: the service's settings it reads, once the
@@ -64,25 +63,6 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
 
     cores.system = if demo { Arc::new(system::DemoSystem) } else { Arc::new(system::SystemPanel(xenonet_os::system::System::new())) };
     cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version, cores.state.clone(), xenonet_grok_build::connect::toml::read_settings));
-
-    // The hub, always: it shows the network's hosts, from its roster, once
-    // this machine is in a network.
-    let schemas = Arc::new(remote::schemas::HostSchemas::new(xenonet_state::graph::activity_of));
-    let windows = serde_json::json!({ "activeWindowMs": js["activeWindowMs"], "recentWindowMs": js["recentWindowMs"], "projectActiveMs": js["projectActiveMs"] });
-    let parts = remote::hub::HubParts {
-        schemas,
-        state: cores.state.clone(),
-        store: cores.store.clone(),
-        cache_dir: config.cache_dir.clone(),
-        root: config.root.to_string_lossy().into_owned(),
-        home: config.home.clone(),
-        demo,
-        windows,
-        emitter: env.emitter.clone(),
-        aliases: xenonet_state::identities::parse_ssh_aliases,
-        relay: remote::relay::Timing::default(),
-    };
-    cores.hub = Some(Arc::new(remote::hub::HubCore(remote::hub::HostHub::new(parts))));
 
     // Remote actors: their connections, reads, audit and tunnels, over
     // the engine's own store, with actors and the assistant both on. The

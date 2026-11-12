@@ -33,7 +33,7 @@ pub use delivery::{Policy, Router};
 pub use door::{Apps, LocalDoor};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
 pub use forwards::Forwards;
-pub use hosts::{HttpApi, Hub, HubNet, SelfApi};
+pub use hosts::{HttpApi, SelfApi};
 pub use intents::{Intents, Reporter};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
 pub use settings::{Command, Demo, Opener, Schemas, Store, Themes};
@@ -140,8 +140,7 @@ pub fn reason(v: &Value) -> String {
 
 /// Every core the service holds, as the JS service's top level makes them.
 /// Optional ones are None when a switch turns them off
-/// (XENONET_ACTORS=off, XENONET_ASSISTANT=off), and the hub until the
-/// service makes it.
+/// (XENONET_ACTORS=off, XENONET_ASSISTANT=off).
 #[derive(Clone)]
 pub struct Cores {
     pub state: Arc<dyn State>,
@@ -161,7 +160,6 @@ pub struct Cores {
     pub spend: Arc<dyn Spend>,
     pub policy: Arc<dyn Policy>,
     pub router: Arc<dyn Router>,
-    pub hub: Option<Arc<dyn Hub>>,
     pub connections: Option<Arc<dyn Connections>>,
     pub tunnels: Option<Arc<dyn Tunnels>>,
     pub audit: Option<Arc<dyn Audit>>,
@@ -241,7 +239,6 @@ impl Cores {
             spend: p.clone(),
             policy: p.clone(),
             router: p.clone(),
-            hub: None,
             connections: (actors && assistant).then(|| p.clone() as Arc<dyn Connections>),
             tunnels: (actors && assistant).then(|| p.clone() as Arc<dyn Tunnels>),
             audit: (actors && assistant).then(|| p.clone() as Arc<dyn Audit>),

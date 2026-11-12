@@ -36,8 +36,6 @@ pub const STEPS: &str = r#"  launch[:inactive|front|hidden]  start it unless it'
                                   made-up connection through a tunnel, with an adapter
                                   connected or not, and actor-read[,actor[,node]]: a read
                                   through it (all demo and test instances only);
-                                  host-offline and host-online (a: another machine on the map,
-                                  the first if left out) and host-skew[,host[,ms]];
                                   and a made-up network across machines: net-none,
                                   net-founder, net-member, net-away, net-invite,
                                   net-mismatch and net-remote-waiting (a: the machine you're at;

@@ -3,10 +3,6 @@
 //! then, and in a service without the engine, a `LogSink` writes each call
 //! to the log, so nothing that arrives is lost silently.
 //!
-//! The map's relay bodies go elsewhere, to the `RelaySink`s set here by
-//! role: the service's relay (`serve`) and the hub (`hear`). They never
-//! reach the engine.
-//!
 //! Entries of other members' feeds (messages, receipts, handoffs) go to
 //! the `Feeds` set here: the engine's, which applies each once in its
 //! store, in the transaction that writes what it does with it. Until one is
@@ -19,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use xenonet_log::feed::{Feed, Kind as EntryKind, MemoryStore, Offer, Verified};
-use xenonet_model::ops::{Incoming, Kind, RelaySink, Sink};
+use xenonet_model::ops::{Incoming, Kind, Sink};
 use xenonet_os::sync::{Locked, ReadWrite};
 
 /// An entry of another member's feed, as this machine took it: its author's
@@ -77,11 +73,9 @@ pub fn entry_kind(k: Kind) -> Option<EntryKind> {
 
 pub type LogFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
-/// The sink the network calls, which the engine can replace, and the
-/// relay sinks beside it.
+/// The sink the network calls, which the engine can replace.
 pub struct SinkSlot {
     inner: RwLock<Arc<dyn Sink>>,
-    relays: RwLock<Vec<(&'static str, Arc<dyn RelaySink>)>>,
     feeds: RwLock<Option<Arc<dyn Feeds>>>,
     /// The feeds in memory, until the engine's are set.
     memory: Mutex<Feed<MemoryStore>>,
@@ -89,7 +83,7 @@ pub struct SinkSlot {
 
 impl SinkSlot {
     pub fn new(sink: Arc<dyn Sink>) -> SinkSlot {
-        SinkSlot { inner: RwLock::new(sink), relays: RwLock::new(Vec::new()), feeds: RwLock::new(None), memory: Mutex::new(Feed::new(MemoryStore::new())) }
+        SinkSlot { inner: RwLock::new(sink), feeds: RwLock::new(None), memory: Mutex::new(Feed::new(MemoryStore::new())) }
     }
 
     /// The engine's feeds plug in here.
@@ -132,24 +126,6 @@ impl SinkSlot {
     pub fn get(&self) -> Arc<dyn Sink> {
         self.inner.reading().clone()
     }
-
-    /// A relay sink, by its role, in place of one set before with it.
-    pub fn set_relay(&self, role: &'static str, sink: Arc<dyn RelaySink>) {
-        let mut relays = self.relays.writing();
-        relays.retain(|(r, _)| *r != role);
-        relays.push((role, sink));
-    }
-
-    fn relays(&self) -> Vec<Arc<dyn RelaySink>> {
-        self.relays.reading().iter().map(|(_, s)| s.clone()).collect()
-    }
-
-    /// A relay body from another host, to each relay sink.
-    pub fn relay(&self, incoming: Incoming) {
-        for s in self.relays() {
-            s.relay(incoming.clone());
-        }
-    }
 }
 
 impl Sink for SinkSlot {
@@ -158,21 +134,12 @@ impl Sink for SinkSlot {
     }
     fn linked(&self, up: bool) {
         self.get().linked(up);
-        for s in self.relays() {
-            s.linked(up);
-        }
     }
     fn removed(&self, host: &str) {
         self.get().removed(host);
-        for s in self.relays() {
-            s.removed(host);
-        }
     }
     fn gap(&self) {
         self.get().gap();
-        for s in self.relays() {
-            s.gap();
-        }
     }
 }
 
@@ -209,43 +176,5 @@ impl Sink for LogSink {
     }
     fn gap(&self) {
         (self.log)("net.gap", "entries for this host or from it were lost on the way");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use xenonet_model::ops::Kind;
-
-    #[derive(Default)]
-    struct Heard(Mutex<Vec<String>>);
-
-    impl RelaySink for Heard {
-        fn relay(&self, incoming: Incoming) {
-            self.0.locked().push(format!("relay {}", incoming.from));
-        }
-        fn removed(&self, host: &str) {
-            self.0.locked().push(format!("removed {host}"));
-        }
-        fn gap(&self) {
-            self.0.locked().push("gap".into());
-        }
-    }
-
-    #[test]
-    fn relay_bodies_go_to_the_relay_sinks_by_role_and_never_the_engine() {
-        let engine = Arc::new(LogSink::new(Arc::new(|_: &str, _: &str| {})));
-        let slot = SinkSlot::new(engine);
-        let (a, b, a2) = (Arc::new(Heard::default()), Arc::new(Heard::default()), Arc::new(Heard::default()));
-        slot.set_relay("serve", a.clone());
-        slot.set_relay("hear", b.clone());
-        slot.set_relay("serve", a2.clone());
-        slot.relay(Incoming { network: String::new(), from: "laptop".into(), kind: Kind::Relay, body: json!({}), at: 0.0, from_window_host: true });
-        slot.removed("desk");
-        slot.gap();
-        assert!(a.0.locked().is_empty(), "a sink set again by its role replaces the one before");
-        assert_eq!(*a2.0.locked(), ["relay laptop", "removed desk", "gap"]);
-        assert_eq!(*b.0.locked(), ["relay laptop", "removed desk", "gap"]);
     }
 }

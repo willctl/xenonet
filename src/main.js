@@ -1334,7 +1334,6 @@ events.addEventListener("assistant", () => actorsPanel?.tunnelsChanged());
 events.addEventListener("pulse", (e) => !replay.active && scene.pulse(JSON.parse(e.data).nodeId));
 events.addEventListener("doctor", (e) => alerts.setDoctor(JSON.parse(e.data)));
 // How each other machine stands, between maps (hosts.js).
-events.addEventListener("hosts", (e) => hostFilters.setHosts(JSON.parse(e.data)));
 // The network across machines changed: read it again (network.js).
 events.addEventListener("net", () => network.heard());
 // A session you started: started, refused or ended, here or on another

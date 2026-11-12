@@ -81,12 +81,10 @@ xenonet-components.workspace = true
 # The composition's other cores (compose/app.rs): remote actors'
 # connections and tunnels, the integrations, the decision model, refusals
 # and the doctor; Grok Build's config.toml, which the MCP catalog reads
-# through its adapter; and the map's activity rule and SSH aliases, which
-# the network's hub draws other machines' maps with.
+# through its adapter.
 xenonet-assistant.workspace = true
 xenonet-doctor.workspace = true
 xenonet-grok-build.workspace = true
-xenonet-state.workspace = true
 xenonet-integrations.workspace = true
 xenonet-sources.workspace = true
 # The apps that start over ACP (compose/acp.rs): the generic ACP client,

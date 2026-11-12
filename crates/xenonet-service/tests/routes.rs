@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use xenonet_api::cores::hosts::HubAnswer;
 use xenonet_api::cores::{self, CoreError, Cores, Kind, R};
 use xenonet_service::ctx::Ctx;
 use xenonet_service::http::{Peer, Reply, Req};
@@ -27,7 +26,6 @@ struct Fake {
     person: Mutex<Value>,
     window: Mutex<Value>,
     hook_out: Mutex<Option<Value>>,
-    hub_answers: Mutex<Vec<(String, HubAnswer)>>,
     environment: Mutex<Value>,
     root_info: Value,
     fail_send: Mutex<Option<String>>,
@@ -267,20 +265,6 @@ impl cores::Router for Fake {
     }
 }
 
-#[async_trait]
-impl cores::Hub for Fake {
-    fn has(&self, host: &str) -> bool {
-        host == "vm1"
-    }
-    async fn get(&self, host: &str, path: &str) -> R<HubAnswer> {
-        self.note("get", json!([host, path]));
-        if let Some((_, a)) = self.hub_answers.lock().unwrap().iter().find(|(p, _)| p == path) {
-            return Ok(HubAnswer { status: a.status, body: a.body.clone() });
-        }
-        Ok(HubAnswer { status: 200, body: json!({ "id": S, "path": path }) })
-    }
-}
-
 impl cores::Store for Fake {
     fn environment(&self) -> R<Value> {
         Ok(self.environment.lock().unwrap().clone())
@@ -310,7 +294,7 @@ impl cores::Integrations for Fake {
 }
 
 /// A service whose cores are this fake where it stands in, pending elsewhere.
-fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
+fn service() -> (Arc<Ctx>, Arc<Fake>) {
     let f = Arc::new(Fake::new());
     let mut c = Cores::pending(true, true);
     xenonet_service::serve::wire_root(&mut c);
@@ -321,7 +305,6 @@ fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
     c.state = f.clone();
     c.policy = f.clone();
     c.router = f.clone();
-    c.hub = hub.then(|| f.clone() as Arc<dyn cores::Hub>);
     c.store = f.clone();
     c.integrations = f.clone();
     (Ctx::for_tests(c), f)
@@ -368,7 +351,7 @@ const AGENT: (&str, &str) = ("x-xenonet-agent", ME);
 
 #[tokio::test]
 async fn codex_hooks_go_to_the_engine_checked_against_the_asking_process() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     assert_eq!(go(&ctx, "POST", "/api/hook/codex", &[], Some(json!({}))).await.status, 204, "nothing to say");
     assert!(f.was("check").is_empty(), "no session, nothing to check");
     *f.hook_out.lock().unwrap() = Some(json!({ "hookSpecificOutput": { "additionalContext": "hi" } }));
@@ -384,7 +367,7 @@ async fn codex_hooks_go_to_the_engine_checked_against_the_asking_process() {
 
 #[tokio::test]
 async fn the_console_and_the_commands_reads() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     assert_eq!(go(&ctx, "GET", "/api/engine/state", &[], None).await.body_json(), json!({ "agents": [] }));
     assert_eq!(go(&ctx, "GET", "/api/engine/agents", &[], None).await.body_json(), json!([{ "id": ME }]));
     assert_eq!(go(&ctx, "GET", "/api/engine/who?path=src/a.js", &[], None).await.status, 400, "a relative path");
@@ -396,7 +379,7 @@ async fn the_console_and_the_commands_reads() {
 
 #[tokio::test]
 async fn connecting_agents_is_for_people_only() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     assert_eq!(go(&ctx, "GET", "/api/engine/connect", &[], None).await.body_json(), json!({ "apps": [] }));
     assert_eq!(go(&ctx, "POST", "/api/engine/connect", &[], Some(json!({ "apps": ["claude"] }))).await.body_json(), json!({ "applied": true }));
     assert_eq!(f.was("apply")[0], json!(["claude"]));
@@ -411,7 +394,7 @@ async fn connecting_agents_is_for_people_only() {
 
 #[tokio::test]
 async fn an_agents_calls_say_who_it_is_are_checked_and_note_that_its_in_touch() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     assert_eq!(go(&ctx, "POST", "/api/engine/whoami", &[], Some(json!({}))).await.status, 400, "no agent named");
     assert_eq!(go(&ctx, "POST", "/api/engine/whoami", &[("x-xenonet-agent", "someone")], None).await.status, 400);
     let r = go(&ctx, "POST", "/api/engine/whoami", &[AGENT], Some(json!({ "cwd": "/repo", "pid": 7 }))).await;
@@ -429,7 +412,7 @@ async fn an_agents_calls_say_who_it_is_are_checked_and_note_that_its_in_touch() 
 
 #[tokio::test]
 async fn an_opencode_sessions_plugin_reports_as_that_session_and_no_other() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let oc = ("x-xenonet-agent", "opencode:ses-abc123");
     let events = json!([{ "type": "status", "state": "busy" }, { "type": "from-the-future" }]);
     let r = go(&ctx, "POST", "/api/engine/opencode-event", &[oc], Some(json!({ "events": events, "cwd": "/w/atlas", "pid": 9 }))).await;
@@ -443,7 +426,7 @@ async fn an_opencode_sessions_plugin_reports_as_that_session_and_no_other() {
 
 #[tokio::test]
 async fn each_of_an_agents_tools_reaches_the_engine_with_what_it_needs() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     for (op, body) in [
         ("peers", json!({ "scope": "machine" })),
         ("peers", json!({ "scope": "galaxy" })),
@@ -470,7 +453,7 @@ async fn each_of_an_agents_tools_reaches_the_engine_with_what_it_needs() {
 
 #[tokio::test]
 async fn an_error_from_the_engine_is_the_callers_to_read() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     *f.fail_send.lock().unwrap() = Some("the message is empty".into());
     let r = go(&ctx, "POST", "/api/engine/send", &[AGENT], None).await;
     assert_eq!(status_error(&r), (400, json!("the message is empty")));
@@ -478,7 +461,7 @@ async fn an_error_from_the_engine_is_the_callers_to_read() {
 
 #[tokio::test]
 async fn a_token_goes_in_the_header_never_in_a_url() {
-    let (ctx, _) = service(false);
+    let (ctx, _) = service();
     let r = go(&ctx, "POST", "/api/engine/whoami?token=abc", &[AGENT], None).await;
     assert_eq!((r.status, r.body_json()["code"].clone()), (400, json!("bad-request")));
     let r = go(&ctx, "GET", "/api/actors?x=xenonet_actor_00", &[], None).await;
@@ -558,7 +541,7 @@ async fn an_actors_calls_need_its_token_its_own_process_and_what_you_allowed_it(
 // in XenoNet.
 #[tokio::test]
 async fn a_checkout_is_confirmed_in_its_project_from_the_window_alone() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let key = ctx.window_key.reveal().to_string();
     let p = "/api/checkouts/chk_x/confirm";
     let code = |r: &Reply| (r.status, r.body_json()["code"].clone());
@@ -770,7 +753,7 @@ async fn with_actors_off_a_token_reaches_nothing() {
 
 #[tokio::test]
 async fn deliverys_controls_are_yours_never_an_actors_or_an_agents() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     assert_eq!(go(&ctx, "POST", "/api/delivery/pause", &[], Some(json!({ "paused": true }))).await.body_json()["paused"], json!(true));
     go(&ctx, "POST", "/api/delivery/grant", &[], Some(json!({ "actor": "actor:wren", "scope": "project:atlas", "hours": 2 }))).await;
     assert_eq!(f.was("grant")[0], json!(["actor:wren", "project:atlas", 7200000.0]));
@@ -792,7 +775,7 @@ async fn deliverys_controls_are_yours_never_an_actors_or_an_agents() {
 
 #[tokio::test]
 async fn the_channel_operation_answers_a_claude_code_session_and_no_one_else() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let r = go(&ctx, "POST", "/api/engine/channel", &[AGENT], Some(json!({ "waitSeconds": 5 }))).await;
     assert_eq!(r.body_json(), json!({ "items": [{ "id": 1, "text": "hi" }] }));
     assert_eq!(f.was("poll")[0], json!([ME, 5000]));
@@ -809,7 +792,7 @@ async fn the_channel_operation_answers_a_claude_code_session_and_no_one_else() {
 
 #[tokio::test]
 async fn changing_the_projects_folder_is_yours() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet" });
     for (method, body) in [("POST", Some(json!({ "path": "~/Clients" }))), ("DELETE", None)] {
         let r = go(&ctx, method, "/api/workspace/root", &[], body).await;
@@ -828,35 +811,18 @@ async fn changing_the_projects_folder_is_yours() {
 
 #[tokio::test]
 async fn from_your_terminal_the_folder_changes_and_goes_back() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     assert_eq!(go(&ctx, "POST", "/api/workspace/root", &[], Some(json!({ "path": "~/Clients" }))).await.body_json(), json!({ "path": "~/Clients", "changed": true }));
     assert_eq!(go(&ctx, "DELETE", "/api/workspace/root", &[], None).await.status, 200);
     assert_eq!(go(&ctx, "POST", "/api/workspace/root", &[], Some(json!({}))).await.status, 400, "no folder named");
     assert_eq!(f.was("setRoot"), vec![json!("~/Clients"), Value::Null]);
 }
 
-// ---------- reads of another machine through its relay ----------
+// ---------- reads of another machine ----------
 
 #[tokio::test]
-async fn without_a_hub_a_remote_id_is_the_windows_and_then_the_states() {
-    let (ctx, _) = service(false);
-    // A remote id is the window's to read (routes/rules.rs); from there
-    // it's left to the routes that don't know it: the state's.
-    let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&format!("@vm1:{S}"))), &[], None).await;
-    assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("window")));
-    let key = ctx.window_key.reveal().to_string();
-    let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&format!("@vm1:{S}"))), &[("x-xenonet-window", &key)], None).await;
-    assert_eq!(r.status, 501, "the server's own route, whose state is pending here");
-    assert_eq!(go(&ctx, "GET", "/api/hosts", &[], None).await.status, 404, "hosts over SSH are gone");
-}
-
-fn urlencode(s: &str) -> String {
-    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
-}
-
-#[tokio::test]
-async fn a_remote_sessions_transcript_and_stats_come_through_its_relay() {
-    let (ctx, f) = service(true);
+async fn another_machines_reads_are_the_windows_and_go_over_svc2() {
+    let (ctx, _) = service();
     let id = format!("@vm1:{S}");
     // Only XenoNet's own window reads another machine's: never an agent
     // here, an actor, or a page without the window's key.
@@ -874,36 +840,30 @@ async fn a_remote_sessions_transcript_and_stats_come_through_its_relay() {
             assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("window")), "{who}: {path}");
         }
     }
-    assert!(f.was("get").is_empty(), "nothing reached a relay");
-    let t = go(&ctx, "GET", &format!("/api/session/{}/transcript?limit=50&cursor=abc_1", urlencode(&id)), &w, None).await;
-    assert_eq!(t.status, 200);
-    assert_eq!(f.was("get")[0], json!(["vm1", format!("/api/session/{S}/transcript?limit=50&cursor=abc_1")]));
-    assert_eq!(t.body_json(), json!({ "id": id, "path": format!("/api/session/{S}/transcript?limit=50&cursor=abc_1"), "host": "vm1" }), "its ids as this XenoNet writes them");
-    go(&ctx, "GET", &format!("/api/session/{id}/stats?limit=9"), &w, None).await;
-    assert_eq!(f.was("get")[1], json!(["vm1", format!("/api/session/{S}/stats")]), "stats take no query");
+    // From the window, with no endpoint running here, nothing reads it.
+    let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&id)), &w, None).await;
+    assert_eq!(r.status, 503, "{}", r.body_json());
     for bad in [format!("/api/session/{}/transcript?limit=all", urlencode(&id)), format!("/api/session/{}/transcript?cursor={}", urlencode(&id), urlencode("a b"))] {
         assert_eq!(go(&ctx, "GET", &bad, &w, None).await.status, 400, "{bad}");
     }
-    for unknown in [format!("@vm9:{S}"), "@vm1:project:~/x".to_string(), "@vm1:@vm2:claude:x".to_string(), "@vm1:claude:../../x".to_string()] {
-        assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(&unknown)), &w, None).await.status, 404, "{unknown}");
+    for unknown in ["@vm1:project:x", "@vm1:@vm2:claude:x", "@vm1:claude:..%2Fx"] {
+        assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(unknown)), &w, None).await.status, 404, "{unknown}");
     }
-    assert_eq!(f.was("get").len(), 2, "nothing else reached a relay");
+    // Another machine's MCP servers stay on it.
+    assert_eq!(go(&ctx, "GET", "/api/mcp?server=agent-wiki&host=vm1", &w, None).await.status, 404);
+    assert_eq!(go(&ctx, "GET", "/api/hosts", &[], None).await.status, 404, "hosts over SSH are gone");
+}
 
-    f.hub_answers.lock().unwrap().push((
-        format!("/api/collision?a={S}&b=claude:2"),
-        HubAnswer { status: 200, body: json!({ "a": { "id": S, "title": "A" }, "b": { "id": "claude:2", "title": "B" }, "files": [] }) },
-    ));
-    let c = go(&ctx, "GET", &format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")), &w, None).await;
-    assert_eq!(c.body_json(), json!({ "a": { "id": id, "title": "A" }, "b": { "id": "@vm1:claude:2", "title": "B" }, "files": [], "host": "vm1" }));
-    assert_eq!(go(&ctx, "GET", &format!("/api/collision?a={}&b={S}", urlencode(&id)), &w, None).await.status, 400, "across machines comes later");
+fn urlencode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 // ---------- test/environments.test.js ----------
 
 #[tokio::test]
 async fn environment_settings_persist_and_bad_or_unauthorized_choices_are_refused() {
-    let (ctx, f) = service(false);
-    let mut events = ctx.events.subscribe(false);
+    let (ctx, f) = service();
+    let mut events = ctx.events.subscribe();
     events.recv().await;
     let r = go(&ctx, "GET", "/api/environment", &[], None).await.body_json();
     assert_eq!(r["current"], json!("trench"));
@@ -924,7 +884,7 @@ async fn environment_settings_persist_and_bad_or_unauthorized_choices_are_refuse
 
 #[tokio::test]
 async fn integration_reads_are_yours_and_bearer_actors_cant_read_or_write() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     for route in ["/api/integrations", "/api/integrations/history", "/api/integrations/pi", "/api/integrations/sandbox/review?id=job"] {
         assert_eq!(go(&ctx, "GET", route, &[("authorization", "Bearer actor")], None).await.status, 403);
     }
@@ -937,7 +897,7 @@ async fn integration_reads_are_yours_and_bearer_actors_cant_read_or_write() {
 
 #[tokio::test]
 async fn every_integration_change_needs_the_window_before_its_body_is_read() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     for suffix in ["route/preview", "route/send", "route/outcome", "sandbox/check", "sandbox/launch", "sandbox/delete", "pi/import"] {
         let r = go(&ctx, "POST", &format!("/api/integrations/{suffix}"), &[], Some(json!({}))).await;
         assert_eq!(r.status, 403, "no window key: {suffix}");
@@ -947,7 +907,7 @@ async fn every_integration_change_needs_the_window_before_its_body_is_read() {
 
 #[tokio::test]
 async fn the_integration_routes_pass_what_each_method_takes() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let key = ctx.window_key.reveal().to_string();
     let w = [("x-xenonet-window", key.as_str())];
     for (suffix, name, body, args) in [
@@ -981,7 +941,7 @@ async fn the_integration_routes_pass_what_each_method_takes() {
 
 #[tokio::test]
 async fn the_version_header_and_pending_cores() {
-    let (ctx, _) = service(false);
+    let (ctx, _) = service();
     let r = go(&ctx, "GET", "/api/health", &[("x-xenonet-api-version", "2")], None).await;
     assert_eq!((r.status, r.body_json()["api"].clone()), (426, json!({ "min": 1, "max": 1 })));
     assert_eq!(go(&ctx, "GET", "/api/health", &[("x-xenonet-api-version", "1")], None).await.status, 200);
@@ -994,7 +954,7 @@ async fn the_version_header_and_pending_cores() {
 
 #[tokio::test]
 async fn bodies_that_arent_json_or_are_too_big_are_the_clients_error() {
-    let (ctx, _) = service(false);
+    let (ctx, _) = service();
     let r = api(&ctx, local(&ctx, Req::fake("POST", "/api/layout", &[], Some("{ not json")))).await;
     assert_eq!(r.err().and_then(|e| e.status), Some(400));
     let big = format!("{{\"positions\":{{}},\"pad\":\"{}\"}}", "x".repeat(1 << 20));
@@ -1004,7 +964,7 @@ async fn bodies_that_arent_json_or_are_too_big_are_the_clients_error() {
 
 #[tokio::test]
 async fn the_windows_message_needs_its_key_and_a_session_or_an_actor() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let r = go(&ctx, "POST", "/api/actors/you/message", &[], Some(json!({ "to": "actor:muse", "text": "hi" }))).await;
     assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("yours")));
     let key = ctx.window_key.reveal().to_string();
@@ -1028,7 +988,7 @@ async fn the_windows_message_needs_its_key_and_a_session_or_an_actor() {
 
 #[tokio::test]
 async fn the_plugins_copy_of_a_hook_stands_by_while_connects_own_is_there() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     *f.connected.lock().unwrap() = vec!["Stop".into()];
     let event = |name: &str| Some(json!({ "session_id": "11111111-2222-3333-4444-555555555555", "hook_event_name": name }));
     assert_eq!(go(&ctx, "POST", "/api/hook/claude?via=plugin", &[], event("Stop")).await.status, 204);
@@ -1045,7 +1005,7 @@ async fn the_plugins_copy_of_a_hook_stands_by_while_connects_own_is_there() {
 
 #[tokio::test]
 async fn claude_codes_hooks_pass_over_what_cursor_and_grok_send_them() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let sid = "11111111-2222-3333-4444-555555555555";
     for body in [
         json!({ "session_id": sid, "hook_event_name": "SessionStart", "cursor_version": "3.19.7" }),
@@ -1061,7 +1021,7 @@ async fn claude_codes_hooks_pass_over_what_cursor_and_grok_send_them() {
 
 #[tokio::test]
 async fn claude_codes_hooks_are_checked_against_the_sessions_process() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     assert_eq!(go(&ctx, "POST", "/api/hook/claude", &[], Some(json!({ "session_id": "not-a-session" }))).await.status, 204);
     assert_eq!(f.was("check"), Vec::<Value>::new());
     *f.check.lock().unwrap() = json!({ "ok": false, "reason": "that's another process's session" });
@@ -1130,7 +1090,7 @@ async fn the_trays_routes_need_its_key_and_you_never_an_agent_or_an_actor() {
 
 #[tokio::test]
 async fn every_route_takes_a_credential_and_one_with_no_row_is_refused() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let bare = |method: &str, path: &str| {
         let ctx = ctx.clone();
         let (method, path) = (method.to_string(), path.to_string());
@@ -1168,7 +1128,7 @@ async fn every_route_takes_a_credential_and_one_with_no_row_is_refused() {
 
 #[tokio::test]
 async fn reads_that_matter_take_the_window_a_checked_session_or_you() {
-    let (ctx, f) = service(false);
+    let (ctx, f) = service();
     let key = ctx.window_key.reveal().to_string();
     *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet" });
     for p in ["/api/engine/state", "/api/delivery", "/api/search?q=refunds", "/api/handoff?nodeId=x"] {

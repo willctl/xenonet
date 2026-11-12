@@ -7,9 +7,8 @@
 // its join line shown once and masked, another machine's agent waiting on
 // you in the attention strip with its question's text, one that seems
 // stuck with why, a machine that shares titles only, the other machines on
-// the map from their presence with a session there found and messaged, one
-// drawn from its own map's relay snapshot with a session's transcript
-// opened through the window,
+// the map from their presence with a session there found and messaged, and
+// its transcript opened through the window,
 // where what waits sounds (here or on another machine: only where you
 // are), a machine that's away with what's held for it, and the message box that writes to a
 // session as you, from the panel and from a session's own panel. Each
@@ -295,25 +294,13 @@ test("net-founder: the other machines on the map from their presence, one dimmed
   assert.ok(await until(async () => !(await s.driver("hosts")).hosts.some((x) => x.network)), "they go");
 }));
 
-test("net-founder with laptop's relay: laptop drawn from its own map's snapshot, and a session's transcript opened from its panel, through the window", { timeout: limit(90000) }, shoot("network-relay", async () => {
-  // laptop's map is this machine's own demo world, served as laptop's by a
-  // relay over a network inside the service (the hub's net-relay).
-  const done = await s.simulate("net-founder", { b: "relay" });
-  assert.equal(done.relay?.ok, true, JSON.stringify(done));
-  const session = "@laptop:claude:0190d3e0-0000-7000-8000-000000000001";
-  const drawn = await until(async () => {
-    const h = await s.driver("hosts");
-    const laptop = h.hosts.find((x) => x.id === "laptop");
-    return laptop?.network === "relay" && laptop.drawn && laptop.state === "live" && (await s.eval(`return !!window.__xenonet.scene.getNode(${JSON.stringify(session)})`)) ? h : null;
-  }, 45000);
-  assert.ok(drawn, "laptop is drawn from its relay snapshot");
-  const laptop = drawn.hosts.find((x) => x.id === "laptop");
-  assert.ok(laptop.sessions > 0 && laptop.constellation?.nodes > 5, JSON.stringify(laptop));
-  // rack, offline with no snapshot, is still drawn from its presence.
-  assert.equal(drawn.hosts.find((x) => x.id === "rack")?.network, true);
-  // Its project with its sessions, as an SSH host's is: Preview, Stats,
-  // and Message, since it's in your network; nothing that opens it here.
-  await s.driver("select", session);
+test("net-founder: a session on laptop, drawn from its presence, opens its transcript and stats from its panel, through the window", { timeout: limit(90000) }, shoot("network-reads", async () => {
+  // A made-up machine's session reads as a window read over svc/2 would
+  // answer: one of this machine's own demo sessions stands in for it.
+  await simulate("net-founder", {}, (n) => n.inNetwork);
+  const far = await until(async () => (await s.driver("find", { kind: "session", query: "login redirect" })).nodes.find((n) => n.host === "laptop") ?? null);
+  assert.ok(far, "laptop's session is on the map");
+  await s.driver("select", far.id);
   const look = () => s.eval(`return ({ where: document.querySelector("#inspector .insp-where")?.textContent ?? "", actions: [...document.querySelectorAll("#inspector [data-action]")].map((b) => b.dataset.action), live: document.querySelector("#inspector .panel-title.sub span")?.textContent ?? "", answer: !!document.querySelector("#inspector [data-need-open], #inspector [data-need-ack], #inspector [data-fresh]") })`);
   const seen = await until(async () => {
     const l = await look();
@@ -322,7 +309,7 @@ test("net-founder with laptop's relay: laptop drawn from its own map's snapshot,
   assert.ok(seen, "the inspector shows it");
   assert.match(seen.where, /in your network/);
   assert.deepEqual(seen.actions, ["preview", "stats", "message"]);
-  assert.equal(seen.live, "Live", "its live state, not its presence");
+  assert.equal(seen.live, "Presence", "what its presence says");
   assert.equal(seen.answer, false, "nothing answered, dismissed or handed off from here");
   // Preview, from the panel: its transcript comes through the window.
   await s.eval(`return (document.querySelector('#inspector [data-action="preview"]').click(), true)`);
@@ -332,18 +319,14 @@ test("net-founder with laptop's relay: laptop drawn from its own map's snapshot,
   }, 20000);
   assert.ok(shown, `the transcript loaded: ${await s.eval(`return document.querySelector("#preview")?.innerText.slice(0, 300) ?? ""`)}`);
   assert.equal(await s.eval(`return !!document.querySelector("#preview .origin.bad")`), false, "no error in its place");
-  await s.screenshot({ name: "e2e-network-relay", inline: false });
+  await s.screenshot({ name: "e2e-network-reads", inline: false });
   await s.input({ keys: "Escape" });
   await s.driver("select", null);
-  // Without the relay, laptop is presence's again.
-  await simulate("net-founder", {}, (n) => n.inNetwork);
-  assert.ok(await until(async () => (await s.driver("hosts")).hosts.find((x) => x.id === "laptop")?.network === true), "drawn from presence again");
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
 test("network mode: the load panel is Machines, the network's sums with each machine's part, this machine's sessions labelled here, and the Machines view's chips are the Filters chips", { timeout: limit(90000) }, shoot("network-machines", async () => {
-  const done = await s.simulate("net-founder", { b: "relay" });
-  assert.equal(done.relay?.ok, true, JSON.stringify(done));
+  await simulate("net-founder", {}, (n) => n.inNetwork);
   // The made-up network: studio (here), laptop online with a load of its
   // own, rack offline. The panel turns into the network's.
   const sys = await until(async () => {

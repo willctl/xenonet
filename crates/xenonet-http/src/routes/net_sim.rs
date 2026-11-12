@@ -23,7 +23,11 @@
 //!   window POST /api/net/svc/publish and svc/unpublish);
 //! - GET /api/system?hosts=1, with a made-up reading for each other host,
 //!   each its own machine, so the Machines panel's sums aren't this one
-//!   counted again.
+//!   counted again;
+//! - the window's reads of a simulated host's session (its transcript and
+//!   stats), answered with one of this machine's own sessions' as a stand-in,
+//!   the way a window read over svc/2 answers, unless its host shares titles
+//!   only.
 //!
 //! With nothing simulated, every one of these is the real route's.
 
@@ -66,6 +70,8 @@ struct Sim {
     /// Xenolith's ask for a grant and the grants given (variant
     /// "xenolith"), as GET /api/net/forwards lists them.
     context: Value,
+    /// The other machines share titles only (variant "titles-only").
+    titles_only: bool,
 }
 
 /// A made-up context key's id for the simulated Xenolith.
@@ -225,14 +231,10 @@ pub fn simulated_remote_agents(ctx: &Ctx) -> Option<Vec<Value>> {
 /// on a permission prompt, and "ask-env" one whose command may read the
 /// run's environment, with the Allow card's warning; "titles-only" has the other machines share
 /// titles only, so their
-/// agents carry no question's text, last message or stuck reason, and
-/// "relay", for net-founder, has laptop drawn from a relay snapshot: this
-/// machine's own map, served as laptop's by a relay over a network inside
-/// this process (the hub's net-relay), whose transcripts open through the
-/// window as another machine's do.
+/// agents carry no question's text, last message or stuck reason.
 pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&str>) -> Option<Value> {
     let (state, agents) = made_up_with(kind, you_at, variant == Some("titles-only"), ctx.now())?;
-    let mut out = json!({
+    let out = json!({
         "ok": true,
         "kind": kind,
         "network": state["network"]["name"],
@@ -250,17 +252,9 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
     };
     let others = if variant == Some("networks") && state["network"].is_object() { vec![other_network(&state)] } else { Vec::new() };
     let context = made_up_context(variant, ctx.now());
-    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new(), context });
+    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new(), others, own: Vec::new(), context, titles_only: variant == Some("titles-only") });
     for a in &asks {
         ctx.broadcast("ask", a);
-    }
-    let relay = kind == "net-founder" && variant == Some("relay");
-    if let Some(h) = &ctx.cores.hub {
-        if let Ok(Some(r)) = h.simulate("net-relay", &json!({ "id": "laptop", "off": !relay })) {
-            if relay {
-                out["relay"] = r;
-            }
-        }
     }
     ctx.broadcast("net", &state);
     Some(out)
@@ -268,9 +262,6 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
 
 /// Ends the simulation; whether one ran.
 pub fn clear(ctx: &Ctx) -> bool {
-    if let Some(h) = &ctx.cores.hub {
-        let _ = h.simulate("net-relay", &json!({ "id": "laptop", "off": true }));
-    }
     let had = sims().locked().remove(&key(ctx)).is_some();
     if had {
         ctx.broadcast("net", &alone());
@@ -304,6 +295,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
         ("POST", "/api/start") => start(ctx, req).await,
         ("GET", "/api/runs/asks") => asks(ctx, req, false).await,
         ("POST", "/api/runs/answer") => asks(ctx, req, true).await,
+        ("GET", p) if p.starts_with("/api/session/") => window_read(ctx, req).await,
         // This machine's own reading, and a made-up one for each other host
         // the simulation has: one that's away has its last, from when it
         // was last heard from.
@@ -380,6 +372,40 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
         }
         _ => Ok(None),
     }
+}
+
+/// The window's read of a simulated host's session, as svc/2 answers it:
+/// a transcript or stats of this machine's first session, under the
+/// remote session's id and host; 403 for a transcript while the others
+/// share titles only. None for a session that isn't a simulated one.
+async fn window_read(ctx: &Ctx, req: &Req) -> Result<Option<Reply>, CoreError> {
+    let Some((raw, what)) = req.path.strip_prefix("/api/session/").and_then(|r| r.split_once('/')) else { return Ok(None) };
+    let Some(id) = crate::http::decode_uri_component(raw) else { return Ok(None) };
+    let (host, titles_only) = {
+        let all = sims().locked();
+        let Some(sim) = all.get(&key(ctx)) else { return Ok(None) };
+        let Some(a) = sim.agents.iter().find(|a| a["id"] == id.as_str()) else { return Ok(None) };
+        (a["host"].clone(), sim.titles_only)
+    };
+    if !req.by.window {
+        return Ok(Some(crate::routes::hosts::window_only_reply()));
+    }
+    let stand_in = ctx.cores.state.nodes()?.into_iter().find(|n| n["kind"] == "session" && n.get("host").is_none_or(Value::is_null));
+    let Some(node) = stand_in else { return Ok(Some(Reply::error(404, "XenoNet doesn't know that session"))) };
+    let mut body = match what {
+        "transcript" if titles_only => return Ok(Some(fail(403, "titles-only", "this machine shares titles only with the network: its transcripts stay on it"))),
+        "transcript" => {
+            let limit = req.param("limit").and_then(|l| l.parse::<f64>().ok()).unwrap_or(120.0);
+            ctx.cores.state.read_transcript(&node, req.param("cursor"), limit).await?
+        }
+        "stats" => ctx.cores.state.session_stats(node["id"].as_str().unwrap_or_default()).await?.unwrap_or_else(|| json!({})),
+        _ => return Ok(None),
+    };
+    if body.is_object() {
+        body["id"] = json!(id);
+        body["host"] = host;
+    }
+    Ok(Some(Reply::json(200, body)))
 }
 
 fn fail(status: u16, code: &str, error: impl Into<String>) -> Reply {
@@ -688,7 +714,7 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
 
 // ---------- each machine's load, made up ----------
 
-/// A made-up machine's reading at `at`, as its relay would send it (no
+/// A made-up machine's reading at `at`, as its load comes on link/2 (no
 /// history, no cores), breathing slowly as the demo's own does, each on
 /// its own phase: studio an Apple M2 Ultra, laptop an M3 Pro, rack a Linux
 /// box with two NVIDIA cards. None for a host the simulation doesn't have.
@@ -1513,7 +1539,7 @@ mod tests {
 
     fn sim(kind: &str) -> Sim {
         let (state, agents) = made_up(kind, None, 1.8e12).unwrap();
-        Sim { state, agents, asks: Vec::new(), services: Vec::new(), others: Vec::new(), own: Vec::new(), context: made_up_context(Some("xenolith"), 0.0) }
+        Sim { state, agents, asks: Vec::new(), services: Vec::new(), others: Vec::new(), own: Vec::new(), context: made_up_context(Some("xenolith"), 0.0), titles_only: false }
     }
 
     #[test]

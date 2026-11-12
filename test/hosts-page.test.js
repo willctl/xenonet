@@ -269,8 +269,6 @@ test("the machines' chips: one per machine with its sessions, and a filter that 
   f.setSelected(["studio"]);
   f.setData({ ...graph, hosts: [{ id: "vm1", state: "live" }] });
   assert.deepEqual(f.selected, []);
-  f.setHosts([{ id: "vm1", state: "stale" }]);
-  assert.equal(f.chips().find((c) => c.key === "vm1").state, "stale");
   // With no host on the map, nothing changes.
   const none = createHostFilters();
   none.setData({ nodes: world([]).nodes });
@@ -279,7 +277,7 @@ test("the machines' chips: one per machine with its sessions, and a filter that 
   assert.deepEqual(none.chips(), []);
 });
 
-test("a machine's chip says why it needs you, from the map or from a hosts event", () => {
+test("a machine's chip says why it needs you, from the map", () => {
   // Just enough of a page for the chips to render into.
   const box = { hidden: true, innerHTML: "" };
   globalThis.document = { getElementById: (id) => (id === "host-filters" ? box : null) };
@@ -288,12 +286,6 @@ test("a machine's chip says why it needs you, from the map or from a hosts event
     f.setData({ nodes: world(["vm1"]).nodes, hosts: [{ id: "vm1", state: "error", error: "vm1 refused the key" }], self: "mac" });
     const title = () => /data-host-key="vm1" title="([^"]*)"/.exec(box.innerHTML)?.[1];
     assert.match(title(), /^vm1 · needs you · vm1 refused the key\n/);
-    // The hosts event carries the hub's view, whose error is an object.
-    f.setHosts([{ id: "vm1", state: "error", error: { code: "refused", message: "vm1 refused the key", fix: "Install the key in vm1's ~/.ssh/authorized_keys" } }]);
-    assert.match(title(), /^vm1 · needs you · vm1 refused the key\n/, "in words, not [object Object]");
-    assert.equal(f.hosts[0].error, "vm1 refused the key");
-    f.setHosts([{ id: "vm1", state: "live", error: null }]);
-    assert.match(title(), /^vm1 · live\n/);
   } finally {
     delete globalThis.document;
   }

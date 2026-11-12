@@ -74,6 +74,7 @@ pub mod identity;
 pub mod join;
 pub mod keys;
 pub mod link2;
+pub mod load;
 pub mod mailbox;
 pub mod node;
 pub mod nodes;

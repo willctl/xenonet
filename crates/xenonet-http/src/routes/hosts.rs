@@ -1,15 +1,13 @@
 //! Reads of another machine of the network (docs/design/network.md,
 //! section 7): a remote session's transcript and stats, over svc/2 under
-//! the window's key where this machine's endpoint runs and through the
-//! host's relay otherwise, and a collision on one host through its relay,
-//! only by XenoNet's own window
-//! (rules.rs: those rows are the window's when they name another
-//! machine), so a session here can't read another machine's transcripts.
+//! the window's key, only by XenoNet's own window (rules.rs: those rows
+//! are the window's when they name another machine), so a session here
+//! can't read another machine's transcripts.
 //! Every other route that takes an id refuses remote ones, since other
 //! machines' maps are read-only here. `route` is None when it isn't one of
 //! these.
 
-use crate::cores::{CoreError, Hub};
+use crate::cores::CoreError;
 use crate::ctx::pending_reply;
 use crate::http::{decode_uri_component, Reply, Req};
 use serde_json::{json, Value};
@@ -24,7 +22,6 @@ pub fn window_only_reply() -> Reply {
 }
 
 pub struct HostRoutes {
-    pub hub: Option<Arc<dyn Hub>>,
     pub net: Option<Arc<dyn crate::parts::Network>>,
 }
 
@@ -49,17 +46,6 @@ fn cursor_ok(v: &str) -> bool {
     (1..=200).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-'))
 }
 
-/// `{ ...a, ...b }` for objects.
-fn merged(a: Value, b: Value) -> Value {
-    let mut out = a;
-    if let (Value::Object(o), Value::Object(more)) = (&mut out, b) {
-        for (k, v) in more {
-            o.insert(k, v);
-        }
-    }
-    out
-}
-
 /// URLSearchParams.toString() of these pairs.
 fn search(pairs: &[(&str, &str)]) -> String {
     let enc = |s: &str| {
@@ -78,10 +64,6 @@ fn search(pairs: &[(&str, &str)]) -> String {
     pairs.iter().map(|(k, v)| format!("{}={}", enc(k), enc(v))).collect::<Vec<_>>().join("&")
 }
 
-pub fn url_search(pairs: &[(&str, &str)]) -> String {
-    search(pairs)
-}
-
 impl HostRoutes {
     pub async fn route(&self, req: &mut Req) -> Option<Reply> {
         match self.inner(req).await {
@@ -93,12 +75,12 @@ impl HostRoutes {
 
     async fn inner(&self, req: &mut Req) -> Result<Option<Reply>, CoreError> {
         let p = req.path.clone();
-        // A remote session's transcript or stats, through its host's relay.
+        // A remote session's transcript or stats, over svc/2.
         if let Some(rest) = p.strip_prefix("/api/session/") {
             if let Some((raw, what)) = rest.split_once('/') {
                 if !raw.is_empty() && (what == "transcript" || what == "stats") && req.method == "GET" {
                     let Some(id) = decode_uri_component(raw) else { return Ok(None) };
-                    if !id.starts_with('@') || (self.hub.is_none() && self.net.is_none()) {
+                    if !id.starts_with('@') {
                         return Ok(None);
                     }
                     let Some((host, local)) = remote_session(Some(&id)) else {
@@ -122,15 +104,8 @@ impl HostRoutes {
                         Some(net) => net.window_read(&host, &path).await,
                         None => None,
                     };
-                    let (status, body) = match read {
-                        Some(r) => r,
-                        None => {
-                            let Some(hub) = self.hub.as_ref().filter(|h| h.has(&host)) else {
-                                return Ok(Some(Reply::error(404, "XenoNet doesn't know that session")));
-                            };
-                            let r = hub.get(&host, &path).await?;
-                            (r.status, r.body)
-                        }
+                    let Some((status, body)) = read else {
+                        return Ok(Some(Reply::error(503, format!("this machine's endpoint isn't running, so {host}'s sessions can't be read from here"))));
                     };
                     let body = if body.is_object() {
                         let mut b = body;
@@ -143,36 +118,6 @@ impl HostRoutes {
                         body
                     };
                     return Ok(Some(Reply::json(status, body)));
-                }
-            }
-        }
-
-        // A collision on one host, with both sides' diffs, through its relay.
-        if p == "/api/collision" && req.method == "GET" {
-            if let Some(hub) = self.hub.as_ref() {
-                let (qa, qb) = (req.param("a").map(str::to_string), req.param("b").map(str::to_string));
-                if [&qa, &qb].iter().any(|x| x.as_deref().is_some_and(|s| s.starts_with('@'))) {
-                    let (a, b) = (remote_session(qa.as_deref()), remote_session(qb.as_deref()));
-                    let (Some(a), Some(b)) = (a, b) else {
-                        return Ok(Some(Reply::error(400, "collisions across machines come later: both sessions have to be on one host")));
-                    };
-                    if a.0 != b.0 {
-                        return Ok(Some(Reply::error(400, "collisions across machines come later: both sessions have to be on one host")));
-                    }
-                    if !hub.has(&a.0) {
-                        return Ok(Some(Reply::error(404, format!("there's no host called {}", a.0))));
-                    }
-                    let r = hub.get(&a.0, &format!("/api/collision?a={}&b={}", a.1, b.1)).await?;
-                    let body = if r.body.is_object() {
-                        let mut out = r.body.clone();
-                        out["a"] = merged(r.body.get("a").cloned().unwrap_or(json!({})), json!({ "id": qa }));
-                        out["b"] = merged(r.body.get("b").cloned().unwrap_or(json!({})), json!({ "id": qb }));
-                        out["host"] = json!(a.0);
-                        out
-                    } else {
-                        r.body
-                    };
-                    return Ok(Some(Reply::json(r.status, body)));
                 }
             }
         }

@@ -9,8 +9,8 @@
 //! receives (`Outgoing`, `Incoming`), this machine and the other hosts as
 //! the link sees them (`Me`, `Host`, `Reach`), and the traits each side
 //! implements (`Net`, the network as the engine sees it, which xenonet-net
-//! puts its link behind; `Sink`, what the network calls in the engine; and
-//! `RelaySink`, where the map's relay bodies go). Frames, keys, sealing,
+//! puts its link behind; and `Sink`, what the network calls in the
+//! engine). Frames, keys, sealing,
 //! the roster and link/2 live behind it, in xenonet-net. With no
 //! network, `NoNet` is behind it and every local path is unchanged.
 
@@ -36,8 +36,6 @@ pub enum Kind {
     Handoff,
     /// The person's action on another host: an answer, a start, a setting.
     Operator,
-    /// The map, between a console and the host it shows: never the engine's.
-    Relay,
     /// An intent the person made here, or their cancel of one.
     Intent,
     /// The maker's machine giving an intent to the machine it names.
@@ -47,7 +45,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Self; 10] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay, Self::Intent, Self::Assign, Self::Report];
+    pub const ALL: [Self; 9] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Intent, Self::Assign, Self::Report];
 
     /// Its name, and the schema's folder; the frame kind on the wire for
     /// what isn't a feed entry.
@@ -59,7 +57,6 @@ impl Kind {
             Self::Receipt => "receipt",
             Self::Handoff => "handoff",
             Self::Operator => "operator",
-            Self::Relay => "relay",
             Self::Intent => "intent",
             Self::Assign => "assign",
             Self::Report => "report",
@@ -71,10 +68,9 @@ impl Kind {
     }
 
     /// Whether it's kept for a host that's away. Presence isn't
-    /// kept: a full set goes when the host is back. Nor is the map: a
-    /// console asks for a fresh snapshot.
+    /// kept: a full set goes when the host is back.
     pub fn queued(self) -> bool {
-        !matches!(self, Self::Presence | Self::Relay)
+        !matches!(self, Self::Presence)
     }
 
     /// Whether it travels as an entry of this machine's feed: a message
@@ -153,9 +149,9 @@ pub struct Incoming {
     pub body: Value,
     /// When the sender made it, by the sender's clock shifted to ours.
     pub at: f64,
-    /// For the map's relay: whether this machine decided the sender may
-    /// read what it relays (an admin's read). The engine decides every
-    /// other kind of act itself, on its own copy of the chains.
+    /// Whether the sender is a window host, as this machine's roster has
+    /// it. The engine decides every act itself, on its own copy of the
+    /// chains.
     pub from_window_host: bool,
 }
 
@@ -297,22 +293,6 @@ pub trait Sink: Send + Sync {
     fn gap(&self);
 }
 
-/// Where the map's relay bodies go (section 7): the service's relay, for a
-/// console on another host that subscribed to this host's map, and the
-/// hub, for the maps this host's console subscribed to. Each takes the
-/// bodies meant for it and leaves the rest. They hear of the link and the
-/// roster as the engine does, so a subscription ends with its host.
-pub trait RelaySink: Send + Sync {
-    /// A relay body from another host.
-    fn relay(&self, incoming: Incoming);
-    /// A host was removed from the roster.
-    fn removed(&self, _host: &str) {}
-    /// This machine reaches its networks' machines, or no longer does.
-    fn linked(&self, _up: bool) {}
-    /// Entries for this host were lost on the way.
-    fn gap(&self) {}
-}
-
 /// No network: what the engine gets when the service isn't in one, and in
 /// the twins.
 pub struct NoNet;
@@ -342,7 +322,6 @@ pub enum Op {
     Receipt(crate::network::Receipt),
     Handoff(crate::network::Handoff),
     Operator(crate::network::Operator),
-    Relay(crate::network::Relay),
 }
 
 impl Op {
@@ -354,7 +333,6 @@ impl Op {
             Op::Receipt(_) => Kind::Receipt,
             Op::Handoff(_) => Kind::Handoff,
             Op::Operator(_) => Kind::Operator,
-            Op::Relay(_) => Kind::Relay,
         }
     }
 }
@@ -370,9 +348,9 @@ mod tests {
             assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{}\"", k.as_str()));
         }
         assert!(Kind::Message.queued() && Kind::Handoff.queued() && Kind::Claims.queued() && Kind::Operator.queued() && Kind::Receipt.queued());
-        assert!(!Kind::Presence.queued() && !Kind::Relay.queued());
+        assert!(!Kind::Presence.queued());
         assert!(Kind::Message.fed() && Kind::Receipt.fed() && Kind::Handoff.fed() && Kind::Claims.fed() && Kind::Intent.fed() && Kind::Assign.fed() && Kind::Report.fed());
-        assert!(!Kind::Presence.fed() && !Kind::Operator.fed() && !Kind::Relay.fed());
+        assert!(!Kind::Presence.fed() && !Kind::Operator.fed());
         assert_eq!(Kind::parse("frame"), None);
         assert_eq!(Kind::Presence.schema(), "network/presence/v1");
         assert_eq!(Kind::Message.schema(), "network/send/v1");

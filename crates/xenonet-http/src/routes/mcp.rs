@@ -1,11 +1,10 @@
 //! What an MCP server on the map is (server/routes/mcp.js):
-//! `GET /api/mcp?server=<name>`, from this machine's sessions, or with
-//! `?host=` from another host's catalog. The demo's are made up.
+//! `GET /api/mcp?server=<name>`, from this machine's sessions. The demo's
+//! are made up.
 
 use crate::cores::CoreError;
-use crate::ctx::{pending_reply, Ctx};
+use crate::ctx::Ctx;
 use crate::http::{Reply, Req};
-use crate::routes::hosts::url_search;
 use serde_json::{json, Value};
 
 pub async fn route(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> {
@@ -20,14 +19,10 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
     if server.is_empty() || server.encode_utf16().count() > 160 || server.chars().any(|c| (c as u32) < 0x20) {
         return Ok(Reply::error(400, "say which MCP server to inspect"));
     }
-    if let Some(host) = req.param("host").filter(|h| !h.is_empty()) {
-        // Another machine's reads are the window's alone (rules.rs).
-        let Some(hub) = &ctx.cores.hub else { return Ok(Reply::error(404, "that host isn't on this map")) };
-        return Ok(match hub.get(host, &format!("/api/mcp?{}", url_search(&[("server", &server)]))).await {
-            Ok(r) => Reply::json(r.status, r.body),
-            Err(e) if e.is_pending() => pending_reply(&e),
-            Err(_) => Reply::error(503, "this host's MCP catalog is unavailable"),
-        });
+    // Another machine's MCP servers stay on it: the window reads only its
+    // sessions' transcripts and stats (section 7).
+    if req.param("host").is_some_and(|h| !h.is_empty()) {
+        return Ok(Reply::error(404, "another machine's MCP servers are read on that machine"));
     }
     let state = &ctx.cores.state;
     let nodes = state.nodes()?;

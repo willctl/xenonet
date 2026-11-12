@@ -425,7 +425,7 @@ export const CHECKS = [
     what: "after down vm2, a mailbox delivers to vm2 once it's back, with the sender offline",
     needs: ["link/2", "mailboxes"],
     owner: `${OWNER.join}; then ${OWNER.mailbox}`,
-    standIn: "simulate host-offline, then host-online (the map's side only)",
+    standIn: "simulate net-away (what's held for a machine that's away, the console's side only)",
     changes: "stops vm2 and vm1's XenoNet, and starts both again",
     reads: "the network's mailboxes (host ids)",
     run: async (ctx) => {
@@ -483,7 +483,7 @@ export const CHECKS = [
     what: "vm2's clock 3 min ahead is ordered by it; 6 min ahead is accepted, clamped, and the doctor shows the skew",
     needs: ["link/2"],
     owner: OWNER.join,
-    standIn: "simulate host-skew (b: 360000)",
+    standIn: "none in XenoNet Dev: the skew is measured on a real hello, so it takes two machines",
     changes: "sets vm2's clock ahead with NTP off, then puts both back",
     reads: "hosts[].skewMs (the peer's clock ahead of this one's, measured on the hello), self.hlcAheadMs (this machine's HLC ahead of its clock) and xenonet doctor --json",
     run: async (ctx) => {

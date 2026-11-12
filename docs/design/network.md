@@ -77,67 +77,22 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   the schema declares, and the detail reaches the console's engine state,
   never `peers` or an agent's view. The strip and the Network panel show
   the question's text and the stuck reason.
-- Other hosts' maps through the gateway (section 7):
-  - Relay frames (`network/relay/v1`) carry the relay's frames
-    between two hosts, sealed as every host frame is. They go to relay
-    sinks beside the engine's sink (`RelaySink`, set by role on the
-    `SinkSlot`), never to the engine. They go up in relay batches of their
-    own (`frames?relay=1`), with a bucket of 120 a minute at the gateway
-    apart from the engine's 600. The gateway never writes them to its
-    store: it holds them in memory for the host's link, two minutes and
-    32 MiB at most, and drops them when the host isn't linked. A relay
-    body is at most 8 MiB before sealing, so a sealed, base64 frame fits
-    the gateway's 16 MiB relay batch.
-  - The subscribing host asks `{ op, sub, … }` (open, get, time, renew,
-    close); the host answers `{ sub, seq, frames }`, at most one body
-    every half second for each subscription (slower when several share
-    the link's bucket), the map at most once a second and the live state
-    every half second within it. `seq` counts within the subscription: a
-    hole, or a `gap`, makes the console ask for a fresh snapshot.
-  - The serving side is the service's relay
-    (`crates/xenonet-runtime/src/remote/runtime/relay.rs`), which runs
-    `xenonet_runtime::remote::relay::Producer`'s shaping, in-process:
-    it follows this machine's own view of its events from the event
-    stream, and reads its own API as a 127.0.0.1 client with the service's
-    own credential and no token, so the allowlist and the routes' rows both
-    apply. It
-    serves only window hosts in the roster, one subscription each, renewed
-    every 20 s, and ends one that lapses after 60 s, whose host goes
-    offline, is removed or stops being a window host, or when this host's
-    own link drops.
-  - While a subscription runs, the serving relay reads this machine's own
-    `GET /api/system` every 5 s and sends it as a `system` event inside
-    the bodies it sends anyway, so it adds no relay frames. It's shaped to
-    the fields `system/v1` declares, without the history or each core, and
-    goes only while the host shares its load ("Share load with the
-    network", on by default; `shareLoad`, kept in the store), which is read
-    at each send. The console's hub qualifies it (`qualify_event`: checked
-    against `system/v1`, kept to its declared fields, its time moved, any
-    `hosts` it carries dropped), keeps the latest per host in memory, and
-    serves them at `GET /api/system?hosts=1` for the Machines panel.
-    Nothing about load goes in presence, so a console that isn't a window
-    host's sees other machines' load from no one.
-  - The subscribing side is the hub, always built: the roster's hosts,
-    each a link whose transport is the network
-    (`crates/xenonet-runtime/src/remote/runtime/transport.rs`), with its
-    states, the merge, the declared-field cleaning and the caps. A window
-    host's hub subscribes only while a console is open there (Desktop's
-    window shown, or a page reading the event stream).
-  - The page draws a network host from its snapshot (`network: "relay"`
-    on its nodes), dimmed and kept while it's away. The hub keeps the
-    last snapshot in the cache folder, under a key made from the
-    network's id and the host's,
-    and forgets it when the host leaves the roster. A remote session's
-    transcript and stats open through the window; nothing remote opens,
-    dismisses or hands off here.
-- Other hosts on the map, from presence, until their first snapshot
-  (section 7): the page makes each one a constellation, as it draws one
-  from a snapshot (a project per repo key or folder, sessions with
-  their state and waits, ids qualified `@<host>:…`), merged into the map
-  before it's drawn (`src/network-map.js`), with the hosts layout's cap on
-  what's drawn.
-- Another machine's transcript, stats, collision diffs and MCP server
-  details are read only by the window (their rows in the local API's rules
+- Other machines on the map, from presence (section 7): the page makes
+  each one a constellation (a project per project id or folder, sessions
+  with their state and waits), merged into the map before it's drawn
+  (`src/network-map.js`), with the hosts layout's cap on what's drawn. A
+  remote session's transcript and stats open through the window, over
+  svc/2's window-read service; nothing remote opens, dismisses or hands
+  off here.
+- Each machine's load (section 7): a live envelope of kind `load` on
+  link/2 every 5 s (`crates/xenonet-net/src/load.rs`), to each connected
+  window host of a network that shares it ("Share load with the network",
+  on by default; `shareLoad`), shaped to the fields `system/v1` declares,
+  without the history or each core. The service reads its own load only
+  while such a window host is connected. The receiver shapes it again,
+  keeps the latest of each member in memory, and serves them at
+  `GET /api/system?hosts=1` for the Machines panel.
+- Another machine's transcript and stats are read only by the window (their rows in the local API's rules
   table are the window's alone when they name another machine: its
   credential, and no token), so an agent on
   one machine can't read another's transcripts.
@@ -160,13 +115,13 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   person messaging from a window host and refused from another, an A2A task
   completed by a session on another host, the gateway restarted with
   messages waiting, and a host removed.
-- `crates/xenonet-service/tests/net_map.rs` runs three services with the
-  binary's hub and relay: a window host's console sees another host's map
-  under `@<host>:` once it opens, and opens its transcript through the
-  window; an agent on the same machine is refused that read; a host that
-  shares titles only keeps its transcripts; a `gap` brings a fresh
-  snapshot; and the relay stops once the subscription lapses. The
-  `net_relay` fuzz target reads asks and answers on both sides.
+- `crates/xenonet-service/tests/net_map.rs` runs three services on
+  link/2 over loopback: each machine's presence gives the others its
+  sessions, a window host's window reads another machine's transcript and
+  stats over svc/2, an agent on the same machine is refused that read, a
+  machine that isn't a window host is refused, a machine that shares titles
+  only keeps its transcripts, and each machine's load reaches the window
+  hosts alone.
 - `crates/xenonet-service/tests/net_svc.rs` runs three services, each
   with its iroh endpoint on loopback, and a made-up HTTP service published
   on one host and reached from another over svc/2: an allowlisted path
@@ -180,8 +135,7 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   `crates/xenonet-net/tests/svc_replay.rs` sends one request again on a
   second stream and on a new connection, and the service is called once;
   a stream naming a network the two don't share is refused. `svc2_tests.rs`
-  has the window key's rules. `tests/net.rs` checks that relay frames
-  never reach the gateway's store. The
+  has the window key's rules. The
   `net_svc` fuzz target reads paths, request and answer heads, window
   reads, addresses and headers.
 
@@ -817,47 +771,26 @@ unchanged.
 
 ### 7. What crosses for the map
 
-- **Every console shows every host.** A window host's console subscribes
-  to another host's map through the gateway.
-  - `relay` frames carry the existing relay protocol (`hello`, `get`,
-    `snapshot`, `event`, `res`, `time`, `ping`, `bye`), sealed between the
-    two hosts (`network/relay/v1`).
-  - The hub merges them, through each host's link over the network.
-- **Only a window host is shown other hosts' maps.** A host serves its map
-  only to a window host in its roster, one subscription for each.
-- **Subscriptions last only while a console is open,** and are renewed
-  every 20 s, so an idle network carries presence and nothing else, and a
-  vanished console doesn't leave a stream running: a host ends a
-  subscription that isn't renewed for 60 s.
-- **Network hosts need no flag.** They show as soon as they're in the
-  roster.
+- **Every console shows every machine,** from its presence: its agents,
+  their states and what waits on you, as cards on the map. Network hosts
+  need no flag: they show as soon as they're in the roster.
 - **Detail is on inside a network:** the text of a waiting question, the
   last message and stuck reasons.
   - Every host in a network is one the person let in, and seeing what
     waits on you from any machine is the point.
   - Settings → Network → "Share with the network: titles only" turns it
     off for one host.
-- **A host that shares titles only** answers a `get` for a transcript, a
-  collision or an MCP server with 403. It serves stats and the three
-  shaped reads (the map, the live state and the engine's state) only, with
-  detail off.
 - **Another machine's transcripts and stats are the window's alone.** A
   console's host reads them only for its own window (its credential, and
   no token), never for an agent, an actor or a browser tab there: over
-  svc/2 under the window's key (section 14) where its endpoint runs, and
-  through the relay otherwise.
-- **The relay's privacy rules stay:**
-  - home folders cross as `~`;
-  - no transcripts are cached;
-  - only declared fields cross;
-  - the 5,000-node and 16 MB caps apply, and a relay body over the network
-    is at most 8 MiB.
-- **Until a host's first snapshot comes,** a console draws it from
-  presence: its agents, states and what waits on you.
-- **Each host's load** (CPU, GPU, memory, and what the parts are) goes
-  with its map as a `system` event every 5 s, to the window hosts'
-  consoles that watch it, unless the host turns "Share load with the
-  network" off. It carries no names, serials or OS version.
+  svc/2 under the window's key (section 14). A host that shares titles
+  only answers 403 for a transcript, and serves stats.
+- **Presence's privacy rules:** home folders cross as `~`, and only the
+  fields `network/presence/v1` declares cross, each to its limit.
+- **Each host's load** (CPU, GPU, memory, and what the parts are) goes as
+  a live `load` envelope every 5 s to the window hosts connected to it,
+  unless the host turns "Share load with the network" off. It carries no
+  names, serials or OS version.
 
 ### 8. The person at any host
 

@@ -624,74 +624,6 @@ impl Document for Receipt {
     const DESCRIPTION: &'static str = "What happened to a message on the host it went to.";
 }
 
-// ---- network/relay/v1
-
-crate::tag!(pub RelayTag = "network/relay/v1");
-
-crate::pattern! {
-    /// The subscription, made at random by the subscribing host
-    pub struct SubscriptionId(r"^sub_[0-9a-f]{32}$");
-}
-
-/// From the subscribing host. open: start, with a hello and a snapshot; get: one read from the relay's allowlist, as GET; time: the host's clock; renew: still watching (every 20 s; a subscription lapses after 60 s without one), with fresh for a new snapshot after a gap; close: stop
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum RelayOp {
-    Open,
-    Get,
-    Time,
-    Renew,
-    Close,
-}
-
-// What the subscribing host asks.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RelayAsk {
-    pub schema: RelayTag,
-    pub op: RelayOp,
-    pub sub: SubscriptionId,
-    /// For get and time: the console's question, which the answer's res or time frame names
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub id: Opt<Ranged<1>>,
-    /// For get: the path and query to read
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub path: Opt<Text<1, 2048>>,
-    /// For renew: send a fresh snapshot, since frames were lost
-    #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub fresh: Opt<bool>,
-}
-
-// One of the SSH relay's frames, by its kind.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RelayFrame {
-    pub t: Text<1, 16>,
-}
-
-// What the watched host answers.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RelayAnswer {
-    pub schema: RelayTag,
-    pub sub: SubscriptionId,
-    /// 1, 2, 3… within the subscription: a hole means frames were lost, and the console asks for a fresh snapshot
-    pub seq: Ranged<1>,
-    /// The relay's frames, in order
-    pub frames: Bounded<RelayFrame, 0, 1000>,
-}
-
-/// The map between hosts.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum Relay {
-    Ask(RelayAsk),
-    Answer(RelayAnswer),
-}
-
-impl Document for Relay {
-    const ID: &'static str = "network/relay/v1";
-    const TITLE: &'static str = "The map between hosts";
-    const DESCRIPTION: &'static str = "A console's subscription to another host's map, and that host's answers: the SSH relay's frames, sealed between the two hosts.";
-}
-
 // ---- network/roster-entry/v2
 
 // What a roster entry does.
@@ -1198,7 +1130,6 @@ pub const DOCUMENTS: &[crate::schema::Writer] = &[
     crate::schema::file::<Operator>,
     crate::schema::file::<Presence>,
     crate::schema::file::<Receipt>,
-    crate::schema::file::<Relay>,
     crate::schema::file::<RosterEntry>,
     crate::schema::file::<SendBody>,
     crate::schema::file::<State>,

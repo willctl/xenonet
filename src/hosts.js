@@ -1,13 +1,13 @@
 // Other machines on the map (docs/design/network.md, section 7): the
 // machines of your network, drawn from their presence (network-map.js
-// makes their nodes) or from the map each one's relay sends. Each host is a
+// makes their nodes). Each host is a
 // constellation of its own beside this machine's: its host node
 // (@<host>:core) held on an outer orbit, and its projects and sessions on
 // rings of their own around it. A dashed bridge joins checkouts of one
 // repo on different machines (hosts-draw.js draws those and the host node).
 // A host that isn't live keeps its constellation in place, dimmed and
-// still. A host is read-only: Preview and Stats, nothing that opens or
-// dismisses anything on it. Its sessions take a message from you, and
+// still. A host is read-only: Preview and Stats, read through the window,
+// nothing that opens or dismisses anything on it. Its sessions take a message from you, and
 // nothing else.
 //
 // This module holds what isn't three.js: the layout's forces, the words
@@ -486,21 +486,6 @@ export function createHostFilters({ sfx = () => {}, onFilter = () => {}, mount =
     render();
   }
 
-  // How each host stands now (the hosts event), between maps. The event
-  // gives the hub's view of each, whose error is the link's { code,
-  // message, fix }; the map's summaries say it in words, and so does this.
-  function setHosts(list) {
-    if (!Array.isArray(list)) return;
-    const now = new Map(list.map((x) => [x.id, x]));
-    // A machine in a network is the network's (network-map.js), not the hub's.
-    hosts = hosts.filter((x) => x.network || now.has(x.id)).map((x) => {
-      if (!now.has(x.id)) return x;
-      const y = now.get(x.id);
-      return { ...x, ...y, error: typeof y.error === "string" ? y.error : (y.error?.message ?? null) };
-    });
-    render();
-  }
-
   // This machine, by HERE or the name it gave itself; a host, by its id.
   const resolve = (k) => (hosts.some((x) => x.id === k) ? k : k === HERE || k === "here" || (self && k === self) || k === "" || k == null ? HERE : null);
 
@@ -606,7 +591,6 @@ export function createHostFilters({ sfx = () => {}, onFilter = () => {}, mount =
 
   return {
     setData,
-    setHosts,
     setSelected,
     toggle,
     look,
