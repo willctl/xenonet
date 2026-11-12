@@ -208,10 +208,17 @@ fn about_of(address: &SpaceId) -> EntityRef {
     EntityRef::Name { kind: address.kind.clone(), name: address.base_name().to_string() }
 }
 
-/// The spaces this machine only follows (1.x sync.json): their curator is another machine's.
-fn followed(paths: &AppPaths) -> BTreeSet<String> {
-    let c = crate::sync::Config::load(paths);
-    c.follow.keys().chain(c.curators.keys()).cloned().collect()
+/// 1.x's sync settings, in the config folder: read for the spaces it followed, never written
+/// (2.0 deletes no 1.x file).
+pub fn sync_1x_file(paths: &AppPaths) -> PathBuf {
+    paths.config_dir.join("sync.json")
+}
+
+/// The spaces this machine followed under 1.x (sync.json's `follow`): their curator is another
+/// machine's, so they're never founded or curated here.
+pub fn followed(paths: &AppPaths) -> BTreeSet<String> {
+    let v: Value = fs::read_to_string(sync_1x_file(paths)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    v["follow"].as_object().into_iter().flatten().filter_map(|(s, _)| SpaceId::parse(s).ok().filter(|s| !s.is_local())).map(|s| s.to_string()).collect()
 }
 
 /// What one pass did.
@@ -255,7 +262,7 @@ fn move_aside(from: &Path, to: &Path) -> Result<(), String> {
     if let Some(p) = to.parent() {
         fs::create_dir_all(p).map_err(|e| format!("cannot make {}: {e}", wiki::disp(p)))?;
     }
-    if fs::rename(from, to).is_ok() {
+    if wiki::retrying(|| fs::rename(from, to)).is_ok() {
         return Ok(());
     }
     fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -563,7 +570,7 @@ mod tests {
             "machine": "neo", "home": "inix", "peers": { "inix": "https://inix.example" },
             "follow": { "project:atlas": { "peer": "inix", "curator": "0123456789abcdef0123456789abcdef" }, "project:shared": { "peer": "inix", "auto": true } },
         });
-        fs::write(crate::sync::config_file(&h.paths), cfg.to_string()).unwrap();
+        fs::write(sync_1x_file(&h.paths), cfg.to_string()).unwrap();
         // Founding first, as a start before the copies moved would: nothing for the followed ones.
         let r = h.reconcile();
         assert_eq!(r.founded, vec![sp("machine:local"), sp("project:mine")], "only what this machine curates");

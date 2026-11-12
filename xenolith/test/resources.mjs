@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { rustBin, srv, srvT } from './impl.mjs';
+import { rustBin, srv, srvT, startService } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
@@ -49,7 +49,7 @@ async function waitFor(fn, ms, label) {
 describe('pages as resources, and the start prompt', { timeout: 60_000 }, () => {
   let E;
   let token; // read on project:atlas only
-  before(() => {
+  before(async () => {
     const dir = path.join(tmp, 'wiki-env');
     const home = path.join(dir, 'home');
     fs.mkdirSync(home, { recursive: true });
@@ -61,7 +61,13 @@ describe('pages as resources, and the start prompt', { timeout: 60_000 }, () => 
     fs.writeFileSync(path.join(E.wikiDir, 'pages', 'home-lab.md'), page('Home lab', 'The rack in the hall', 'A 2.5 GbE switch. ![x](https://example.com/x.png)'));
     fs.writeFileSync(path.join(E.wikiDir, 'spaces', 'project', 'atlas', 'pages', 'db.md'), page('Atlas database', 'Postgres 17', 'Chosen for logical replication.'));
     cli(E.env, 'grant', 'client:phone', 'ctx:read:project:atlas');
-    token = JSON.parse(cli(E.env, 'token', 'create', 'client:phone', '--json')).token;
+    // The service mints the token.
+    const service = await startService(E.env);
+    try {
+      token = JSON.parse(cli(E.env, 'token', 'create', 'client:phone', '--json')).token;
+    } finally {
+      await service.stop();
+    }
   });
 
   test('every readable page is a resource, read as Markdown', async () => {

@@ -14,7 +14,7 @@ use crate::httpd::Request;
 use crate::mcp::State;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
-use xenolith_core::access::Level;
+use xenolith_core::access::{self, Level};
 use xenolith_core::activity::{links_in, parse_log_day};
 use xenolith_core::audit;
 use xenolith_core::paths::AppPaths;
@@ -295,7 +295,7 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             "/api/forget" => Some(("Forgetting", ", or run `xenolith forget` in a terminal")),
             "/api/note" => Some(("A note from you", "")),
             "/api/spaces/bind" => Some(("Binding a space", ", or run `xenolith spaces bind` in a terminal")),
-            "/api/pair/offer" => Some(("Offering a pairing code", ", or run `xenolith pair offer` in a terminal")),
+            "/api/tokens" => Some(("Making a token", ", or run `xenolith token create` in a terminal")),
             "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
             _ => None,
         };
@@ -476,13 +476,42 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             Err(held::Error::Wiki(e)) => json_reply(500, &json!({ "error": e.to_string() })),
         };
     }
-    if path == "/api/pair/offer" && method == "POST" {
-        return match xenolith_core::pair::offer(&AppPaths::current(), xenolith_core::text::now_ms()) {
-            Ok((code, expires)) => {
-                entry.result = Some("pair code offered".into());
-                json_reply(200, &json!({ "code": code, "expiresAt": expires, "expiresInSeconds": xenolith_core::pair::CODE_TTL_MS / 1000 }))
+    if path == "/api/tokens" && method == "POST" {
+        // A grant for a subject, minted with this start's token root: the token goes back once,
+        // and access.json keeps only its revocation id and its row.
+        let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+        let subject = body["subject"].as_str().unwrap_or("").to_string();
+        let scopes: Option<Vec<access::Scope>> = body["scopes"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(access::parse_scope).collect::<Option<Vec<_>>>()).unwrap_or(None);
+        let Some(scopes) = scopes.filter(|s| !s.is_empty() && access::valid_subject(&subject)) else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"subject\": \"actor:<slug>|client:<id>\", \"scopes\": [\"ctx:read…\"], \"label\"?: \"…\", \"until\"?: <ms>}" }));
+        };
+        let now = xenolith_core::text::now_ms();
+        let until = body["until"].as_i64().unwrap_or(now + xenolith_core::grants::ROOT_MS);
+        let label = body["label"].as_str().unwrap_or("");
+        let made = app.mint(&subject, &scopes, until).and_then(|(token, revocation, until)| {
+            access::update(&AppPaths::current(), |p| p.record(&subject, scopes.clone(), label, &revocation, until, now)).map(|rec| (token, rec)).map_err(|e| e.to_string())
+        });
+        return match made {
+            Ok((token, rec)) => {
+                // Its revocation id, never the token.
+                audit::best_effort(
+                    &AppPaths::current(),
+                    "token",
+                    by,
+                    vec![
+                        ("revocation", json!(rec.revocation)),
+                        ("subject", json!(rec.subject)),
+                        ("scopes", json!(rec.scopes.iter().map(access::format_scope).collect::<Vec<_>>())),
+                        ("expiresAt", json!(rec.expires_at)),
+                    ],
+                );
+                entry.result = Some("token made".into());
+                json_reply(
+                    200,
+                    &json!({ "token": token, "id": rec.id, "subject": rec.subject, "scopes": rec.scopes.iter().map(access::format_scope).collect::<Vec<_>>(), "expiresAt": rec.expires_at }),
+                )
             }
-            Err(e) => json_reply(409, &json!({ "error": e.to_string() })),
+            Err(e) => json_reply(409, &json!({ "error": e })),
         };
     }
     if path == "/api/spaces/bind" && method == "POST" {

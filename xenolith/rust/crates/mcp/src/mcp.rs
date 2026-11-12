@@ -464,7 +464,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                             // another machine can tell a stale one (sync).
                             base: (opt_s(args, "mode").as_deref() == Some("replace")).then(|| {
                                 let slug = slug.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| wiki::slugify(&s(args, "title")));
-                                xenolith_core::sync::page_base(dir, &slug)
+                                xenolith_core::wiki::page_base(dir, &slug)
                             }),
                             slug,
                             title: opt_s(args, "title"),

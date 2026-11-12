@@ -253,6 +253,12 @@ pub fn confined_path(wiki_dir: &Path, path: &Path) -> Result<PathBuf> {
     Ok(checked)
 }
 
+/// A page's hash as a replace remembers it (its base), or "none": the curator turns a replace
+/// against an older page than it holds into a proposal.
+pub fn page_base(dir: &Path, slug: &str) -> String {
+    confined_path(dir, &dir.join("pages").join(format!("{slug}.md"))).ok().and_then(|f| read_if_exists(&f).ok().flatten()).map(|t| hash_text(&t, 16)).unwrap_or_else(|| "none".into())
+}
+
 pub fn read_if_exists(file: &Path) -> Result<Option<String>> {
     match fs::read(file) {
         Ok(b) => Ok(Some(to_lf(&String::from_utf8_lossy(&b)))),

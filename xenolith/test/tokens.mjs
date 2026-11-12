@@ -1,7 +1,9 @@
 // Bearer tokens with ctx:* scopes (the Rust programs only): the HTTP service as an OAuth 2.1
 // resource server the way MCP's authorization spec has it (resource metadata, 401 and 403
-// challenges), XENOLITH_TOKEN for stdio, and the token commands. A token reaches the lower of
-// what it asks (its scopes) and what its subject is granted, and nothing by default.
+// challenges), XENOLITH_TOKEN for stdio, and the token commands. A token is a grant: a Biscuit
+// rooted at this Xenolith's token root, which only the running service holds, so only it mints. A
+// token reaches the lower of what it asks (its scopes) and what its subject is granted, never past
+// its Biscuit's rights, and nothing by default.
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -15,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { rustBin, srv, srvT } from './impl.mjs';
+import { rustBin, srv, srvT, startService } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
@@ -124,11 +126,11 @@ describe('tokens over HTTP', { timeout: 60_000 }, () => {
       await c.callTool({ name: 'context_log', arguments: { app: 'setup', title, body: 'x', ...(space ? { space } : {}) } });
       await c.close();
     }
+    server = await startHttp(E.env);
     assert.equal(cli(E.env, 'grant', 'client:reader', 'ctx:read:project:atlas').code, 0);
     reader = JSON.parse(cli(E.env, 'token', 'create', 'client:reader', '--json').out).token;
     assert.equal(cli(E.env, 'grant', 'actor:hermes', 'ctx:append:by:hermes').code, 0);
     writer = JSON.parse(cli(E.env, 'token', 'create', 'actor:hermes', '--scope', 'ctx:write', '--json').out).token;
-    server = await startHttp(E.env);
   });
   after(() => server?.proc.kill());
 
@@ -275,14 +277,6 @@ describe('tokens over HTTP', { timeout: 60_000 }, () => {
     assert.ok(!h.text.includes(E.wikiDir) && !h.text.includes(E.home), h.text);
   });
 
-  test('sync always needs a token, even from this machine', async () => {
-    for (const [method, p] of [['GET', '/sync/v1/spaces/project/atlas/pages'], ['POST', '/sync/v1/spaces/project/atlas/entries']]) {
-      const r = await request(server.port, { method, path: p, body: method === 'POST' ? { entries: [] } : undefined });
-      assert.equal(r.status, 401, `${method} ${p}`);
-      assert.match(r.headers['www-authenticate'], /^Bearer error_description="Sync needs a token, even from this machine\.", resource_metadata="/);
-    }
-  });
-
   test('20 bad tokens a minute from one source, then 429 for a minute; other sources and tokenless calls go on', async () => {
     const E4 = makeEnv();
     const s4 = await startHttp(E4.env);
@@ -295,7 +289,6 @@ describe('tokens over HTTP', { timeout: 60_000 }, () => {
       assert.equal(limited.status, 429);
       assert.equal(limited.json.error, 'too_many_requests');
       assert.ok(Number(limited.headers['retry-after']) > 50, limited.headers['retry-after']);
-      assert.equal((await request(s4.port, { method: 'GET', path: '/sync/v1/spaces/project/atlas/pages', headers: bad })).status, 429, 'sync too');
       // Behind a proxy, the client it names is its own source.
       assert.equal((await request(s4.port, { headers: { ...bad, Forwarded: 'for=192.0.2.9' }, body: toolCall('context_search', { query: 'x' }) })).status, 401);
       assert.equal((await request(s4.port, { body: toolCall('context_search', { query: 'x' }) })).status, 200, 'this machine without a token is not a token guesser');
@@ -420,7 +413,10 @@ describe('XENOLITH_TOKEN for a stdio server, and the token commands', { timeout:
   test('a stdio server started with a token works as its holder; an unknown one does not start', async () => {
     const E = makeEnv();
     assert.equal(cli(E.env, 'grant', 'actor:hermes', 'ctx:append:by:hermes').code, 0);
+    // The service mints it and stops: the stdio server checks it against the root's certificate.
+    const service = await startService(E.env);
     const { token } = JSON.parse(cli(E.env, 'token', 'create', 'actor:hermes', '--json').out);
+    await service.stop();
     const c = new Client({ name: 'hermes', version: '1' });
     await c.connect(new StdioClientTransport({ ...srvT(), env: { ...E.env, XENOLITH_TOKEN: token }, stderr: 'pipe' }));
     try {
@@ -436,25 +432,39 @@ describe('XENOLITH_TOKEN for a stdio server, and the token commands', { timeout:
     assert.match(bad.stderr, /XENOLITH_TOKEN is not a token Xenolith knows/);
   });
 
-  test("token create takes the subject's grants as its scopes, shows the token once, keeps only its hash", () => {
+  test("token create takes the subject's grants as its scopes, shows the token once, keeps only its revocation id", async () => {
     const E = makeEnv();
     const none = cli(E.env, 'token', 'create', 'actor:hermes');
     assert.equal(none.code, 1);
     assert.match(none.err, /has no grants, so a token would reach nothing/);
     cli(E.env, 'grant', 'actor:hermes', 'ctx:append:by:hermes');
     cli(E.env, 'grant', 'actor:hermes', 'ctx:read:project:atlas');
-    const plain = cli(E.env, 'token', 'create', 'actor:hermes', '--label', 'Hermes on the server', '--days', '7');
-    assert.equal(plain.code, 0, plain.err);
-    assert.match(plain.out, /^xenolith_[0-9a-f]{64}\n$/);
-    assert.match(plain.err, /^Token tok_[0-9a-f]{12} for actor:hermes \(ctx:append:by:hermes ctx:read:project:atlas\), until \S+\. It is shown once/);
-    const policy = JSON.parse(cli(E.env, 'access', '--json').out);
-    assert.equal(policy.tokens.length, 1);
-    assert.equal(policy.tokens[0].label, 'Hermes on the server');
-    assert.equal(policy.tokens[0].hash, undefined, 'access --json shows ids, not hashes');
-    assert.ok(!fs.readFileSync(path.join(E.home, 'access.json'), 'utf8').includes(plain.out.trim()), 'only the hash is kept');
-    ownerOnly(path.join(E.home, 'access.json'));
-    assert.match(cli(E.env, 'token', 'create', 'actor:hermes', '--scope', 'ctx:read nope').err, /"nope" is not a scope/);
-    assert.equal(cli(E.env, 'token', 'revoke', 'tok_000000000000').code, 1, 'nothing to revoke');
+    const off = cli(E.env, 'token', 'create', 'actor:hermes');
+    assert.equal(off.code, 1, 'only the running service mints');
+    assert.match(off.err, /No running Xenolith service/);
+    const service = await startService(E.env);
+    try {
+      const plain = cli(E.env, 'token', 'create', 'actor:hermes', '--label', 'Hermes on the server', '--days', '7');
+      assert.equal(plain.code, 0, plain.err);
+      assert.match(plain.out, /^xenolith_grant_[A-Za-z0-9_-]{100,}\n$/);
+      assert.match(plain.err, /^Token tok_[0-9a-f]{12} for actor:hermes \(ctx:append:by:hermes ctx:read:project:atlas\), until \S+\. It is shown once/);
+      const policy = JSON.parse(cli(E.env, 'access', '--json').out);
+      assert.equal(policy.tokens.length, 1);
+      assert.equal(policy.tokens[0].label, 'Hermes on the server');
+      assert.match(policy.tokens[0].revocation, /^[0-9a-f]{64,}$/);
+      assert.equal(policy.tokens[0].id, `tok_${policy.tokens[0].revocation.slice(0, 12)}`);
+      assert.ok(Math.abs(policy.tokens[0].expiresAt - (Date.now() + 7 * 86_400_000)) < 120_000, 'seven days');
+      const kept = fs.readFileSync(path.join(E.home, 'access.json'), 'utf8');
+      assert.ok(!kept.includes(plain.out.trim().slice(20, 80)), 'never the token');
+      ownerOnly(path.join(E.home, 'access.json'));
+      ownerOnly(path.join(E.home, 'keys', 'token-roots.json'));
+      assert.match(cli(E.env, 'token', 'create', 'actor:hermes', '--scope', 'ctx:read nope').err, /"nope" is not a scope/);
+      assert.equal(cli(E.env, 'token', 'revoke', 'tok_000000000000').code, 1, 'nothing to revoke');
+      // The old hex tokens are no tokens.
+      assert.equal(cli(E.env, 'grant', 'machine:laptop', 'ctx:read').code, 1, 'machines no longer hold grants');
+    } finally {
+      await service.stop();
+    }
   });
 
   test('a token is a secret: the wiki refuses to store one', async () => {
@@ -462,10 +472,11 @@ describe('XENOLITH_TOKEN for a stdio server, and the token commands', { timeout:
     const c = new Client({ name: 'x', version: '1' });
     await c.connect(new StdioClientTransport({ ...srvT(), env: E.env, stderr: 'pipe' }));
     try {
-      const token = `xenolith_${'ab'.repeat(32)}`;
-      const r = await call(c, 'context_log', { app: 'x', title: 'Token for hermes', body: `It is ${token}` });
-      assert.equal(r.isError, true);
-      assert.match(r.text, /^Refused: `body` looks like it contains a Xenolith or XenoNet token\./);
+      for (const token of [`xenolith_grant_${'Ab3_-'.repeat(30)}`, `xenonet_actor_${'Zz9-_'.repeat(30)}`, `xenolith_${'ab'.repeat(32)}`]) {
+        const r = await call(c, 'context_log', { app: 'x', title: 'Token for hermes', body: `It is ${token}` });
+        assert.equal(r.isError, true, token.slice(0, 20));
+        assert.match(r.text, /^Refused: `body` looks like it contains a Xenolith or XenoNet token\./);
+      }
     } finally {
       await c.close();
     }

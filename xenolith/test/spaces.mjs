@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { curatorCmd, rustBin, srv, srvT } from './impl.mjs';
+import { curatorCmd, rustBin, srvT, startService } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
@@ -209,29 +209,7 @@ describe('spaces and grants from the command line', { timeout: 60_000 }, () => {
   });
 });
 
-/** The HTTP service on a free port, until its stdin closes. */
-function startService(env) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
-    let err = '';
-    const timer = setTimeout(() => reject(new Error(`the service did not start:\n${err}`)), 10_000);
-    proc.stderr.setEncoding('utf8');
-    proc.stderr.on('data', (d) => {
-      err += d;
-      if (/listening on http:\/\/127\.0\.0\.1:\d+\/mcp/.test(err)) {
-        clearTimeout(timer);
-        resolve({ proc, log: () => err });
-      }
-    });
-    proc.on('exit', (code) => reject(new Error(`the service exited ${code}:\n${err}`)));
-  });
-}
-
-async function stopService(s) {
-  const gone = new Promise((r) => s.proc.once('exit', r));
-  s.proc.stdin.end();
-  await gone;
-}
+const stopService = (s) => s.stop();
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 

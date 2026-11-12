@@ -9,12 +9,14 @@
 //!   by (an actor's own space: by:<slug> names the actor itself).
 //! - Scopes: `ctx:<level>` or `ctx:<level>:<selector>`, written as OAuth scope strings, so terms
 //!   join with "+": `ctx:read:project:atlas+identity:adal`. A level includes the ones below it.
-//! - Grants: what you allow a subject (actor:<slug>, client:<id>, machine:<name>): a scope until
-//!   it expires. A subject can hold several.
-//! - Tokens: `xenolith_<64 hex digits>`, 256 random bits; Xenolith keeps
-//!   only the SHA-256. Each names its subject and the scopes it asks for. What a token may do in a
-//!   space is the lower of its own scopes and its subject's live grants there: a token can't
-//!   reach past what you granted, and a grant does nothing without a token that asks for it.
+//! - Grants: what you allow a subject (actor:<slug>, client:<id>): a scope until it expires. A
+//!   subject can hold several.
+//! - Tokens: Biscuits rooted at this Xenolith's token root (grants.rs), `xenolith_grant_…`.
+//!   access.json keeps no token, only each one's revocation id with its row: its subject, the
+//!   scopes it asks for, its label and end; and the revocation ids of revoked tokens. What a token
+//!   may do in a space is the lower of its own scopes and its subject's live grants there, and
+//!   never more than its Biscuit's rights: a token can't reach past what you granted, and a grant
+//!   does nothing without a token that asks for it. Every decision is xenonet-authz's.
 //!
 //! Local callers (stdio, and HTTP from a process on this machine without a token and without a
 //! proxy's Forwarded, X-Forwarded-* or Via header) have admin everywhere by default. Local is any
@@ -26,7 +28,9 @@
 
 use crate::paths::AppPaths;
 use crate::spaces::SpaceId;
-use crate::text::{now_ms, random_hex, sha256_hex};
+use crate::text::now_ms;
+#[cfg(test)]
+use crate::text::random_hex;
 use crate::wiki::{self, Result, wiki_err};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -200,23 +204,6 @@ pub fn parse_scope_list(text: &str) -> Result<Vec<Scope>> {
 
 // ---------------------------------------------------------------- tokens
 
-pub const TOKEN_PREFIX: &str = "xenolith_";
-
-pub fn is_token(s: &str) -> bool {
-    s.len() == TOKEN_PREFIX.len() + 64 && s.starts_with(TOKEN_PREFIX) && s[TOKEN_PREFIX.len()..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-pub fn hash_token(token: &str) -> String {
-    sha256_hex(token.as_bytes())
-}
-
-/// A new token and the hash Xenolith keeps of it. Shown once; it travels only as a Bearer header.
-pub fn new_token() -> (String, String) {
-    let token = format!("{TOKEN_PREFIX}{}", random_hex(64));
-    let hash = hash_token(&token);
-    (token, hash)
-}
-
 /// The token an Authorization header carries (RFC 6750): None without the header, Some(None) when
 /// it isn't a Bearer, Some(Some(token)) otherwise (which may still be one Xenolith doesn't know).
 pub fn bearer_of(header: Option<&str>) -> Option<Option<String>> {
@@ -230,6 +217,12 @@ pub fn bearer_of(header: Option<&str>) -> Option<Option<String>> {
     Some(Some(rest.to_string()))
 }
 
+/// A token's handle for listing and revoking: `tok_` and the first 12 hex digits of its revocation
+/// id.
+pub fn handle_of(revocation: &str) -> String {
+    format!("tok_{}", &revocation[..revocation.len().min(12)])
+}
+
 // ---------------------------------------------------------------- the policy
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -241,19 +234,38 @@ pub struct Grant {
     pub by: String,
 }
 
+/// What access.json keeps of a token: never the token, only its revocation id and its row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TokenRec {
-    /// A short handle for listing and revoking: "tok_" and the hash's first 12 hex digits.
+    /// The handle (`tok_…`).
     pub id: String,
-    pub hash: String,
+    /// Its Biscuit's first revocation id, in hex.
+    pub revocation: String,
     pub subject: String,
+    /// What it may select: the row decisions read (grants.rs).
     pub scopes: Vec<Scope>,
     pub label: String,
     pub at: i64,
-    /// None: until revoked.
-    pub expires_at: Option<i64>,
-    /// An OAuth access token's resource (RFC 8707): the server it was issued for.
-    pub resource: Option<String>,
+    pub expires_at: i64,
+}
+
+/// A token, checked: it stands for the holder of a `Principal::Token`, so a decision can show it
+/// to xenonet-authz. Two are the same when their revocation ids are.
+#[derive(Clone)]
+pub struct Proof(pub std::sync::Arc<xenonet_authz::Token>);
+
+impl PartialEq for Proof {
+    fn eq(&self, other: &Proof) -> bool {
+        self.0.id() == other.0.id()
+    }
+}
+
+impl Eq for Proof {}
+
+impl std::fmt::Debug for Proof {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 /// Who is asking.
@@ -262,7 +274,7 @@ pub enum Principal {
     /// You, or a session on this machine (stdio, or HTTP from this machine without a token).
     Local,
     /// A bearer token's holder.
-    Token { id: String, subject: String, scopes: Vec<Scope> },
+    Token { id: String, subject: String, scopes: Vec<Scope>, proof: Proof },
 }
 
 impl Principal {
@@ -275,10 +287,10 @@ impl Principal {
     }
 }
 
-/// Subjects a grant or token can name: an actor, an OAuth client, another machine (sync).
+/// Subjects a grant or token can name: an actor, or an OAuth client.
 pub fn valid_subject(s: &str) -> bool {
     let Some((k, v)) = s.split_once(':') else { return false };
-    matches!(k, "actor" | "client" | "machine") && !v.is_empty() && v.len() <= 80 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+    matches!(k, "actor" | "client") && !v.is_empty() && v.len() <= 80 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
 pub const GRANT_MS: i64 = 30 * 24 * 3600 * 1000;
@@ -289,9 +301,15 @@ pub struct Policy {
     pub local: Option<Level>,
     pub grants: Vec<Grant>,
     pub tokens: Vec<TokenRec>,
+    /// The revocation ids (hex) of tokens revoked: a token holding one is no token.
+    pub revoked: Vec<String>,
     pub spaces: BTreeMap<String, Facts>,
     /// Set when access.json could not be read: tokens are then refused, and /status says why.
     pub problem: Option<String>,
+    /// This Xenolith, as decisions name it, and the token roots it made: from the state folder,
+    /// by `load`.
+    pub me: crate::grants::Me,
+    pub roots: Vec<xenonet_authz::RootCertificate>,
 }
 
 pub fn policy_file(paths: &AppPaths) -> PathBuf {
@@ -300,6 +318,10 @@ pub fn policy_file(paths: &AppPaths) -> PathBuf {
 
 fn scopes_of(v: &Value) -> Vec<Scope> {
     v.as_array().into_iter().flatten().filter_map(Value::as_str).filter_map(parse_scope).collect()
+}
+
+fn is_hex_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 256 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 impl Policy {
@@ -344,19 +366,19 @@ impl Policy {
             .into_iter()
             .flatten()
             .filter_map(|t| {
-                let hash = t["hash"].as_str().filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))?.to_string();
+                let revocation = t["revocation"].as_str().filter(|h| is_hex_id(h))?.to_string();
                 Some(TokenRec {
-                    id: format!("tok_{}", &hash[..12]),
-                    hash,
+                    id: handle_of(&revocation),
+                    revocation,
                     subject: t["subject"].as_str().filter(|s| valid_subject(s))?.to_string(),
                     scopes: scopes_of(&t["scopes"]),
                     label: t["label"].as_str().unwrap_or("").to_string(),
                     at: t["at"].as_i64().unwrap_or(0),
-                    expires_at: t["expiresAt"].as_i64(),
-                    resource: t["resource"].as_str().map(String::from),
+                    expires_at: t["expiresAt"].as_i64()?,
                 })
             })
             .collect();
+        let revoked = v["revoked"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|h| is_hex_id(h)).map(String::from).collect();
         let spaces = v["spaces"]
             .as_object()
             .into_iter()
@@ -367,12 +389,12 @@ impl Policy {
                 Some((id.to_string(), Facts { identities }))
             })
             .collect();
-        Policy { local, grants, tokens, spaces, problem: None }
+        Policy { local, grants, tokens, revoked, spaces, ..Policy::new() }
     }
 
     pub fn to_json(&self) -> Value {
         let mut o = Map::new();
-        o.insert("version".into(), json!(1));
+        o.insert("version".into(), json!(2));
         o.insert("local".into(), json!(self.local.map_or("none", Level::as_str)));
         o.insert(
             "grants".into(),
@@ -384,29 +406,24 @@ impl Policy {
                 self.tokens
                     .iter()
                     .map(|t| {
-                        let mut m = Map::new();
-                        m.insert("hash".into(), json!(t.hash));
-                        m.insert("subject".into(), json!(t.subject));
-                        m.insert("scopes".into(), json!(t.scopes.iter().map(format_scope).collect::<Vec<_>>()));
-                        m.insert("label".into(), json!(t.label));
-                        m.insert("at".into(), json!(t.at));
-                        if let Some(e) = t.expires_at {
-                            m.insert("expiresAt".into(), json!(e));
-                        }
-                        if let Some(r) = &t.resource {
-                            m.insert("resource".into(), json!(r));
-                        }
-                        Value::Object(m)
+                        json!({
+                            "revocation": t.revocation,
+                            "subject": t.subject,
+                            "scopes": t.scopes.iter().map(format_scope).collect::<Vec<_>>(),
+                            "label": t.label,
+                            "at": t.at,
+                            "expiresAt": t.expires_at,
+                        })
                     })
                     .collect(),
             ),
         );
+        o.insert("revoked".into(), json!(self.revoked));
         o.insert("spaces".into(), Value::Object(self.spaces.iter().map(|(k, f)| (k.clone(), json!({ "identities": f.identities }))).collect()));
         Value::Object(o)
     }
 
-    /// Writes the policy for you alone (and, on Windows, the service, which checks tokens with it):
-    /// it holds token hashes and the grants.
+    /// Writes the policy for you alone (and, on Windows, the service, which checks tokens with it).
     pub fn save(&self, file: &Path) -> Result<()> {
         let text = serde_json::to_string_pretty(&self.to_json()).unwrap_or_default();
         crate::wiki::write_private(file, &format!("{text}\n"), &crate::paths::service_readers())?;
@@ -417,39 +434,36 @@ impl Policy {
         self.spaces.get(&space.to_string()).cloned().unwrap_or_default()
     }
 
-    /// The principal a bearer token stands for; None when it is not a live token of this policy.
-    pub fn principal_for(&self, token: &str, now: i64) -> Option<Principal> {
-        if self.problem.is_some() || !is_token(token) {
-            return None;
-        }
-        let hash = hash_token(token);
-        let t = self.tokens.iter().find(|t| t.hash == hash)?;
-        if t.expires_at.is_some_and(|e| e <= now) {
-            return None;
-        }
-        Some(Principal::Token { id: t.id.clone(), subject: t.subject.clone(), scopes: t.scopes.clone() })
+    /// The live row of a token, by its revocation id.
+    fn row(&self, revocation: &str, now: i64) -> Option<&TokenRec> {
+        self.tokens.iter().find(|t| t.revocation == revocation && t.expires_at > now && !self.revoked.contains(&t.revocation))
     }
 
-    /// The live record of a token, by the token itself.
-    pub fn token(&self, secret: &str) -> Option<&TokenRec> {
-        if !is_token(secret) {
+    /// The principal a bearer token stands for: one of this Xenolith's tokens, checked against its
+    /// roots and revocations, with a live row here. None otherwise.
+    pub fn principal_for(&self, text: &str, now: i64) -> Option<Principal> {
+        if self.problem.is_some() || !crate::grants::looks_like_token(text) {
             return None;
         }
-        let hash = hash_token(secret);
-        self.tokens.iter().find(|t| t.hash == hash)
+        let token = crate::grants::parse(self, text, now)?;
+        let rec = self.row(&token.id(), now)?;
+        if token.bearer().slug.as_str() != rec.subject {
+            return None;
+        }
+        Some(Principal::Token { id: rec.id.clone(), subject: rec.subject.clone(), scopes: rec.scopes.clone(), proof: Proof(std::sync::Arc::new(token)) })
     }
 
-    /// A principal as this policy sees it now: a token's holder again from its live record, so a
+    /// A principal as this policy sees it now: a token's holder again from its live row, so a
     /// revoked or expired token stops working at once, even on a connection opened before.
     pub fn current(&self, who: &Principal, now: i64) -> Option<Principal> {
         match who {
             Principal::Local => Some(Principal::Local),
-            Principal::Token { id, .. } => {
+            Principal::Token { proof, .. } => {
                 if self.problem.is_some() {
                     return None;
                 }
-                let t = self.tokens.iter().find(|t| t.id == *id && t.expires_at.is_none_or(|e| e > now))?;
-                Some(Principal::Token { id: t.id.clone(), subject: t.subject.clone(), scopes: t.scopes.clone() })
+                let t = self.row(&proof.0.id(), now)?;
+                Some(Principal::Token { id: t.id.clone(), subject: t.subject.clone(), scopes: t.scopes.clone(), proof: proof.clone() })
             }
         }
     }
@@ -458,24 +472,35 @@ impl Policy {
         self.grants.iter().filter(|g| g.subject == subject && g.expires_at > now && g.scope.covers(space, facts)).map(|g| g.scope.level).max()
     }
 
-    /// The most a principal may do in a space, or None: deny by default.
+    /// What a token's row reaches in a space: the lower of its own scopes and its subject's live
+    /// grants there. grants.rs reads it for xenonet-authz, which also holds it to the token's
+    /// rights.
+    pub fn row_level(&self, subject: &str, scopes: &[Scope], space: &SpaceId, now: i64) -> Option<Level> {
+        let facts = self.facts(space);
+        let asked = scopes.iter().filter(|s| s.covers(space, &facts)).map(|s| s.level).max()?;
+        let granted = self.grant_level(subject, space, &facts, now)?;
+        Some(asked.min(granted))
+    }
+
+    /// The most a principal may do in a space, as xenonet-authz decides it, or None: deny by
+    /// default.
     pub fn level(&self, who: &Principal, space: &SpaceId, now: i64) -> Option<Level> {
         match who {
-            Principal::Local => self.local,
-            Principal::Token { subject, scopes, .. } => {
+            Principal::Local => crate::grants::level(self, None, space, now),
+            Principal::Token { subject, scopes, proof, .. } => {
                 if self.problem.is_some() {
                     return None;
                 }
-                let facts = self.facts(space);
-                let asked = scopes.iter().filter(|s| s.covers(space, &facts)).map(|s| s.level).max()?;
-                let granted = self.grant_level(subject, space, &facts, now)?;
-                Some(asked.min(granted))
+                crate::grants::level(self, Some((&proof.0, subject, scopes)), space, now)
             }
         }
     }
 
     pub fn allows(&self, who: &Principal, space: &SpaceId, need: Level, now: i64) -> bool {
-        self.level(who, space, now).is_some_and(|l| l >= need)
+        match who {
+            Principal::Local => crate::grants::decide(self, None, space, need, now).is_ok(),
+            Principal::Token { subject, scopes, proof, .. } => self.problem.is_none() && crate::grants::decide(self, Some((&proof.0, subject, scopes)), space, need, now).is_ok(),
+        }
     }
 
     /// The highest level a token's own scopes reach in any space: below what a call needs, the
@@ -491,7 +516,7 @@ impl Policy {
     /// scope. Returns the grant.
     pub fn grant(&mut self, subject: &str, scope: Scope, ms: i64, by: &str, now: i64) -> Result<Grant> {
         if !valid_subject(subject) {
-            return wiki_err(format!("\"{subject}\" is not a subject: use actor:<slug>, client:<id> or machine:<name>."));
+            return wiki_err(format!("\"{subject}\" is not a subject: use actor:<slug> or client:<id>."));
         }
         let g = Grant { subject: subject.into(), scope, at: now, expires_at: now + ms.max(60_000), by: by.into() };
         self.grants.retain(|x| !(x.subject == g.subject && x.scope == g.scope));
@@ -506,40 +531,49 @@ impl Policy {
         before - self.grants.len()
     }
 
-    /// Makes a token for `subject` asking for `scopes`. Returns the token (shown once) and its record.
-    pub fn issue(&mut self, subject: &str, scopes: Vec<Scope>, label: &str, ttl_ms: Option<i64>, resource: Option<String>, now: i64) -> Result<(String, TokenRec)> {
+    /// Records a token minted for `subject` (its revocation id, from grants::mint) with the row it
+    /// selects by. Returns the record; the token itself is never kept.
+    pub fn record(&mut self, subject: &str, scopes: Vec<Scope>, label: &str, revocation: &str, until: i64, now: i64) -> Result<TokenRec> {
         if !valid_subject(subject) {
-            return wiki_err(format!("\"{subject}\" is not a subject: use actor:<slug>, client:<id> or machine:<name>."));
+            return wiki_err(format!("\"{subject}\" is not a subject: use actor:<slug> or client:<id>."));
         }
         if scopes.is_empty() {
             return wiki_err("A token needs at least one scope, such as ctx:read.");
         }
-        let (token, hash) = new_token();
+        if !is_hex_id(revocation) {
+            return wiki_err("That isn't a token's revocation id.");
+        }
         let rec = TokenRec {
-            id: format!("tok_{}", &hash[..12]),
-            hash,
+            id: handle_of(revocation),
+            revocation: revocation.into(),
             subject: subject.into(),
             scopes,
             label: crate::text::one_line(label).chars().take(80).collect(),
             at: now,
-            expires_at: ttl_ms.map(|t| now + t.max(60_000)),
-            resource,
+            expires_at: until,
         };
         self.tokens.push(rec.clone());
-        Ok((token, rec))
+        Ok(rec)
     }
 
-    /// Revokes tokens by id (tok_…) or by subject (every token it holds). Returns how many.
-    pub fn revoke_token(&mut self, id_or_subject: &str) -> usize {
-        let before = self.tokens.len();
-        self.tokens.retain(|t| t.id != id_or_subject && t.subject != id_or_subject);
-        before - self.tokens.len()
+    /// Revokes tokens by handle (tok_…) or by subject (every token it holds): their revocation ids
+    /// join `revoked`, so the tokens are no tokens even if a row came back. Returns the revocation
+    /// ids.
+    pub fn revoke_token(&mut self, id_or_subject: &str) -> Vec<String> {
+        let gone: Vec<String> = self.tokens.iter().filter(|t| t.id == id_or_subject || t.subject == id_or_subject).map(|t| t.revocation.clone()).collect();
+        self.tokens.retain(|t| !gone.contains(&t.revocation));
+        for r in &gone {
+            if !self.revoked.contains(r) {
+                self.revoked.push(r.clone());
+            }
+        }
+        gone
     }
 
     /// Drops expired tokens and grants (kept a day after they lapse, so a listing can show them).
     pub fn prune(&mut self, now: i64) {
         self.grants.retain(|g| g.expires_at + 86_400_000 > now);
-        self.tokens.retain(|t| t.expires_at.is_none_or(|e| e + 86_400_000 > now));
+        self.tokens.retain(|t| t.expires_at + 86_400_000 > now);
     }
 }
 
@@ -567,13 +601,20 @@ pub fn update<T>(paths: &AppPaths, f: impl FnOnce(&mut Policy) -> Result<T>) -> 
     r
 }
 
+/// The policy, with this Xenolith's own id and its token roots, which decisions need.
 pub fn load(paths: &AppPaths) -> Policy {
-    Policy::load(&policy_file(paths))
+    let mut p = Policy::load(&policy_file(paths));
+    p.me = crate::grants::Me::load(paths);
+    p.roots = crate::grants::roots(paths);
+    p
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::grants::{self, Me};
+    use xenonet_authz::TokenRoot;
+    use xenonet_id::sign::{KeyHome, SeedSigner};
 
     fn sp(s: &str) -> SpaceId {
         SpaceId::parse(s).unwrap()
@@ -581,8 +622,23 @@ mod tests {
     fn sc(s: &str) -> Scope {
         parse_scope(s).unwrap()
     }
-    fn tok(scopes: &[&str]) -> Principal {
-        Principal::Token { id: "tok_x".into(), subject: "actor:hermes".into(), scopes: scopes.iter().map(|s| sc(s)).collect() }
+
+    /// A Xenolith's root and a policy that knows it.
+    fn world(now: i64) -> (TokenRoot, Policy) {
+        let key = SeedSigner::from_seed(&[5; 32], KeyHome::File).unwrap();
+        let me = Me::of(&key).unwrap();
+        let root = TokenRoot::new(me.machine.clone(), &key, now - 1000, now + grants::ROOT_MS).unwrap();
+        let p = Policy { me, roots: vec![root.certificate().clone()], ..Policy::new() };
+        (root, p)
+    }
+
+    /// A token minted and recorded in `p`: its text and its principal.
+    fn issue(root: &TokenRoot, p: &mut Policy, subject: &str, scopes: &[&str], until: i64, now: i64) -> (String, Principal) {
+        let scopes: Vec<Scope> = scopes.iter().map(|s| sc(s)).collect();
+        let (token, text) = grants::mint(root, subject, &scopes, until).unwrap();
+        p.record(subject, scopes, "", &token.id(), until, now).unwrap();
+        let who = p.principal_for(&text, now).unwrap();
+        (text, who)
     }
 
     #[test]
@@ -628,25 +684,23 @@ mod tests {
     }
 
     #[test]
-    fn tokens_are_prefixed_hex_and_kept_as_hashes() {
-        let (t, h) = new_token();
-        assert!(is_token(&t) && t.starts_with("xenolith_") && t.len() == 73);
-        assert_eq!(h, hash_token(&t));
-        assert!(!is_token("xenolith_XYZ") && !is_token(&t.to_uppercase()));
+    fn bearer_headers_and_token_shapes() {
         assert_eq!(bearer_of(None), None);
         assert_eq!(bearer_of(Some("Basic abc")), Some(None));
         assert_eq!(bearer_of(Some("Bearer")), Some(None));
         assert_eq!(bearer_of(Some("bearer  abc ")), Some(Some("abc".into())));
         assert_eq!(bearer_of(Some("Bearer a b")), Some(None));
+        assert!(!grants::looks_like_token(&format!("xenolith_{}", "0".repeat(64))), "the old form is no token");
+        assert_eq!(handle_of("0123456789abcdef"), "tok_0123456789ab");
     }
 
     #[test]
     fn deny_by_default_and_the_lower_of_scope_and_grant() {
-        let now = 1_000_000;
-        let mut p = Policy::new();
+        let now = 1_800_000_000_000;
+        let (root, mut p) = world(now);
         let atlas = sp("project:atlas");
         assert_eq!(p.level(&Principal::Local, &atlas, now), Some(Level::Admin), "you have admin everywhere");
-        let who = tok(&["ctx:write:project:atlas", "ctx:append:by:hermes"]);
+        let (_, who) = issue(&root, &mut p, "actor:hermes", &["ctx:write:project:atlas", "ctx:append:by:hermes"], now + GRANT_MS * 2, now);
         assert_eq!(p.level(&who, &atlas, now), None, "a token asks, a grant allows: nothing granted yet");
         p.grant("actor:hermes", sc("ctx:read:project:atlas"), GRANT_MS, "you", now).unwrap();
         assert_eq!(p.level(&who, &atlas, now), Some(Level::Read), "the grant caps what the token asks");
@@ -654,7 +708,6 @@ mod tests {
         assert_eq!(p.level(&who, &SpaceId::local(), now), None, "nothing granted on this machine's space");
         p.grant("actor:hermes", sc("ctx:admin:by:hermes"), GRANT_MS, "you", now).unwrap();
         assert_eq!(p.level(&who, &sp("actor:hermes"), now), Some(Level::Append), "the token asks only append there");
-        assert_eq!(p.level(&tok(&["ctx:read"]), &atlas, now), Some(Level::Read));
         assert_eq!(p.level(&who, &atlas, now + GRANT_MS + 1), None, "grants expire");
         assert_eq!(p.revoke("actor:hermes", None), 2);
         assert_eq!(p.level(&who, &atlas, now), None, "revoked at once");
@@ -662,34 +715,38 @@ mod tests {
         p.local = None;
         assert_eq!(p.level(&Principal::Local, &atlas, now), None);
         assert!(p.grant("hermes", sc("ctx:read"), GRANT_MS, "you", now).is_err(), "subjects name their kind");
+        assert!(p.grant("machine:laptop", sc("ctx:read"), GRANT_MS, "you", now).is_err(), "machines join by a share now, not a grant");
     }
 
     #[test]
     fn a_token_reaches_this_machines_space_only_through_a_grant_that_names_it() {
-        let now = 1_000;
+        let now = 1_800_000_000_000;
         let local = SpaceId::local();
-        let reader = |scope: &str| Principal::Token { id: "tok_l".into(), subject: "client:phone".into(), scopes: vec![sc(scope)] };
         for grant in ["ctx:read", "ctx:read:all", "ctx:read:machine:*", "ctx:read:machine:loc*", "ctx:admin"] {
-            let mut p = Policy::new();
+            let (root, mut p) = world(now);
             p.grant("client:phone", sc(grant), GRANT_MS, "you", now).unwrap();
-            assert_eq!(p.level(&reader("ctx:read:machine:local"), &local, now), None, "{grant} does not name machine:local");
-            assert_eq!(p.level(&reader("ctx:read"), &sp("project:atlas"), now).is_some(), !grant.contains("machine"), "{grant} still reaches other spaces");
+            let (_, named) = issue(&root, &mut p, "client:phone", &["ctx:read:machine:local"], now + GRANT_MS, now);
+            let (_, all) = issue(&root, &mut p, "client:phone", &["ctx:read"], now + GRANT_MS, now);
+            assert_eq!(p.level(&named, &local, now), None, "{grant} does not name machine:local");
+            assert_eq!(p.level(&all, &sp("project:atlas"), now).is_some(), !grant.contains("machine"), "{grant} still reaches other spaces");
         }
-        let mut p = Policy::new();
+        let (root, mut p) = world(now);
         p.grant("client:phone", sc("ctx:read:machine:local"), GRANT_MS, "you", now).unwrap();
-        assert_eq!(p.level(&reader("ctx:read:machine:local"), &local, now), Some(Level::Read), "named exactly, by the grant and the token");
-        assert_eq!(p.level(&reader("ctx:read"), &local, now), None, "the token's own scopes must name it too");
-        assert_eq!(p.level(&reader("ctx:read:machine:local"), &sp("machine:studio"), now), None);
+        let (_, named) = issue(&root, &mut p, "client:phone", &["ctx:read:machine:local"], now + GRANT_MS, now);
+        let (_, all) = issue(&root, &mut p, "client:phone", &["ctx:read"], now + GRANT_MS, now);
+        assert_eq!(p.level(&named, &local, now), Some(Level::Read), "named exactly, by the grant and the token");
+        assert_eq!(p.level(&all, &local, now), None, "the token's own scopes must name it too");
+        assert_eq!(p.level(&named, &sp("machine:studio"), now), None);
         assert_eq!(p.level(&Principal::Local, &local, now), Some(Level::Admin), "this machine's own processes are not tokens");
     }
 
     #[test]
     fn identities_of_a_project_come_from_the_policy() {
-        let now = 5;
-        let mut p = Policy::new();
+        let now = 1_800_000_000_000;
+        let (root, mut p) = world(now);
         p.spaces.insert("project:atlas".into(), Facts { identities: vec!["adal".into()] });
         p.grant("client:phone", sc("ctx:read:identity:adal"), GRANT_MS, "you", now).unwrap();
-        let who = Principal::Token { id: "tok_y".into(), subject: "client:phone".into(), scopes: vec![sc("ctx:read")] };
+        let (_, who) = issue(&root, &mut p, "client:phone", &["ctx:read"], now + GRANT_MS, now);
         assert_eq!(p.level(&who, &sp("project:atlas"), now), Some(Level::Read));
         assert_eq!(p.level(&who, &sp("project:other"), now), None);
         assert_eq!(p.level(&who, &sp("identity:adal"), now), Some(Level::Read));
@@ -700,24 +757,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenolith-access-{}", random_hex(8)));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("access.json");
-        let now = 10_000;
-        let mut p = Policy::new();
+        let now = 1_800_000_000_000;
+        let (root, mut p) = world(now);
         p.grant("actor:hermes", sc("ctx:append:by:hermes"), GRANT_MS, "you", now).unwrap();
-        let (secret, rec) = p.issue("actor:hermes", vec![sc("ctx:append:by:hermes"), sc("ctx:read")], "Hermes", None, None, now).unwrap();
+        let (secret, who) = issue(&root, &mut p, "actor:hermes", &["ctx:append:by:hermes", "ctx:read"], now + GRANT_MS, now);
         p.spaces.insert("project:atlas".into(), Facts { identities: vec!["adal".into()] });
+        p.revoked.push("ab".repeat(32));
         p.save(&file).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
-        assert!(!text.contains(&secret), "only the hash is kept");
-        let q = Policy::load(&file);
+        assert!(!text.contains(&secret) && !text.contains(&secret[grants::PREFIX.len()..][..40]), "never the token");
+        let q = Policy { me: p.me.clone(), roots: p.roots.clone(), ..Policy::load(&file) };
         assert_eq!(q.grants, p.grants);
         assert_eq!(q.tokens, p.tokens);
         assert_eq!(q.spaces, p.spaces);
-        let who = q.principal_for(&secret, now).unwrap();
-        assert_eq!(who, Principal::Token { id: rec.id.clone(), subject: "actor:hermes".into(), scopes: rec.scopes.clone() });
+        assert_eq!(q.revoked, p.revoked);
+        assert_eq!(q.principal_for(&secret, now).unwrap(), who);
         assert_eq!(q.level(&who, &sp("actor:hermes"), now), Some(Level::Append));
-        assert!(q.principal_for(&new_token().0, now).is_none(), "an unknown token is nobody");
+        // Minted by this root but never recorded here: nobody.
+        let (_, stray) = grants::mint(&root, "actor:hermes", &[sc("ctx:read")], now + 1000).unwrap();
+        assert!(q.principal_for(&stray, now).is_none(), "a token without its row reaches nothing");
         std::fs::write(&file, "{ not json").unwrap();
-        let broken = Policy::load(&file);
+        let broken = Policy { me: p.me.clone(), roots: p.roots.clone(), ..Policy::load(&file) };
         assert!(broken.problem.is_some());
         assert!(broken.principal_for(&secret, now).is_none(), "a policy that can't be read refuses every token");
         assert_eq!(broken.level(&Principal::Local, &SpaceId::local(), now), Some(Level::Admin), "you keep admin to fix it");
@@ -748,30 +808,32 @@ mod tests {
     }
 
     #[test]
-    fn tokens_expire_and_revoke_by_id_or_subject() {
-        let now = 100_000;
-        let mut p = Policy::new();
-        let (a, ra) = p.issue("client:phone", vec![sc("ctx:read")], "", Some(3_600_000), None, now).unwrap();
-        let (b, _) = p.issue("client:phone", vec![sc("ctx:read")], "", None, None, now).unwrap();
-        assert!(p.principal_for(&a, now).is_some());
+    fn tokens_expire_and_revoke_by_handle_or_subject() {
+        let now = 1_800_000_000_000;
+        let (root, mut p) = world(now);
+        let (a, wa) = issue(&root, &mut p, "client:phone", &["ctx:read"], now + 3_600_000, now);
+        let (b, _) = issue(&root, &mut p, "client:phone", &["ctx:read"], now + GRANT_MS, now);
         assert!(p.principal_for(&a, now + 3_600_001).is_none(), "expired");
-        assert_eq!(p.revoke_token(&ra.id), 1);
+        let Principal::Token { id, .. } = &wa else { unreachable!() };
+        let gone = p.revoke_token(id);
+        assert_eq!(gone.len(), 1);
         assert!(p.principal_for(&a, now).is_none() && p.principal_for(&b, now).is_some());
-        assert_eq!(p.revoke_token("client:phone"), 1);
+        assert!(p.revoked.contains(&gone[0]), "its revocation id is kept");
+        assert_eq!(p.revoke_token("client:phone").len(), 1);
         assert!(p.tokens.is_empty());
-        assert!(p.issue("client:phone", vec![], "", None, None, now).is_err());
+        assert!(p.record("client:phone", vec![], "", "ab", now, now).is_err());
+        assert!(p.record("client:phone", vec![sc("ctx:read")], "", "not hex", now, now).is_err());
     }
 
     #[test]
     fn a_principal_is_checked_again_against_the_live_policy() {
-        let now = 7;
-        let mut p = Policy::new();
-        let (secret, rec) = p.issue("actor:hermes", vec![sc("ctx:read")], "", Some(1_000_000), None, now).unwrap();
-        let who = p.principal_for(&secret, now).unwrap();
+        let now = 1_800_000_000_000;
+        let (root, mut p) = world(now);
+        let (_, who) = issue(&root, &mut p, "actor:hermes", &["ctx:read"], now + 1_000_000, now);
         assert_eq!(p.current(&who, now), Some(who.clone()));
         assert_eq!(p.current(&who, now + 1_000_001), None, "expired since the connection opened");
-        assert_eq!(p.token(&secret).map(|t| t.id.clone()), Some(rec.id.clone()));
-        p.revoke_token(&rec.id);
+        let Principal::Token { id, .. } = &who else { unreachable!() };
+        p.revoke_token(id);
         assert_eq!(p.current(&who, now), None, "revoked since the connection opened");
         assert_eq!(p.current(&Principal::Local, now), Some(Principal::Local));
     }

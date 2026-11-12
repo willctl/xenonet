@@ -2,7 +2,7 @@
 //! frontmatter, the index, the daily log, search, the inbox, cross-process locks, the request log
 //! and the secret guard, in the formats FORMAT.md documents, which every earlier release wrote
 //! too, so an upgrade works on the same folder. It also holds spaces, who may use them (access),
-//! the audit chain, each space's chain and sync.
+//! the audit chain, each space's chain and the grants (Biscuit tokens) decisions check.
 
 pub mod access;
 pub mod activity;
@@ -16,6 +16,7 @@ pub mod curator;
 pub mod embed;
 pub mod forget;
 pub mod frontmatter;
+pub mod grants;
 pub mod held;
 pub mod inbox;
 pub mod keys;
@@ -23,7 +24,6 @@ pub mod lint;
 pub mod lock;
 pub mod models;
 pub mod owner;
-pub mod pair;
 pub mod paths;
 pub mod readcache;
 pub mod reqlog;
@@ -31,7 +31,6 @@ pub mod search;
 pub mod secrets;
 pub mod settings;
 pub mod spaces;
-pub mod sync;
 pub mod sys;
 pub mod text;
 pub mod waker;

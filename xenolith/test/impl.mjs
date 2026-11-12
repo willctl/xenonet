@@ -3,6 +3,7 @@
 // name another). The Node runtime is retired; XENOLITH_IMPL may still say "rust", and anything else
 // is a mistake worth stopping on.
 
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,4 +55,25 @@ export function curatorCmd(...args) {
 /** [command, args] that run the SessionStart hook. */
 export function hookCmd() {
   return [rustBin(), ['hook']];
+}
+
+/** The HTTP service on a free port, until its stdin closes: { proc, port, url, log(), stop() }.
+ * Minting a token needs it: its token root lives in its memory alone. */
+export function startService(env) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let err = '';
+    const timer = setTimeout(() => reject(new Error(`the service did not start:\n${err}`)), 10_000);
+    proc.stderr.setEncoding('utf8');
+    proc.stderr.on('data', (d) => {
+      err += d;
+      const m = err.match(/listening on (http:\/\/127\.0\.0\.1:(\d+)\/mcp)/);
+      if (m) {
+        clearTimeout(timer);
+        const gone = new Promise((r) => proc.once('exit', r));
+        resolve({ proc, url: m[1], port: Number(m[2]), log: () => err, stop: () => (proc.stdin.end(), gone) });
+      }
+    });
+    proc.on('exit', (code) => reject(new Error(`the service exited ${code}:\n${err}`)));
+  });
 }

@@ -19,7 +19,9 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
         ("a Google API key", r"(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}"),
         ("a JSON Web Token", r"(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
         ("an npm token", r"(?<![A-Za-z0-9])npm_[A-Za-z0-9]{36}(?![A-Za-z0-9])"),
-        ("a Xenolith or XenoNet token", r"(?<![A-Za-z0-9])(?:xenolith(?:_refresh)?|xenonet_(?:actor|gateway))_[0-9a-f]{64}(?![0-9a-f])"),
+        // Biscuits in base64url (Xenolith's grants, XenoNet's actor and gateway tokens), and the hex
+        // tokens of releases before them, which may still sit in someone's notes.
+        ("a Xenolith or XenoNet token", r"(?<![A-Za-z0-9])(?:(?:xenolith_grant|xenonet_(?:actor|gateway))_[A-Za-z0-9_-]{40,}|xenolith(?:_refresh)?_[0-9a-f]{64}(?![0-9a-f]))"),
         ("a US Social Security number", r"(?<![\d-])(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}(?![\d-])"),
     ]
     .into_iter()
@@ -138,9 +140,20 @@ mod tests {
         assert_eq!(find_secret("ssn 123-45-6789"), Some("a US Social Security number"));
         assert_eq!(find_secret("order 123-45-67890"), None);
         assert_eq!(redact_secrets("use AKIAIOSFODNN7EXAMPLE now"), "use [REDACTED] now");
-        let (token, _) = crate::access::new_token();
-        assert_eq!(find_secret(&format!("token {token} for hermes")), Some("a Xenolith or XenoNet token"));
-        assert_eq!(find_secret(&format!("xenonet_actor_{}", "a".repeat(64))), Some("a Xenolith or XenoNet token"));
+        // A token of each kind, freshly minted.
+        use xenonet_id::sign::Signer;
+        let key = xenonet_id::sign::SeedSigner::from_seed(&[3; 32], xenonet_id::sign::KeyHome::File).unwrap();
+        let root = xenonet_authz::TokenRoot::new(xenonet_authz::MachineId::new(&key.public().id()).unwrap(), &key, 0, i64::MAX / 2).unwrap();
+        let scopes = [crate::access::parse_scope("ctx:read").unwrap()];
+        let (_, grant) = crate::grants::mint(&root, "actor:hermes", &scopes, 4_000_000_000_000).unwrap();
+        let actor = xenonet_authz::ActorGrant { actor: xenonet_authz::ActorSlug::new("hermes").unwrap(), network: None, rights: vec![xenonet_authz::Action::Read], until: 4_000_000_000_000 };
+        let minted = root.mint_actor(&actor).unwrap();
+        for t in [grant, minted.encode(xenonet_authz::ACTOR_PREFIX).unwrap(), minted.encode(xenonet_authz::GATEWAY_PREFIX).unwrap()] {
+            assert_eq!(find_secret(&format!("token {t} for hermes")), Some("a Xenolith or XenoNet token"), "{}", &t[..20]);
+            assert!(!redact_secrets(&t).contains(&t[20..40]));
+        }
+        assert_eq!(find_secret(&format!("xenolith_{}", "ab".repeat(32))), Some("a Xenolith or XenoNet token"), "the old hex form too");
+        assert_eq!(find_secret("xenolith_grant_ is the prefix"), None);
         assert_eq!(redact_secrets("api_key=abc123def456ghi"), "api_key=[REDACTED]"); // gitleaks:allow -- synthetic rejection fixture
     }
 }

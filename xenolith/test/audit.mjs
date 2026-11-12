@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { rustBin, srvT } from './impl.mjs';
+import { rustBin, srvT, startService } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
@@ -54,7 +54,12 @@ describe('the audit chain', { timeout: 60_000 }, () => {
   test('grants, tokens, writes, refusals and new spaces each leave one linked entry', async () => {
     const E = makeEnv();
     assert.equal(cli(E.env, 'grant', 'actor:hermes', 'ctx:append:by:hermes').code, 0);
-    const { token, id } = JSON.parse(cli(E.env, 'token', 'create', 'actor:hermes', '--json').out);
+    // The service mints tokens; it isn't needed after.
+    const service = await startService(E.env);
+    const made = cli(E.env, 'token', 'create', 'actor:hermes', '--json');
+    await service.stop();
+    assert.equal(made.code, 0, made.err);
+    const { token, id } = JSON.parse(made.out);
     await session(E.env, async (call) => {
       assert.equal((await call('context_log', { app: 'codex', space: 'project:atlas', title: 'Atlas notes', body: 'The quiet words in this note.' })).isError, false);
     });
@@ -70,7 +75,7 @@ describe('the audit chain', { timeout: 60_000 }, () => {
       lines.map((l) => [l.kind, l.who]),
       [
         ['grant', 'you'],
-        ['token', 'you'],
+        ['token', 'cli'],
         ['space', 'you'],
         ['write', 'you'],
         ['write', `actor:hermes (${id})`],
@@ -83,6 +88,10 @@ describe('the audit chain', { timeout: 60_000 }, () => {
     for (let i = 1; i < lines.length; i++) assert.equal(lines[i].prev, lines[i - 1].hash, `line ${i + 1} names the one before`);
     assert.equal(lines[0].subject, 'actor:hermes');
     assert.equal(lines[0].scope, 'ctx:append:by:hermes');
+    // A token is in the chain by its revocation id, made and revoked.
+    assert.match(lines[1].revocation, /^[0-9a-f]{64,}$/);
+    assert.equal(id, `tok_${lines[1].revocation.slice(0, 12)}`);
+    assert.deepEqual(lines[6].revocations, [lines[1].revocation]);
     assert.deepEqual([lines[2].space, lines[2].event], ['project:atlas', 'created']);
     assert.equal(lines[3].space, 'project:atlas');
     assert.equal(lines[3].tool, 'context_log');

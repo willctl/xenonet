@@ -1,12 +1,12 @@
 //! `serve --http`: Streamable HTTP on 127.0.0.1 (stateless, JSON responses), /health, /status, the
-//! window (/ui, /api) and sync (/sync/v1). Never a web page: other Hosts and cross-origin requests
+//! window (/ui, /api). Never a web page: other Hosts and cross-origin requests
 //! are refused (DNS rebinding).
 //!
 //! Who a request is: a request is this machine's own (Local) only when it reaches the loopback
 //! listener directly, names a loopback Host and carries no Forwarded, X-Forwarded-* or Via header.
 //! Local is any process on this machine, not only the owner's own apps: tokens scope remote and
-//! other apps' access. /mcp takes Local or a bearer token; /sync/v1 always needs a token, since sync
-//! is remote by nature; /status, /ui and /api are Local only and never take a token; /health is
+//! other apps' access. /mcp takes Local or a bearer token (a grant: xenolith_core::grants);
+//! /status, /ui and /api are Local only and never take a token; /health is
 //! open and says nothing private. Deciding anything in /api also needs the owner key (owner.rs),
 //! which this service makes when it starts.
 
@@ -120,6 +120,9 @@ pub struct App {
     /// The keys this Xenolith signs and connects with (xenolith_core::keys), or why they couldn't
     /// be read. The context key signs the spaces' chains and markers (xenolith_core::chains).
     keys: Result<Arc<Keys>, String>,
+    /// This start's token root, which mints grants (xenolith_core::grants), certified by the
+    /// context key; or why there is none.
+    root: Result<xenolith_core::grants::Root, String>,
     bad_tokens: BadTokens,
 }
 
@@ -215,9 +218,17 @@ impl Resource {
     }
 }
 
+/// https:// anywhere, or http:// to this machine only (a token never crosses a network in clear),
+/// with no query, fragment, space or quote.
+fn valid_url(u: &str) -> bool {
+    let u = u.trim_end_matches('/');
+    let local = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"].iter().any(|p| u.starts_with(p));
+    (u.starts_with("https://") || local) && !u.contains(['?', '#', ' ', '"', '\\']) && u.len() < 300
+}
+
 /// config.json's "publicUrl": https:// (or http:// to this machine), no query or fragment.
 fn public_url(config: &Value) -> Option<String> {
-    config.get("publicUrl").and_then(Value::as_str).map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| xenolith_core::sync::valid_url(u))
+    config.get("publicUrl").and_then(Value::as_str).map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| valid_url(u))
 }
 
 /// Who is calling /status or the window's API: a local request (http.rs refuses any other).
@@ -253,6 +264,15 @@ impl App {
     /// Why decisions can't be made in the window this start, if the owner key could not be written.
     pub fn owner_problem(&self) -> Option<&str> {
         self.owner.as_ref().err().map(String::as_str)
+    }
+
+    /// Mints a token for `subject` with the rights `scopes` reach, until `until` (at most the
+    /// root's end): the token and its revocation id.
+    pub fn mint(&self, subject: &str, scopes: &[access::Scope], until: i64) -> Result<(String, String, i64), String> {
+        let root = self.root.as_ref().map_err(Clone::clone)?;
+        let until = until.min(root.certificate().until());
+        let (token, text) = xenolith_core::grants::mint(root, subject, scopes, until)?;
+        Ok((text, token.id(), until))
     }
 
     /// This Xenolith's context key and the standalone owner's, to sign as the owner with: for this
@@ -363,22 +383,6 @@ pub fn status_report(app: &App, st: &State) -> Value {
         if !skipped.is_empty() {
             reasons.push(format!("curator: {} page(s) did not fit in the last batch's context: {}", skipped.len(), skipped.join(", ")));
         }
-    }
-    // Followed spaces: notes their curators refused for good, and a curator that refuses this
-    // machine's token or answers as another curator. A curator that is just out of reach is normal
-    // for a laptop away from home, so that is shown but is not a problem.
-    let sync = xenolith_core::sync::status(&AppPaths::current(), dir);
-    if sync["spaces"].as_array().is_some_and(|a| !a.is_empty()) {
-        let dead = sync["dead"].as_u64().unwrap_or(0);
-        if dead > 0 {
-            reasons.push(format!("{dead} note(s) refused by a curator for good (xenolith sync status)"));
-        }
-        for sp in sync["spaces"].as_array().into_iter().flatten() {
-            if matches!(sp["last"]["errorKind"].as_str(), Some("auth" | "curator")) {
-                reasons.push(format!("sync of {}: {}", sp["space"].as_str().unwrap_or("?"), sp["last"]["error"].as_str().unwrap_or("")));
-            }
-        }
-        s.insert("sync".into(), sync);
     }
     let last15 = errors["last15m"].as_i64().unwrap_or(0);
     if last15 > 0 {
@@ -495,162 +499,6 @@ fn sdk_error(status: u16, code: i64, message: &str) -> Reply {
     Reply::json(status, &rpc_error(Value::Null, code, message))
 }
 
-// ---------------------------------------------------------------- sync (xenolith_core::sync)
-
-/// /sync/v1/spaces/<kind>/<name>/pages[/<slug>] and /log/<date> (GET, read), and /entries (POST,
-/// append or write per entry). A space the caller may not read is "not found", like one that
-/// doesn't exist; a space this machine only follows sends the caller to its curator (421).
-fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal, resource: &Resource, entry: &mut Entry) -> Reply {
-    use xenolith_core::access::Level;
-    use xenolith_core::spaces::{self, SpaceId};
-    use xenolith_core::sync;
-    if path == format!("{}/spaces", sync::API) {
-        return spaces_list(app, method, who, resource, entry);
-    }
-    let rest = path.strip_prefix(&format!("{}/spaces/", sync::API)).unwrap_or("");
-    let parts: Vec<&str> = rest.split('/').collect();
-    let not_found = || Reply::json(404, &json!({ "error": "not_found", "error_description": "No such space or page here." }));
-    let (space, tail) = match parts.as_slice() {
-        [kind, name, tail @ ..] if !tail.is_empty() => match SpaceId::parse(&format!("{kind}:{name}")) {
-            Ok(id) if id.kind == *kind && id.name == *name => (id, tail.to_vec()),
-            _ => return not_found(),
-        },
-        _ => return not_found(),
-    };
-    let st = app.state();
-    let Some(root) = st.wiki_dir.clone().filter(|_| st.setup_error.is_none()) else {
-        return Reply::json(503, &json!({ "error": st.setup_error.clone().unwrap_or_default() }));
-    };
-    let paths = AppPaths::current();
-    let policy = access::load(&paths);
-    let now = now_ms();
-    let Some(who) = policy.current(&who, now) else {
-        return challenge(resource, Some("invalid_token"), None, "The token has been revoked or has expired.");
-    };
-    if !policy.allows(&who, &space, Level::Read, now) || !spaces::exists(&root, &space) {
-        xenolith_core::audit::best_effort(
-            &paths,
-            "refused",
-            &who.name(),
-            vec![("space", json!(space.to_string())), ("need", json!("read")), ("why", json!("sync: not granted")), ("transport", json!("sync"))],
-        );
-        return not_found();
-    }
-    entry.client = Some(who.name());
-    let dir = spaces::space_dir(&root, &space);
-    // A copy is not the curator: its pages lag, it has no curator id, and entries go to the curator.
-    let cfg = sync::Config::load(&paths);
-    if let Some(curator) = cfg.curator_of(&space) {
-        // Its URL when another machine could use it; a loopback address means nothing there.
-        let url = cfg.peers.get(curator).filter(|u| u.starts_with("https://"));
-        let at = url.map(|u| format!(", at {u}")).unwrap_or_default();
-        return Reply::json(
-            421,
-            &json!({ "error": "not_curator", "error_description": format!("This machine follows {space}; its curator is {curator}{at}."), "curator": curator, "curatorUrl": url }),
-        );
-    }
-    match (method, tail.as_slice()) {
-        ("GET", ["pages"]) => match sync::page_list(&dir) {
-            Ok(v) => Reply::json(200, &v),
-            Err(e) => Reply::json(500, &json!({ "error": "server_error", "error_description": format!("Could not list the pages: {e}") })),
-        },
-        ("GET", ["pages", slug]) => match sync::page_get(&dir, slug) {
-            Some(v) => Reply::json(200, &v),
-            None => not_found(),
-        },
-        ("GET", ["log", date]) => match sync::log_get(&dir, date) {
-            Some(v) => Reply::json(200, &v),
-            None => not_found(),
-        },
-        ("POST", ["entries"]) => {
-            let body: Value = match read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()) {
-                Some(v) => v,
-                None => return Reply::json(400, &json!({ "error": "invalid_request", "error_description": "Send {\"entries\": [...]} as JSON." })),
-            };
-            let entries = body["entries"].as_array().cloned().unwrap_or_default();
-            if entries.is_empty() || entries.len() > sync::MAX_ENTRIES {
-                return Reply::json(400, &json!({ "error": "invalid_request", "error_description": format!("Send 1 to {} entries.", sync::MAX_ENTRIES) }));
-            }
-            let can = |l: Level| policy.allows(&who, &space, l, now);
-            let (results, conflict) = sync::accept(&dir, &who, &entries, &can);
-            let count = |r: &str| results.iter().filter(|x| x["result"] == r).count();
-            xenolith_core::audit::best_effort(
-                &paths,
-                "sync",
-                &who.name(),
-                vec![
-                    ("space", json!(space.to_string())),
-                    ("accepted", json!(count("accepted"))),
-                    ("duplicates", json!(count("duplicate"))),
-                    ("conflicts", json!(count("conflict"))),
-                    ("refused", json!(count("refused"))),
-                ],
-            );
-            entry.result = Some(if conflict { "conflict".into() } else { "ok".into() });
-            // 409 when any page write came in against an older version: it is a proposal now.
-            Reply::json(if conflict { 409 } else { 200 }, &json!({ "results": results }))
-        }
-        (_, ["entries"]) => Reply::json(405, &json!({ "error": "Use POST" })).with("Allow", "POST"),
-        (_, ["pages" | "log", ..]) => Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET"),
-        _ => not_found(),
-    }
-}
-
-/// GET /sync/v1/spaces: the spaces this machine curates that the caller may read (never
-/// machine:local), which a satellite follows.
-fn spaces_list(app: &App, method: &str, who: Principal, resource: &Resource, entry: &mut Entry) -> Reply {
-    use xenolith_core::access::Level;
-    if method != "GET" {
-        return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
-    }
-    let st = app.state();
-    let Some(root) = st.wiki_dir.clone().filter(|_| st.setup_error.is_none()) else {
-        return Reply::json(503, &json!({ "error": st.setup_error.clone().unwrap_or_default() }));
-    };
-    let policy = access::load(&AppPaths::current());
-    let now = now_ms();
-    let Some(who) = policy.current(&who, now) else {
-        return challenge(resource, Some("invalid_token"), None, "The token has been revoked or has expired.");
-    };
-    entry.client = Some(who.name());
-    // A space this machine only follows is not its to list: its curator lists it.
-    let cfg = xenolith_core::sync::Config::load(&AppPaths::current());
-    Reply::json(200, &xenolith_core::sync::space_list(&root, &|s| policy.allows(&who, s, Level::Read, now) && cfg.curator_of(s).is_none()))
-}
-
-/// POST /sync/v1/pair: a satellite joining with a pairing code (xenolith_core::pair). No token: the
-/// proof of the code is in the body. A bad join counts like a bad token against its source.
-fn pair_route(app: &App, req: &Request, method: &str, entry: &mut Entry) -> Reply {
-    if method != "POST" {
-        return Reply::json(405, &json!({ "error": "Use POST" })).with("Allow", "POST");
-    }
-    let source = source_of(req);
-    let now = Instant::now();
-    if let Some(wait) = app.bad_tokens.blocked(&source, now) {
-        entry.result = Some("rate-limited".into());
-        return too_many(wait);
-    }
-    let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
-    match xenolith_core::pair::accept(&AppPaths::current(), &body, &clip_str(&source, 120), now_ms()) {
-        Ok(answer) => {
-            entry.result = Some("paired".into());
-            Reply::json(200, &answer)
-        }
-        Err(r) => {
-            entry.result = Some("pair-refused".into());
-            if r.bad && app.bad_tokens.failed(&source, now) {
-                audit::best_effort(
-                    &AppPaths::current(),
-                    "refused",
-                    "an unknown machine",
-                    vec![("why", json!("too many bad pairing codes")), ("source", json!(clip_str(&source, 120))), ("transport", json!("sync"))],
-                );
-            }
-            Reply::json(r.status, &json!({ "error": "pair_refused", "error_description": r.why }))
-        }
-    }
-}
-
 fn too_many(wait: Duration) -> Reply {
     let secs = wait.as_secs().max(1);
     Reply::json(429, &json!({ "error": "too_many_requests", "error_description": format!("Too many bad tokens from here. Try again in {secs} s.") })).with("Retry-After", &secs.to_string())
@@ -659,9 +507,9 @@ fn too_many(wait: Duration) -> Reply {
 // ---------------------------------------------------------------- tokens (OAuth 2.1 resource server, as MCP's authorization spec has it)
 
 /// RFC 9728's metadata for the MCP endpoint: what it is and which scopes it knows.
-pub fn protected_resource(base: &str) -> Value {
+fn protected_resource(resource: &Resource) -> Value {
     json!({
-        "resource": format!("{base}/mcp"),
+        "resource": resource.mcp(),
         "scopes_supported": access::scopes_supported(),
         "bearer_methods_supported": ["header"],
         "resource_name": "Xenolith",
@@ -684,11 +532,6 @@ fn challenge(resource: &Resource, error: Option<&str>, scope: Option<&str>, why:
     Reply::json(status, &json!({ "error": error.unwrap_or("unauthorized"), "error_description": why })).with("WWW-Authenticate", &format!("Bearer {}", parts.join(", ")))
 }
 
-/// 127.0.0.1 and localhost name the same server: a token issued for one works at the other.
-fn same_resource(a: &str, b: &str) -> bool {
-    a.replace("://localhost:", "://127.0.0.1:") == b.replace("://localhost:", "://127.0.0.1:")
-}
-
 /// Whether a request is this machine's own: it reached the loopback listener directly (the Host
 /// check has already run) and no proxy says it passed it on. A forwarder that adds none of those
 /// headers (a plain TCP tunnel) is indistinguishable from a local process: README, Security.
@@ -696,10 +539,9 @@ fn is_local(req: &Request) -> bool {
     !req.forwarded() && req.peer.is_none_or(|p| p.ip().is_loopback())
 }
 
-/// Who a request to /mcp or /sync comes from, or the challenge to answer it with. Without a token
-/// it is this machine's own when `local` (see is_local), unless access.json says "local": "none".
-/// `also`: the address the request used, which a token issued for it may name.
-fn principal_of(resource: &Resource, also: &str, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
+/// Who a request to /mcp comes from, or the challenge to answer it with. Without a token it is
+/// this machine's own when `local` (see is_local), unless access.json says "local": "none".
+fn principal_of(resource: &Resource, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
     let policy = access::load(&AppPaths::current());
     let now = now_ms();
     match bearer {
@@ -713,18 +555,19 @@ fn principal_of(resource: &Resource, also: &str, bearer: &Option<Option<String>>
             Err(challenge(resource, Some("invalid_request"), None, "Send the token as Authorization: Bearer <token>."))
         }
         Some(Some(t)) => {
-            // A token issued for one server works at no other: this one, by its public URL or the address used.
-            let rec = policy.token(t).filter(|r| r.resource.as_deref().is_none_or(|res| same_resource(res, &resource.mcp()) || same_resource(res, &format!("{also}/mcp"))));
-            match rec.and_then(|_| policy.principal_for(t, now)) {
+            // One of this Xenolith's grants, under its own root, with a live row here.
+            match policy.principal_for(t, now) {
                 Some(p) => Ok(p),
                 None => {
                     entry.result = Some("invalid-token".into());
-                    // Never the token itself: a hash of it, enough to tell attempts with one token apart.
+                    // Never the token itself: its revocation id when it reads as a Biscuit, enough to
+                    // tell attempts with one token apart.
+                    let revocation = xenolith_core::grants::revocation_of(t);
                     xenolith_core::audit::best_effort(
                         &AppPaths::current(),
                         "refused",
                         "an unknown token",
-                        vec![("why", json!("invalid token")), ("token", json!(&access::hash_token(t)[..12])), ("transport", json!("http"))],
+                        vec![("why", json!("invalid token")), ("revocation", json!(revocation)), ("transport", json!("http"))],
                     );
                     Err(challenge(resource, Some("invalid_token"), None, "The token is unknown, expired, revoked, or for another server."))
                 }
@@ -735,15 +578,15 @@ fn principal_of(resource: &Resource, also: &str, bearer: &Option<Option<String>>
 
 /// principal_of, behind the bad-token limit: a source that sent BAD_TOKENS_PER_MINUTE bad tokens
 /// in a minute gets 429 for every request with a token for BAD_TOKEN_BLOCK.
-fn authenticate(app: &App, req: &Request, resource: &Resource, also: &str, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
-    let Some(_) = bearer else { return principal_of(resource, also, bearer, local, entry) };
+fn authenticate(app: &App, req: &Request, resource: &Resource, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
+    let Some(_) = bearer else { return principal_of(resource, bearer, local, entry) };
     let source = source_of(req);
     let now = Instant::now();
     if let Some(wait) = app.bad_tokens.blocked(&source, now) {
         entry.result = Some("rate-limited".into());
         return Err(too_many(wait));
     }
-    let r = principal_of(resource, also, bearer, local, entry);
+    let r = principal_of(resource, bearer, local, entry);
     if r.is_err() && app.bad_tokens.failed(&source, now) {
         audit::best_effort(&AppPaths::current(), "refused", "an unknown token", vec![("why", json!("too many bad tokens")), ("source", json!(clip_str(&source, 120))), ("transport", json!("http"))]);
     }
@@ -782,7 +625,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     let public = public_url(&app.state.read().unwrap().config).filter(|_| !local);
     let resource = Resource { base: public.clone().unwrap_or_else(|| also.clone()) };
     // Tokens travel in the Authorization header only (RFC 6750 5.3): logs and histories keep URLs.
-    if query.split('&').any(|kv| kv.split('=').next().is_some_and(|k| k.eq_ignore_ascii_case("access_token") || k.eq_ignore_ascii_case("token"))) || url.contains(access::TOKEN_PREFIX) {
+    if query.split('&').any(|kv| kv.split('=').next().is_some_and(|k| k.eq_ignore_ascii_case("access_token") || k.eq_ignore_ascii_case("token"))) || url.contains(xenolith_core::grants::PREFIX) {
         entry.result = Some("token-in-url".into());
         return Reply::json(400, &json!({ "error": "invalid_request", "error_description": "Send tokens in the Authorization header, never in a URL." }));
     }
@@ -790,33 +633,14 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
         if method != "GET" {
             return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
         }
-        return Reply::json(200, &protected_resource(&resource.base));
+        return Reply::json(200, &protected_resource(&resource));
     }
-    // A token is for /mcp and sync: the window's API, /status and /health belong to this machine
-    // and show its folders.
+    // A token is for /mcp: the window's API, /status and /health belong to this machine and show
+    // its folders.
     let bearer = access::bearer_of(req.header("authorization").as_deref());
-    let is_sync = path.starts_with(&format!("{}/", xenolith_core::sync::API));
-    if bearer.is_some() && path != "/mcp" && !is_sync {
+    if bearer.is_some() && path != "/mcp" {
         entry.result = Some("forbidden-token".into());
-        return Reply::json(403, &json!({ "error": "Forbidden: tokens work at /mcp and /sync only" }));
-    }
-    if is_sync {
-        if app.closing.load(Ordering::SeqCst) {
-            return Reply::json(503, &json!({ "error": "xenolith is restarting; retry shortly." }));
-        }
-        if path == xenolith_core::pair::ROUTE {
-            return pair_route(app, req, method, entry);
-        }
-        // Sync is remote by nature: a token always, even from this machine.
-        if bearer.is_none() {
-            entry.result = Some("unauthorized".into());
-            return challenge(&resource, None, None, "Sync needs a token, even from this machine.");
-        }
-        let principal = match authenticate(app, req, &resource, &also, &bearer, local, entry) {
-            Ok(p) => p,
-            Err(r) => return r,
-        };
-        return sync_route(app, req, method, &path, principal, &resource, entry);
+        return Reply::json(403, &json!({ "error": "Forbidden: tokens work at /mcp only" }));
     }
     if path == "/health" {
         if method != "GET" {
@@ -862,7 +686,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     if app.closing.load(Ordering::SeqCst) {
         return Reply::json(503, &rpc_error(Value::Null, -32000, "xenolith is restarting; retry shortly."));
     }
-    let principal = match authenticate(app, req, &resource, &also, &bearer, local, entry) {
+    let principal = match authenticate(app, req, &resource, &bearer, local, entry) {
         Ok(p) => p,
         Err(r) => return r,
     };
@@ -1036,6 +860,12 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
     if let Err(e) = &keys {
         log(&format!("this Xenolith's keys could not be read: {e}"));
     }
+    // A token root for this start. Its certificate is kept, readable by the installing user on
+    // Windows too, so a stdio server can check the tokens it mints.
+    let root = keys.clone().and_then(|k| xenolith_core::grants::new_root(&AppPaths::current(), &k.context, now_ms(), &owner_readers));
+    if let Err(e) = &root {
+        log(&format!("no token root this start, so no token can be made: {e}"));
+    }
     let app = Arc::new(App {
         state: RwLock::new(state),
         reqlog,
@@ -1046,6 +876,7 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
         inflight: AtomicUsize::new(0),
         owner,
         keys,
+        root,
         bad_tokens: BadTokens::default(),
     });
     log(&format!("v{} listening on http://127.0.0.1:{actual}/mcp ({mode} writes); wiki at {wiki_shown}", xenolith_core::VERSION));
@@ -1057,6 +888,12 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
     let root = app.state.read().unwrap().wiki_dir.clone();
     let mut spaces_seen = root.as_deref().map(spaces_stamp);
     if let Some(root) = &root {
+        // A 1.x satellite's copies of the spaces it followed go aside, kept, the first time.
+        match xenolith_core::chains::move_1x_copies(&AppPaths::current(), root) {
+            Ok(r) if r.is_empty() => {}
+            Ok(r) => log(&format!("spaces: {}", r.to_json())),
+            Err(e) => log(&format!("1.x's copies of followed spaces were not moved aside: {e}")),
+        }
         found_spaces(&app, root);
     }
     let shared = app.clone();

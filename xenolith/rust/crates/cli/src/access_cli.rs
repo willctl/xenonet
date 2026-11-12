@@ -8,16 +8,18 @@
 //!                                                      tie a space made under its name to its
 //!                                                      project: what it would do, and with --run,
 //!                                                      do it through the service (the owner key)
-//!   xenolith grant <subject> <scope> [--days N]       allow a subject (actor:<slug>, client:<id>,
-//!                                                      machine:<name>) a scope, for N days (30)
+//!   xenolith grant <subject> <scope> [--days N]       allow a subject (actor:<slug>, client:<id>)
+//!                                                      a scope, for N days (30)
 //!   xenolith revoke <subject> [<scope>]               take its grants away: all, or one scope
 //!   xenolith access [--json]                          the policy: grants, tokens (never secrets), spaces
 //!   xenolith access local <read|append|write|admin|none>
 //!                                                      what this machine's own processes may do
 //!                                                      without a token (admin by default)
 //!   xenolith token create <subject> [--scope "<scopes>"] [--label <text>] [--days N]
-//!                                                      a token for the subject, shown once; its scopes
-//!                                                      default to what the subject is granted now
+//!                                                      a token for the subject, shown once, minted
+//!                                                      by the running service (the owner key); its
+//!                                                      scopes default to what the subject is
+//!                                                      granted now
 //!   xenolith token revoke <tok_…|subject>             revoke one token, or every token of a subject
 //!   xenolith audit [verify | tail [N]] [--json]       check the audit chain, or show its last entries
 //!
@@ -226,37 +228,34 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 }
             };
             let days = opts(args, "--days").first().map(|d| d.parse::<f64>().unwrap_or_else(|_| fail("--days takes a number")));
-            let ttl = days.map(|d| ((d * 86_400_000.0) as i64).clamp(60_000, 3650 * 86_400_000));
+            let until = days.map(|d| now + ((d * 86_400_000.0) as i64).clamp(60_000, 3650 * 86_400_000));
             let label = opts(args, "--label").first().copied().unwrap_or("");
-            let (token, rec) = access::update(&paths, |p| p.issue(subject, scopes.clone(), label, ttl, None, now)).unwrap_or_else(|e| fail(&e.to_string()));
-            audit::best_effort(
-                &paths,
-                "token",
-                "you",
-                vec![
-                    ("token", json!(rec.id)),
-                    ("subject", json!(rec.subject)),
-                    ("scopes", json!(rec.scopes.iter().map(format_scope).collect::<Vec<_>>())),
-                    ("expiresAt", rec.expires_at.map(|e| json!(e)).unwrap_or(Value::Null)),
-                ],
-            );
+            // Only the running service mints: its token root lives in its memory alone.
+            let body = json!({ "subject": subject, "scopes": scopes.iter().map(format_scope).collect::<Vec<_>>(), "label": label, "until": until });
+            let made = match crate::owner_client::post("/api/tokens", &body) {
+                Ok((200, v)) => v,
+                Ok((_, v)) => fail(&format!("no token: {}", v["error"].as_str().unwrap_or("the service refused"))),
+                Err(e) => fail(&e),
+            };
             if json_out {
-                println!("{}", json!({ "token": token, "id": rec.id, "subject": rec.subject, "scopes": rec.scopes.iter().map(format_scope).collect::<Vec<_>>(), "expiresAt": rec.expires_at }));
+                println!("{made}");
             } else {
-                println!("{token}");
+                println!("{}", made["token"].as_str().unwrap_or(""));
                 eprintln!(
-                    "Token {} for {} ({}), {}. It is shown once: give it to the agent as Authorization: Bearer, or as XENOLITH_TOKEN for a stdio server.",
-                    rec.id,
-                    rec.subject,
-                    rec.scopes.iter().map(format_scope).collect::<Vec<_>>().join(" "),
-                    rec.expires_at.map(|e| format!("until {}", when(e))).unwrap_or_else(|| "until revoked".into())
+                    "Token {} for {} ({}), until {}. It is shown once: give it to the agent as Authorization: Bearer, or as XENOLITH_TOKEN for a stdio server.",
+                    made["id"].as_str().unwrap_or(""),
+                    made["subject"].as_str().unwrap_or(""),
+                    made["scopes"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(" "),
+                    when(made["expiresAt"].as_i64().unwrap_or(0))
                 );
             }
             std::process::exit(0)
         }
         ("token", ["revoke", which]) => {
-            let n = access::update(&paths, |p| Ok(p.revoke_token(which))).unwrap_or_else(|e| fail(&e.to_string()));
-            audit::best_effort(&paths, "token-revoked", "you", vec![("which", json!(which)), ("revoked", json!(n))]);
+            let gone = access::update(&paths, |p| Ok(p.revoke_token(which))).unwrap_or_else(|e| fail(&e.to_string()));
+            // Their revocation ids, never a token.
+            audit::best_effort(&paths, "token-revoked", "you", vec![("which", json!(which)), ("revocations", json!(gone))]);
+            let n = gone.len();
             if json_out {
                 println!("{}", json!({ "revoked": n }));
             } else {
@@ -331,9 +330,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             if json_out {
                 let mut v = p.to_json();
                 for t in v["tokens"].as_array_mut().into_iter().flatten() {
-                    let hash = t["hash"].as_str().unwrap_or("").to_string();
-                    t["id"] = json!(format!("tok_{}", &hash[..hash.len().min(12)]));
-                    t.as_object_mut().map(|o| o.remove("hash"));
+                    t["id"] = json!(access::handle_of(t["revocation"].as_str().unwrap_or("")));
                 }
                 if let Some(problem) = &p.problem {
                     v["problem"] = json!(problem);
@@ -362,7 +359,7 @@ fn print_policy(p: &Policy, now: i64) {
     }
     for t in &p.tokens {
         let scopes: Vec<String> = t.scopes.iter().map(format_scope).collect();
-        let exp = t.expires_at.map(|e| format!("{} {}", if e <= now { "expired" } else { "until" }, when(e))).unwrap_or_else(|| "until revoked".into());
+        let exp = format!("{} {}", if t.expires_at <= now { "expired" } else { "until" }, when(t.expires_at));
         println!("token  {} {:<24} {} {exp}{}", t.id, t.subject, scopes.join(" "), if t.label.is_empty() { String::new() } else { format!(" ({})", t.label) });
     }
 }

@@ -14,8 +14,8 @@ its rules for working beside other agents.
 ## Where things are
 
 - `rust/`: the programs that ship, in their own workspace and `Cargo.lock`. `crates/core`
-  (xenolith-core: the folder, curator, held changes, search, spaces, access and sync, on
-  xenonet-id, -log and -authz), `crates/mcp` (xenolith-mcp: the MCP server's tools, resources and
+  (xenolith-core: the folder, curator, held changes, search, spaces and their chains, grants
+  and access, on xenonet-id, -log and -authz), `crates/mcp` (xenolith-mcp: the MCP server's tools, resources and
   prompts), `crates/cli` (`xenolith`: the stdio server, the session hook, the commands and the
   installer, on the core alone, since the hook starts it for every conversation), `crates/service`
   (`xenolith-service`: the HTTP service, the window API, the curator and the Windows service),
@@ -97,18 +97,18 @@ A release is a tag `xenolith-v<version>` and four archives, built by
 | Regexes match ASCII digits (`[0-9]`, never `\d`) | `wiki::tests::no_regex_in_the_crates_uses_unicode_digit_classes` |
 | Tools are defined once; the `source` enum is `inbox::SOURCES` | `mcp::tool_tests::one_tool_list_with_the_direct_texts_and_the_core_sources` |
 | Who may use which space lives in the config folder (access.json), never in the shared context folder; deny by default | `access::policy_file`, `access::tests` |
-| Grants, tokens, refusals and writes go in the audit chain, with hashes, never text | `audit::tests`, `test/audit.mjs` |
-| A request is local only straight from the loopback listener with no `Forwarded`, `X-Forwarded-*` or `Via`; sync always needs a token; `/status`, `/ui`, `/api` are local only | `http::is_local`, `test/tokens.mjs` |
-| Deciding held changes, Undo, Revert, the approvals setting, Forget and notes as the person need the owner key; the CLI goes through the service for them | `uiapi::handle`'s routing, `owner_client`, `test/curator.mjs`, `test/sync.mjs` |
+| Grants, tokens, refusals and writes go in the audit chain, with hashes and revocation ids, never text or a token | `audit::tests`, `test/audit.mjs` |
+| Every decision on a space is xenonet-authz's `decide`; a token is a Biscuit grant under this Xenolith's token root, which only the running service holds and mints with; access.json keeps a token's revocation id and row, never the token | `grants::tests`, `access::tests`, `test/tokens.mjs` |
+| A request is local only straight from the loopback listener with no `Forwarded`, `X-Forwarded-*` or `Via`; `/status`, `/ui`, `/api` are local only | `http::is_local`, `test/tokens.mjs` |
+| Deciding held changes, Undo, Revert, the approvals setting, Forget and notes as the person need the owner key; the CLI goes through the service for them | `uiapi::handle`'s routing, `owner_client`, `test/curator.mjs` |
 | A note's source is stamped from who sent it (`by`); only the owner's notes may be `user` | `inbox::By`, `inbox::trusted_source`, `inbox::tests` |
 | Reads return content only: `pages/`, `log/`, `inbox/` and the protocol's top-level files | `wiki::readable_rel`, `wiki::tests::reads_return_content_only` |
 | A token reaches `machine:local` only through a grant and scopes that name it exactly | `access::Scope::covers`, `access::tests` |
-| A pairing code works once, within ten minutes, only with its secret; the token it yields reads and appends only; neither the code nor the token enters the audit chain | `pair::accept`, `test/pair.mjs` |
-| Files only the owner may read (access.json, sync.json, peer tokens, the owner key, the keys) are written with `wiki::write_private` (or, for a key, `xenonet_os::private_file::write_new`): mode 0600 or a protected DACL from the moment they exist, with the Windows service's account as a reader where it must read them | `xenonet_os::private_file::tests`, `keys::tests`, the mode and ACL checks in `test/tokens.mjs` and `test/sync.mjs` |
+| Files only the owner may read (access.json, the token roots' certificates, the owner key, the keys) are written with `wiki::write_private` (or, for a key, `xenonet_os::private_file::write_new`): mode 0600 or a protected DACL from the moment they exist, with the Windows service's account as a reader where it must read them | `xenonet_os::private_file::tests`, `keys::tests`, the mode and ACL checks in `test/tokens.mjs` |
 | The context signing key, the transport key and the standalone owner key are separate files in `<state>/keys`; one that can't be read is an error, never replaced by a new key | `keys::Keys::load_or_create`, `keys::tests`, `test/tokens.mjs` |
 | The standalone owner key signs only for a request with the owner key; a space it owns is weaker, shares into no network, and moves to a person only, never to a key | `keys::OwnerSigner::signer`; xenonet-log's space policy (`xenonet_log::space`), checked with this Xenolith's own keys in `keys::tests` |
 | Each space's chain lives in the state folder; a space folder's `xenolith-space.json` is information only, signed by the context key, and decides nothing; a space followed from another machine is never founded here | `chains::reconcile`, `chains::tests`, `test/spaces.mjs` |
-| Files in the shared context folder are untrusted input (held changes, journals, settings, sync state) | `held::parse_file`, `curator::journal_problem`, `settings::approvals_and_problem`, sync's `load_manifest` and `FollowState::load`, and their tests |
+| Files in the shared context folder are untrusted input (held changes, journals, settings, space markers) | `held::parse_file`, `curator::journal_problem`, `settings::approvals_and_problem`, `chains::reconcile`, and their tests |
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |
 | The installer leaves an app's config alone while that app runs | Claude desktop: `install::desktop_running` and its sandbox test. Codex and Claude Code: judgment |
 | Tests and verification never touch the installed service (port 47850) or the real shared context folder | The verify skill's isolated instance; judgment |

@@ -6091,7 +6091,6 @@ dependencies = [
  "sha2 0.10.9",
  "unicode-normalization",
  "windows-sys 0.61.2",
- "x25519-dalek",
  "xenonet-authz",
  "xenonet-id",
  "xenonet-log",
