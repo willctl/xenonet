@@ -75,6 +75,10 @@ The new machine dials the machine that made the invite by the key the invite nam
 
 The join route answers only a valid ticket. Twenty bad tickets in an hour from one address shut it to that address for an hour, and two hundred from anywhere shut it for everyone, which the doctor says. Five wrong tries at one ticket retire it.
 
+## Relays
+
+A relay carries traffic between two machines that can't reach each other directly. A network has none unless you name one: your own `iroh-relay`, or n0's public relays (`n0`). Name it with `--relay` when you start the network, or later in **Network settings › Relays**; a machine can also have relays of its own (`xenonet net relay add <url> --mine`). A machine never uses a relay its network doesn't list for that network. [Running your own relay](own-relay.md) says what one needs, how to set it up, and how a machine trusts a relay whose certificate comes from your own CA.
+
 ## What agents can do across machines
 
 A session connected to XenoNet (see [Sessions working together](agents.md)) can do across the network what it does on one machine:
@@ -286,7 +290,7 @@ The gateway sees, for each frame, which machine sent it, which it's for, its kin
 ## Checking the network
 
 - `xenonet net status` shows the network, this machine, the gateway and its link, what waits for approval, and what waits in the outbox. `xenonet net hosts` lists the machines.
-- `xenonet doctor` checks the network's files and key, the link, the gateway's key against the pinned one, the clock, the outbox and the gateway's queues, a roster another machine sees differently, whether this machine was removed, what the gateway's address means, and on the gateway, whether the join route is shut and, on a LAN or tailnet address, whether the firewall lets other machines in. It also says how this machine asks you before it acts as you (Touch ID, something weaker such as Windows Hello, polkit or a passphrase, or not at all), and warns when your identity's root key is kept in a file here rather than sealed to the device key.
+- `xenonet doctor` checks the network's files and key, the link, the gateway's key against the pinned one, the clock, the outbox and the gateway's queues, a roster another machine sees differently, whether this machine was removed, what the gateway's address means, and on the gateway, whether the join route is shut and, on a LAN or tailnet address, whether the firewall lets other machines in. It asks each relay the machine has, the networks' and its own, whether it answers, how far away it is and whose CA vouched for its certificate, and names a relay that's down ([own-relay.md](own-relay.md#checking-it)). It also says how this machine asks you before it acts as you (Touch ID, something weaker such as Windows Hello, polkit or a passphrase, or not at all), and warns when your identity's root key is kept in a file here rather than sealed to the device key.
 
 The link is `live` while this machine hears the gateway. It's `offline` when the gateway can't be reached, doesn't answer a request within 35 seconds, or sends nothing for 45 seconds, which is what a gateway behind a firewall that blocks XenoNet looks like. `xenonet net status`, the Network panel and the doctor then say since when and why. XenoNet keeps trying by itself, and the link is `live` again as soon as the gateway answers. `refused` means the gateway answered and turned this machine away; the reason says why.
 
