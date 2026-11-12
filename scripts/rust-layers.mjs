@@ -63,7 +63,6 @@ const COMPOSITION = {
   "xenonet-state": { ceiling: 7, phase: 4, why: "the map's state goes into the one store" },
   "xenonet-assistant": { ceiling: 8, phase: 5, why: "remote actors' connections and tunnels go to the transport" },
   "xenonet-doctor": { ceiling: 7, phase: 5, why: "it runs the checks the crates and adapters expose, through the registry" },
-  "xenonet-integrations": { ceiling: 5, phase: 6, why: "the edges: ACP, A2A outbound and MCP's catalog become adapters" },
 };
 // The surfaces: xenonet-api and the base crates alone.
 const SURFACES = {
@@ -78,7 +77,7 @@ const DEMO_USERS = new Set([...Object.keys(SURFACES), ...ROOT, "xenonet-state"])
 // Crates whose literals aren't the core's: the registry and the demo.
 const NAMING = new Set(["xenonet-adapter", "xenonet-demo"]);
 // The generic adapters, by package name.
-const GENERIC = new Set(["xenonet-acp", "xenonet-a2a"]);
+const GENERIC = new Set(["xenonet-acp", "xenonet-a2a", "xenonet-mcp-catalog"]);
 // What Xenolith may take of XenoNet's: the libraries, and the base crates
 // they bring.
 const XENOLITH = { dir: "xenolith/rust", may: new Set(["xenonet-id", "xenonet-log", "xenonet-authz", "xenonet-net", ...BASE]) };
@@ -89,12 +88,11 @@ const XENOLITH = { dir: "xenolith/rust", may: new Set(["xenonet-id", "xenonet-lo
 // something other than the app; never for a branch on the app.
 const NOT_AN_APP = [
   { file: "crates/xenonet-net/src/svc2.rs", text: `"cursor" => (1..=200)`, why: "a transcript page's cursor parameter in a window read" },
-  { file: "crates/xenonet-integrations/src/mcp_info.rs", text: `"cursor": self.state.get("cursor")`, why: "the MCP status listing's page cursor" },
-  { file: "crates/xenonet-integrations/src/mcp_info.rs", text: `c.state.insert("cursor".into(), Value::Null);`, why: "the MCP status listing's page cursor" },
-  { file: "crates/xenonet-integrations/src/mcp_info.rs", text: `let cursor = c.state.get("cursor").cloned();`, why: "the MCP status listing's page cursor" },
-  { file: "crates/xenonet-integrations/src/mcp_info.rs", text: `c.state.insert("cursor".into(), next_cursor`, why: "the MCP status listing's page cursor" },
-  { file: "crates/xenonet-integrations/src/runtime/mcp.rs", text: `json!({ "cursor": c })`, why: "an MCP list request's page cursor" },
-  { file: "crates/xenonet-integrations/src/runtime/mod.rs", text: `"pi" => {`, why: "the Integrations core's method name for the pi route" },
+  { file: "adapters/mcp-catalog/src/info.rs", text: `"cursor": self.state.get("cursor")`, why: "the MCP status listing's page cursor" },
+  { file: "adapters/mcp-catalog/src/info.rs", text: `c.state.insert("cursor".into(), Value::Null);`, why: "the MCP status listing's page cursor" },
+  { file: "adapters/mcp-catalog/src/info.rs", text: `let cursor = c.state.get("cursor").cloned();`, why: "the MCP status listing's page cursor" },
+  { file: "adapters/mcp-catalog/src/info.rs", text: `c.state.insert("cursor".into(), next_cursor`, why: "the MCP status listing's page cursor" },
+  { file: "adapters/mcp-catalog/src/catalog.rs", text: `json!({ "cursor": c })`, why: "an MCP list request's page cursor" },
   { file: "crates/xenonet-assistant/src/service.rs", text: `self.args.get("cursor")`, why: "a read's page cursor argument" },
   { file: "crates/xenonet-assistant/src/runtime/reads.rs", text: `("cursor", &cursor)`, why: "a read's page cursor argument" },
   { file: "crates/xenonet-runtime/src/remote/relay.rs", text: `k == "cursor" && chars_ok`, why: "a relayed read's page cursor parameter" },

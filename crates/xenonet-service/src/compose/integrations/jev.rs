@@ -46,7 +46,7 @@ fn stable(v: &Value) -> Value {
 }
 
 fn sha256(v: &Value) -> String {
-    format!("sha256:{}", crate::b64::sha256_hex(xenonet_text::json::stringify(&stable(v), 0).as_bytes()))
+    format!("sha256:{}", crate::compose::integrations::b64::sha256_hex(xenonet_text::json::stringify(&stable(v), 0).as_bytes()))
 }
 
 fn request_id(prefix: &str) -> String {
@@ -226,7 +226,7 @@ mod tests {
     use super::*;
 
     fn candidates() -> Vec<Value> {
-        crate::routing::inventory(&[json!({ "kind": "session", "app": "codex" })]).as_array().cloned().unwrap()
+        crate::compose::integrations::routing::inventory(&[json!({ "kind": "session", "app": "codex" })]).as_array().cloned().unwrap()
     }
 
     fn answer(choice: &str, probs: Value, confidence: f64) -> Value {

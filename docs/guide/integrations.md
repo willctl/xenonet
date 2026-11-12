@@ -10,7 +10,7 @@ JevRouter ranks the observed Codex and Claude Code apps and human review. Observ
 
 XenoNet supplies JevRouter with its existing decision provider, preserving `provider.zdr: true`. It sends only the reviewed task and fixed candidate descriptions and availability, with no transcript, project paths or user/session identifiers. Obvious credential patterns are rejected; review the preview for other sensitive content. The provider receives the task, but the local receipt saves only its SHA-256, probabilities, selection, model, time, cost and your outcome annotation. Provider error bodies are omitted. Outcomes are feedback; marking a decision accepted does not grant permissions.
 
-JevRouter is MIT, and XenoNet follows its upstream commit `b1cdf80593ee530cedd99728a938f4e74ddd556b`. XenoNet doesn't carry the SDK: the `xenonet` binary applies JevRouter's ranking and policy rules itself (`crates/xenonet-integrations/src/jev.rs`), for the one-stage choice XenoNet asks for. The SDK's CLI setup and raw-context receipt store are not used.
+JevRouter is MIT, and XenoNet follows its upstream commit `b1cdf80593ee530cedd99728a938f4e74ddd556b`. XenoNet doesn't carry the SDK: the `xenonet` binary applies JevRouter's ranking and policy rules itself (`crates/xenonet-service/src/compose/integrations/jev.rs`), for the one-stage choice XenoNet asks for. The SDK's CLI setup and raw-context receipt store are not used.
 
 ## OpenShell execution
 

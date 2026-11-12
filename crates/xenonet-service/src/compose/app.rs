@@ -7,6 +7,7 @@
 
 mod paths;
 
+use super::integrations::{self, decide};
 use super::open;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -18,7 +19,7 @@ use xenonet_assistant::runtime as assistant;
 use xenonet_components::runtime::xenonet_bin_here;
 use xenonet_console::cores::system;
 use xenonet_doctor::runtime as doctor;
-use xenonet_integrations::runtime::{self as integrations, decide, mcp};
+use xenonet_mcp_catalog::catalog as mcp;
 use xenonet_sources::refusals::runtime as refusals;
 
 /// What these cores run with: the service's settings it reads, once the

@@ -24,10 +24,9 @@ xenonet-engine = { path = "crates/xenonet-engine" }
 xenonet-schema = { path = "crates/xenonet-schema" }
 xenonet-sources = { path = "crates/xenonet-sources" }
 xenonet-state = { path = "crates/xenonet-state" }
-# The install, assistant, integrations and doctor.
+# The install, assistant and doctor.
 xenonet-components = { path = "crates/xenonet-components" }
 xenonet-assistant = { path = "crates/xenonet-assistant" }
-xenonet-integrations = { path = "crates/xenonet-integrations" }
 xenonet-doctor = { path = "crates/xenonet-doctor" }
 # The demo's made-up world, and what only the console has.
 xenonet-demo = { path = "crates/xenonet-demo" }
@@ -62,6 +61,8 @@ xenonet-platforms = { path = "adapters/all" }
 # The generic ACP client, which the composition root starts the ACP apps
 # with.
 xenonet-acp = { path = "adapters/acp" }
+# The generic MCP adapter: the MCP servers' catalogs (adapters/mcp-catalog).
+xenonet-mcp-catalog = { path = "adapters/mcp-catalog" }
 # ACP's SDK, for the generic ACP client (adapters/acp): v1 only, pinned
 # exactly, since its majors move in weeks.
 agent-client-protocol = "=5.2.0"

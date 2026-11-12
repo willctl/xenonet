@@ -5,7 +5,7 @@
 //! task. Nothing starts an agent. JevRouter (an npm library) does the
 //! routing itself, in the twin.
 
-use crate::common::{clean, fail, failed, has_credential, text, Fail};
+use crate::compose::integrations::common::{clean, fail, failed, has_credential, text, Fail};
 use serde_json::{json, Map, Value};
 use xenonet_text::text::to_number;
 use xenonet_text::text::truthy;
@@ -119,7 +119,7 @@ pub fn decision_record(result: &Value, request: &str, metrics: &Value) -> Value 
         ("kind", Some(json!("decision"))),
         ("status", result.get("status").cloned()),
         ("selected", decision.and_then(|d| d.get("selected")).cloned()),
-        ("taskHash", Some(json!(crate::b64::sha256_hex(request.as_bytes())))),
+        ("taskHash", Some(json!(crate::compose::integrations::b64::sha256_hex(request.as_bytes())))),
         ("model", Some(json!(clean(metrics.get("model"), 160)))),
         ("cost", Some(xenonet_text::json::number(n("cost")))),
         ("ms", Some(xenonet_text::json::number(n("ms")))),

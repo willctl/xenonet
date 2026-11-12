@@ -11,8 +11,8 @@
 /// The program that collects text inside a sandbox.
 pub const COLLECT_TEXT: &str = include_str!("collect_text.js");
 
-use crate::b64;
-use crate::common::{fail, failed, write_new, Fail};
+use crate::compose::integrations::b64;
+use crate::compose::integrations::common::{fail, failed, write_new, Fail};
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{json, Map, Value};

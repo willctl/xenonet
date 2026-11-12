@@ -3,7 +3,7 @@
 //! history of decisions and sandbox jobs, Pi's records, and the demo
 //! instance's made-up decider, OpenShell and records.
 
-use crate::common::{clean, fail, query, Fail};
+use crate::compose::integrations::common::{clean, fail, query, Fail};
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
 use xenonet_os::files;
@@ -52,7 +52,7 @@ pub fn pi(records: &[Value], scanned: &Value, enabled: bool, params: &Value) -> 
 /// An export's metadata as importPi keeps it: { update: id, fields } for
 /// one imported before, or { add: record }.
 pub fn import_plan(records: &[Value], value: &Value) -> Result<Value, Fail> {
-    let mut fields: Map<String, Value> = crate::pi::export_metadata(value)?.as_object().cloned().unwrap_or_default();
+    let mut fields: Map<String, Value> = crate::compose::integrations::pi::export_metadata(value)?.as_object().cloned().unwrap_or_default();
     let source_id = fields.shift_remove("id").unwrap_or(Value::Null);
     let existing = records.iter().find(|r| xenonet_text::value::same(r.get("sourceId"), Some(&source_id)));
     Ok(match existing {
@@ -84,7 +84,7 @@ pub fn demo_run(args: &[Value]) -> Result<String, String> {
             return Err("Demo gateway is offline.".into());
         }
         let problems = if has("demo-partial") { json!([{ "path": "image.png", "reason": "Binary file" }]) } else { json!([]) };
-        let out = json!({ "files": [{ "path": "hello.txt", "content": crate::b64::encode(b"Hello from the sandbox.\n") }], "omissions": [], "problems": problems });
+        let out = json!({ "files": [{ "path": "hello.txt", "content": crate::compose::integrations::b64::encode(b"Hello from the sandbox.\n") }], "omissions": [], "problems": problems });
         return Ok(xenonet_text::json::stringify(&out, 0));
     }
     if has("get") && has("json") {

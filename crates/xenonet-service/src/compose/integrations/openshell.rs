@@ -4,9 +4,9 @@
 //! behind your back. The commands and the records are the host's
 //! (`ShellHost`).
 
-use crate::b64;
-use crate::common::{clean, fail, failed, has_credential, sandbox_gone, text, Fail, Tickets};
-use crate::reviews::{self, ReviewHost};
+use crate::compose::integrations::b64;
+use crate::compose::integrations::common::{clean, fail, failed, has_credential, sandbox_gone, text, Fail, Tickets};
+use crate::compose::integrations::reviews::{self, ReviewHost};
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;

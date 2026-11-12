@@ -79,14 +79,21 @@ xenonet-schema.workspace = true
 xenonet-runtime.workspace = true
 xenonet-components.workspace = true
 # The composition's other cores (compose/app.rs): remote actors'
-# connections and tunnels, the integrations, the decision model, refusals
-# and the doctor; Grok Build's config.toml, which the MCP catalog reads
-# through its adapter.
+# connections and tunnels, refusals and the doctor; the MCP catalog, with
+# Grok Build's config.toml, which it reads through Grok Build's adapter.
 xenonet-assistant.workspace = true
 xenonet-doctor.workspace = true
 xenonet-grok-build.workspace = true
-xenonet-integrations.workspace = true
+xenonet-mcp-catalog.workspace = true
 xenonet-sources.workspace = true
+# The integrations (compose/integrations/): the decision model's checks
+# (the map's decide.rs) and what OpenRouter's key spent (sources'); what
+# reads as a credential, records' hashes and ids, and the files reviews
+# write.
+xenonet-state.workspace = true
+regex.workspace = true
+sha2.workspace = true
+libc.workspace = true
 # The apps that start over ACP (compose/acp.rs): the generic ACP client,
 # over the runtime's asks.
 xenonet-acp.workspace = true

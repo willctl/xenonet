@@ -3,8 +3,8 @@
 //! checkpoints, never what was said. Sources are only read, at most a
 //! bound of each, and never changed.
 
-use crate::b64::sha256_hex;
-use crate::common::{clean, fail, Fail};
+use crate::compose::integrations::b64::sha256_hex;
+use crate::compose::integrations::common::{clean, fail, Fail};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;

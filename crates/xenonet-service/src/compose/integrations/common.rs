@@ -3,7 +3,7 @@
 //! expire and work once, and the records of decisions and sandbox jobs,
 //! on disk or in memory, with their retention and queries.
 
-use crate::b64::uuid;
+use crate::compose::integrations::b64::uuid;
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;

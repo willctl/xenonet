@@ -1,30 +1,40 @@
-//! The integrations as the service runs them (the Integrations core):
-//! their settings, the history and Pi's records, the routing preview, and
-//! OpenShell's sandbox jobs with their text reviews. The decisions are the
-//! crate's own modules'; what its sandbox and review actions wait on
-//! (commands, git runs, records) is done here. The demo's decider,
+//! XenoNet's integrations as the service runs them (the Integrations
+//! core): routing suggestions through OpenRouter (`routing`, with `jev`,
+//! JevRouter's route() over the decision model's answer), OpenShell
+//! sandboxes and their text reviews (`openshell`, `reviews`), and Pi's
+//! sessions and exports read as metadata (`pi`), all read-only toward the
+//! agents they describe; their settings, the history of decisions and
+//! sandbox jobs (`index`, `common`). What goes out is checked and bounded
+//! in those modules; what their sandbox and review actions wait on
+//! (commands, git runs, records) is done here, as their hosts
+//! (`openshell::ShellHost`, `reviews::ReviewHost`). The demo's decider,
 //! OpenShell and records are made up. Beside it: the decision model and
-//! OpenRouter's spend (`decide`), and the MCP servers' catalogs (`mcp`).
+//! OpenRouter's spend (`decide`). The MCP servers' catalogs are the
+//! generic MCP adapter's (`xenonet-mcp-catalog`).
 //!
 //! OpenShell's and the reviews' state is shared between their actions, so
 //! it lives on a thread of its own (fx::local), one per integrations, and
 //! each action runs there.
-//!
-//! A route goes through JevRouter's rules as jev.rs has them.
 
 // A core's error carries what the routes answer (a status, a code, extra
 // fields), and is rare: boxing it would only make each core wordier.
 #![expect(clippy::result_large_err, reason = "a core's error is the routes' own, and rare")]
 
+pub mod b64;
+pub mod common;
 pub mod decide;
-pub mod mcp;
+pub mod index;
+pub mod jev;
+pub mod openshell;
+pub mod pi;
+pub mod reviews;
+pub mod routing;
 
-use crate::common::{Fail, Records, Tickets};
-use crate::openshell::ShellHost;
-use crate::reviews::{Git, ReviewHost};
-use crate::{index, openshell, pi, reviews, routing};
 use async_trait::async_trait;
+use common::{Fail, Records, Tickets};
 use decide::Decisions;
+use openshell::ShellHost;
+use reviews::{Git, ReviewHost};
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -240,12 +250,12 @@ impl Integrated {
                 if routing::answer_ok(&response["answers"], &candidates) {
                     Ok(json!({ "answers": response["answers"], "model": response["model"] }))
                 } else {
-                    Err(crate::jev::JevError::http("The provider returned an invalid probability distribution."))
+                    Err(jev::JevError::http("The provider returned an invalid probability distribution."))
                 }
             }
-            Err(e) => Err(crate::jev::JevError::http(e.message)),
+            Err(e) => Err(jev::JevError::http(e.message)),
         };
-        let result = crate::jev::route(&candidates, &["suggest".to_string()], raw);
+        let result = jev::route(&candidates, &["suggest".to_string()], raw);
         self.records.locked().add(&routing::decision_record(&result, &request, &metrics), now_ms()).map_err(fail)
     }
 

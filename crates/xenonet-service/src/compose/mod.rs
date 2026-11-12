@@ -6,6 +6,7 @@ pub mod app;
 pub mod connect;
 pub mod context;
 pub mod forward;
+pub mod integrations;
 pub mod keys;
 pub mod net;
 pub mod open;

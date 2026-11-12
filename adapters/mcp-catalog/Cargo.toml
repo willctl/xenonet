@@ -1,0 +1,29 @@
+[package]
+name = "xenonet-mcp-catalog"
+description = "The generic MCP adapter: the catalogs of the MCP servers on the map (the McpInfo core), collected from the apps that list their servers and from the one server already configured, with nothing of its configuration or credentials."
+version.workspace = true
+edition.workspace = true
+# The api, through xenonet-net, needs Rust 1.91.
+rust-version = "1.91"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+# The child it lists over standard input and output, and the waits.
+tokio.workspace = true
+# A URI as the console may show it.
+url.workspace = true
+# The apps that list their MCP servers' status.
+xenonet-adapter.workspace = true
+# The McpInfo core it implements, and the map's State it asks Codex through.
+xenonet-api.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
+
+[lints]
+workspace = true

@@ -43,7 +43,6 @@ xenonet-components = { path = "../crates/xenonet-components" }
 xenonet-engine = { path = "../crates/xenonet-engine" }
 xenonet-store = { path = "../crates/xenonet-store" }
 xenonet-model = { path = "../crates/xenonet-model" }
-xenonet-integrations = { path = "../crates/xenonet-integrations" }
 xenonet-net = { path = "../crates/xenonet-net" }
 # The roster's owner and their devices' presence, for the network targets.
 xenonet-id = { path = "../crates/xenonet-id" }

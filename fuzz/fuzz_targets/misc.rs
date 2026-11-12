@@ -108,8 +108,8 @@ fuzz_target!(|data: &[u8]| {
                 let _ = xenonet_console::themes::themes(custom);
             }
             let _ = xenonet_console::themes::merge(v.as_ref(), v.as_ref().and_then(|v| v.get("over")));
-            let _ = xenonet_integrations::b64::decode(&text);
-            let _ = xenonet_integrations::b64::byte_length(&text);
+            let _ = xenonet_service::compose::integrations::b64::decode(&text);
+            let _ = xenonet_service::compose::integrations::b64::byte_length(&text);
         }
     });
 });

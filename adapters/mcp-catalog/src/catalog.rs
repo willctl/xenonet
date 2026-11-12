@@ -1,6 +1,6 @@
-//! What an MCP server on the map is (the McpInfo core, over `mcp_info`
-//! and `mcp_discovery`), without its configuration or credentials.
-//! Collecting a catalog is `mcp_info`'s state machine; this answers what
+//! What an MCP server on the map is (the McpInfo core, over `info` and
+//! `discovery`), without its configuration or credentials.
+//! Collecting a catalog is `info`'s state machine; this answers what
 //! it asks: Codex's word on the server, and the
 //! server's own, by starting the one already configured and listing what it
 //! offers (never calling a tool, reading a resource or signing in). The
@@ -11,7 +11,7 @@
 //! Codex is asked through the app-server the map's Codex reader runs
 //! (State::codex_request); while that's pending, as Codex not answering.
 
-use crate::{mcp_discovery as discovery, mcp_info as info};
+use crate::{discovery, info};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
