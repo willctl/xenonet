@@ -690,6 +690,14 @@ Will's step on inix and NEO-REX.
      the window; A2A's tenant; the push-notification refusal's wording,
      which says XenoNet makes no outbound calls.
    - Release: the release workflow running the lockfile check.
+   - The e2e suite under load: in about one full run in six on a busy
+     Mac, `projects.test.js` misses its 8 s window because the map's
+     background refresh (`refresh_now` in `xenonet-state`'s runtime)
+     sometimes takes 2 to 7 s, and a project rule that lands just after
+     one waits for it. A rule's own refresh takes under a second. Which
+     phase of the slow refresh takes the time isn't measured yet.
+     `refusals.test.js` failed once in six full runs the same way, with
+     no cause found.
    - From the plan's list after phase 6: gossip fan-out when iroh-gossip
      is 1.0; per-network endpoint keys; an embedded relay; the service as
      its own OS user; Xenolith's MCP on 2026-07-28; Ask from another
