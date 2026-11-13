@@ -31,7 +31,11 @@ const hosted = process.env.CI === "true" && process.env.XENONET_E2E_RESTART !== 
 test("production Desktop restarts without losing its service, console connection or terminal", { timeout: limit(300000), skip: hosted && "hosted runners have lost the service or Desktop part way through this test (see the note above); XENONET_E2E_RESTART=1 runs it anyway" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-components-"));
   const port = await freePort();
-  const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: process.env.XENONET_E2E_SHOW ?? "hidden" };
+  // Its own Electron profile: without one the test instance's Desktop takes
+  // the one fixed XenoNet Dev (test) folder, and with it Electron's
+  // single-instance lock, so a run beside this one (another checkout's e2e,
+  // or a Desktop an earlier run left) made this Desktop quit at once.
+  const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: process.env.XENONET_E2E_SHOW ?? "hidden", XENONET_TEST_PROFILE: path.join(dir, "profile") };
   delete env.ELECTRON_RUN_AS_NODE;
   // The components are installed and updated by the xenonet binary
   // (xenonet components), from a bundle: XENONET_TEST_COMPONENT_BUNDLE's,
