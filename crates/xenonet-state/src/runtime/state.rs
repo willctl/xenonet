@@ -867,13 +867,12 @@ impl MapState {
             })
             .collect();
         let mut have = lock(&self.repo_watches);
-        for k in have.keys().filter(|k| !want.contains_key(*k)) {
-            self.live.unwatch(&format!("{REPO_WATCH}{k}"));
-        }
-        for (k, w) in &want {
-            if have.get(k) != Some(w) {
-                self.live.watch(&format!("{REPO_WATCH}{k}"), w.0.clone());
-            }
+        // One change to what the system watches, not one per repo: each
+        // costs an FSEvents restart on macOS (`Live::watch_many`).
+        let removes: Vec<String> = have.keys().filter(|k| !want.contains_key(*k)).map(|k| format!("{REPO_WATCH}{k}")).collect();
+        let adds: Vec<(String, Vec<WatchSpec>)> = want.iter().filter(|(k, w)| have.get(*k) != Some(*w)).map(|(k, w)| (format!("{REPO_WATCH}{k}"), w.0.clone())).collect();
+        if !removes.is_empty() || !adds.is_empty() {
+            self.live.watch_many(&removes, adds);
         }
         *have = want;
     }

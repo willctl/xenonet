@@ -573,6 +573,24 @@ impl Live {
         }
     }
 
+    /// Stops watching some owners and watches others' specs as one change
+    /// to what the system watches (`Watcher::change`): a projects folder
+    /// changed touches a watch per repo.
+    pub fn watch_many(&self, removes: &[String], adds: Vec<(String, Vec<WatchSpec>)>) {
+        {
+            let mut wanted = lock(&self.wanted);
+            for k in removes {
+                wanted.remove(k);
+            }
+            for (k, specs) in &adds {
+                wanted.insert(k.clone(), specs.clone());
+            }
+        }
+        if let Some(s) = lock(&self.sessions).as_ref() {
+            s.watcher().change(removes, adds);
+        }
+    }
+
     /// Stops watching an owner's specs.
     pub fn unwatch(&self, key: &str) {
         lock(&self.wanted).remove(key);

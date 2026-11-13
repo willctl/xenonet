@@ -89,6 +89,10 @@ struct Shared {
     counts: HashMap<PathBuf, Count>,
     owners: BTreeMap<String, Vec<Entry>>,
     follower: Follower,
+    // While a `change` is applied, the folders it touched, each with the
+    // way the system watched it before: they're handed to the system in
+    // one go at its end (see `flush`).
+    batch: Option<HashMap<PathBuf, Option<RecursiveMode>>>,
 }
 
 /// The running watcher. Dropping it stops it.
@@ -124,7 +128,7 @@ impl Watcher {
                 let _ = events.send(Msg::Event(Via::File, Ok(e)));
             })
         };
-        let shared = Arc::new(Mutex::new(Shared { notify, counts: HashMap::new(), owners: BTreeMap::new(), follower }));
+        let shared = Arc::new(Mutex::new(Shared { notify, counts: HashMap::new(), owners: BTreeMap::new(), follower, batch: None }));
         let s = shared.clone();
         let mut on = on;
         let thread = std::thread::Builder::new()
@@ -193,6 +197,40 @@ impl Watcher {
     /// Stops watching an owner's specs.
     pub fn remove(&self, key: &str) {
         lock(&self.shared).drop_owner(key);
+    }
+
+    /// Stops watching some owners and watches others' specs, in place of
+    /// any they had, as one change to what the system watches. On macOS
+    /// each folder added to or taken from an FSEvents watch stops and
+    /// starts its stream again, which waits on fseventsd; a projects
+    /// folder changed means one such change per repo, which took seconds
+    /// a repo on a busy Mac. Here the stream starts again once.
+    pub fn change(&self, removes: &[String], adds: Vec<(String, Vec<WatchSpec>)>) {
+        let told = {
+            let mut s = lock(&self.shared);
+            s.batch = Some(HashMap::new());
+            for key in removes {
+                s.drop_owner(key);
+            }
+            let mut told = Vec::new();
+            for (key, specs) in adds {
+                s.drop_owner(&key);
+                let entries: Vec<Entry> = specs
+                    .into_iter()
+                    .map(|spec| {
+                        let spec = spec.canonical();
+                        let placed = s.place(&spec, &mut told, &key);
+                        Entry { spec, placed }
+                    })
+                    .collect();
+                s.owners.insert(key, entries);
+            }
+            told.extend(s.flush());
+            told
+        };
+        for b in told {
+            let _ = self.tx.send(Msg::Tell(b));
+        }
     }
 
     /// The owners watched now.
@@ -305,6 +343,19 @@ impl Shared {
         if want == have {
             return Ok(());
         }
+        if let Some(batch) = self.batch.as_mut() {
+            // Recorded, and handed to the system at the batch's end; the
+            // folder is there (`place` looked), so it's taken as watched.
+            batch.entry(dir.to_path_buf()).or_insert(have);
+            match self.counts.get_mut(dir) {
+                Some(c) if want.is_none() && c.tree == 0 && c.flat == 0 => {
+                    self.counts.remove(dir);
+                }
+                Some(c) => c.mode = want,
+                None => {}
+            }
+            return Ok(());
+        }
         if have.is_some() {
             let _ = self.notify.unwatch(dir);
         }
@@ -321,6 +372,43 @@ impl Shared {
             None => {}
         }
         r
+    }
+
+    // Ends a batch: each folder it touched is taken from the system's
+    // watch or given to it as its specs want it now, then the watch starts
+    // again once. A folder the system wouldn't take is unwatched, and its
+    // owners reconcile.
+    fn flush(&mut self) -> Vec<Batch> {
+        let Some(batch) = self.batch.take() else { return Vec::new() };
+        let mut told = Vec::new();
+        let mut failed: Vec<PathBuf> = Vec::new();
+        {
+            let mut paths = self.notify.paths_mut();
+            for (dir, before) in &batch {
+                let now = self.counts.get(dir).and_then(|c| c.mode);
+                if now == *before {
+                    continue;
+                }
+                if before.is_some() {
+                    let _ = paths.remove(dir);
+                }
+                if let Some(m) = now {
+                    if let Err(e) = paths.add(dir, m) {
+                        failed.push(dir.clone());
+                        told.push(Batch::Reconcile { key: None, why: format!("can't watch {}: {e}", dir.display()) });
+                    }
+                }
+            }
+            if let Err(e) = paths.commit() {
+                told.push(Batch::Reconcile { key: None, why: format!("the file watcher didn't start again: {e}") });
+            }
+        }
+        for dir in failed {
+            if let Some(c) = self.counts.get_mut(&dir) {
+                c.mode = None;
+            }
+        }
+        told
     }
 
     fn place(&mut self, spec: &WatchSpec, told: &mut Vec<Batch>, key: &str) -> Placed {
@@ -524,6 +612,32 @@ mod tests {
         w.remove("app:a");
         assert_eq!(w.keys(), ["app:b"]);
         assert_eq!(mode(&w, &d.join("p")), None, "its folder is let go");
+        drop(w);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_change_of_many_owners_is_one_change_to_the_system() {
+        let d = dir("change");
+        for r in ["a", "b", "c"] {
+            std::fs::create_dir_all(d.join(r).join("refs")).unwrap();
+        }
+        let (w, rx) = started();
+        w.add("git:a", vec![WatchSpec::tree("refs", d.join("a/refs"), &[])]);
+        let adds = ["b", "c"].iter().map(|r| (format!("git:{r}"), vec![WatchSpec::tree("refs", d.join(r).join("refs"), &[])])).collect();
+        w.change(&["git:a".to_string()], adds);
+        assert_eq!(w.keys(), ["git:b", "git:c"]);
+        assert_eq!(
+            (mode(&w, &d.join("a/refs")), mode(&w, &d.join("b/refs")), mode(&w, &d.join("c/refs"))),
+            (None, Some(RecursiveMode::Recursive), Some(RecursiveMode::Recursive)),
+            "the one let go and the two taken, as the system watches them"
+        );
+        assert!(lock(&w.shared).batch.is_none(), "the batch is over");
+        // What the system watches after the batch is what it hears from.
+        let f = d.join("c/refs/main");
+        let write = || std::fs::write(&f, "x").unwrap();
+        write();
+        assert!(heard(&rx, changed_with("git:c", &f), write).is_some(), "a watched repo's own event, within a minute");
         drop(w);
         std::fs::remove_dir_all(&d).unwrap();
     }
