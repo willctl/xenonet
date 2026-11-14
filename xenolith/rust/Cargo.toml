@@ -16,7 +16,7 @@ members = ["crates/core", "crates/mcp", "crates/cli", "crates/net", "crates/serv
 default-members = ["crates/core", "crates/mcp", "crates/cli", "crates/net", "crates/service"]
 
 [workspace.package]
-version = "2.0.0" # kept equal to package.json's version (scripts/build.mjs checks)
+version = "2.0.1" # kept equal to package.json's version (scripts/build.mjs checks)
 edition = "2024"
 # The core's, and so the hook's and the tray's: xenonet-id and -authz need 1.88. xenolith-net and
 # the service need 1.91 (iroh), the tray 1.90 (tray-icon and muda).
