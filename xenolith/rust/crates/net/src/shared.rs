@@ -92,15 +92,7 @@ fn watch(dirs: &[PathBuf], wake: tokio::sync::mpsc::UnboundedSender<()>) -> Vec<
             let _ = wake.send(());
         }
     };
-    if let Ok(mut w) = notify::recommended_watcher(tell.clone()) {
-        for d in dirs.iter().filter(|d| d.is_dir()) {
-            let _ = w.watch(d, notify::RecursiveMode::NonRecursive);
-        }
-        out.push(Box::new(w));
-    }
-    // FSEvents can lag by seconds; kqueue sees a folder's entries change at once.
-    #[cfg(target_os = "macos")]
-    if let Ok(mut w) = notify::KqueueWatcher::new(tell, notify::Config::default()) {
+    if let Ok(mut w) = notify::recommended_watcher(tell) {
         for d in dirs.iter().filter(|d| d.is_dir()) {
             let _ = w.watch(d, notify::RecursiveMode::NonRecursive);
         }
@@ -145,15 +137,18 @@ async fn run(cfg: Arc<Config>, jobs: mpsc::Sender<Job>, fwd: Arc<RwLock<Option<F
     let keys = xenolith_core::keys::dir(&cfg.paths);
     let _ = std::fs::create_dir_all(&keys);
     let dirs: Vec<PathBuf> = [path.parent().map(Path::to_path_buf), Some(keys)].into_iter().flatten().collect();
-    let mut watchers = watch(&dirs, wake_tx.clone());
+    let mut whole = dirs.iter().all(|d| d.is_dir());
+    // Held so the watches last: dropping one ends it.
+    let mut _watchers = watch(&dirs, wake_tx.clone());
     let mut said = String::new();
     // A refused attach (XenoNet's network endpoint not up yet) is tried again sooner than a
     // minute, a second at first and twice as long each time.
     let mut wait = Duration::from_secs(1);
     loop {
         // A folder that wasn't there at first (XenoNet not installed yet) is watched once it is.
-        if watchers.len() < 2 && dirs.iter().all(|d| d.is_dir()) {
-            watchers = watch(&dirs, wake_tx.clone());
+        if !whole && dirs.iter().all(|d| d.is_dir()) {
+            _watchers = watch(&dirs, wake_tx.clone());
+            whole = true;
         }
         // Ok: the engine stopped while attached.
         let ended = match attach(&cfg, &path, &jobs, &fwd, &shared, &stop, &mut wake).await {

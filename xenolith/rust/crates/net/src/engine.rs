@@ -48,6 +48,9 @@ use xenonet_net::{NetError, R};
 /// How long the worker waits after a change in the folder before it looks, so a burst of writes
 /// is one look.
 const SETTLE: Duration = Duration::from_millis(150);
+/// How often the worker scans with no event heard: FSEvents can lag by seconds, more when
+/// fseventsd is busy, and this bounds how long a change waits for it.
+const PASS: Duration = Duration::from_secs(5);
 /// How long a follow record's addresses are kept in the endpoint's lookup.
 const ADDR_TTL: Duration = Duration::from_secs(365 * 24 * 3600);
 
@@ -480,8 +483,9 @@ pub(crate) fn spawn(
             w.refresh();
             w.scan();
             let mut due: Option<Instant> = None;
+            let mut pass = Instant::now() + PASS;
             loop {
-                let wake = [due, w.fetch_due()].into_iter().flatten().min();
+                let wake = [due, w.fetch_due(), Some(pass)].into_iter().flatten().min();
                 let job = match wake {
                     Some(at) => match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
                         Ok(j) => Some(j),
@@ -495,10 +499,15 @@ pub(crate) fn spawn(
                 };
                 match job {
                     None => {
-                        if due.is_some_and(|at| at <= Instant::now()) {
+                        let now = Instant::now();
+                        if due.is_some_and(|at| at <= now) {
                             due = None;
+                            pass = now + PASS;
                             w.scan();
                             w.say_spaces(false);
+                        } else if pass <= now {
+                            pass = now + PASS;
+                            w.scan();
                         }
                         w.fetch_tick();
                     }
@@ -520,26 +529,25 @@ pub(crate) fn spawn(
 }
 
 /// Watches the spaces' folders: a page, a note or a day of the log written there wakes the worker.
-/// The system's events (FSEvents, inotify, ReadDirectoryChangesW) watch the whole `spaces/` tree.
-/// On macOS FSEvents can lag by seconds (more when fseventsd is busy), so the folders sync reads
+/// The system's events (FSEvents, inotify, ReadDirectoryChangesW) watch the whole `spaces/` tree,
+/// with no descriptor per file. On macOS FSEvents can lag by seconds, so the folders sync reads
 /// (each synced space's `pages/`, `inbox/` and this year's `log/`) and the pages in them are
-/// watched with kqueue too, as XenoNet's adapters follow a transcript: one descriptor each, so
-/// at most `KQUEUE_MAX` (`Watch::track`).
+/// followed with kqueue too (`xenonet_os::follow`, one descriptor each, under its cap). The
+/// worker's pass every `PASS` catches anything neither has said yet.
 pub(crate) struct Watch {
     fs: Option<notify::RecommendedWatcher>,
     /// `spaces/`, watched once it's there: sync never makes it.
     base: PathBuf,
     armed: bool,
     log: Arc<dyn Fn(&str) + Send + Sync>,
-    #[cfg(target_os = "macos")]
-    kq: Option<notify::KqueueWatcher>,
-    #[cfg(target_os = "macos")]
-    tracked: BTreeSet<PathBuf>,
+    follower: xenonet_os::follow::Follower,
 }
 
-/// The most paths kqueue watches beside FSEvents, each a file descriptor.
-#[cfg(target_os = "macos")]
-const KQUEUE_MAX: usize = 128;
+impl Drop for Watch {
+    fn drop(&mut self) {
+        self.follower.stop();
+    }
+}
 
 fn waker(tx: &mpsc::Sender<Job>, filter: Option<[PathBuf; 2]>) -> impl Fn(notify::Result<notify::Event>) + Send + 'static {
     let tx = Mutex::new(tx.clone());
@@ -561,22 +569,13 @@ fn waker(tx: &mpsc::Sender<Job>, filter: Option<[PathBuf; 2]>) -> impl Fn(notify
 
 impl Watch {
     fn new(cfg: &Arc<Config>, tx: &mpsc::Sender<Job>) -> Watch {
-        #[cfg(target_os = "macos")]
-        use notify::Watcher as _;
         let base = cfg.root.join(spaces::SPACES_DIR);
         // Events name the folder as the OS resolves it (on macOS /var is /private/var).
         let real = std::fs::canonicalize(&cfg.root).map_or_else(|_| base.clone(), |r| r.join(spaces::SPACES_DIR));
         let fs = notify::recommended_watcher(waker(tx, Some([base.clone(), real]))).ok();
-        let mut w = Watch {
-            fs,
-            base,
-            armed: false,
-            log: cfg.log.clone(),
-            #[cfg(target_os = "macos")]
-            kq: notify::KqueueWatcher::new(waker(tx, None), notify::Config::default()).ok(),
-            #[cfg(target_os = "macos")]
-            tracked: BTreeSet::new(),
-        };
+        let wake = waker(tx, None);
+        let follower = xenonet_os::follow::Follower::start(xenonet_os::follow::cap(), move |ev| wake(Ok(ev)));
+        let mut w = Watch { fs, base, armed: false, log: cfg.log.clone(), follower };
         w.arm();
         w
     }
@@ -594,24 +593,19 @@ impl Watch {
         }
     }
 
-    /// The folders and files kqueue watches from now on (macOS; elsewhere the system's events are
-    /// enough). Each is watched again, since a page written whole (a rename) is a new file.
+    /// The folders and files followed from now on (macOS; elsewhere the system's events are
+    /// direct). One followed already is left as it is; one replaced at its path is followed anew.
     fn track(&mut self, paths: &[PathBuf]) {
         self.arm();
-        #[cfg(target_os = "macos")]
-        if let Some(kq) = self.kq.as_mut() {
-            use notify::Watcher as _;
-            for p in std::mem::take(&mut self.tracked) {
-                let _ = kq.unwatch(&p);
-            }
-            for p in paths.iter().filter(|p| p.exists()).take(KQUEUE_MAX) {
-                if kq.watch(p, notify::RecursiveMode::NonRecursive).is_ok() {
-                    self.tracked.insert(p.clone());
-                }
+        let keep: BTreeSet<&PathBuf> = paths.iter().collect();
+        for p in self.follower.followed() {
+            if !keep.contains(&p) {
+                self.follower.unfollow(&p);
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = paths;
+        for p in paths.iter().filter(|p| p.exists()) {
+            self.follower.follow(p);
+        }
     }
 }
 
@@ -1168,7 +1162,7 @@ impl Worker {
         self.track(&ids);
     }
 
-    /// What kqueue watches (`Watch::track`): each synced space's folders sync reads, and its pages.
+    /// What is followed (`Watch::track`): each synced space's folders sync reads, and its pages.
     fn track(&mut self, ids: &[String]) {
         let year = xenolith_core::text::local_date(&xenolith_core::text::now()).get(..4).unwrap_or("").to_string();
         let mut paths = vec![];
@@ -1176,9 +1170,6 @@ impl Worker {
             let synced = self.held.get(id).is_some_and(|h| chains::is_shared(&h.space) || !self.curates(id));
             let Some(dir) = self.dir_of(id).filter(|_| synced) else { continue };
             paths.extend([dir.join("pages"), dir.join("inbox"), dir.join("log").join(&year)]);
-        }
-        for id in ids {
-            let Some(dir) = self.dir_of(id) else { continue };
             if let Ok(rd) = std::fs::read_dir(dir.join("pages")) {
                 paths.extend(rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "md")));
             }
@@ -1934,5 +1925,38 @@ impl Worker {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod watch_tests {
+    use notify::Watcher as _;
+
+    fn open_descriptors() -> usize {
+        std::fs::read_dir("/dev/fd").map_or(0, |d| d.count())
+    }
+
+    #[test]
+    fn a_recursive_watch_holds_no_descriptor_per_file() {
+        let dir = std::env::temp_dir().join(format!("xenolith-watch-test-{}", std::process::id()));
+        let pages = dir.join("spaces").join("project").join("atlas").join("pages");
+        std::fs::create_dir_all(&pages).expect("a folder");
+        for i in 0..400 {
+            std::fs::write(pages.join(format!("page-{i}.md")), "text").expect("a page");
+        }
+        let before = open_descriptors();
+        let mut w = notify::recommended_watcher(|_: notify::Result<notify::Event>| {}).expect("a watcher");
+        w.watch(&dir, notify::RecursiveMode::Recursive).expect("watched");
+        for i in 0..100 {
+            // A file written whole, as the curator writes its status: a new file each time.
+            let tmp = pages.join("status.json.tmp");
+            std::fs::write(&tmp, format!("{i}")).expect("written");
+            std::fs::rename(&tmp, pages.join("status.json")).expect("renamed");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let after = open_descriptors();
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(after < before + 50, "{} descriptors opened for 400 files and 100 rewrites", after.saturating_sub(before));
     }
 }
