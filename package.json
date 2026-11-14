@@ -1,7 +1,7 @@
 {
   "name": "xenonet",
   "productName": "XenoNet",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "XenoNet helps people and bots take an intent to an outcome across machines. Claude Code, Codex and Grok Build sessions show on one live map, message each other, claim files and hand work to your other machines, and every actor works within a grant you set.",
   "author": "willctl",
