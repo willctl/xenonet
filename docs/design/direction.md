@@ -657,8 +657,8 @@ Will's step on inix and NEO-REX.
    their hash table, the satellite mode and its once-a-minute pass, and
    `x25519-dalek`; Xenolith's svc publication path and its credential
    header; and the hand-written A2A types.
-   No release is cut: XenoNet 0.7.0 and Xenolith 2.0.0 are Will's step
-   (below). Left for later, by what the phase 6 review asked:
+   The release is XenoNet 0.7.2 and Xenolith 2.0.1 (the v0.7.0 and
+   v0.7.1 tags have no release). Left for later, by what the phase 6 review asked:
    - Spaces: driving the code from `space.qnt`'s traces with
      quint-connect; a superseded curator handing its unfiled inbox to the
      new one, and a test of two takes in a partition with both filing;
@@ -697,7 +697,13 @@ Will's step on inix and NEO-REX.
      one waits for it. A rule's own refresh takes under a second. Which
      phase of the slow refresh takes the time isn't measured yet.
      `refusals.test.js` failed once in six full runs the same way, with
-     no cause found.
+     no cause found. The Desktop restart test (`components.test.js`)
+     fails in some full runs on its page's 30 s wait and passes alone.
+   - Xenolith's tray test on hosted macOS runners: the first `--selftest`
+     after the service starts reads `/status` past the tray's 4 s timeout
+     ("os error 35") in about half the release runs, and passes on a
+     rerun and on this Mac. What holds `/status` back there isn't found
+     yet.
    - From the plan's list after phase 6: gossip fan-out when iroh-gossip
      is 1.0; per-network endpoint keys; an embedded relay; the service as
      its own OS user; Xenolith's MCP on 2026-07-28; Ask from another
@@ -712,13 +718,11 @@ Will's step on inix and NEO-REX.
    cutover.
    1. Review what phase 6 decided as recommended (questions 6 and 12 to
       14, below) and overturn any of it.
-   2. Cut XenoNet 0.7.0 ([releases.md](../guide/releases.md)) and
-      Xenolith 2.0.0 ([xenolith/AGENTS.md](../../xenolith/AGENTS.md#releases)):
-      agents bump the versions and write the notes; Will tags (or has an
-      agent tag as willctl after `gh auth switch --user willctl`), tries
-      the archives and publishes, Xenolith with "latest" unticked. The
-      notes say 1.x and 2.x don't sync and 1.x's client tokens are made
-      again.
+   2. Done: XenoNet 0.7.2 and Xenolith 2.0.1 are released, and inix's
+      Xenolith is on 2.0.1 with `xenolith upgrade --run` done (no file
+      changed but the two space markers; backups in
+      `~/Xenolith-backup-2026-11-13-cold`, with the 1.10.0 archive).
+      inix's Desktop, Service and Tools stay on 0.6.6 until step 5.
    3. On inix, `grok login`, then `cargo run -p xenonet-acp --example
       probe` for Grok Build, before its headless start is deleted.
    4. On NEO-REX, the TPM check: `XENONET_REQUIRE_TPM=1 npm run cargo --
@@ -742,19 +746,15 @@ Will's step on inix and NEO-REX.
    6. Before the cutover, run the lab's Xenolith checks
       (`npm run lab -- check`, `xenolith-rehearsal` first), which haven't
       had a real run yet.
-   7. Move Xenolith from 1.x on inix and NEO-REX in one sitting, by its
-      README's steps
-      ([From 1.x to 2.0](../../xenolith/README.md#from-1x-to-20)): drain
-      NEO-REX's 1.x queue and stop both, copy the folder, config and
-      state with Xenolith stopped and keep 1.10.0, install 2.0,
-      `xenolith upgrade` then `--run` (inix first), make UDP 47851
-      reachable (or set `sync.relays`), `xenolith invite` on inix and the
-      printed `xenolith join` on NEO-REX within ten minutes, checking the
-      owner and genesis hashes, then `xenolith sync status` on both. Make
-      1.x's client tokens again with `xenolith token create`. To go back:
+   7. Xenolith on NEO-REX: inix's Xenolith never paired with it, so
+      nothing waits in a 1.x queue. Install 2.0.1 there
+      ([From 1.x to 2.0](../../xenolith/README.md#from-1x-to-20) if it
+      runs 1.x), make UDP 47851 on inix reachable (or set `sync.relays`),
+      run `xenolith invite` on inix and the printed `xenolith join` on
+      NEO-REX within ten minutes, checking the owner and genesis hashes,
+      then `xenolith sync status` on both. To take inix back to 1.x:
       `xenolith upgrade --undo` while 2.0 is still installed, then stop
-      2.0, restore the config and state folders, and reinstall 1.10.0 on
-      both.
+      it, restore the config and state folders, and reinstall 1.10.0.
    8. On a Mac in the network, shared mode: in Network settings › Shared
       context, Allow "Xenolith asks to sync over the network" with the
       networks ticked (Touch ID), then for each space Make it yours and
@@ -915,7 +915,7 @@ the phase that needs it.
     recommended in phase 6: Grok Build and Hermes start over ACP, and
     Claude Code's ACP adapter, an npm package, isn't taken unless Will
     wants it; Codex stays headless. The release after phase 6 is XenoNet
-    0.7.0 and Xenolith 2.0.0.
+    0.7.2 and Xenolith 2.0.1.
 
 ## Risks
 
