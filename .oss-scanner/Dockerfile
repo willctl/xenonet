@@ -2,8 +2,8 @@
 #
 # The audit runs offline, so this build installs Node and the Rust that rust-toolchain.toml pins,
 # fetches every npm package and crate, and builds what threat_model.md (beside this file) says to
-# exercise: the page, the xenonet binary (the service, the command and the MCP servers), the
-# Node-API addon the JS tests load in place of core/, and the Rust tests. Electron isn't fetched:
+# exercise: the page, the xenonet binary (the service, the command and the MCP servers) and the
+# Rust tests. Electron isn't fetched:
 # Desktop needs a display, and its own code is plain JS.
 
 FROM node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS node
@@ -30,11 +30,10 @@ WORKDIR /src
 RUN rustup toolchain install
 RUN npm ci && cargo fetch --locked
 
-# The page (dist/, which the service serves), the binary at target/debug/xenonet, the addon at
-# crates/xenonet-node/xenonet.<platform>-<arch>.node, and the Rust test binaries.
+# The page (dist/, which the service serves), the binary at target/debug/xenonet, and the Rust
+# test binaries.
 RUN npm run build \
     && cargo build --workspace --locked \
-    && npm run rust:build -- --debug \
     && cargo test --workspace --locked --no-run
 
 # The cheap tests, so a broken image shows. A failure doesn't stop the build.

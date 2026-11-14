@@ -6,7 +6,7 @@ XenoNet maps the Claude Code and Codex sessions on a computer and lets them mess
 
 The service runs as the person's own user and listens on `127.0.0.1` only. Treat these as untrusted:
 
-- **Web pages in the person's browser.** Any page can send requests to `127.0.0.1:47840`. The service answers only its own `Host` (`crates/xenonet-service/src/serve.rs`, 421 otherwise, against DNS rebinding) and refuses a cross-origin request (403). The console page runs under a Content-Security-Policy, whether the service serves it to a browser (`crates/xenonet-service/src/static_files.rs`) or Desktop serves it to its window (`server/static.js`, through `electron/desktop-server.js`), so text from transcripts, actors or other hosts must never become script.
+- **Web pages in the person's browser.** Any page can send requests to `127.0.0.1:47840`. The service answers only its own `Host` (`crates/xenonet-service/src/serve.rs`, 421 otherwise, against DNS rebinding) and refuses a cross-origin request (403). The console page runs under a Content-Security-Policy, whether the service serves it to a browser (`crates/xenonet-service/src/static_files.rs`) or Desktop serves it to its window (`electron/lib/static.js`, through `electron/desktop-server.js`), so text from transcripts, actors or other hosts must never become script.
 - **Transcripts and other apps' files.** The readers parse files other programs write: Claude Code's and Codex's JSONL transcripts, Codex's state database, OpenCode's SQLite database, Cursor's, Copilot CLI's and Gemini CLI's files, the shared context's pages (`crates/xenonet-sources`), and a few other apps' `Info.plist` keys and metadata (`crates/xenonet-actors`). A transcript holds whatever a model or a tool printed, so assume an attacker wrote it.
 - **Repositories.** XenoNet runs `git status` on every repo under the projects folder. A cloned repo's config must never make it run a program: the repo's filters are emptied, its hooks pointed at nothing and its fsmonitor turned off (`crates/xenonet-sources/src/git.rs`).
 - **Other programs on the same computer.** Any local program can call the HTTP API and the MCP servers and claim a session's name. On macOS the service looks up the process on the other end of each connection and its parents (`crates/xenonet-engine/src/attest.rs`), so one session can't act as another, and requests from under a session can't connect Claude Code and Codex or change standing settings. Windows and Linux don't check this yet, as `docs/guide/privacy.md` says.
@@ -30,8 +30,8 @@ The image has everything built:
 
 - `target/debug/xenonet serve --demo` runs the service on made-up data (a demo world in a temporary folder) on `127.0.0.1:47841`. Without `--demo` it reads `$HOME`'s real transcript folders, which in the image are empty: write transcripts under `$HOME/.claude/projects/<project>/<session>.jsonl` to feed it. `--dev` adds the dev instance's routes (`/api/dev/simulate`, `/api/dev/capture`).
 - `target/debug/xenonet mcp` is the MCP server on stdio; `target/debug/xenonet hook claude` reads a hook's JSON on stdin and posts it to the service;
-- `cargo test --workspace` runs the Rust tests. `npm test` runs the JS tests against the JS; `npm run test:rust` runs them with each ported module's Rust twin loaded; `npm run test:bin` runs the ones that start a service, a command or an MCP server against the binary (`test/harness/xenonet-bin.js`).
-- `test/server.test.js`, `test/actor-gateway.test.js`, `test/engine-routes.test.js` and `test/hosts-server.test.js` show how the HTTP API, the gateway and relays are called.
+- `cargo test --workspace` runs the Rust tests, the golden files included. `npm test` runs the page's, Desktop's and the scripts' unit tests.
+- The golden files show how the HTTP API and the command (`crates/xenonet-cli/tests/golden/`), the MCP servers (`crates/xenonet-mcp/tests/golden/`) and the actor gateway (`crates/xenonet-service/tests/fixtures/gateway.json`) are called.
 
 ## How you rate severity
 
@@ -45,4 +45,4 @@ The image has everything built:
 - Claude Code, Codex, Electron, Node and the apps XenoNet observes: their bugs belong to their projects.
 - Anything that needs administrator rights or physical access.
 - That Windows and Linux don't check which process a request comes from: it's documented and planned.
-- `xenolith/` is a separate project with its own `SECURITY.md`. `scripts/`, `test/` and the demo world's made-up data (`core/demo.js` and its Rust port) are development tools.
+- `xenolith/` is a separate project with its own `SECURITY.md`. `scripts/`, `test/` and the demo world's made-up data (`crates/xenonet-state/src/runtime/demo.rs`, `crates/xenonet-actors/src/demo.rs`) are development tools.
