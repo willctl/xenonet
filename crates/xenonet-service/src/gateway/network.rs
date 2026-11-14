@@ -113,12 +113,11 @@ pub fn desktop_installed(home: &str) -> bool {
     desktop_places(home).iter().any(|p| p.exists())
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
     #[test]
-    #[cfg(target_os = "macos")]
     fn desktop_is_looked_for_where_its_installer_puts_it() {
         let home = std::env::temp_dir().join(format!("xenonet-desktop-test-{}", std::process::id()));
         let places = desktop_places(&home.to_string_lossy());

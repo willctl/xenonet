@@ -15,6 +15,9 @@
 // temp homes, loopback, ports from the OS. NET_TEST_LOG=1 prints what the
 // XenoNets log, XENOLITH_TEST_LOG=1 what the Xenoliths do.
 
+// Shared mode reaches XenoNet over a Unix socket; the Windows named pipe
+// isn't built yet, so this runs on Unix alone.
+#![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
 mod common;
