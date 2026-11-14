@@ -6111,6 +6111,7 @@ version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
+ "notify",
  "regex",
  "reqwest",
  "rustls",

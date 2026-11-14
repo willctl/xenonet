@@ -27,6 +27,8 @@ pub mod clock;
 pub mod dirs;
 pub mod error;
 pub mod files;
+#[cfg(feature = "follow")]
+pub mod follow;
 pub mod fs;
 #[cfg(feature = "process")]
 pub mod fx;

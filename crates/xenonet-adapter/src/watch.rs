@@ -20,7 +20,7 @@
 //! stays the reconcile path.
 
 pub mod cursor;
-pub mod follow;
+pub use xenonet_os::follow;
 pub mod runner;
 pub mod sessions;
 

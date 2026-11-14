@@ -1,5 +1,6 @@
-//! The transcripts being written, watched each on its own, beside their
-//! folder's watch (goal 4: a message in well under a second).
+//! Files watched each on their own, beside their folder's watch: the
+//! transcripts being written, and the pages Xenolith syncs (goal 4: a
+//! message in well under a second).
 //!
 //! On macOS a folder's events come through fseventsd, which a busy Mac
 //! keeps behind: a line written to a transcript has been seen to take 5 to
@@ -41,7 +42,7 @@ pub struct Follower(());
 
 #[cfg(not(target_os = "macos"))]
 impl Follower {
-    pub(crate) fn start(_cap: usize, _on: impl Fn(notify::Event) + Send + 'static) -> Follower {
+    pub fn start(_cap: usize, _on: impl Fn(notify::Event) + Send + 'static) -> Follower {
         Follower(())
     }
     pub fn follow(&self, _path: &Path) -> bool {
@@ -159,7 +160,7 @@ mod kq {
         /// Starts the thread that hears the watches, which tells `on` each
         /// change to a file as a file event names it. At most `cap` files
         /// are watched.
-        pub(crate) fn start(cap: usize, on: impl Fn(notify::Event) + Send + 'static) -> Follower {
+        pub fn start(cap: usize, on: impl Fn(notify::Event) + Send + 'static) -> Follower {
             Follower::start_with(cap, IDLE, SWEEP, on)
         }
 

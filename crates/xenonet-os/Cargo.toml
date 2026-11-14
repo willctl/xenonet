@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-os"
-description = "The machine XenoNet runs on: files, paths, processes and the children it runs, a thread for work that isn't Send, locks, the error log, its own folders, the home folder, platform and random ids, fetch(), a program's output lines, the programs that open things, the system panel's numbers and their reading, and why something failed."
+description = "The machine XenoNet runs on: files, paths, processes and the children it runs, a thread for work that isn't Send, locks, the error log, its own folders, the home folder, platform and random ids, fetch(), a program's output lines, the programs that open things, the system panel's numbers and their reading, files followed on their own, and why something failed."
 version.workspace = true
 edition.workspace = true
 # reqwest and tokio, as the service (Rust 1.88+).
@@ -19,6 +19,8 @@ rustls = { workspace = true, optional = true }
 # Lines of a program's output (lines.rs), the children fx.rs runs and the
 # system panel's reading (system.rs).
 tokio = { workspace = true, optional = true }
+# A file followed on its own (follow.rs): notify's event types, on kqueue.
+notify = { workspace = true, optional = true }
 # The log's key patterns and what private_file reads of an ACL.
 regex.workspace = true
 serde_json.workspace = true
@@ -42,6 +44,9 @@ default = ["fetch", "process"]
 fetch = ["dep:reqwest", "dep:rustls"]
 # Programs run and read on tokio: fx.rs, lines.rs and system.rs.
 process = ["dep:tokio"]
+# Files followed on their own with kqueue on macOS, beside a folder's FSEvents
+# watch (follow.rs).
+follow = ["dep:notify"]
 
 [lints]
 workspace = true
