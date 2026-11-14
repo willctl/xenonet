@@ -3,7 +3,7 @@
 //! folders it looked at (paths inside the projects folder, well-known files,
 //! counts, file types, sessions, its own call) and keeps only the picks
 //! that would change something. Running Codex and asking the decider stay
-//! with the twin.
+//! with the caller.
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};

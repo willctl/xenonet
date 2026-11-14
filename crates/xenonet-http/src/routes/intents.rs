@@ -1,6 +1,6 @@
 //! The person's intents (docs/design/goals.md): work asked for at one of
 //! their devices, worked on the machine it names under one of their
-//! delegations. Rust-only, with no JS twin.
+//! delegations.
 //!
 //! - `GET /api/intents`: the intents this machine keeps, and what a new one
 //!   may name (machines, delegations, projects). Yours, at the window or

@@ -1,5 +1,4 @@
-//! Sessions XenoNet starts, and its runs (docs/guide/network.md): Rust-only,
-//! with no JS twin, as the network is.
+//! Sessions XenoNet starts, and its runs (docs/guide/network.md).
 //!
 //! - `POST /api/start`: a new session here or on another machine of the
 //!   network (`{ machine?, folder?, app?, mode?, prompt }`). From you

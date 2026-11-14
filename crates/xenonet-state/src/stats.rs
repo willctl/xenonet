@@ -13,7 +13,7 @@
 //! The figures are added up as JS adds them: a token count a transcript
 //! writes as a string is joined on as a string, and what JS would throw on
 //! (a value that can't be made a primitive, a line view's TypeError) is a
-//! TypeError here, which the twin throws.
+//! TypeError here.
 
 use regex::Regex;
 use serde_json::Value;
@@ -295,7 +295,7 @@ impl Tok for Figure {
             Figure::Worked(n) => Ok(Prim::Num(*n)),
         }
     }
-    // As the pricing twin reads a figure: nothing for null, else Number(v).
+    // As pricing reads a figure: nothing for null, else Number(v).
     fn for_price(&self) -> Result<Option<f64>, TypeError> {
         match self {
             Figure::Written(None | Some(Value::Null)) => Ok(None),

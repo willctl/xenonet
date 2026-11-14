@@ -1,6 +1,6 @@
 //! core/digest.js: summaries built from the live event history: "while you
 //! were away", the day's log, and handoff briefs. All deterministic; asking
-//! Codex to narrate one is a child process, which the twin runs.
+//! Codex to narrate one is a child process, which the caller runs.
 
 use serde_json::{json, Map, Value};
 use std::collections::hash_map::Entry;

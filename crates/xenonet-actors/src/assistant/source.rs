@@ -4,8 +4,8 @@
 //! the places, the sessions with what the tailer saw of each, the
 //! collisions and the actors. One is made at most every second.
 //!
-//! The state and the actors' registry are other modules' (core/state.js,
-//! core/actors/): the twin hands their contents over, and answers what
+//! The state and the actors' registry are other modules': the caller
+//! hands their contents over, and answers what
 //! the view asks of them (a session's place, a product, whether an actor
 //! is registered).
 

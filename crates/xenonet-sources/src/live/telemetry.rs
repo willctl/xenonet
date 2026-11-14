@@ -170,7 +170,7 @@ pub struct Session {
     last_error_at: Option<f64>,
     last_result_at: Option<f64>,
     seq: u64,
-    // Bumped when its prompts or messages change, for the twin's copies.
+    // Bumped when its prompts or messages change, for a reader's copies.
     texts: u64,
 }
 
@@ -1590,10 +1590,10 @@ pub fn project_limit(now: f64, points: &[(f64, f64)], pct: Option<&Value>, reset
     ])
 }
 
-// ---------- the faces the twin gives JS ----------
+// ---------- a session's fields by name ----------
 
 impl Session {
-    /// A session's field, for the twin's view of it: Some(None) for
+    /// A session's field, by its name: Some(None) for
     /// undefined, and None for a field it doesn't have.
     pub fn get(&self, name: &str) -> Option<Option<Value>> {
         let f = |v: f64| Some(number(v));
@@ -1697,7 +1697,7 @@ impl Session {
     /// What JS holds on to and sees change, as live.js's snapshot and
     /// notes hand out the session's own objects: { tokens, context,
     /// toolCounts, texts }, with its prompts and messages when `texts`
-    /// (the twin's last count of their changes) is out of date.
+    /// (the reader's last count of their changes) is out of date.
     pub fn mirror(&self, texts: f64) -> Value {
         let mut m = Map::new();
         m.insert("tokens".into(), self.tokens_value());

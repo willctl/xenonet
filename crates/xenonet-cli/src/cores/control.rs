@@ -307,8 +307,7 @@ fn num(a: &Value, k: &str, d: f64) -> f64 {
     a.get(k).and_then(Value::as_f64).unwrap_or(d)
 }
 
-/// One of the client's methods, `kind`, with its arguments, as the twin's
-/// run(kind, args) made it.
+/// One of the client's methods, `kind`, with its arguments.
 async fn method(t: &Target, kind: &str, a: Value) -> Result<Value, Failure> {
     match t {
         Target::Dev(i) => {

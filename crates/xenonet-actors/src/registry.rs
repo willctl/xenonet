@@ -509,7 +509,7 @@ impl Actors {
         self.demo && self.get(id).is_some_and(|a| a.simulated_offline)
     }
 
-    /// Each actor as the twin shows `actors.actors` (instances and targets
+    /// Each actor as `actors.actors` shows it (instances and targets
     /// by name), for the tests that look in.
     pub fn records(&self) -> Value {
         Value::Array(

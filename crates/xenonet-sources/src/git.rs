@@ -2,8 +2,8 @@
 //!
 //! What `git status --porcelain -b` says, the guards and filter overrides a
 //! status runs with, and what each run's answer means for the next.
-//! Running git stays with the caller (the twin, or
-//! whatever stands in for git in a test).
+//! Running git stays with the caller (or whatever stands in for git in a
+//! test).
 
 /// What `git status --porcelain=v1 -b` says of a repo.
 #[derive(Clone, Debug, PartialEq)]

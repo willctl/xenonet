@@ -1,9 +1,8 @@
 //! The parts of the core the command calls, in Rust: each function has the
 //! shape of the JS function it stands for (JSON in and out where the JS
 //! passes objects), and calls the slice's Rust (docs/design/rust-core.md).
-//! Where a twin's JS did the plumbing (child processes, files, fetch,
-//! timers, sockets), it's done here, natively; those drivers are in the
-//! modules below. Only a script that's a JS module still runs in Node,
+//! The plumbing (child processes, files, fetch, timers, sockets) is done
+//! here, natively; those drivers are in the modules below. Only a script that's a JS module still runs in Node,
 //! since its default export is JS (control.rs's run_module).
 //!
 //! ```text

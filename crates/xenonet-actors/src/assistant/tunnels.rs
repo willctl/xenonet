@@ -3,7 +3,7 @@
 //! connection uses, where its key is kept, each run's state and its
 //! backoff after an exit, its log as XenoNet shows it, and the client's
 //! own environment are here; the processes, the timers, the credential
-//! store and the health probes are the twin's.
+//! store and the health probes are the caller's.
 //!
 //! The key goes only into tunnel-client's own environment
 //! (CONTROL_PLANE_API_KEY), never into a file, a command line or a log;
@@ -176,7 +176,7 @@ struct Run {
 /// What became of a run after something happened to it.
 #[derive(Debug, PartialEq)]
 pub struct After {
-    /// Whether its state or why changed (the twin says "changed").
+    /// Whether its state or why changed.
     pub changed: bool,
     /// Try again after this long, for an exit with tries left.
     pub retry_ms: Option<f64>,

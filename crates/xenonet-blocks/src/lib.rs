@@ -9,7 +9,7 @@ pub mod scanner;
 pub mod store;
 pub mod tailer;
 
-/// Stops what a block was doing: the caller's own code failed (a JS hook
-/// that threw, in a twin), so the block goes no further, as the JS didn't.
+/// Stops what a block was doing: the caller's own code failed, so the
+/// block goes no further.
 #[derive(Debug)]
 pub struct Halt;

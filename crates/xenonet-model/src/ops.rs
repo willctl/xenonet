@@ -294,7 +294,7 @@ pub trait Sink: Send + Sync {
 }
 
 /// No network: what the engine gets when the service isn't in one, and in
-/// the twins.
+/// the tests.
 pub struct NoNet;
 
 impl Net for NoNet {

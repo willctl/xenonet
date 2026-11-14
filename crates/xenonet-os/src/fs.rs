@@ -1,6 +1,6 @@
 //! The filesystem as XenoNet's blocks see it: the few calls they make, with
 //! errors named as Node names them (`ENOENT`, `EACCES`), behind a trait, so
-//! a test (or a twin given a fake `fs`) can stand in for the disk.
+//! a test can stand in for the disk.
 
 use std::io;
 use std::path::Path;

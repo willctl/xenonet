@@ -15,8 +15,7 @@
 //! reader goes on to the next record; one record isn't the normalizer's
 //! health, so its state stays as it is.
 //!
-//! The hooks are whoever runs it: Rust in the binary, JS callbacks in the
-//! twin. `R` is a record before normalizing, `T` after, and `W` where it
+//! The hooks are whoever runs it. `R` is a record before normalizing, `T` after, and `W` where it
 //! came from (whatever the caller keeps per file or request).
 
 use crate::lifecycle::{Counters, Lifecycle};

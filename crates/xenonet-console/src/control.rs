@@ -780,8 +780,7 @@ mod tests {
         async fn sleep(&self, _ms: f64) {}
     }
 
-    // Spelled as on a unix host; on Windows the JS tests run against the
-    // Rust (test:rust) check where data lives.
+    // Spelled as on a unix host; on Windows this isn't checked.
     #[cfg(unix)]
     #[test]
     fn where_data_lives() {

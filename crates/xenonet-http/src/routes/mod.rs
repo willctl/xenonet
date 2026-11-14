@@ -158,7 +158,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return a;
         }
     }
-    // The network across machines: Rust-only, with no JS twin.
+    // The network across machines.
     if route.starts_with("/api/net/") {
         if let Some(a) = net::route(ctx, req).await {
             return a;

@@ -1,7 +1,7 @@
 //! core/secret-store.js for the command: your computer's own credential
 //! store (xenonet-actors' secret store says what its program is given, a
 //! secret only ever on standard input, and reads its answer), its program
-//! run here as the twin's runFile ran it: never an error, -1 for a program
+//! run here: never an error, -1 for a program
 //! that couldn't start or didn't finish in 20 seconds.
 
 use super::native::{on_path, run};

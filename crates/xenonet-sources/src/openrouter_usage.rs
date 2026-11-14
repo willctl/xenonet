@@ -1,7 +1,7 @@
 //! core/openrouter-usage.js: what your OpenRouter key has spent, for the
 //! Token use panel, from OpenRouter's GET /api/v1/key, at most once a
-//! minute. The key and the request stay with whoever runs this (the twin's
-//! fetch); here is what an answer means.
+//! minute. The key and the request stay with whoever runs this; here is
+//! what an answer means.
 
 use serde_json::{json, Map, Value};
 use xenonet_text::json::number;

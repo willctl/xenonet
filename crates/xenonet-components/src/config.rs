@@ -191,8 +191,8 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
     }
 }
 
-// The paths here are spelled as on a unix host; on Windows the JS tests run
-// against the Rust (test:rust) check the same settings. (Two attributes:
+// The paths here are spelled as on a unix host; on Windows these aren't
+// checked. (Two attributes:
 // clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
 #[cfg(unix)]

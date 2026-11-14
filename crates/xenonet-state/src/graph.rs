@@ -34,7 +34,7 @@ fn str_of<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
     get(v, k).and_then(Value::as_str)
 }
 
-// pathKey(p): a key for a truthy path, as the paths twin gives it.
+// pathKey(p): a key for a truthy path, as path_key gives it.
 fn key_of(p: Option<&Value>) -> Option<String> {
     p.filter(|v| truthy(Some(v))).and_then(|v| path_key(&display(v)))
 }

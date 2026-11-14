@@ -3,7 +3,7 @@
 //! ~/Projects. A folder is checked before XenoNet reads it: it has to exist,
 //! be a folder XenoNet can read, and be neither the whole disk nor your home
 //! folder (nor a folder holding it), judged by where it leads when it's a
-//! link. The config, the store and the scan stay with the twin.
+//! link. The config, the store and the scan stay with the caller.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -217,8 +217,8 @@ pub fn stands_for(asked: &[Value], dev_port: &Value, dev_name: &str) -> Option<S
     (asked.len() == 1 && &asked[0] == dev_port).then(|| dev_name.to_string())
 }
 
-// Spelled as on a unix host, where Node's path module is posix; on Windows
-// the JS tests run against the Rust (test:rust) check the same. (Two
+// Spelled as on a unix host; on Windows
+// these aren't checked. (Two
 // attributes: clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
 #[cfg(unix)]

@@ -215,7 +215,7 @@ impl Columns {
     }
 }
 
-/// readDb: `exists` is what the twin's files said, `open` opens the
+/// readDb: `exists` is what the caller's files said, `open` opens the
 /// database (Err with what it threw). Err(Threw) when getting the vendor
 /// reader threw, which readDb throws on.
 pub fn read_db<'d>(exists: bool, open: &mut dyn FnMut() -> Result<Box<dyn Db + 'd>, String>, vendor: &mut dyn Vendor, since_ms: f64, edits_since_ms: f64) -> Result<Read, Threw> {

@@ -152,8 +152,8 @@ pub async fn ensure_service(host: &dyn Starter, root: &str, exec: &str, args: &[
     Err(Failure::msg("XenoNet Service did not start. See its service log."))
 }
 
-// Spelled as on a unix host, where Node's path module is posix; on Windows
-// the JS tests run against the Rust (test:rust) check the same. (Two
+// Spelled as on a unix host; on Windows
+// these aren't checked. (Two
 // attributes: clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
 #[cfg(unix)]

@@ -1,6 +1,6 @@
 //! The files the native readers, numbat's included, read, as Node's fs
 //! calls give them: a folder's entries, a file's stats, its text, or a
-//! range of its bytes. Behind a trait, so a twin given another `files`
+//! range of its bytes. Behind a trait, so a reader given another `files`
 //! (a test's) reads through that.
 
 use std::io;

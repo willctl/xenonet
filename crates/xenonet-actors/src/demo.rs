@@ -1,4 +1,4 @@
-//! The demo world's actors (core/actors/demo.js): you, and three made-up
+//! The demo world's actors: you, and three made-up
 //! agents at work on the demo's own projects and sessions:
 //!
 //!   Wren     a local agent (Hermes Agent), observed and attributed: it

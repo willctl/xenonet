@@ -2,8 +2,7 @@
 //! task, made by a model through OpenRouter. The preview sends nothing;
 //! routing sends only the task and the candidates' descriptions, and the
 //! record keeps the task's hash, the scores and the outcome, never the
-//! task. Nothing starts an agent. JevRouter (an npm library) does the
-//! routing itself, in the twin.
+//! task. Nothing starts an agent.
 
 use crate::compose::integrations::common::{clean, fail, failed, has_credential, text, Fail};
 use serde_json::{json, Map, Value};
