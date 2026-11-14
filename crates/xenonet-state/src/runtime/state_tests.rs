@@ -464,7 +464,7 @@ async fn a_home_folders_own_sessions_and_projects() {
     let session = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(&format!("claude:{id}"))).cloned().expect("the session, on the map");
     assert_eq!((session["title"].as_str(), session["cwd"].as_str()), (Some("Add a health check route"), Some(cwd.as_str())));
     let place = s.home(&format!("claude:{id}")).and_then(|h| s.node_of(&h)).expect("its home, on the map");
-    assert!(s_of(&place, "path").is_some_and(|p| p.ends_with("/atlas")), "in its project");
+    assert!(s_of(&place, "path").is_some_and(|p| std::path::Path::new(p).ends_with("atlas")), "in its project");
     assert!(s_of(&place, "id").is_some_and(|i| i.starts_with("project:chk_")), "a project node is its checkout: {place}");
     assert_eq!((place["projectId"].as_str().map(|p| &p[..4]), place["confirmed"].as_bool()), (Some("prj_"), Some(true)), "the founding checkout of its project");
     let st = |name: &str| items(g.get("sources")).iter().find(|x| s_of(x, "name") == Some(name)).cloned().unwrap_or(Value::Null);
@@ -523,7 +523,7 @@ async fn a_project_space_is_tied_by_its_signed_marker_not_its_folder() {
     // The page's projects (the map's `mentions`), and what its node says
     // the space is about when it isn't the project's.
     let read = |g: &Value| {
-        let atlas = items(g.get("nodes")).iter().find(|n| s_of(n, "kind") == Some("project") && s_of(n, "path").is_some_and(|p| p.ends_with("/atlas"))).cloned().expect("atlas");
+        let atlas = items(g.get("nodes")).iter().find(|n| s_of(n, "kind") == Some("project") && s_of(n, "path").is_some_and(|p| std::path::Path::new(p).ends_with("atlas"))).cloned().expect("atlas");
         let tied = items(g.get("relations")).iter().any(|r| s_of(r, "a") == Some(page) && s_of(r, "kind") == Some("mentions") && r.get("b") == atlas.get("id"));
         let node = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(page)).cloned().expect("the page");
         (atlas, tied, node.get("spaceAbout").cloned())
