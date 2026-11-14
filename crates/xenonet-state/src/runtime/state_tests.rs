@@ -523,7 +523,11 @@ async fn a_project_space_is_tied_by_its_signed_marker_not_its_folder() {
     // The page's projects (the map's `mentions`), and what its node says
     // the space is about when it isn't the project's.
     let read = |g: &Value| {
-        let atlas = items(g.get("nodes")).iter().find(|n| s_of(n, "kind") == Some("project") && s_of(n, "path").is_some_and(|p| std::path::Path::new(p).ends_with("atlas"))).cloned().expect("atlas");
+        let atlas = items(g.get("nodes"))
+            .iter()
+            .find(|n| s_of(n, "kind") == Some("project") && s_of(n, "path").is_some_and(|p| std::path::Path::new(p).ends_with("atlas")))
+            .cloned()
+            .expect("atlas");
         let tied = items(g.get("relations")).iter().any(|r| s_of(r, "a") == Some(page) && s_of(r, "kind") == Some("mentions") && r.get("b") == atlas.get("id"));
         let node = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(page)).cloned().expect("the page");
         (atlas, tied, node.get("spaceAbout").cloned())
