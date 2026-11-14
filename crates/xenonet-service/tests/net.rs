@@ -459,8 +459,9 @@ async fn a_network_runs_on_link2_alone_its_chain_messages_and_acts_included() {
     let (s, v) = a.call("POST", "/api/net/remove", json!({ "host": "desk" }), true).await;
     assert_eq!(s, 200, "{v}");
     until("laptop holds the removal", 10, || b.roster().len() == len + 2).await;
+    // Thirty seconds: a hosted macOS runner has taken more than ten.
     let mut removed = false;
-    for _ in 0..200 {
+    for _ in 0..600 {
         if c.state().await["removed"].is_object() {
             removed = true;
             break;
