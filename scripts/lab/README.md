@@ -125,6 +125,13 @@ plans, as on the Mac.
   the VMs and the Mac are on one LAN there, the Mac at the subnet's `.1`,
   with UDP and multicast between all three. That's where XenoNet's direct
   paths and mDNS run. `status` shows each VM's address on it.
+- **On macOS 26.5 the VMs can't reach each other.** Each vzNAT guest joins
+  the Mac's bridge as a private member (`ifconfig bridge100` shows
+  `PRIVATE` on both), so a guest reaches the Mac and the internet but
+  never the other guest: no ping, no UDP, no multicast. `lan-udp`, the
+  multicast check and the Xenolith checks that sync between vm1 and vm2
+  fail there until the lab's LAN moves to a network where guests talk
+  (Lima's `user-v2`, or `socket_vmnet`'s shared network).
 - **The Mac's loopback is blocked.** Lima's user network maps 192.168.5.2 in
   a guest to the Mac's 127.0.0.1, where XenoNet's API listens. nftables
   rules, loaded before the network at every boot

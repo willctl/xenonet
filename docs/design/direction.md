@@ -743,9 +743,15 @@ Will's step on inix and NEO-REX.
       actors' grants again (Grok Bot's gateway token, the Hermes plugin's
       token); connect Claude Code and Codex again from the window
       (`/hooks` once in Codex).
-   6. Before the cutover, run the lab's Xenolith checks
-      (`npm run lab -- check`, `xenolith-rehearsal` first), which haven't
-      had a real run yet.
+   6. The lab's checks ran once on inix (`npm run lab -- check`, on
+      macOS 26.5 with Lima 2.1.2): `xenolith-rehearsal` passes, and so do
+      each VM's own checks. `xenolith-join`, `xenolith-notes`,
+      `xenolith-offline`, `lan-udp` and the multicast check fail because
+      the two VMs can't reach each other at all: macOS puts each vzNAT
+      guest on the bridge as a private member, so a guest reaches the Mac
+      and never another guest. The lab's LAN has to move to a network
+      where guests talk before those five mean anything
+      ([the lab's README](../../scripts/lab/README.md)).
    7. Xenolith on NEO-REX: inix's Xenolith never paired with it, so
       nothing waits in a 1.x queue. Install 2.0.1 there
       ([From 1.x to 2.0](../../xenolith/README.md#from-1x-to-20) if it
