@@ -325,6 +325,74 @@ async fn an_ask_from_another_machine_is_taken_only_for_a_run_it_was_asked_to_sta
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// What desk sends to everyone, with two networks: a body that names no
+/// network and arrives from none goes nowhere (it is refused, in words),
+/// one that names a network reaches that network's machines and no other's,
+/// and one made while handling a frame goes back into the network of the
+/// frame.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_body_for_everyone_goes_in_one_named_network_and_never_the_first() {
+    use xenonet_model::ops::{Kind, Outgoing, To};
+    let root = std::env::temp_dir().join(format!("xenonet-all-networks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let net = t.desk.svc.net();
+    let offer_for_all = |n: u32| {
+        let mut h = offer(n);
+        h["from"] = json!(t.desk.agt(DESK_ATLAS));
+        h["to"] = json!({ "agent": null, "projectKey": t.atlas, "host": null });
+        Outgoing { network: None, authority: None, to: To::All, kind: Kind::Handoff, body: h }
+    };
+    // Nothing names a network: refused, saying so, and nothing goes to
+    // N1's tower or N2's contractor-vm.
+    let refused = net.send(offer_for_all(1)).unwrap_err();
+    assert!(refused.contains("several networks"), "{refused}");
+    // Named, N2: contractor-vm hears it, tower does not.
+    net.send(Outgoing { network: Some(t.n2.clone()), ..offer_for_all(2) }).unwrap();
+    until("contractor-vm has the offer sent into N2", 20, || async { has_handoff(&t.contractor, 2) }).await;
+    // Made while handling a frame of N1: into N1, tower hears it.
+    xenonet_net::ground::within(&t.n1, || net.send(offer_for_all(3))).unwrap();
+    until("tower has the offer sent in N1", 20, || async { has_handoff(&t.tower, 3) }).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!has_handoff(&t.contractor, 1) && !has_handoff(&t.tower, 1), "the body that named no network went nowhere");
+    assert!(!has_handoff(&t.tower, 2), "N1's tower isn't in N2");
+    assert!(!has_handoff(&t.contractor, 3), "N2's contractor-vm isn't in N1");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A call that is made in no frame, with two networks, is not in either:
+/// the facts it decides on are the ones of no network, and what it reads
+/// of the settings is the most restrictive of the two. Made while handling
+/// a frame of a network, they are that network's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_call_with_no_frame_and_two_networks_decides_in_neither() {
+    let root = std::env::temp_dir().join(format!("xenonet-no-frame-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    // N1 lets the network wake desk's sessions and start sessions there; N2 doesn't.
+    let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "home", "host": "desk", "wake": "network", "start": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    let net = t.desk.svc.net();
+    let governance = xenonet_service::compose::runtime::ground::governance(&t.desk.world).unwrap();
+    use xenonet_net::ground::within;
+    let n1 = within(&t.n1, || (net.reach(), governance.facts().network().map(|n| n.as_str().to_string())));
+    assert_eq!((n1.0.wake.as_str(), n1.0.start.as_str(), n1.1.as_deref()), ("network", "network", Some(t.n1.as_str())));
+    let n2 = within(&t.n2, || (net.reach(), governance.facts().network().map(|n| n.as_str().to_string())));
+    assert_eq!((n2.0.wake.as_str(), n2.0.start.as_str(), n2.1.as_deref()), ("consent", "you", Some(t.n2.as_str())));
+    let none = (net.reach(), governance.facts().network());
+    assert_eq!((none.0.wake.as_str(), none.0.start.as_str()), ("consent", "you"), "N1's looser settings don't stand in for the call");
+    assert_eq!(none.1, None, "the call decides in no network");
+    // A frame of a network this machine isn't in is in none either.
+    assert_eq!(within("net_00000000-0000-4000-8000-000000000000", || governance.facts().network()), None);
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_hosts_with_their_engines_work_as_one_network() {
     let root = std::env::temp_dir().join(format!("xenonet-net-engine-{}", std::process::id()));
