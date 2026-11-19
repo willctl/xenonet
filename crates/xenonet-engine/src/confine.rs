@@ -13,8 +13,18 @@
 //! - `cell` names a wall, and no other level does.
 //! - The wall is the starting identity's wall, derived from the identity's
 //!   id by [`wall_for_identity`]. Another identity's wall is refused.
-//! - The project folder is copied into the cell, never mounted, and the
-//!   folder may not be the home folder or one that holds it.
+//! - The project folder is copied into the cell, never mounted. It is
+//!   resolved first (a symlink at the top is refused, the path is made
+//!   canonical, `..` and letter case do not get around the rules), and it
+//!   may not be the home folder or hold it, be a dot folder or `Library`
+//!   directly under the home folder, or be or hold a protected folder (the
+//!   Adytum home, XenoNet's state). The plan keeps the folder's device and
+//!   inode, and a run whose folder changed is refused.
+//! - Files that hold secrets in a project (`.env`, `.env.*`, `.git/config`,
+//!   see [`COPY_EXCLUDE`]) are not copied in.
+//! - What the cell makes comes back only into a fresh folder the runner
+//!   makes for it, never into the project, and only if it holds nothing but
+//!   plain files and folders.
 //! - The cell gets an environment of its own: a fixed `PATH` and `HOME`
 //!   inside the cell and the few names in [`ENV_ALLOWED`]. Any other name
 //!   offered, and any value that carries the host's home folder, is
@@ -28,6 +38,9 @@ use sha2::{Digest, Sha256};
 use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// What is not copied into a cell from a project: files that hold secrets.
+pub const COPY_EXCLUDE: &[&str] = &[".env", ".env.*", ".git/config"];
 
 /// The variables a cell may be given besides its fixed `PATH` and `HOME`:
 /// how text and the terminal are shown, nothing that grants anything.
@@ -77,6 +90,14 @@ pub enum ConfineError {
     EnvNotAllowed(String),
     /// A value that holds the host's home folder, or a NUL.
     EnvValueRefused(String),
+    /// An argument that holds the host's home folder, or a NUL.
+    ArgRefused,
+    /// The project folder is not the one the plan was made for.
+    ProjectChanged { project: String },
+    /// What the cell made holds something that is not a plain file or folder.
+    ResultRefused { path: String },
+    /// The cell could not be removed; the run's result is in the words.
+    NotRemoved { cell: String, why: String, result: String },
     /// A project folder that is the home folder or holds it, or is not absolute.
     ProjectRefused { project: String, why: &'static str },
     /// The host failed to run it in the cell.
@@ -101,6 +122,12 @@ impl fmt::Display for ConfineError {
             }
             Self::EnvNotAllowed(n) => write!(f, "A cell is not given {n}. It gets only {}; leave {n} out.", ENV_ALLOWED.join(", ")),
             Self::EnvValueRefused(n) => write!(f, "The value of {n} holds the host's home folder or a NUL byte, which a cell does not get. Leave it out."),
+            Self::ArgRefused => f.write_str("An argument holds the host's home folder or a NUL byte, which a cell does not get. Leave it out."),
+            Self::ProjectChanged { project } => write!(f, "The project folder {project} is not the folder the start was planned for. Plan the start again."),
+            Self::ResultRefused { path } => {
+                write!(f, "What the cell made holds {path}, which is not a plain file or folder, so none of it was kept. Look at the cell's own output.")
+            }
+            Self::NotRemoved { cell, why, result } => write!(f, "The cell {cell} could not be removed ({why}). Remove it with `adytum rm {cell}`. The run itself: {result}."),
             Self::ProjectRefused { project, why } => write!(f, "The project folder {project} cannot be copied into a cell: {why}."),
             Self::Host(m) => write!(f, "The cell could not run the start: {m}"),
         }
@@ -227,10 +254,13 @@ pub struct CellRequest<'a> {
     pub stdin: Option<&'a [u8]>,
     /// The project folder on the host, copied in.
     pub project: &'a Path,
+    /// Folders a cell never gets, whole or in part: Adytum's home and
+    /// XenoNet's state folder. The project may not be or hold one.
+    pub protected: &'a [PathBuf],
     pub offered_env: &'a [(String, String)],
     pub host_home: &'a str,
-    /// Where the project copy is copied back to when the run ends.
-    pub copy_out: Option<&'a Path>,
+    /// Bring what the cell made back, into a fresh folder of the runner's.
+    pub copy_out: bool,
     /// Keep the cell when the run ends (default: remove it).
     pub keep: bool,
     pub deadline: Option<Duration>,
@@ -248,8 +278,15 @@ pub struct CellPlan {
     /// The environment the program gets, all of it: `PATH`, `HOME`, then the
     /// allowed names.
     pub env: Vec<(String, String)>,
+    /// The project folder as resolved: canonical, not a symlink.
     pub project: PathBuf,
-    pub copy_out: Option<PathBuf>,
+    /// Its device and inode when planned (where the system has them).
+    pub project_id: Option<(u64, u64)>,
+    /// Paths, relative to the project, that are not copied in: file names
+    /// (`.env`) or `*`-ended prefixes (`.env.*`) at any depth, and paths
+    /// (`.git/config`) from the project's top.
+    pub copy_exclude: Vec<String>,
+    pub copy_out: bool,
     pub keep: bool,
     pub deadline: Option<Duration>,
 }
@@ -265,6 +302,9 @@ pub struct CellRun {
     pub cell: String,
     /// Whether the cell was removed when the run ended.
     pub removed: bool,
+    /// Where what the cell made was put (a fresh folder, for the caller to
+    /// look at and then remove), when the plan asked for it.
+    pub result: Option<PathBuf>,
 }
 
 /// What the engine needs of a place that can run a start in a cell.
@@ -292,11 +332,11 @@ pub fn plan(host: &dyn CellHost, req: &CellRequest<'_>) -> Result<CellPlan, Conf
         .find(|a| a.app == req.app && a.program.starts_with('/'))
         .map(|a| a.program)
         .ok_or_else(|| ConfineError::NoLinuxBuild { app: req.app.to_owned() })?;
-    check_project(req.project, req.host_home)?;
+    let (project, project_id) = resolve_project(req.project, req.host_home, req.protected)?;
     let mut env = vec![("PATH".to_owned(), CELL_PATH.to_owned()), ("HOME".to_owned(), CELL_HOME.to_owned())];
     env.extend(cell_env(req.offered_env, req.host_home)?);
-    if req.args.iter().any(|a| a.contains('\0')) {
-        return Err(ConfineError::EnvValueRefused("an argument".to_owned()));
+    if req.args.iter().any(|a| a.contains('\0') || holds_home(a, req.host_home) || canonical_home(req.host_home).is_some_and(|h| holds_home(a, &h.to_string_lossy()))) {
+        return Err(ConfineError::ArgRefused);
     }
     Ok(CellPlan {
         wall: wall.clone(),
@@ -305,8 +345,10 @@ pub fn plan(host: &dyn CellHost, req: &CellRequest<'_>) -> Result<CellPlan, Conf
         args: req.args.to_vec(),
         stdin: req.stdin.map(<[u8]>::to_vec),
         env,
-        project: req.project.to_path_buf(),
-        copy_out: req.copy_out.map(Path::to_path_buf),
+        project,
+        project_id,
+        copy_exclude: COPY_EXCLUDE.iter().map(|e| (*e).to_owned()).collect(),
+        copy_out: req.copy_out,
         keep: req.keep,
         deadline: req.deadline,
     })
@@ -317,16 +359,85 @@ pub fn run_confined(host: &dyn CellHost, req: &CellRequest<'_>) -> Result<CellRu
     host.run(&plan(host, req)?)
 }
 
-fn check_project(project: &Path, host_home: &str) -> Result<(), ConfineError> {
+fn canonical_home(host_home: &str) -> Option<PathBuf> {
+    (!host_home.is_empty()).then(|| std::fs::canonicalize(host_home).unwrap_or_else(|_| PathBuf::from(host_home.trim_end_matches(['/', '\\']))))
+}
+
+/// A path as the file system compares it: APFS and NTFS ignore letter case.
+fn folded(p: &Path) -> PathBuf {
+    if cfg!(any(target_os = "macos", windows)) {
+        PathBuf::from(p.to_string_lossy().to_lowercase())
+    } else {
+        p.to_path_buf()
+    }
+}
+
+#[cfg(unix)]
+#[expect(clippy::unnecessary_wraps, reason = "the other systems have no inode, and answer None")]
+fn id_of(meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn id_of(_: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+/// The project folder as the file system has it, or why it may not go in a
+/// cell. A symlink at the top is refused; the rest is judged on the
+/// canonical path, so `..`, links in the path and letter case change
+/// nothing.
+fn resolve_project(project: &Path, host_home: &str, protected: &[PathBuf]) -> Result<(PathBuf, Option<(u64, u64)>), ConfineError> {
     let refuse = |why| Err(ConfineError::ProjectRefused { project: project.display().to_string(), why });
     if !project.is_absolute() {
         return refuse("it is not an absolute path");
     }
-    let home = Path::new(host_home.trim_end_matches(['/', '\\']));
-    // The home folder itself, or any folder that holds it (including /),
-    // would put the user's other projects, keys and settings in the cell.
-    if !host_home.is_empty() && home.starts_with(project) {
-        return refuse("it is the home folder or holds it, and a cell never gets the home folder");
+    let Ok(top) = std::fs::symlink_metadata(project) else {
+        return refuse("it cannot be read");
+    };
+    if top.file_type().is_symlink() {
+        return refuse("it is a symbolic link; name the folder itself");
+    }
+    if !top.is_dir() {
+        return refuse("it is not a folder");
+    }
+    let Ok(canon) = std::fs::canonicalize(project) else {
+        return refuse("it cannot be resolved");
+    };
+    let at = folded(&canon);
+    if let Some(home) = canonical_home(host_home) {
+        let home = folded(&home);
+        // The home folder itself, or any folder that holds it (including /),
+        // would put the user's other projects, keys and settings in the cell.
+        if home.starts_with(&at) {
+            return refuse("it is the home folder or holds it, and a cell never gets the home folder");
+        }
+        if let Ok(rest) = at.strip_prefix(&home) {
+            let first = rest.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
+            if first.starts_with('.') || first == "library" {
+                return refuse("it is inside a dot folder or Library of the home folder, where settings, keys and tokens live");
+            }
+        }
+    }
+    for p in protected {
+        let p = folded(&std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()));
+        if p.starts_with(&at) || at.starts_with(&p) {
+            return refuse("it is, or holds, a folder XenoNet or Adytum keeps its own state in");
+        }
+    }
+    let id = std::fs::metadata(&canon).ok().and_then(|m| id_of(&m));
+    Ok((canon, id))
+}
+
+/// Checks that the folder a plan was made for is still that folder: not a
+/// symlink now, and the same device and inode. A runner calls it right
+/// before it copies the folder in.
+pub fn check_project_unchanged(plan: &CellPlan) -> Result<(), ConfineError> {
+    let changed = || ConfineError::ProjectChanged { project: plan.project.display().to_string() };
+    let meta = std::fs::symlink_metadata(&plan.project).map_err(|_| changed())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() || id_of(&meta) != plan.project_id {
+        return Err(changed());
     }
     Ok(())
 }
@@ -356,7 +467,53 @@ mod tests {
 
         fn run(&self, plan: &CellPlan) -> Result<CellRun, ConfineError> {
             self.ran.lock().expect("a test's lock").push(plan.clone());
-            Ok(CellRun { status: Some(0), stdout: Vec::new(), stderr: Vec::new(), timed_out: false, cell: "adytum-test-1".into(), removed: true })
+            Ok(CellRun { status: Some(0), stdout: Vec::new(), stderr: Vec::new(), timed_out: false, cell: "adytum-test-1".into(), removed: true, result: None })
+        }
+    }
+
+    /// A real folder to use as a project, outside any test home.
+    fn work() -> &'static Path {
+        static W: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        W.get_or_init(|| {
+            let d = std::env::temp_dir().join(format!("xn-confine-work-{}", std::process::id()));
+            std::fs::create_dir_all(&d).expect("a temp folder");
+            d
+        })
+    }
+
+    /// A home folder with a project, settings and a Library, all real.
+    struct Tree {
+        base: PathBuf,
+    }
+
+    impl Tree {
+        fn new(tag: &str) -> Self {
+            let base = std::fs::canonicalize(std::env::temp_dir()).expect("temp").join(format!("xn-confine-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            for d in ["home/Projects/atlas", "home/.ssh", "home/.adytum/lima", "home/Library/LaunchAgents", "state"] {
+                std::fs::create_dir_all(base.join(d)).expect("a folder");
+            }
+            Self { base }
+        }
+        fn home(&self) -> String {
+            self.base.join("home").to_string_lossy().into_owned()
+        }
+        fn refuses(&self, project: &Path, protected: &[PathBuf]) -> bool {
+            let c = cell_for("git:x");
+            let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
+            let home = self.home();
+            let mut req = request(&c, "git:x", project);
+            req.host_home = &home;
+            req.protected = protected;
+            let refused = matches!(plan(&fake, &req), Err(ConfineError::ProjectRefused { .. }));
+            assert!(fake.ran.lock().expect("lock").is_empty());
+            refused
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.base);
         }
     }
 
@@ -372,9 +529,10 @@ mod tests {
             args: &[],
             stdin: None,
             project,
+            protected: &[],
             offered_env: &[],
             host_home: HOME,
-            copy_out: None,
+            copy_out: false,
             keep: false,
             deadline: None,
         }
@@ -420,7 +578,7 @@ mod tests {
         let theirs = cell_for("github:github.com/other");
         assert!(matches!(theirs.check_identity("github:github.com/nova"), Err(ConfineError::WallNotIdentitys { .. })));
         let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
-        let req = request(&theirs, "github:github.com/nova", Path::new("/work/a"));
+        let req = request(&theirs, "github:github.com/nova", work());
         assert!(matches!(plan(&fake, &req), Err(ConfineError::WallNotIdentitys { .. })));
         assert!(fake.ran.lock().expect("lock").is_empty());
     }
@@ -463,7 +621,7 @@ mod tests {
     fn a_start_at_off_or_vendor_is_not_sent_to_a_cell() {
         let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
         for c in [Confinement::Off, Confinement::Vendor] {
-            assert_eq!(plan(&fake, &request(&c, "git:x", Path::new("/work/a"))), Err(ConfineError::NotACellStart));
+            assert_eq!(plan(&fake, &request(&c, "git:x", work())), Err(ConfineError::NotACellStart));
         }
     }
 
@@ -471,13 +629,13 @@ mod tests {
     fn an_app_with_no_linux_build_is_refused_in_words() {
         let c = cell_for("git:x");
         let fake = Fake::with(&[("other", "/usr/bin/other")]);
-        let err = plan(&fake, &request(&c, "git:x", Path::new("/work/a"))).expect_err("refused");
+        let err = plan(&fake, &request(&c, "git:x", work())).expect_err("refused");
         assert_eq!(err, ConfineError::NoLinuxBuild { app: "fake-agent".into() });
         assert!(err.to_string().contains("no Linux build in the cell image"));
         assert!(err.to_string().contains("vendor confinement or off"));
         // A program that is not an absolute path in the image is no build either.
         let fake = Fake::with(&[("fake-agent", "agent")]);
-        assert!(matches!(plan(&fake, &request(&c, "git:x", Path::new("/work/a"))), Err(ConfineError::NoLinuxBuild { .. })));
+        assert!(matches!(plan(&fake, &request(&c, "git:x", work())), Err(ConfineError::NoLinuxBuild { .. })));
     }
 
     #[test]
@@ -508,16 +666,125 @@ mod tests {
 
     #[test]
     fn the_home_folder_and_its_parents_are_not_copied_in() {
+        let t = Tree::new("home");
+        let home = PathBuf::from(t.home());
+        assert!(t.refuses(&home, &[]));
+        assert!(t.refuses(&PathBuf::from(format!("{}/", t.home())), &[]));
+        assert!(t.refuses(&t.base, &[]), "a folder that holds the home folder");
+        assert!(t.refuses(Path::new("/"), &[]));
+        assert!(t.refuses(Path::new("work/a"), &[]), "relative");
+        assert!(t.refuses(&home.join("nope"), &[]), "missing");
+        assert!(!t.refuses(&home.join("Projects/atlas"), &[]), "a project inside the home folder is copied, not mounted");
+    }
+
+    #[test]
+    fn a_path_that_climbs_back_to_the_home_folder_is_refused() {
+        let t = Tree::new("dotdot");
+        let home = PathBuf::from(t.home());
+        assert!(t.refuses(&home.join("Projects/atlas/../.."), &[]));
+        assert!(t.refuses(&home.join("Projects/../.ssh"), &[]));
+        assert!(t.refuses(&home.join("Projects/atlas/../../.."), &[]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_the_home_folder_or_into_it_is_refused() {
+        let t = Tree::new("link");
+        let home = PathBuf::from(t.home());
+        let to_home = t.base.join("to-home");
+        std::os::unix::fs::symlink(&home, &to_home).expect("a link");
+        assert!(t.refuses(&to_home, &[]), "a link to the home folder");
+        let to_project = t.base.join("to-project");
+        std::os::unix::fs::symlink(home.join("Projects/atlas"), &to_project).expect("a link");
+        assert!(t.refuses(&to_project, &[]), "even a link to a fine project: name the folder itself");
+        // A link in the middle of the path that leads to the home folder.
+        let via = t.base.join("via");
+        std::os::unix::fs::symlink(&home, &via).expect("a link");
+        assert!(t.refuses(&via.join(".ssh"), &[]), "a path through a link into a dot folder");
+        assert!(t.refuses(&via, &[]));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn another_letter_case_of_the_home_folder_is_refused() {
+        let t = Tree::new("case");
+        let home = t.home();
+        let upper = PathBuf::from(home.to_uppercase());
+        assert!(t.refuses(&upper, &[]), "{upper:?}");
+        let mut c = home.clone();
+        c.push_str("/PROJECTS/../.SSH");
+        assert!(t.refuses(Path::new(&c), &[]));
+        assert!(t.refuses(&PathBuf::from(format!("{}/library", home)), &[]));
+    }
+
+    #[test]
+    fn dot_folders_and_library_under_the_home_folder_are_refused() {
+        let t = Tree::new("dots");
+        let home = PathBuf::from(t.home());
+        for d in [".ssh", ".adytum", ".adytum/lima", "Library", "Library/LaunchAgents"] {
+            assert!(t.refuses(&home.join(d), &[]), "{d}");
+        }
+    }
+
+    #[test]
+    fn a_protected_folder_is_neither_the_project_nor_inside_it_nor_holds_it() {
+        let t = Tree::new("prot");
+        let state = t.base.join("state");
+        let protected = [state.clone()];
+        assert!(t.refuses(&state, &protected));
+        std::fs::create_dir_all(state.join("sub")).expect("sub");
+        assert!(t.refuses(&state.join("sub"), &protected));
+        assert!(t.refuses(&t.base, &protected));
+        // The Adytum home outside the user's home, named by ADYTUM_HOME.
+        let other = t.base.join("elsewhere/adytum");
+        std::fs::create_dir_all(&other).expect("other");
+        assert!(t.refuses(&other, &[other.clone()]));
+        assert!(!t.refuses(&t.base.join("home/Projects/atlas"), &protected));
+    }
+
+    #[test]
+    fn the_plan_keeps_the_canonical_folder_and_refuses_a_swapped_one() {
+        let t = Tree::new("swap");
         let c = cell_for("git:x");
         let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
-        for project in ["/Users/nova", "/Users/nova/", "/Users", "/"] {
-            let err = plan(&fake, &request(&c, "git:x", Path::new(project))).expect_err(project);
-            assert!(matches!(err, ConfineError::ProjectRefused { .. }), "{project}");
+        let home = t.home();
+        let project = t.base.join("home/Projects/atlas/../atlas");
+        let mut req = request(&c, "git:x", &project);
+        req.host_home = &home;
+        let plan = plan(&fake, &req).expect("a plan");
+        assert_eq!(plan.project, std::fs::canonicalize(t.base.join("home/Projects/atlas")).expect("canon"));
+        assert_eq!(check_project_unchanged(&plan), Ok(()));
+        #[cfg(unix)]
+        {
+            // The folder is replaced by a link to the home folder after the plan.
+            std::fs::remove_dir(&plan.project).expect("rm");
+            std::os::unix::fs::symlink(&home, &plan.project).expect("link");
+            assert!(matches!(check_project_unchanged(&plan), Err(ConfineError::ProjectChanged { .. })));
+            std::fs::remove_file(&plan.project).expect("rm link");
         }
-        let err = plan(&fake, &request(&c, "git:x", Path::new("work/a"))).expect_err("relative");
-        assert!(matches!(err, ConfineError::ProjectRefused { .. }));
-        assert!(plan(&fake, &request(&c, "git:x", Path::new("/Users/nova/Projects/atlas"))).is_ok(), "a project inside the home folder is copied, not mounted");
-        assert!(fake.ran.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn an_argument_with_the_host_home_is_refused() {
+        let t = Tree::new("args");
+        let c = cell_for("git:x");
+        let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
+        let home = t.home();
+        for arg in [format!("--config={home}/.ssh/config"), "a\0b".to_owned()] {
+            let args = [arg.clone()];
+            let mut req = request(&c, "git:x", work());
+            req.host_home = &home;
+            req.args = &args;
+            assert_eq!(plan(&fake, &req), Err(ConfineError::ArgRefused), "{arg:?}");
+        }
+    }
+
+    #[test]
+    fn secrets_in_a_project_are_on_the_plans_exclude_list() {
+        let c = cell_for("git:x");
+        let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
+        let plan = plan(&fake, &request(&c, "git:x", work())).expect("a plan");
+        assert_eq!(plan.copy_exclude, [".env", ".env.*", ".git/config"]);
     }
 
     #[test]
@@ -526,7 +793,7 @@ mod tests {
         let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
         let offered = [("LANG".to_owned(), "C.UTF-8".to_owned())];
         let args = ["agent.sh".to_owned()];
-        let mut req = request(&c, "git:x", Path::new("/work/a"));
+        let mut req = request(&c, "git:x", work());
         req.offered_env = &offered;
         req.args = &args;
         let run = run_confined(&fake, &req).expect("runs");
@@ -546,7 +813,7 @@ mod tests {
     fn a_refused_start_runs_nothing() {
         let c = cell_for("git:x");
         let fake = Fake::with(&[]);
-        assert!(run_confined(&fake, &request(&c, "git:x", Path::new("/work/a"))).is_err());
+        assert!(run_confined(&fake, &request(&c, "git:x", work())).is_err());
         assert!(fake.ran.lock().expect("lock").is_empty());
     }
 }
