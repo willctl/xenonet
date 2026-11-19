@@ -1,0 +1,71 @@
+# Daily use
+
+What it takes for one person to run a week of their real agent work on
+XenoNet. The person here is Nova: `desk` and `tower` are her machines,
+`contractor-vm` is a Linux machine she works on and doesn't own, `atlas` is
+the project that machine is for, and `ledger` is any other project. The
+names are made up.
+
+## What it's for
+
+1. A session on `desk` hands a render to `tower` and gets the result back.
+2. A manager session on `desk` starts work on `contractor-vm` in `atlas`,
+   answers its questions from `desk`, and `contractor-vm` can reach
+   nothing but `atlas`.
+3. Every session runs as the account and git identity its project calls
+   for, and a mismatch is caught before a commit or a push.
+4. Sessions started from the network run sandboxed.
+5. Sessions from the apps she uses show on one map.
+6. When a provider ships a new version, XenoNet says whether it still
+   reads it.
+
+Scenario 1 needs no new code, only both machines on a current release.
+
+## Built
+
+- **Harness.** The engine test harness is shared
+  (`crates/xenonet-service/tests/common/engine.rs`), with
+  `two_networks()`: `desk` in `home` with `tower` and in `work` with
+  `contractor-vm`, `work` shown only `atlas`. The lab's VMs reach each
+  other on Lima's `user-v2` network ([the lab's README](../../scripts/lab/README.md)).
+- **An identity guard that warns.** A project's rule names its git email
+  and push account; a mismatch shows in Needs you and the inspector, a
+  session is told at its start, and an opt-in pre-push hook refuses the
+  push ([identities](../guide/identities.md)).
+- **A network reaches only what it sees.** The receiving machine decides
+  every act from another machine against what the network the frame came
+  in is shown, before it checks the sender; what leaves is held to the
+  same sharing; a network with no sharing row is shown nothing; the first
+  network no longer stands in for every network
+  ([authorization](authorization.md), [network](network.md)).
+
+## Next
+
+Each waits until scenario 1 has run for real.
+
+- **A machine she doesn't own.** Try what exists first: a start she signs
+  at `desk` already runs on a machine that holds no identity of hers, and
+  its prompts come back to `desk`. A guest grant in the network's own
+  chain is built only if asking for presence on every prompt is too slow
+  in use. Whoever holds root on that machine can ignore anything XenoNet
+  does there; what protects her is that her own machines decide.
+- **Sandboxed starts.** Each harness's own sandbox, driven by XenoNet, with
+  the setting inside the signed start so nothing between her signature
+  and the run can drop it. An app with no sandbox refuses a sandboxed
+  start, in words.
+- **Several accounts per app.** Several folders per app, each with its own
+  sign-in and timeline; the identity rule gains the account; a start picks
+  the folder that holds the right account or refuses.
+- **More apps on the map**, through their own documented interfaces.
+- **Release watch.** The app registry records which version each reader
+  was last checked against, and `xenonet doctor` compares it with what is
+  installed.
+
+## Open
+
+- Who sees a run's permission prompt: only the machine that asked for the
+  run (today), or every console of the person's own machines.
+- Whether a session that takes a message from a guest may still read other
+  folders. Sandboxed starts are the mitigation.
+- A message already stored is handed over after its project stops being
+  shared; closing that needs the message's network in the store.
