@@ -58,6 +58,8 @@ pub struct DemoWorld {
     demo: Mutex<Demo>,
     world: Mutex<Option<Value>>,
     clients: OnceCell<()>,
+    /// Whether the made-up rules have been given to their projects.
+    ruled: std::sync::atomic::AtomicBool,
 }
 
 impl DemoWorld {
@@ -65,13 +67,13 @@ impl DemoWorld {
     /// servers running side by side don't wipe each other's.
     pub fn new(port: u16) -> DemoWorld {
         let tmp = xenonet_os::paths::real_path(&std::env::temp_dir());
-        DemoWorld { demo: Mutex::new(Demo::new(&tmp.to_string_lossy(), &port.to_string(), &local_day(now_ms()))), world: Mutex::new(None), clients: OnceCell::new() }
+        DemoWorld { demo: Mutex::new(Demo::new(&tmp.to_string_lossy(), &port.to_string(), &local_day(now_ms()))), world: Mutex::new(None), clients: OnceCell::new(), ruled: Default::default() }
     }
 
     /// The demo over a world already written (`Demo::over`), as made.
     pub fn over(demo: Demo) -> DemoWorld {
         let world = demo.world.to_value();
-        DemoWorld { demo: Mutex::new(demo), world: Mutex::new(Some(world)), clients: OnceCell::new() }
+        DemoWorld { demo: Mutex::new(demo), world: Mutex::new(Some(world)), clients: OnceCell::new(), ruled: Default::default() }
     }
 
     /// Builds the demo workspace from scratch (once).
@@ -89,6 +91,29 @@ impl DemoWorld {
     /// world is made.
     pub fn remembered(&self) -> Option<Value> {
         lock(&self.demo).remembered().cloned()
+    }
+
+    /// The rules Nova would have set, as `(project id, rule)` for the
+    /// project nodes given, once: the projects have their ids only after
+    /// the first scan, and a rule she clears must stay cleared.
+    pub fn rules_to_set(&self, nodes: &[Value]) -> Vec<(String, Value)> {
+        use std::sync::atomic::Ordering;
+        if self.ruled.load(Ordering::SeqCst) {
+            return Vec::new();
+        }
+        let Some(by_path) = self.remembered().and_then(|r| r.get("rulesByPath").and_then(Value::as_object).cloned()) else { return Vec::new() };
+        let mut found = Vec::new();
+        for (path, rule) in &by_path {
+            let key = xenonet_os::paths::path_key(path);
+            let node = nodes.iter().find(|n| n.get("kind").and_then(Value::as_str) == Some("project") && n.get("path").and_then(Value::as_str).and_then(xenonet_os::paths::path_key) == key);
+            if let Some(id) = node.and_then(|n| n.get("id").and_then(Value::as_str)) {
+                found.push((id.to_string(), rule.clone()));
+            }
+        }
+        if found.len() == by_path.len() {
+            self.ruled.store(true, Ordering::SeqCst);
+        }
+        found
     }
 
     /// The sessions of an app as its adapter would list them.

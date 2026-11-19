@@ -233,6 +233,7 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/projects/codex", YOU, Nothing),
     r("DELETE", "/api/projects/codex", YOU, Nothing),
     r("GET",    "/api/identities", LOCAL, Nothing),
+    r("GET",    "/api/identities/project", LOCAL, Nothing),
     r("POST",   "/api/identities/name", YOU, Nothing),
     r("POST",   "/api/identities/hidden", YOU, Nothing),
     r("POST",   "/api/identities/pin", YOU, Nothing),

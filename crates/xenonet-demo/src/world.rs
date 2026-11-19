@@ -955,11 +955,17 @@ impl Demo {
         known.insert(work.clone(), json!({ "kind": "claude", "handle": "nova@atlas.example", "detail": { "plan": "Team", "org": "Atlas" }, "firstSeen": n(now - 30.0 * 86400e3), "lastSeen": n(now - 8.0 * 3600e3) }));
         let signins = json!({ "claude": [{ "id": work, "from": n(now - 30.0 * 86400e3), "to": n(now - 8.0 * 3600e3) }, { "id": personal, "from": n(now - 8.0 * 3600e3), "to": n(now - 3600e3) }] });
         files::mkdir_p(&self.world.state_dir, None)?;
-        Ok(json!({ "names": names, "known": known, "signins": signins }))
+        // Nova's rule for pathfinder: Orbit's email and Orbit's account.
+        // Its commits carry the email, but a push signs in as nova-dev, so
+        // the rule doesn't match and XenoNet warns.
+        // A project's id is made when it is first scanned, so the rule is
+        // kept by folder until the service has one.
+        let rules = json!({ self.p("pathfinder"): { "git": "hello@orbitworks.example", "push": { "login": "orbitworks", "host": "github.com" } } });
+        Ok(json!({ "names": names, "known": known, "signins": signins, "rulesByPath": rules }))
     }
 
     /// What XenoNet would remember of the made-up identities, once the
-    /// world is made: `{ names, known, signins }`.
+    /// world is made: `{ names, known, signins, rulesByPath }`.
     pub fn remembered(&self) -> Option<&Value> {
         self.remembered.as_ref()
     }

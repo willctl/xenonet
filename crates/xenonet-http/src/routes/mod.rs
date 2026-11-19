@@ -1032,6 +1032,10 @@ async fn identities(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError
     if m == "GET" && route == "/api/identities" {
         return Ok(Some(Reply::json(200, state.identity_detection()?)));
     }
+    if m == "GET" && route == "/api/identities/project" {
+        let path = req.param("path").unwrap_or("").to_string();
+        return Ok(Some(Reply::json(200, state.identity_project(&path)?)));
+    }
     let get = |b: &Value, k: &str| b.get(k).cloned().unwrap_or(Value::Null);
     match (m.as_str(), route.as_str()) {
         ("POST", "/api/identities/name") => {

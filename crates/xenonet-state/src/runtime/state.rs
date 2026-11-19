@@ -674,6 +674,11 @@ impl MapState {
             None => None,
             Some(w) => {
                 let t0 = self.now();
+                if let Some(d) = self.demo() {
+                    for (id, rule) in d.rules_to_set(items(graph.get("nodes"))) {
+                        self.store.set_identity_rule(&id, Some(&rule));
+                    }
+                }
                 let linked = w.link(&mut graph, &self.store);
                 if linked.is_ok() {
                     self.note_signins();
@@ -1603,6 +1608,28 @@ impl State for MapState {
         self.store.set_identity_rule(&id, rule.as_ref());
         self.after_change().await?;
         self.identity_detection()
+    }
+    fn identity_project(&self, path: &str) -> R<Value> {
+        let Some(want) = path_key(path) else { return Err(err("give a folder")) };
+        // The project whose folder holds this one, the deepest of them.
+        let found = self
+            .all_nodes()
+            .into_iter()
+            .filter(|n| n.get("kind").and_then(Value::as_str) == Some("project"))
+            .filter_map(|n| {
+                let key = path_key(n.get("path").and_then(Value::as_str)?)?;
+                xenonet_os::paths::is_under(&want, &key).then_some((key.len(), n))
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, n)| n);
+        let Some(node) = found else { return Ok(json!({ "project": null, "rule": null, "check": null })) };
+        let id = node.get("id").cloned().unwrap_or(Value::Null);
+        let rule = id.as_str().and_then(|i| self.store.identities().get("rules").and_then(|r| r.get(i)).cloned()).unwrap_or(Value::Null);
+        Ok(json!({
+            "project": { "id": id, "name": node.get("name").cloned().unwrap_or(Value::Null), "path": node.get("path").cloned().unwrap_or(Value::Null) },
+            "rule": rule,
+            "check": node.get("identityRule").cloned().unwrap_or(Value::Null),
+        }))
     }
     async fn rescan_identities(&self) -> R<Value> {
         if let Some(w) = &self.identities {

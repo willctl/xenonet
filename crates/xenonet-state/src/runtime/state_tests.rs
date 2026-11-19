@@ -265,7 +265,7 @@ async fn a_projects_rule_is_checked_on_the_map() {
     s.refresh_map().await.expect("a map with the repos read");
     let graph = s.graph().expect("graph").expect("a map");
     let reads = |n: &Value, role: &str| items(n.get("identities")).iter().any(|l| l["role"] == role);
-    let project = items(graph.get("nodes")).iter().find(|n| n["kind"] == "project" && reads(n, "commits-as")).expect("a project that commits as someone").clone();
+    let project = items(graph.get("nodes")).iter().find(|n| n["kind"] == "project" && reads(n, "commits-as") && n.get("identityRule").is_none()).expect("a project that commits as someone").clone();
     let id = project["id"].as_str().unwrap().to_string();
     assert!(project.get("identityRule").is_none(), "no rule, no check");
     // A rule for an email nobody here commits with.
@@ -274,18 +274,38 @@ async fn a_projects_rule_is_checked_on_the_map() {
     let n = s.node_of(&id).expect("the project");
     assert_eq!((n["identityRule"]["git"]["state"].as_str(), n["identityRule"]["mismatch"].as_bool()), (Some("differs"), Some(true)), "{}", n["identityRule"]);
     let warned = s.summary().expect("a summary");
-    assert_eq!(warned["identityWarnings"][0]["id"], id.as_str(), "{warned}");
+    assert!(items(warned.get("identityWarnings")).iter().any(|w| w["id"] == id.as_str()), "{warned}");
     // A rule for the one it does commit with matches.
     let uses = n["identityRule"]["git"]["uses"].as_str().expect("the email it commits with").to_string();
     s.set_identity_rule(json!(id), json!({ "git": uses })).await.expect("another rule");
     assert_eq!(s.node_of(&id).unwrap()["identityRule"]["mismatch"], false);
-    assert!(s.summary().unwrap().get("identityWarnings").is_none(), "nothing to warn of");
+    assert!(!items(s.summary().unwrap().get("identityWarnings")).iter().any(|w| w["id"] == id.as_str()), "nothing to warn of for it");
     assert!(s.set_identity_rule(json!(SESSION1), json!({ "git": "ada@acme.example" })).await.is_err(), "only a project has a rule");
     assert!(s.set_identity_rule(json!(id), json!({ "git": "not an email" })).await.is_err());
     // Naming neither takes the rule out.
     let gone = s.set_identity_rule(json!(id), json!({})).await.expect("no rule");
-    assert!(gone.get("rules").is_none());
+    assert!(gone.get("rules").and_then(|r| r.get(&id)).is_none());
     assert!(s.node_of(&id).unwrap().get("identityRule").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_demos_rule_doesnt_match_and_a_folder_finds_its_project() {
+    let w = world();
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    s.refresh_repos().await;
+    s.refresh_map().await.expect("a map with the repos read");
+    let warned = s.summary().expect("a summary");
+    assert_eq!(items(warned.get("identityWarnings")).len(), 1, "{warned}");
+    let id = warned["identityWarnings"][0]["id"].as_str().unwrap().to_string();
+    let path = s.node_of(&id).expect("the project")["path"].as_str().unwrap().to_string();
+    // The project's folder and a folder inside it both find it, with the rule and its check.
+    for folder in [path.clone(), format!("{path}/src/deeper")] {
+        let found = s.identity_project(&folder).expect("a project");
+        assert_eq!((found["project"]["id"].as_str(), found["rule"]["git"].as_str(), found["check"]["mismatch"].as_bool()), (Some(id.as_str()), Some("hello@orbitworks.example"), Some(true)), "{found}");
+    }
+    let outside = s.identity_project("/nowhere/at/all").expect("an answer");
+    assert!(outside["project"].is_null() && outside["rule"].is_null(), "{outside}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

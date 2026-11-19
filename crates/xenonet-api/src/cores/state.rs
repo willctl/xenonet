@@ -121,6 +121,11 @@ pub trait State: Send + Sync {
     async fn rescan_identities(&self) -> R<Value> {
         pending(M)
     }
+    /// The project a folder is in, with its rule and the rule's check
+    /// (`{ project: { id, name, path } | null, rule, check }`).
+    fn identity_project(&self, _path: &str) -> R<Value> {
+        pending(M)
+    }
     fn summary(&self) -> R<Value> {
         pending(M)
     }
