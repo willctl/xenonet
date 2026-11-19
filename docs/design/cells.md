@@ -41,10 +41,11 @@ XenoNet   who may do what, across machines (signed acts, decide, grants)
 |---|---|
 | `adytum-model` | Typed ids (`cell_`, `img_`, `wall_`), names, the cell spec, image pins, refusals. Serde, no IO |
 | `adytum-policy` | Every isolation rule as a pure function over a spec and what already exists |
+| `adytum-driver` | The trait a cell driver implements (`create`, `start`, `exec`, `stream`, `copy_in`, `copy_out`, `stop`, `remove`, `list`, `clone`) and its errors; the one place text becomes a cell name |
 | `adytum-exec` | A program and an argument list, never a shell string: streamed output, a deadline, a cancel, the process group stopped, only the named variables, and a duplex byte stream to a child's stdin and stdout |
 | `adytum-lima` | Lima cells: create, start, run, copy, stop, remove, from a pinned image, by running `limactl` through `adytum-exec` |
 | `adytum-oci` | Podman and docker cells, the same trait as Lima |
-| `adytum-ledger` | A record before each create, settled after, compared with what exists at every start |
+| `adytum-ledger` | A record before each create and remove, settled after, compared with what exists at every start. It keeps its own `adytum.sqlite` under `ADYTUM_HOME`, not XenoNet's store, because a table added there would change XenoNet's schema hash and make every XenoNet machine set up again |
 | `adytum-doctor` | What is wrong, each problem with its fix |
 | `adytum-cli` | The `adytum` binary |
 | `adytum-testkit` | A fake `limactl` and `podman` that replay golden files |
@@ -86,17 +87,17 @@ answers, per pinned Lima version.
 
 | Crate | Job |
 |---|---|
-| `eidolon-model` | Typed ids (`eid_`, `fct_`), the manifest, facet kinds, the seat record |
+| `eidolon-model` | Typed ids (`eid_`, `fct_`), walls, facet specs, holders, the seat record and its `State` (`Sealed`, `Opening`, `Open`, `Retired`) |
 | `eidolon-policy` | One seat, the holder list, the wall, what a facet may leave out |
 | `eidolon-vault` | Chunks named by a keyed hash of their content, encrypted at rest |
-| `eidolon-pack` | A facet's files into chunks and a signed manifest, and back |
+| `eidolon-pack` | A facet's files into chunks, the manifest that lists them, and the signed head that names the manifest's chunks; and back |
 | `eidolon-facet` | The facet trait and the `folder` kind |
 | `eidolon-move` | Have-and-want over any byte stream, resumable, key wrapped to the receiver, the seat passed |
 | `eidolon-bidi` | A WebDriver BiDi client |
-| `eidolon-browser` | The browser facet: profile rules, a browser kept alive in a cell |
-| `eidolon-view` | The person's window for sign-ins |
-| `eidolon-mcp` | The browser facet's tools for agents |
-| `eidolon-cli` | The `eidolon` binary |
+| `eidolon-browser` | The browser facet: profile rules, the systemd units, a browser kept alive in a cell |
+| `eidolon-view` | The person's window for sign-ins: a screen share on 127.0.0.1 |
+| `eidolon-mcp` | The browser facet's tools for agents, over stdio or over HTTP on localhost |
+| `eidolon-cli` | The `eidolon` binary, and the machine's file key store |
 | `eidolon-testkit` | A fake BiDi server |
 
 ### Sealed
@@ -108,10 +109,16 @@ answers, per pinned Lima version.
   is compressed, then sealed with ChaCha20-Poly1305 under the eidolon's
   content key, the nonce taken from the name. A chunk whose body doesn't
   open, or opens to a plaintext with another name, is refused.
-- Both keys come from one 32-byte eidolon key in the machine's key store
-  (`xenonet_id::store::KeyStore`), never in a file beside the vault.
-- The manifest lists each facet's files (path, mode, size, chunk names) and
-  is signed by the seat's machine key.
+- Both keys come from one 32-byte eidolon key, kept under the eidolon's name
+  in the machine's key store (`xenonet_id::store::KeyStore`), never in a file
+  beside the vault. On this platform the store is a file store, one
+  owner-only file per secret under `<home>/keys`, because no operating system
+  store is used yet; `eidolon machine init` says so.
+- The manifest (in `eidolon-pack`) lists each facet's files (path, mode,
+  size, chunk names) and is itself sealed into chunks. The head names those
+  chunks and is signed by a machine key. An eidolon opens only if some machine
+  on the holder list signed its head, because after several moves the signer
+  can be neither the current holder nor the sender of the last move.
 
 ### One seat
 
@@ -121,6 +128,12 @@ receiver, signed by the sender. The sender then deletes its eidolon key, so
 its vault can no longer open the eidolon even though its chunks remain. A
 receiver refuses a seat record that isn't the next generation, isn't signed
 by the current seat, or names a machine off the holder list.
+
+An eidolon is `Sealed`, `Opening`, `Open` in one cell, or `Retired`. `Opening`
+is written before the first file is placed in a cell, so a kill during an open
+is found by the next command, which clears the cell or finishes the open.
+A sender that cannot tell whether the receiver took the eidolon keeps it
+closed until the person settles it (`move-settle`).
 
 ### Moving
 
@@ -142,16 +155,31 @@ after it, with the receiver. There is never a moment with two seats or none.
 ### The browser facet
 
 Firefox runs in its own cell, kept alive by systemd units, with no program
-of Eidolon's in the guest. Its automation is WebDriver BiDi on a socket in
+of Eidolon's in the guest. The cell is set up on its first open: Firefox from
+Mozilla's package repository, a virtual display and a screen share. Its automation is WebDriver BiDi on a socket in
 the guest, which the host reaches as a byte stream over Adytum's exec
 channel; the port is never forwarded. Ready means the protocol answered.
 Before sealing, the browser is stopped so its profile is quiet, and caches
 are left out. Eidolon does not hide automation from sites.
 
-The person signs in through a window (`eidolon-view`) on 127.0.0.1 with a
-secret per session. While it is open, automation is off: the browser runs
-without its automation socket. Files for uploads and downloads go through
-one folder of the cell.
+The person signs in through a window (`eidolon view`) on 127.0.0.1 with a
+secret per session, shown once. The window is three units: the browser
+without its automation socket, a virtual display and a screen share. Opening
+it stops the automation browser, and closing it starts that browser again on
+the same profile. While it is open, automation is off. The host reaches the
+screen share as a byte stream over Adytum's exec channel, as it does the
+automation socket; nothing is forwarded.
+
+Agents get the browser through `eidolon mcp <eid>`, an MCP server on standard
+input and output, or `eidolon mcp <eid> --http 127.0.0.1:<port>`, the same
+tools over HTTP on the loopback address only. The HTTP form makes a token,
+writes it once to standard error and checks it on every request; it answers
+only on `/mcp/` and refuses a request that carries an `Origin` header. XenoNet
+publishes that address as a service, so a session on another machine calls it
+through the network's own door with the token as its `Authorization` header.
+Files for uploads and downloads pass through one folder on the host,
+`$EIDOLON_HOME/files/<eid>/`. An upload must resolve to a regular file inside
+it, and a fetched download lands in its `downloads` folder.
 
 ## The alignment check
 
