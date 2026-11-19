@@ -122,7 +122,11 @@ impl Browser {
         if let Some(session) = &inner.session {
             return Ok(Arc::clone(session));
         }
-        let session = Arc::new(Self::connect_with(self.driver.as_ref(), &self.cell, self.port, self.options).await?);
+        let session = Self::connect_with(self.driver.as_ref(), &self.cell, self.port, self.options).await?;
+        // A new connection has no BiDi session yet, and no command but
+        // `session.status` works until it has one.
+        session.new_session().await?;
+        let session = Arc::new(session);
         inner.generation += 1;
         let generation = inner.generation;
         // Subscribe again to everything a caller asked for before.

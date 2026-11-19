@@ -66,8 +66,9 @@ async fn a_browser_that_says_it_is_not_ready_is_an_error_after_the_bound() {
 
 #[tokio::test]
 async fn after_the_connection_drops_the_next_command_succeeds_on_a_new_one() {
-    // Message 1 is the readiness check; message 2 drops the connection.
-    let first = FakeBidi::new().drop_on_message(2);
+    // Message 1 is the readiness check, 2 opens the session; message 3
+    // drops the connection.
+    let first = FakeBidi::new().drop_on_message(3);
     let second = FakeBidi::new();
     let second_page = second.page();
     let driver = FakeDriver::new(vec![Next::Serve(first), Next::Serve(second)]);
@@ -80,19 +81,19 @@ async fn after_the_connection_drops_the_next_command_succeeds_on_a_new_one() {
     let answer = browser.send("session.status", json!({})).await.unwrap();
     assert_eq!(answer["ready"], true);
     assert_eq!(driver.stream_count(), 2, "a second connection was made");
-    // The new browser was asked if it is ready before it got the command.
-    assert_eq!(second_page.methods(), ["session.status", "session.status"]);
+    // The new browser was asked if it is ready and given a session before it got the command.
+    assert_eq!(second_page.methods(), ["session.status", "session.new", "session.status"]);
 }
 
 #[tokio::test]
 async fn a_subscription_survives_a_reconnect() {
-    let first = FakeBidi::new().drop_on_message(3);
+    let first = FakeBidi::new().drop_on_message(4);
     let second = FakeBidi::new();
     let second_page = second.page();
     let driver = FakeDriver::new(vec![Next::Serve(first), Next::Serve(second)]);
     let browser = Browser::supervise(driver.clone(), cell(), 9222, quick());
 
-    // Messages: 1 status, 2 subscribe, 3 (dropped).
+    // Messages: 1 status, 2 new session, 3 subscribe, 4 (dropped).
     let mut events = browser.subscribe(&["browsingContext.load"]).await.unwrap();
     assert!(browser.send("session.status", json!({})).await.is_err());
 
