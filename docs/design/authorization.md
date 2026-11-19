@@ -498,8 +498,8 @@ answer:
    session it is for, as that machine's presence names it, else it is
    refused here in words). A handoff's accept and answers say which handoff
    and who, never what the work was, and are told in each network the
-   offer went to. A stored claim is held to what is shared now.
-   This machine's own door isn't limited by what any network is shown.
+   offer went to. A stored claim is held to what is shared now, in the warning before an edit and in the reply to a claim alike. A message already stored, waiting for its session to read it, is not recalled when its project is unshared afterwards.
+   This machine's own door isn't limited by what any network is shown. It does read the settings: a call in no frame, from a machine in several networks, is decided on the narrowest start and wake of those networks (`Facts::narrowed`), never the defaults.
    What a member can read of this machine as an admin (`Act::Read` of the
    machine's transcripts and stats) is not limited by it either: the
    sharing narrows what a network reaches and is shown, not what its

@@ -434,10 +434,14 @@ person, one endpoint with one connection per peer, and the HLC.
   in hand arrived in (`ground::within`, carried to any thread that answers
   for it: a start's receipts name the network their request came in), else
   the one network this machine is in (a network it was removed from does not
-  count). A call in no frame from a machine in several networks is in none: it decides on the facts of no network, reads
-  the narrowest of their settings (`Reach::narrowest`: the lowest start and
-  wake; titles only if any network asks, load shared only if all do, no
-  roster head), and a body for everyone (`To::All`) is refused in words
+  count: not for a start, an intent, a read of the settings or the page's
+  choice of network). A call in no frame from a machine in several networks
+  is in none: it decides on the facts of no network and reads the narrowest
+  of their settings, in what it is decided on too (`Facts::narrowed`: the
+  lowest start and wake, so with every network's start off even your own
+  start here is refused) and in what is read (`Reach::narrowest`: titles
+  only if any network asks, load shared only if all do, no roster head, a
+  delegation only if the networks agree on who gave it), and a body for everyone (`To::All`) is refused in words
   unless it names its network. `Net::me` still names this machine by the
   first network, for labels only. A send to a host that is in two of this
   machine's networks goes into the first that has it; a start names its
@@ -466,14 +470,16 @@ person, one endpoint with one connection per peer, and the HLC.
   message's wake is decided in that network too: its wake setting, and
   whether it is shown the session. Every network has a sharing row from the
   moment it is adopted (the first shares all, the rest none; a store opened
-  without one writes "all", which is what a missing row meant); a network
-  with no row is shown nothing. What goes out is held to it the same way: a
+  with a network that has no row writes "all" for the first network only and
+  "none" for the others, which is what a missing row meant only for the
+  first); a network with no row is shown nothing. What goes out is held to it the same way: a
   claim or a handoff goes into each network its project is shared into, in
   the network of the frame in hand too, and a handoff that names no project
   only into a network shown everything. What comes in is held to it too: a
   remote session in a project this machine doesn't show any network it
-  shares with that host warns of no edit collision and is not among the
-  sessions this machine shows. An admin's read of this machine (transcripts,
+  shares with that host warns of no edit collision, is not among the
+  sessions this machine shows and is not named as the claim that stands in
+  the reply to a claim. An admin's read of this machine (transcripts,
   stats) is not narrowed by sharing.
 - **Grants name a network.** An actor's grant is minted with a network
   fact, and one with none or another network is refused, so a second
@@ -918,11 +924,18 @@ its ask also carries the run it was forked from (followed back through
 copies of copies), which the receiver checks for the sending machine in
 place of the copy. An ask is taken when it arrives in that network from a
 machine that has such a run named. A run stays named for a day after it was
-last named or last asked from (each ask taken renews it), so a turn resumed
-by a later message is taken after its request is over. Any other ask is
-dropped and logged, so a member that may message a machine can't put
-prompts in its Needs you, and a window host shows the prompts of the runs
-it asked for.
+last named or last asked from (each ask taken renews it, to a week from the
+start at most), so a turn resumed by a later message is taken after its
+request is over. The runs named, and the network each run started here for
+another machine came through (where its asks go), are kept in the store as
+settings (`named-runs`, `run-networks`), so a restart of the service forgets
+neither; age drops them, and a full table drops the one longest unused. Any
+other ask is dropped and logged, so a member that may message a machine
+can't put prompts in its Needs you, and a window host shows the prompts of
+the runs it asked for. A run's ask is sent to every window host of its
+network, and each one that didn't ask for the run drops it. An ask is
+answered by its id alone, so the first machine to send an ask under an id
+holds it: another machine's ask under it is dropped.
 
 **Intents** for any machine the delegation names are given out once by
 the arbiter the intent names, from takes that carry the person's signed
