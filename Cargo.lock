@@ -55,6 +55,16 @@ dependencies = [
 [[package]]
 name = "adytum-doctor"
 version = "0.1.0"
+dependencies = [
+ "adytum-exec",
+ "adytum-ledger",
+ "adytum-lima",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
 
 [[package]]
 name = "adytum-driver"

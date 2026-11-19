@@ -1,0 +1,298 @@
+{
+  "comment": "Not recorded: written from docker's documentation (docker ps --format json prints one object per line, with Names and Labels as strings; docker rm -f stops at once and has no --time). The calls are the ones the podman recording makes, in the same order.",
+  "tool": "docker",
+  "version": "27.3.1",
+  "calls": [
+    {
+      "argv": [
+        "docker",
+        "ps",
+        "-a",
+        "--filter",
+        "label=adytum.cell",
+        "--format",
+        "json"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "create",
+        "--name",
+        "adytum-test-golden",
+        "--label",
+        "adytum.cell=cell_yqyge2xe76symzyy6eop2jfep4",
+        "--label",
+        "adytum.wall=wall_test",
+        "--pull=missing",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--cpus=1",
+        "--memory=256m",
+        "docker.io/library/alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+        "sleep",
+        "infinity"
+      ],
+      "stdin": null,
+      "stdout": "03062be0456dd2ea7a1d8da7074d4e2eeb107bd803255022c8a509484f4f5aa3\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "ps",
+        "-a",
+        "--filter",
+        "label=adytum.cell",
+        "--format",
+        "json"
+      ],
+      "stdin": null,
+      "stdout": "{\"Names\":\"adytum-test-golden\",\"State\":\"created\",\"Labels\":\"adytum.cell=cell_yqyge2xe76symzyy6eop2jfep4,adytum.wall=wall_test\",\"Image\":\"docker.io/library/alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc\"}\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "container",
+        "inspect",
+        "--format",
+        "{{index .Config.Labels \"adytum.cell\"}}",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "cell_yqyge2xe76symzyy6eop2jfep4\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "start",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "adytum-test-golden\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "ps",
+        "-a",
+        "--filter",
+        "label=adytum.cell",
+        "--format",
+        "json"
+      ],
+      "stdin": null,
+      "stdout": "{\"Names\":\"adytum-test-golden\",\"State\":\"running\",\"Labels\":\"adytum.cell=cell_yqyge2xe76symzyy6eop2jfep4,adytum.wall=wall_test\",\"Image\":\"docker.io/library/alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc\"}\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "container",
+        "inspect",
+        "--format",
+        "{{index .Config.Labels \"adytum.cell\"}}",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "cell_yqyge2xe76symzyy6eop2jfep4\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "exec",
+        "adytum-test-golden",
+        "cat",
+        "/etc/os-release"
+      ],
+      "stdin": null,
+      "stdout": "NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.20.10\nPRETTY_NAME=\"Alpine Linux v3.20\"\nHOME_URL=\"https://alpinelinux.org/\"\nBUG_REPORT_URL=\"https://gitlab.alpinelinux.org/alpine/aports/-/issues\"\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "container",
+        "inspect",
+        "--format",
+        "{{index .Config.Labels \"adytum.cell\"}}",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "cell_yqyge2xe76symzyy6eop2jfep4\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "exec",
+        "adytum-test-golden",
+        "printf",
+        "%s\\n",
+        "$(touch /tmp/x)",
+        "a b",
+        ";",
+        "*",
+        "it's",
+        "-n"
+      ],
+      "stdin": null,
+      "stdout": "$(touch /tmp/x)\na b\n;\n*\nit's\n-n\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "container",
+        "inspect",
+        "--format",
+        "{{index .Config.Labels \"adytum.cell\"}}",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "cell_yqyge2xe76symzyy6eop2jfep4\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "cp",
+        "{work}/in.txt",
+        "adytum-test-golden:/tmp/in.txt"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "container",
+        "inspect",
+        "--format",
+        "{{index .Config.Labels \"adytum.cell\"}}",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "cell_yqyge2xe76symzyy6eop2jfep4\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "cp",
+        "adytum-test-golden:/tmp/in.txt",
+        "{work}/out.txt"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "container",
+        "inspect",
+        "--format",
+        "{{index .Config.Labels \"adytum.cell\"}}",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "cell_yqyge2xe76symzyy6eop2jfep4\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "stop",
+        "--time",
+        "2",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "adytum-test-golden\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "ps",
+        "-a",
+        "--filter",
+        "label=adytum.cell",
+        "--format",
+        "json"
+      ],
+      "stdin": null,
+      "stdout": "{\"Names\":\"adytum-test-golden\",\"State\":\"exited\",\"Labels\":\"adytum.cell=cell_yqyge2xe76symzyy6eop2jfep4,adytum.wall=wall_test\",\"Image\":\"docker.io/library/alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc\"}\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "container",
+        "inspect",
+        "--format",
+        "{{index .Config.Labels \"adytum.cell\"}}",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "cell_yqyge2xe76symzyy6eop2jfep4\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "rm",
+        "--force",
+        "--volumes",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "adytum-test-golden\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "docker",
+        "ps",
+        "-a",
+        "--filter",
+        "label=adytum.cell",
+        "--format",
+        "json"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    }
+  ]
+}
