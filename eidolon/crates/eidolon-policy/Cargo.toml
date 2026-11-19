@@ -10,6 +10,11 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+eidolon-model.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+xenonet-id.workspace = true
 
 [lints]
 workspace = true
