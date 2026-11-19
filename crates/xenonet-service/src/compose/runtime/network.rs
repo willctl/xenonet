@@ -1248,16 +1248,45 @@ fn actor_authority(w: &Runtime, slug: &str) -> Value {
     })
 }
 
-/// Sends again what has no stored receipt, oldest first.
+/// Sends again what has no stored receipt, oldest first. A message is held
+/// to what is shared now, as when it was first sent: the sender's project
+/// is routed again, and one that no network fits any more (or whose own
+/// network doesn't) is refused here, not sent because it once could be.
+/// One kept before its network was recorded is routed as a new one.
 pub fn resend(w: &Runtime) {
     let rows = store(w, |s| s.outbox(now_ms() - OUTBOX_MS)).unwrap_or_default();
     for r in rows {
-        let (Some(host), Some(frame)) = (r.text("host"), r.text("frame")) else { continue };
-        let Ok(kept) = serde_json::from_str::<Value>(frame) else { continue };
-        // Again through the network it first went through; one kept before
-        // that was recorded goes nowhere but where it can be routed.
-        let Some(network) = s(&kept, "network") else { continue };
-        send_in(w, Some(network), To::Host(host.to_string()), Kind::Message, kept["body"].clone(), kept.get("authority").cloned());
+        let (Some(host), Some(frame), Some(id), Some(rid)) = (r.text("host"), r.text("frame"), r.num("message_id"), r.text("agent")) else { continue };
+        let Ok(mut kept) = serde_json::from_str::<Value>(frame) else { continue };
+        let kept_in = s(&kept, "network");
+        let me = s(&kept["body"], "sender").unwrap_or_default();
+        let sender = if me == YOU { Sender::You } else { Sender::Placed(project_of_session(w, &me).map(|p| p.as_str().to_string())) };
+        // Where it went first is preferred, and the only place it may go
+        // again when it is still shown what the message is from and for.
+        let routed = match &kept_in {
+            Some(n) => xenonet_net::ground::within(n, || route(w, host, &sender, rid, None)).and_then(|got| {
+                if got == *n {
+                    Ok(got)
+                } else {
+                    Err(format!("{n} isn't shown what the message is from and for any more"))
+                }
+            }),
+            None => route(w, host, &sender, rid, None),
+        };
+        match routed {
+            Ok(network) => {
+                if kept_in.as_deref() != Some(network.as_str()) {
+                    kept["network"] = json!(network);
+                    let _ = store(w, |s| s.set_delivery_net(id, rid, host, &kept.to_string()));
+                }
+                send_in(w, Some(network), To::Host(host.to_string()), Kind::Message, kept["body"].clone(), kept.get("authority").cloned());
+            }
+            Err(why) => {
+                if store(w, |s| s.set_receipt(id, rid, "refused", now_ms())).unwrap_or(false) {
+                    w.emit(From::Engine, "receipt", json!({ "id": id, "agent": rid, "host": host, "state": "refused", "reason": why }));
+                }
+            }
+        }
     }
 }
 

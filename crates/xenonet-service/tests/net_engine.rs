@@ -3190,3 +3190,68 @@ async fn a_handoff_taken_or_lapsed_is_heard_after_its_project_is_unshared() {
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// desk, in two networks, with a message from its atlas session to
+/// contractor-vm's waiting in its outbox (contractor-vm is away), and
+/// everything sent from then on recorded.
+async fn desk_with_a_message_waiting(root: &Path) -> (TwoNetworks, Arc<Recording>, f64, String) {
+    let t = two_networks(root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    t.contractor.svc.stop();
+    until("contractor-vm is away", 20, || async {
+        t.desk.state().await["networks"][1]["hosts"].as_array().unwrap().iter().any(|h| h["id"] == "contractor-vm" && h["online"] == false)
+    })
+    .await;
+    let agent = t.contractor.agt(VM_ATLAS);
+    let sent = t.desk.agent(DESK_ATLAS, "send", json!({ "to": agent, "text": "Waiting for you." })).await;
+    let id = sent["id"].as_f64().unwrap();
+    let recording = Arc::new(Recording { inner: t.desk.world.engine.net.get(), sent: std::sync::Mutex::new(Vec::new()) });
+    t.desk.world.engine.net.set(recording.clone());
+    (t, recording, id, agent)
+}
+
+fn receipt_of(t: &TwoNetworks, id: f64, agent: &str) -> Option<String> {
+    t.desk.world.store.with(|s| s.delivery(id, agent).unwrap().and_then(|d| d.text("receipt").map(str::to_string)))
+}
+
+/// A message waiting in the outbox from before the network was recorded
+/// with it is routed when it is sent again, not skipped for good.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_message_kept_without_its_network_is_routed_when_sent_again() {
+    let root = std::env::temp_dir().join(format!("xenonet-resend-old-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let (t, recording, id, agent) = desk_with_a_message_waiting(&root).await;
+    // As an earlier version kept it: the frame without a network.
+    t.desk.world.store.with(|s| {
+        let mut kept: Value = serde_json::from_str(s.delivery(id, &agent).unwrap().unwrap().text("frame").unwrap()).unwrap();
+        kept.as_object_mut().unwrap().remove("network");
+        s.set_delivery_net(id, &agent, "contractor-vm", &kept.to_string()).unwrap();
+    });
+    recording.sent.lock().unwrap().clear();
+    xenonet_service::compose::runtime::network::resend(&t.desk.world);
+    assert_eq!(messages_to(&recording, "contractor-vm", "Waiting for you."), vec![Some(t.n2.clone())]);
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Sent again, a message is held to what is shared now: once atlas isn't
+/// shown to N2, the message that waits for contractor-vm is refused, not
+/// sent into N2 because it was once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_message_waiting_in_the_outbox_is_held_to_what_is_shared_when_it_is_sent_again() {
+    let root = std::env::temp_dir().join(format!("xenonet-resend-unshared-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let (t, recording, id, agent) = desk_with_a_message_waiting(&root).await;
+    let (s, v) = t.desk.window("PUT", "/api/net/sharing", json!({ "network": "work", "sharing": [] })).await;
+    assert_eq!(s, 200, "{v}");
+    recording.sent.lock().unwrap().clear();
+    xenonet_service::compose::runtime::network::resend(&t.desk.world);
+    assert!(messages_to(&recording, "contractor-vm", "Waiting for you.").is_empty(), "a message went into a network no longer shown atlas");
+    assert_eq!(receipt_of(&t, id, &agent).as_deref(), Some("refused"));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
