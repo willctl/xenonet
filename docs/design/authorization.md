@@ -479,13 +479,26 @@ answer:
    network with no sharing row is shown nothing. The signed act is for the
    machine, so what else a frame reaches is added by the receiver
    (`Request::reaching`, asked on its own as `shown`), outside the
-   signature. A start that adds nothing is placed nowhere. A refusal has
+   signature. A frame that carries content (a message, wake, start, claim,
+   handoff, intent or report) and adds nothing is placed nowhere, so a
+   caller that forgets to say fails closed; one that reaches nothing
+   sharing governs says so (`Reaching::Nothing`: a membership check, a
+   prompt of a run this machine started, a handoff passed by for another
+   machine). An intent reaches the project its act names, and a report on
+   one the intent's project. A refusal has
    the code `shared`. For a session or an actor it has the words of an id
    nobody has ("no session or actor here has that id"); for a start, "that
    folder isn't in a project this network is shown", which is also what a
    folder that doesn't exist gets. Both come before the sender is checked
    (a message asks `shown` before it looks at a signature or a token), so
    neither tells a member which sessions or folders exist, whoever sends.
+   What this machine sends is held to the same sharing: an intent, a
+   handoff, a claim and a message go only into networks shown the project
+   they are about (a message: the project of the session sending and of the
+   session it is for, as that machine's presence names it, else it is
+   refused here in words). A handoff's accept and answers say which handoff
+   and who, never what the work was, and are told in each network the
+   offer went to. A stored claim is held to what is shared now.
    This machine's own door isn't limited by what any network is shown.
    What a member can read of this machine as an admin (`Act::Read` of the
    machine's transcripts and stats) is not limited by it either: the
