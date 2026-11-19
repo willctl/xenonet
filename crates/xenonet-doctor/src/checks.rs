@@ -74,6 +74,7 @@ pub fn all_with(adapters: &[CheckRow]) -> Vec<Row> {
         .chain(ACTORS)
         .chain(slot(Slot::Actors))
         .chain(ACTORS_CHECKED)
+        .chain(crate::cells::CHECKS)
         .chain(crate::login::CHECKS)
         .chain(crate::firewall::CHECKS)
         .collect()
@@ -666,6 +667,7 @@ pub async fn run_with(host: &dyn DoctorHost, id: String, facts: Facts, adapters:
             }
             Ok(ok(said))
         }
+        id if crate::cells::CHECKS.iter().any(|(c, ..)| *c == id) => crate::cells::run(&c, id).await,
         id if crate::login::CHECKS.iter().any(|(c, ..)| *c == id) => crate::login::run(&c, id).await,
         id if crate::firewall::CHECKS.iter().any(|(c, ..)| *c == id) => crate::firewall::run(&c, id).await,
         id => match adapters.iter().find(|k| k.row().id == id) {

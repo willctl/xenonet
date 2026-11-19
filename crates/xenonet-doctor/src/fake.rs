@@ -25,11 +25,13 @@ pub struct Fake {
     pub run: Run,
     pub login: Option<Value>,
     pub network: Option<Value>,
+    /// Commands `which` doesn't find.
+    pub missing: Vec<&'static str>,
 }
 
 impl Default for Fake {
     fn default() -> Self {
-        Fake { run: Box::new(|file, args| json!({ "stdout": format!("ran {file} {}", args.first().unwrap_or(&"")), "code": 0 })), login: None, network: None }
+        Fake { run: Box::new(|file, args| json!({ "stdout": format!("ran {file} {}", args.first().unwrap_or(&"")), "code": 0 })), login: None, network: None, missing: Vec::new() }
     }
 }
 
@@ -41,8 +43,8 @@ impl DoctorHost for Fake {
     async fn local_time(&self, ms: f64) -> String {
         format!("at {ms:?}")
     }
-    async fn which(&self, _cmd: &str) -> Option<String> {
-        Some("/x/tool".into())
+    async fn which(&self, cmd: &str) -> Option<String> {
+        (!self.missing.contains(&cmd)).then(|| "/x/tool".into())
     }
     async fn exists(&self, path: &str) -> bool {
         path == "/x/here"
