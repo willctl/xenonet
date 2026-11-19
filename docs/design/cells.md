@@ -187,3 +187,87 @@ one folder of the cell.
 - [goals.md](goals.md), [rust-core.md](rust-core.md) (the standards both
   follow), [authorization.md](authorization.md) (where cross-machine
   decisions are made).
+
+## Designed, not built
+
+Two ways XenoNet and the cells could meet that nothing implements yet.
+Neither changes XenoNet's authorization rules; each says where it would
+meet them.
+
+### A move as a XenoNet act
+
+Today `eidolon move` runs over a byte stream the person names: a pipe, or
+a command such as `ssh` that Eidolon starts and speaks to. Between two
+machines of one network the same move could be a XenoNet act instead, so
+the person needs no shell access between them and the receiving machine
+decides.
+
+The sender's XenoNet signs an act for the move and sends it to the
+receiver as it does any act from another machine: it names the eidolon,
+its wall, the generation the move would write, and the sender's holder
+entry (public keys only). The receiver's `decide` takes it at the network
+door from a member, as it does a start from another machine, and then
+needs the person: a machine receiving an identity widens what that
+machine holds, so the nearest existing rows are `admit` and `widen`, with
+a presence block bound to the act's hash. The ask shows in the receiver's
+window ("tower wants to send you an eidolon for wall W: Allow?"), and
+Touch ID answers it. A decision to hold, because governance is stale, or
+a refusal, ends the move before a chunk is sent. Whether this is a new
+act kind in the table or an existing one with a new resource is a
+decision for authorization.md when it is built; this note doesn't pick.
+
+Once the receiver allows, the move itself needs a long, two-way byte
+stream, which `svc/2` is not (its requests and answers are 8 MiB at most).
+The stream that fits is `forward(alpn)`: Eidolon attaches as the actor
+for one registered ALPN, say `eidolon/move/1`, with the grant that names
+it, and XenoNet carries the stream between the two machines over the
+member connection ([network.md](network.md), "forward(alpn)"). Registering
+the ALPN is a line of data in the composition root, as Xenolith's is. The
+forward is Unix only, so a move to or from Windows waits for its named
+pipe.
+
+In Eidolon only the stream's source changes: the `move` and `receive`
+commands would read and write the forward's socket, where now they read
+and write a pipe. The protocol doesn't change: have and want, chunks sent
+as sealed in the vault, the key wrapped to the receiver's X25519 key, the
+seat record for the next generation, and the sender deleting its key only
+after the receiver's acknowledgement. The seat doesn't change either:
+Eidolon still checks the record's generation, the signature of the current
+seat and the holder list on its own, so there are two separate decisions,
+XenoNet's on whether this machine takes the eidolon at all and Eidolon's
+on whether the record is valid, and neither stands in for the other.
+XenoNet terminates QUIC and so reads the forwarded bytes, which are sealed
+chunks and a wrapped key, nothing it can open. A move killed at any point
+leaves one seat, as it does over a pipe.
+
+### A cell as a sandbox kind on a start
+
+The daily-use plan's slice 4 adds a `sandbox` field to a start: the
+request, the signed act and what the adapter is given all carry it, and a
+start from anyone but the person with it missing or off is refused. The
+field there is on or off with allowed domains, mapped to each harness's
+own sandbox. A cell could be a second kind of value in that field: the
+start names an Adytum cell as the sandbox, and the session runs inside it.
+
+The cell would hold the project folder and the identity's eidolon. The
+start names an identity; the receiving machine opens that identity's
+eidolon in a new cell on the identity's wall, with the project folder as a
+folder facet, and starts the harness inside the cell through Adytum's exec
+channel. What the session can reach is then what the cell holds: a machine
+boundary, not a harness setting, which is the point of goal 3. The browser
+facet, if the eidolon has one, is in the same wall and so reachable.
+
+A cell is a stronger sandbox than a harness's, and it costs more: the
+image needs the harness installed, a cell takes seconds to a minute to
+start, and the session's hooks and MCP servers inside it must reach
+XenoNet's local door without a published port (Adytum publishes ports on
+127.0.0.1 only, and never the automation port). That last piece has no
+answer yet and may need a socket carried over the exec channel, as the
+browser's is. Which harnesses can run inside a cell at all is an
+adapter question.
+
+This waits on slice 4's field. Until a start can carry a sandbox, the
+signed act has nowhere to name a cell, and XenoNet has no sandbox of its
+own to extend. When the field exists, the cell kind adds a variant to it,
+a refusal for an adapter that can't run in a cell, and a doctor row for
+Adytum being present, which `xenonet doctor` already reports.
