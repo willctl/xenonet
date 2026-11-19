@@ -52,11 +52,13 @@ pub enum Call {
 pub struct FakeDriver {
     root: PathBuf,
     pub calls: Mutex<Vec<Call>>,
+    /// Makes every `chmod` fail, as a cell that refuses it would.
+    pub fail_chmod: std::sync::atomic::AtomicBool,
 }
 
 impl FakeDriver {
     pub fn new(root: &Path) -> Arc<FakeDriver> {
-        Arc::new(FakeDriver { root: root.to_path_buf(), calls: Mutex::default() })
+        Arc::new(FakeDriver { root: root.to_path_buf(), calls: Mutex::default(), fail_chmod: false.into() })
     }
 
     pub fn guest(&self, path: &str) -> PathBuf {
@@ -90,6 +92,12 @@ impl Driver for FakeDriver {
     }
     async fn exec(&self, _name: &CellName, argv: &[String], _opts: ExecOpts) -> Result<Output, DriverError> {
         self.calls.lock().unwrap().push(Call::Exec(argv.to_vec()));
+        if argv.first().map(String::as_str) == Some("chmod") {
+            if self.fail_chmod.load(Ordering::Relaxed) {
+                return Ok(Output { status: Some(1), stderr: b"Operation not permitted".to_vec(), ..Output::default() });
+            }
+            return Ok(Output { status: Some(0), ..Output::default() });
+        }
         // Only `find <dir> -maxdepth 1 -type f -printf '%f\0%s\0'` is answered.
         assert_eq!(argv.first().map(String::as_str), Some("find"), "the fake answers find only");
         let mut out = Vec::new();

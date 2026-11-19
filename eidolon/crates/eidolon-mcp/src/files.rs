@@ -12,6 +12,9 @@ use crate::error::{Error, Result};
 /// The folder under `files` where fetched downloads are put.
 pub const DOWNLOADS_DIR: &str = "downloads";
 
+/// The largest file an upload accepts.
+pub const MAX_UPLOAD_BYTES: u64 = 512 * 1024 * 1024;
+
 fn refused(text: String) -> Error {
     Error::Refused(text)
 }
@@ -27,8 +30,13 @@ pub fn upload_source(files: &Path, requested: &str) -> Result<PathBuf> {
     if !resolved.starts_with(&root) {
         return Err(refused(format!("The file {requested} is outside the files folder {}. Put it in that folder first; only files there can be uploaded.", root.display())));
     }
-    if !resolved.is_file() {
+    // Folders, fifos and devices are not files an upload can read to the end.
+    let meta = resolved.metadata().map_err(|e| Error::Io(format!("The file {requested} cannot be read: {e}.")))?;
+    if !meta.is_file() {
         return Err(refused(format!("{requested} is not a regular file. Upload one file at a time.")));
+    }
+    if meta.len() > MAX_UPLOAD_BYTES {
+        return Err(refused(format!("{requested} is larger than 512 MiB. Upload a smaller file.")));
     }
     Ok(resolved)
 }

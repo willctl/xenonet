@@ -65,9 +65,52 @@ async fn an_upload_inside_the_files_folder_is_copied_in_and_chosen_by_its_guest_
     let said = e.tools.upload_file_by_uid(&uid, "pics/../pics/avatar.png").await.unwrap();
     assert!(said.contains("avatar.png"), "{said}");
     let guest = "/home/eidolon/files/uploads/avatar.png";
-    assert_eq!(e.driver.calls(), vec![Call::CopyIn { host: e.files.join("pics/avatar.png"), guest: guest.to_owned() }]);
+    assert_eq!(
+        e.driver.calls(),
+        vec![Call::CopyIn { host: e.files.join("pics/avatar.png"), guest: guest.to_owned() }, Call::Exec(vec!["chmod".to_owned(), "0644".to_owned(), guest.to_owned()])]
+    );
     assert_eq!(std::fs::read_to_string(e.driver.guest(guest)).unwrap(), "png bytes");
     assert_eq!(e.page.files("#upload"), vec![guest.to_owned()]);
+}
+
+#[tokio::test]
+async fn a_failing_chmod_stops_the_upload_before_the_browser_is_told() {
+    let e = env().await;
+    write(&e.files.join("a.txt"), "a");
+    e.driver.fail_chmod.store(true, std::sync::atomic::Ordering::Relaxed);
+    let uid = uid_of(&e.tools.take_snapshot().await.unwrap(), "Avatar");
+    let r = e.tools.upload_file_by_uid(&uid, "a.txt").await;
+    assert!(matches!(&r, Err(Error::Driver(text)) if text.contains("readable")), "{r:?}");
+    assert_eq!(e.page.files("#upload"), Vec::<String>::new(), "setFiles ran after a failed chmod");
+}
+
+#[tokio::test]
+async fn a_private_host_file_is_uploaded_and_made_readable() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env().await;
+    let path = e.files.join("private.txt");
+    write(&path, "secret-ish");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let uid = uid_of(&e.tools.take_snapshot().await.unwrap(), "Avatar");
+    e.tools.upload_file_by_uid(&uid, "private.txt").await.unwrap();
+    let guest = "/home/eidolon/files/uploads/private.txt";
+    assert!(e.driver.calls().contains(&Call::Exec(vec!["chmod".to_owned(), "0644".to_owned(), guest.to_owned()])));
+    assert_eq!(e.page.files("#upload"), vec![guest.to_owned()]);
+}
+
+#[tokio::test]
+async fn a_fifo_and_an_oversized_file_are_not_uploaded() {
+    let e = env().await;
+    let fifo = e.files.join("pipe");
+    assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let big = std::fs::File::create(e.files.join("big.bin")).unwrap();
+    big.set_len(512 * 1024 * 1024 + 1).unwrap();
+    let uid = uid_of(&e.tools.take_snapshot().await.unwrap(), "Avatar");
+    let text = refused(e.tools.upload_file_by_uid(&uid, "pipe").await);
+    assert!(text.contains("not a regular file"), "{text}");
+    let text = refused(e.tools.upload_file_by_uid(&uid, "big.bin").await);
+    assert!(text.contains("512 MiB"), "{text}");
+    assert_eq!(e.driver.calls().len(), 0);
 }
 
 #[tokio::test]

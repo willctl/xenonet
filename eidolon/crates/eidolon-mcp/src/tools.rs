@@ -403,6 +403,14 @@ impl BrowserTools {
         let (context, id) = self.element(uid)?;
         let guest = format!("{UPLOADS_PATH}/{name}");
         self.driver.copy_in(&self.cell, &source, &guest).await?;
+        // The copy keeps the host file's mode; the browser runs as another
+        // user, so a 0600 file would be unreadable to it.
+        let chmod: Vec<String> = ["chmod", "0644", guest.as_str()].iter().map(|s| (*s).to_owned()).collect();
+        let done = self.driver.exec(&self.cell, &chmod, ExecOpts::default()).await?;
+        if done.status != Some(0) {
+            let stderr = String::from_utf8_lossy(&done.stderr);
+            return Err(Error::Driver(format!("The file {name} was copied in but could not be made readable for the browser: {}. Try again.", stderr.trim())));
+        }
         let params = json!({ "context": context, "element": { "sharedId": id }, "files": [guest] });
         self.cmd("input.setFiles", params).await?;
         Ok(format!("Chose {name} in {uid}."))
