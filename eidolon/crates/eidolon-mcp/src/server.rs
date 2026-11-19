@@ -16,8 +16,8 @@ use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt};
 use crate::error::Error;
 use crate::tools::{definitions, BrowserTools, Part, ToolDef};
 
-const NAME: &str = "eidolon-browser";
-const INSTRUCTIONS: &str = "Tools for the web browser of one identity. Call take_snapshot to see a page and get a uid for each element, then act on a uid. Files go through the shared files folder: upload_file_by_uid takes a file from it, fetch_download puts a download in its downloads folder.";
+pub(crate) const NAME: &str = "eidolon-browser";
+pub(crate) const INSTRUCTIONS: &str = "Tools for the web browser of one identity. Call take_snapshot to see a page and get a uid for each element, then act on a uid. Files go through the shared files folder: upload_file_by_uid takes a file from it, fetch_download puts a download in its downloads folder.";
 
 struct Server {
     tools: Arc<BrowserTools>,

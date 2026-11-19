@@ -10,6 +10,8 @@
 //! - [`BrowserTools`]: the tools, each a method; [`definitions`] lists them
 //!   with their JSON Schemas.
 //! - [`serve_stdio`] / [`serve_transport`]: the MCP server over `rmcp`.
+//! - [`serve_http`]: the same tools on localhost over HTTP, with a token
+//!   of their own, for XenoNet to publish as a service.
 //! - [`Bidi`]: what the tools need of a browser, implemented for a
 //!   supervised [`eidolon_browser::Browser`] and a bare session.
 //!
@@ -21,6 +23,7 @@ mod args;
 mod bidi;
 mod error;
 pub mod files;
+mod http;
 mod keys;
 mod server;
 pub mod snapshot;
@@ -28,5 +31,6 @@ mod tools;
 
 pub use bidi::Bidi;
 pub use error::{Error, Result};
+pub use http::{serve_http, HttpServer, MAX_BODY, PATH};
 pub use server::{serve_stdio, serve_transport};
 pub use tools::{check_url, definitions, BrowserTools, Download, Part, ToolDef};
