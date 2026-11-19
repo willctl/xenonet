@@ -714,7 +714,7 @@ mod tests {
         let mut c = home.clone();
         c.push_str("/PROJECTS/../.SSH");
         assert!(t.refuses(Path::new(&c), &[]));
-        assert!(t.refuses(&PathBuf::from(format!("{}/library", home)), &[]));
+        assert!(t.refuses(&PathBuf::from(format!("{home}/library")), &[]));
     }
 
     #[test]
@@ -738,7 +738,7 @@ mod tests {
         // The Adytum home outside the user's home, named by ADYTUM_HOME.
         let other = t.base.join("elsewhere/adytum");
         std::fs::create_dir_all(&other).expect("other");
-        assert!(t.refuses(&other, &[other.clone()]));
+        assert!(t.refuses(&other, std::slice::from_ref(&other)));
         assert!(!t.refuses(&t.base.join("home/Projects/atlas"), &protected));
     }
 
