@@ -3255,3 +3255,31 @@ async fn a_message_waiting_in_the_outbox_is_held_to_what_is_shared_when_it_is_se
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A take or an assign counts only in the network its intent belongs to:
+/// tower's intent for any machine, made in N1 and arbitrated by desk, is
+/// taken by contractor-vm in N2 (which has the person's delegation and a
+/// confirmed checkout of atlas), and desk neither keeps the take nor gives
+/// the intent out, in N1 or anywhere.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_take_from_another_network_is_not_kept_nor_does_it_assign_the_intent() {
+    use xenonet_model::ops::Kind;
+    use xenonet_net::feed::Kind as EntryKind;
+    let root = std::env::temp_dir().join(format!("xenonet-take-network-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    delegate(&t.tower, DLG, vec![device(&t.tower).await, device(&t.desk).await, device(&t.contractor).await], [&t.desk, &t.tower]).await;
+    let (made, body) = signed_intent_at(&t.tower, "tower", "hold-on: whoever", "@any", &t.atlas, DLG, "desk");
+    entry_to(&t.tower, &t.desk, EntryKind::Intent, body);
+    until("desk holds the intent", 10, || async { intent(&t.desk, &made.id).await["state"] == "made" }).await;
+    confirm(&t.contractor, &t.atlas);
+    guest_sends(&t, Kind::Assign, take(&made.id, confirmation(&t.contractor, &t.atlas)));
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let takes = t.desk.world.setup.db.as_ref().unwrap().takes(&made.id).unwrap();
+    assert!(takes.is_empty(), "a take that came in N2 was kept for an intent of N1: {}", takes.len());
+    assert_eq!(intent(&t.desk, &made.id).await["state"], "made", "and it was not given out");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

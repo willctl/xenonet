@@ -563,6 +563,7 @@ fn given_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
         db.hold_assign(&id, host, &target, now_ms() as i64).map_err(|e| e.message)?;
         return Ok(());
     };
+    in_its_network(&i)?;
     if i.arbiter != host {
         return Err(format!("an assign of {id} from {host}: only {}, its arbiter, assigns it", i.arbiter));
     }
@@ -696,6 +697,16 @@ fn offer(w: &Runtime, db: &Db, id: &str) {
     w.log("info", "intent", &format!("{here} took {id}"));
 }
 
+/// Whether the frame in hand is of the network `i` belongs to: an intent is
+/// taken and given out only in its own network, and a take or an assign that
+/// came in another is none of its business.
+fn in_its_network(i: &IntentRow) -> Result<(), String> {
+    match xenonet_net::ground::current() {
+        Some(n) if n == i.network => Ok(()),
+        _ => Err(format!("{} belongs to another network than the one this came in", i.id)),
+    }
+}
+
 /// A machine's take of an intent for any machine: checked and kept, or
 /// refused; kept as it came when the intent hasn't reached this machine
 /// yet, and checked when the arbiter goes through it.
@@ -704,7 +715,10 @@ fn take_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let evidence = b.get("evidence").cloned().unwrap_or(Value::Null);
     let db = db(w)?;
     match db.intent(&id).map_err(|e| e.message)? {
-        Some(i) => check_take(w, &i, host, &evidence)?,
+        Some(i) => {
+            in_its_network(&i)?;
+            check_take(w, &i, host, &evidence)?;
+        }
         // Before the intent: the project the take names is the one it
         // vouches for, which the network it came in must be shown.
         None => {
@@ -736,7 +750,10 @@ fn arbitrate(w: &Runtime, db: &Db, id: &str) {
         if !db.assign_intent(id, &t.machine, now_ms() as i64).unwrap_or(false) {
             return;
         }
-        send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "assign", "intent": id, "target": t.machine, "until": i.until }));
+        // In the intent's network, whichever network the take came in.
+        xenonet_net::ground::within(&i.network, || {
+            send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "assign", "intent": id, "target": t.machine, "until": i.until }));
+        });
         w.log("info", "intent", &format!("{here} gave {id} to {}", t.machine));
         changed(w);
         if t.machine == here {
