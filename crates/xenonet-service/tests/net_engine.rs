@@ -259,6 +259,69 @@ async fn a_wake_asks_what_the_network_the_message_came_in_is_shown() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The next XenoNet note `contractor-vm`'s session is told, which is where
+/// an agent's start answers come; `told` keeps what came with it.
+async fn vm_is_told(t: &TwoNetworks, told: &mut Vec<String>, what: &str) -> String {
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        told.extend(texts(&t.contractor.ctx.cores.engine.inbox(VM_ATLAS, Duration::ZERO).await.unwrap()));
+        if let Some(i) = told.iter().position(|m| m.contains("[XenoNet]")) {
+            return told.remove(i);
+        }
+        assert!(std::time::Instant::now() < end, "waited for the answer to {what}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// A start is a reach too: `desk` lets N2 start sessions on it, and N2 is
+/// shown atlas only, so `contractor-vm` can start one in atlas's folder and
+/// in none of ledger's, nor in a folder that is in no project, nor in one
+/// that doesn't exist, and the three refusals say the same words, which
+/// aren't a missing id's (a receipt in those is rewritten as an old XenoNet).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_start_reaches_a_folder_only_in_a_project_the_network_is_shown() {
+    let root = std::env::temp_dir().join(format!("xenonet-guest-starts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "work", "host": "desk", "start": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("contractor-vm knows desk takes starts from the network", 20, || async {
+        let r = row_of(&t.contractor.state().await, "desk");
+        r["reach"]["start"] == "network" && r["can"].as_array().is_some_and(|c| c.contains(&json!("start")))
+    })
+    .await;
+    let desk_home = root.join("desk/home");
+    // What the session that asked is told, which is where an agent's start
+    // answers come.
+    let mut told: Vec<String> = Vec::new();
+    let try_in = |folder: String, prompt: &'static str| {
+        let contractor = &t.contractor;
+        async move {
+            let (s, v) = as_agent(contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": folder, "prompt": prompt })).await;
+            assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+        }
+    };
+    // The positive control: atlas's folder, which N2 is shown.
+    try_in(desk_home.join("atlas").to_string_lossy().into_owned(), "hold-on: tidy atlas").await;
+    let first = vm_is_told(&t, &mut told, "atlas").await;
+    assert!(first.contains("Started"), "{first}");
+    // ledger's folder, one in no project (desk's home), and one that isn't there.
+    let mut words = Vec::new();
+    for (folder, prompt) in [(desk_home.join("ledger"), "hold-on: tidy ledger"), (desk_home.clone(), "hold-on: tidy home"), (desk_home.join("nothing"), "hold-on: tidy nothing")] {
+        try_in(folder.to_string_lossy().into_owned(), prompt).await;
+        let got = vm_is_told(&t, &mut told, "a folder it isn't shown").await;
+        assert!(got.contains("No session was started"), "{folder:?}: {got}");
+        words.push(got);
+    }
+    assert!(words[0].contains("that folder isn't in a project this network is shown"), "{words:?}");
+    assert!(words.iter().all(|w| *w == words[0]), "{words:?}");
+    assert_eq!(fake_runs(&t.desk).len(), 1, "only atlas's run was started");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A frame `contractor-vm` sends desk over N2 as a run's permission prompt,
 /// naming `session` as the run that asks.
 fn guest_ask(t: &TwoNetworks, n: u32, id: &str, sender: &str, session: &str) -> Value {

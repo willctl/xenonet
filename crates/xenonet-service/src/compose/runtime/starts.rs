@@ -923,6 +923,19 @@ fn start_receipt(w: &Runtime, network: Option<&str>, to: &str, mid: &str, state:
     crate::compose::runtime::network::send_in(w, network.map(str::to_string), To::Host(to.to_string()), FrameKind::Receipt, body, None);
 }
 
+/// What a start in `folder` reaches here: the project the folder is in,
+/// through a checkout the person confirmed, or none (a folder in no
+/// project, or one that isn't there, which can't be told apart from here).
+fn folder_reach(w: &Runtime, folder: &str) -> xenonet_authz::Reaching {
+    let (known, reported) = folders(w);
+    let project = starts::folder(folder, &w.setup.home, &known, &reported, cfg!(windows))
+        .ok()
+        .filter(|cwd| std::path::Path::new(cwd).is_dir())
+        .and_then(|cwd| w.setup.db.as_ref().and_then(|db| crate::compose::runtime::checkouts::project_of(db, &cwd)))
+        .and_then(|p| xenonet_authz::ProjectId::new(&p).ok());
+    project.map_or(xenonet_authz::Reaching::Unplaced, xenonet_authz::Reaching::Project)
+}
+
 /// A start request from another machine (`message_in` routes the target
 /// here): `kind` and `sender` as its frame says, the `authority` it came
 /// with, `at` when it was sent, by this clock. Decided here, on this
@@ -953,8 +966,11 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, ag
     let r = &start.request;
     let k = kind_of(kind);
     let Some(mut g) = crate::compose::runtime::ground::ground(w, None) else { return refuse("this machine's governance isn't plugged in, so it starts nothing") };
+    // The folder it runs in, by the project it is in here: what the network
+    // the request came in must be shown.
+    let reaching = vec![folder_reach(w, &r.folder)];
     let decided = run_act(&g.facts.machine, r).and_then(|(resource, act)| {
-        crate::compose::runtime::network::judge_remote(w, &mut g, &crate::compose::runtime::network::SentBy { host: from, kind, sender, authority }, resource, act)
+        crate::compose::runtime::network::judge_remote_reaching(w, &mut g, &crate::compose::runtime::network::SentBy { host: from, kind, sender, authority }, resource, act, reaching)
     });
     if let Err(why) = decided {
         let why = delegated_words(w, r, k).unwrap_or(why);

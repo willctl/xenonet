@@ -451,20 +451,32 @@ fn arrival(request: &Request, ground: &dyn Ground) -> Step<Arrival> {
 // nowhere, which only a network shown everything sees. This comes before
 // the sender is checked, so the answer can't depend on who is asking.
 fn seen(request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<()> {
-    let Some(network) = request.network().filter(|_| !arrival.own) else { return Ok(()) };
+    match request.network().filter(|_| !arrival.own) {
+        Some(network) => shown(ground, network, request.action(), request.resource(), request.reaches()),
+        None => Ok(()),
+    }
+}
+
+/// Whether `network` is shown everything an act of `action` on `resource`
+/// reaches, with `reaching` besides: the question `decide` asks of a frame
+/// from another machine, askable before anything about its sender is, so a
+/// receiver can answer a frame for what isn't shown without checking who
+/// sent it. A start that names no place reaches none, which only a network
+/// shown everything sees.
+pub fn shown(ground: &dyn Ground, network: &NetworkId, action: Action, resource: &Resource, reaching: &[Reaching]) -> Result<(), Reason> {
     let by_session = |s| ground.session_project(s);
     let mut reached: Vec<Option<ProjectId>> = Vec::new();
-    match (request.action(), request.resource()) {
+    match (action, resource) {
         (Action::Message | Action::Wake, Resource::Session(s)) => reached.push(by_session(s)),
         (Action::Claim, Resource::Project(p)) => reached.push(Some(p.clone())),
         _ => {}
     }
     // A start reaches the folder it runs in, which the receiver says by
     // what it finds the folder in. One that says nothing is placed nowhere.
-    if request.action() == Action::Start && request.reaches().is_empty() {
+    if action == Action::Start && reaching.is_empty() {
         reached.push(None);
     }
-    for r in request.reaches() {
+    for r in reaching {
         reached.push(match r {
             Reaching::Session(s) => by_session(s),
             Reaching::Project(p) => Some(p.clone()),
@@ -475,7 +487,7 @@ fn seen(request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<()> {
         Ok(())
     } else {
         // A start has words of its own: a folder is not a session id.
-        Err(Reason::new("shared", if request.action() == Action::Start { NOT_SEEN_FOLDER } else { NOT_SEEN }))
+        Err(Reason::new("shared", if action == Action::Start { NOT_SEEN_FOLDER } else { NOT_SEEN }))
     }
 }
 
