@@ -115,11 +115,11 @@ fn drain(mut from: impl Read + Send + 'static, log: Option<Arc<Mutex<Log>>>) {
 }
 
 /// The command for `how`: its arguments as given, or on Windows (where a
-/// command line is one string) as written. adytum-exec's `Spawned` starts
-/// every program with no window on Windows (`CREATE_NO_WINDOW`, 0x0800_0000).
+/// command line is one string) as written.
 #[cfg(windows)]
 fn command(how: &runs::Launch) -> Command {
     let cmd = Command::new(&how.program);
+    // adytum-exec's Spawned starts it with no window (CREATE_NO_WINDOW, 0x0800_0000).
     if how.verbatim {
         how.args.iter().fold(cmd, |c, a| c.raw_arg(a))
     } else {
@@ -131,6 +131,7 @@ fn command(how: &runs::Launch) -> Command {
 #[cfg(not(windows))]
 fn command(how: &runs::Launch) -> Command {
     Command::new(&how.program).args(&how.args)
+    // Never built on Windows, where Spawned adds CREATE_NO_WINDOW (no_window).
 }
 
 /// One turn: of `app`'s CLI for `key` (the session it's for), with `args`,
