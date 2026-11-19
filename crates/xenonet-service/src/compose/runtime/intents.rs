@@ -247,6 +247,10 @@ fn make_in_network(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
     let arbiter = text(body, "arbiter").unwrap_or_else(|| here.clone());
     let project = text(body, "project").ok_or_else(|| status(400, "say which project it's worked in: a prj_ id"))?;
     xenonet_model::ids::ProjectId::parse(&project).map_err(|_| status(400, format!("{project} isn't a project's id")))?;
+    // Its goal travels in the network, so only one that is shown the project.
+    if !shown_in(w, network.as_str(), &project) {
+        return Err(status(409, format!("{project} isn't shared into this network, so an intent for it can't travel there: share it first, or pick another network")));
+    }
     // The app as a start takes it: the registry's first when none is named.
     let app = xenonet_engine::delivery::starts::request(&json!({ "app": text(body, "app"), "prompt": goal })).map_err(|e| status(400, e))?.app;
     let hours = body.get("hours").and_then(Value::as_f64).unwrap_or(DEFAULT_HOURS);
@@ -424,6 +428,12 @@ fn changed(w: &Runtime) {
 
 // ---------- from other machines ----------
 
+/// Whether `network` is shown `project`: an intent is kept, offered,
+/// taken, given and worked only in a network that is, whoever made it.
+fn shown_in(w: &Runtime, network: &str, project: &str) -> bool {
+    ground::governance(w).is_some_and(|g| g.sharing(network).shows_project(project))
+}
+
 /// The project an intent is for, as what a frame about it reaches.
 fn project_of(i: &IntentRow) -> Result<xenonet_authz::Reaching, String> {
     ProjectId::new(&i.project).map(xenonet_authz::Reaching::Project).map_err(|e| e.message)
@@ -480,6 +490,11 @@ fn make_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     if g.facts.network().is_none_or(|n| n.as_str() != row.network) {
         return Err(format!("{} travels in another network", row.id));
+    }
+    // Neither kept nor passed on for a project its network isn't shown, in
+    // the words of an id nobody has.
+    if !shown_in(w, &row.network, &row.project) {
+        return Err(xenonet_authz::NOT_SEEN.to_string());
     }
     // Only from the feed of the machine whose device signed it.
     let authority = b.get("authority").cloned().unwrap_or_else(|| json!({}));
@@ -627,6 +642,9 @@ fn check_take(w: &Runtime, i: &IntentRow, host: &str, evidence: &Value) -> Resul
     if !i.any() || !i.open() {
         return Err(format!("{} isn't an open intent for any machine", i.id));
     }
+    if !shown_in(w, &i.network, &i.project) {
+        return Err(xenonet_authz::NOT_SEEN.to_string());
+    }
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     let device = g.facts.view.as_ref().and_then(|v| v.member(host)).and_then(|m| m.device.clone()).ok_or_else(|| format!("{host} has no device of the person's"))?;
     let gov = ground::governance(w).ok_or("this machine's governance isn't plugged in")?;
@@ -652,7 +670,7 @@ fn check_take(w: &Runtime, i: &IntentRow, host: &str, evidence: &Value) -> Resul
 /// project the person confirmed here, with their signature. Once.
 fn offer(w: &Runtime, db: &Db, id: &str) {
     let (Some(here), Ok(Some(i))) = (me(w), db.intent(id)) else { return };
-    if !i.any() || i.state != "made" || i.assigned.is_some() {
+    if !i.any() || i.state != "made" || i.assigned.is_some() || !shown_in(w, &i.network, &i.project) {
         return;
     }
     if db.takes(id).unwrap_or_default().iter().any(|t| t.machine == here) {
@@ -685,8 +703,16 @@ fn take_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let id = text(b, "intent").ok_or("a take without its intent")?;
     let evidence = b.get("evidence").cloned().unwrap_or(Value::Null);
     let db = db(w)?;
-    if let Some(i) = db.intent(&id).map_err(|e| e.message)? {
-        check_take(w, &i, host, &evidence)?;
+    match db.intent(&id).map_err(|e| e.message)? {
+        Some(i) => check_take(w, &i, host, &evidence)?,
+        // Before the intent: the project the take names is the one it
+        // vouches for, which the network it came in must be shown.
+        None => {
+            let network = xenonet_net::ground::current().ok_or("a take outside a network's frame")?;
+            if text(&evidence, "project").is_some_and(|p| !shown_in(w, &network, &p)) {
+                return Err(xenonet_authz::NOT_SEEN.to_string());
+            }
+        }
     }
     db.add_take(&id, host, &evidence.to_string(), now_ms() as i64).map_err(|e| e.message)?;
     arbitrate(w, &db, &id);

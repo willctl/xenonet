@@ -2495,3 +2495,63 @@ async fn an_intent_runs_prompt_outside_the_delegation_reaches_the_machine_that_m
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// An intent from tower in N1 is kept, offered, taken and worked here only
+/// for a project N1 is shown: desk shares atlas into N1 and not ledger, and
+/// tower's intent on ledger (for desk, or for any machine) is neither kept
+/// nor taken nor worked, while the same on atlas runs. One kept while
+/// ledger was shared, and still waiting when it was unshared, isn't
+/// started either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_intent_is_kept_taken_and_worked_only_for_a_project_its_network_is_shown() {
+    use xenonet_net::feed::Kind as EntryKind;
+    let root = std::env::temp_dir().join(format!("xenonet-intent-shown-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    delegate(&t.tower, DLG, vec![device(&t.tower).await, device(&t.desk).await], [&t.desk, &t.tower]).await;
+    let from_tower = |goal: &str, target: &str, project: &str| signed_intent_at(&t.tower, "tower", goal, target, project, DLG, "tower");
+    let sent = |body: Value| entry_to(&t.tower, &t.desk, EntryKind::Intent, body);
+
+    // While N1 is shown everything, an intent on ledger is kept (made).
+    let (waiting, body) = from_tower("hold-on: reconcile April", "desk", &t.ledger);
+    sent(body);
+    until("desk holds the intent on ledger", 10, || async { intent(&t.desk, &waiting.id).await["state"] == "made" }).await;
+    // Then ledger is unshared from N1.
+    let (s, v) = t.desk.window("PUT", "/api/net/sharing", json!({ "network": "home", "sharing": [t.atlas] })).await;
+    assert_eq!(s, 200, "{v}");
+    // Given to desk after that: desk doesn't start it.
+    entry_to(&t.tower, &t.desk, EntryKind::Assign, assign(&waiting.id, "desk"));
+    intent_is(&t.desk, &waiting.id, "failed").await;
+    assert_eq!(fake_runs(&t.desk).len(), 0, "ledger isn't shown to N1 any more, so nothing started in it");
+
+    // New ones: on ledger for desk, and for any machine (with a take); then
+    // the positive control, atlas.
+    confirm(&t.desk, &t.ledger);
+    let (for_desk, body) = from_tower("hold-on: reconcile May", "desk", &t.ledger);
+    sent(body);
+    entry_to(&t.tower, &t.desk, EntryKind::Assign, assign(&for_desk.id, "desk"));
+    let (for_any, body) = signed_intent_at(&t.tower, "tower", "hold-on: whoever", "@any", &t.ledger, DLG, "tower");
+    sent(body);
+    entry_to(&t.tower, &t.desk, EntryKind::Assign, take(&for_any.id, confirmation(&t.tower, &t.ledger)));
+    let (control, body) = from_tower("hold-on: tidy the form", "desk", &t.atlas);
+    sent(body);
+    entry_to(&t.tower, &t.desk, EntryKind::Assign, assign(&control.id, "desk"));
+    let _ = ran(&t.desk, 1).await;
+    intent_is(&t.desk, &control.id, "running").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mut reached = Vec::new();
+    for (name, id) in [("for desk", &for_desk.id), ("for any machine", &for_any.id)] {
+        if intent(&t.desk, id).await != Value::Null {
+            reached.push(format!("the intent {name} on ledger was kept"));
+        }
+    }
+    if !t.desk.world.setup.db.as_ref().unwrap().takes(&for_any.id).unwrap().is_empty() {
+        reached.push("a take of an intent on ledger was kept".to_string());
+    }
+    assert!(reached.is_empty(), "N1 is shown only atlas, and still: {reached:?}");
+    assert_eq!(fake_runs(&t.desk).len(), 1, "only atlas's run was started");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
