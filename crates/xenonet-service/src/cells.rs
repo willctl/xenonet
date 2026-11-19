@@ -26,7 +26,7 @@ use xenonet_engine::confine::{CellApp, CellHost, CellPlan, CellRun, ConfineError
 const GUEST_IN: &str = "/tmp/xn-in";
 
 /// A run with no deadline of its own ends after this long.
-const DEFAULT_DEADLINE: Duration = Duration::from_secs(30 * 60);
+const DEFAULT_DEADLINE: Duration = Duration::from_mins(30);
 
 /// The cell name prefix in production.
 pub const PRODUCTION_PREFIX: &str = "adytum-xn-";
@@ -58,7 +58,7 @@ impl CellRunner {
     /// Names cells with this prefix instead (`adytum-test-` in tests).
     pub fn with_prefix(mut self, prefix: &str) -> Result<Self, ConfineError> {
         format!("{prefix}x").parse::<CellName>().map_err(|e| ConfineError::Host(format!("{prefix:?} is not a cell name prefix: {e}")))?;
-        self.prefix = prefix.to_owned();
+        prefix.clone_into(&mut self.prefix);
         Ok(self)
     }
 
@@ -108,7 +108,7 @@ impl CellRunner {
         ledger.settle(op, outcome).map_err(|e| ConfineError::Host(e.to_string()))?;
         started.map_err(host)?;
 
-        let folder = self.project_folder_name(&plan.project)?;
+        let folder = Self::project_folder_name(&plan.project)?;
         let setup = self.driver.exec(name, &["mkdir".into(), "-p".into(), CELL_HOME.into(), GUEST_IN.into()], ExecOpts::default()).await.map_err(host)?;
         if !setup.success() {
             return Err(ConfineError::Host(format!("the cell's folders could not be made: {}", setup.stderr_lossy().trim())));
@@ -132,7 +132,7 @@ impl CellRunner {
         Ok(CellRun { status: out.status, stdout: out.stdout, stderr: out.stderr, timed_out: out.timed_out, cell: name.to_string(), removed: false })
     }
 
-    fn project_folder_name(&self, project: &Path) -> Result<String, ConfineError> {
+    fn project_folder_name(project: &Path) -> Result<String, ConfineError> {
         let refuse = |why| ConfineError::ProjectRefused { project: project.display().to_string(), why };
         if !project.is_dir() {
             return Err(refuse("it is not a folder"));
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn a_prefix_that_is_not_ours_is_refused() {
-        let (home, _) = (dir("d-home"), ());
+        let home = dir("d-home");
         let (r, _, _) = runner(false, &home);
         assert!(r.with_prefix("xenonet-").is_err());
         let _ = std::fs::remove_dir_all(&home);

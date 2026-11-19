@@ -9,8 +9,6 @@
 //! sockets), names its cell `adytum-test-*`, and removes the cell and the
 //! folder at the end, also when a step fails. Needs about 6 GB free.
 
-#![expect(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout, reason = "a live gate: it fails loudly where it stands and prints its timings")]
-
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
