@@ -1,0 +1,171 @@
+{
+  "tool": "limactl",
+  "version": "2.1.2",
+  "calls": [
+    {
+      "argv": [
+        "limactl",
+        "list",
+        "--json"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "create",
+        "--name=adytum-test-golden",
+        "--tty=false",
+        "{lima_home}/_templates/adytum-test-golden.yaml"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "list",
+        "--json"
+      ],
+      "stdin": null,
+      "stdout": "{\"name\":\"adytum-test-golden\",\"hostname\":\"lima-adytum-test-golden\",\"status\":\"Stopped\",\"dir\":\"{lima_home}/adytum-test-golden\",\"vmType\":\"vz\",\"arch\":\"aarch64\",\"cpus\":2,\"memory\":2147483648,\"disk\":10737418240,\"sshConfigFile\":\"{lima_home}/adytum-test-golden/ssh.config\",\"IdentityFile\":\"{lima_home}/_config/user\",\"sshAddress\":\"127.0.0.1\",\"protected\":false,\"limaVersion\":\"2.1.2\",\"HostOS\":\"darwin\",\"HostArch\":\"aarch64\",\"LimaHome\":\"{lima_home}\"}\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "clone",
+        "--tty=false",
+        "--set",
+        ".cpus = 2",
+        "--set",
+        ".memory = \"2048MiB\"",
+        "--set",
+        ".mounts = []",
+        "--set",
+        ".portForwards = [{\"guestPort\":8080,\"hostPort\":18080,\"hostIP\":\"127.0.0.1\",\"proto\":\"tcp\"},{\"guestIP\":\"127.0.0.1\",\"proto\":\"any\",\"guestPortRange\":[1,65535],\"ignore\":true},{\"guestIP\":\"0.0.0.0\",\"proto\":\"any\",\"guestPortRange\":[1,65535],\"ignore\":true},{\"guestIP\":\"::\",\"proto\":\"any\",\"guestPortRange\":[1,65535],\"ignore\":true}]",
+        "adytum-test-golden",
+        "adytum-test-golden-clone"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "list",
+        "--json"
+      ],
+      "stdin": null,
+      "stdout": "{\"name\":\"adytum-test-golden\",\"hostname\":\"lima-adytum-test-golden\",\"status\":\"Stopped\",\"dir\":\"{lima_home}/adytum-test-golden\",\"vmType\":\"vz\",\"arch\":\"aarch64\",\"cpus\":2,\"memory\":2147483648,\"disk\":10737418240,\"sshConfigFile\":\"{lima_home}/adytum-test-golden/ssh.config\",\"IdentityFile\":\"{lima_home}/_config/user\",\"sshAddress\":\"127.0.0.1\",\"protected\":false,\"limaVersion\":\"2.1.2\",\"HostOS\":\"darwin\",\"HostArch\":\"aarch64\",\"LimaHome\":\"{lima_home}\"}\n{\"name\":\"adytum-test-golden-clone\",\"hostname\":\"lima-adytum-test-golden-clone\",\"status\":\"Stopped\",\"dir\":\"{lima_home}/adytum-test-golden-clone\",\"vmType\":\"vz\",\"arch\":\"aarch64\",\"cpus\":2,\"memory\":2147483648,\"disk\":10737418240,\"sshConfigFile\":\"{lima_home}/adytum-test-golden-clone/ssh.config\",\"IdentityFile\":\"{lima_home}/_config/user\",\"sshAddress\":\"127.0.0.1\",\"protected\":false,\"limaVersion\":\"2.1.2\",\"HostOS\":\"darwin\",\"HostArch\":\"aarch64\",\"LimaHome\":\"{lima_home}\"}\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "list",
+        "--json"
+      ],
+      "stdin": null,
+      "stdout": "{\"name\":\"adytum-test-golden\",\"hostname\":\"lima-adytum-test-golden\",\"status\":\"Stopped\",\"dir\":\"{lima_home}/adytum-test-golden\",\"vmType\":\"vz\",\"arch\":\"aarch64\",\"cpus\":2,\"memory\":2147483648,\"disk\":10737418240,\"sshConfigFile\":\"{lima_home}/adytum-test-golden/ssh.config\",\"IdentityFile\":\"{lima_home}/_config/user\",\"sshAddress\":\"127.0.0.1\",\"protected\":false,\"limaVersion\":\"2.1.2\",\"HostOS\":\"darwin\",\"HostArch\":\"aarch64\",\"LimaHome\":\"{lima_home}\"}\n{\"name\":\"adytum-test-golden-clone\",\"hostname\":\"lima-adytum-test-golden-clone\",\"status\":\"Stopped\",\"dir\":\"{lima_home}/adytum-test-golden-clone\",\"vmType\":\"vz\",\"arch\":\"aarch64\",\"cpus\":2,\"memory\":2147483648,\"disk\":10737418240,\"sshConfigFile\":\"{lima_home}/adytum-test-golden-clone/ssh.config\",\"IdentityFile\":\"{lima_home}/_config/user\",\"sshAddress\":\"127.0.0.1\",\"protected\":false,\"limaVersion\":\"2.1.2\",\"HostOS\":\"darwin\",\"HostArch\":\"aarch64\",\"LimaHome\":\"{lima_home}\"}\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "start",
+        "--tty=false",
+        "adytum-test-golden-clone"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "shell",
+        "--workdir=/",
+        "adytum-test-golden-clone",
+        "--",
+        "uname",
+        "-a"
+      ],
+      "stdin": null,
+      "stdout": "Linux lima-adytum-test-golden-clone 6.8.0-117-generic #117-Ubuntu SMP PREEMPT_DYNAMIC Thu May  7 17:26:37 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "list",
+        "--json"
+      ],
+      "stdin": null,
+      "stdout": "{\"name\":\"adytum-test-golden\",\"hostname\":\"lima-adytum-test-golden\",\"status\":\"Stopped\",\"dir\":\"{lima_home}/adytum-test-golden\",\"vmType\":\"vz\",\"arch\":\"aarch64\",\"cpus\":2,\"memory\":2147483648,\"disk\":10737418240,\"sshConfigFile\":\"{lima_home}/adytum-test-golden/ssh.config\",\"IdentityFile\":\"{lima_home}/_config/user\",\"sshAddress\":\"127.0.0.1\",\"protected\":false,\"limaVersion\":\"2.1.2\",\"HostOS\":\"darwin\",\"HostArch\":\"aarch64\",\"LimaHome\":\"{lima_home}\"}\n{\"name\":\"adytum-test-golden-clone\",\"hostname\":\"lima-adytum-test-golden-clone\",\"status\":\"Running\",\"dir\":\"{lima_home}/adytum-test-golden-clone\",\"vmType\":\"vz\",\"arch\":\"aarch64\",\"cpus\":2,\"memory\":2147483648,\"disk\":10737418240,\"sshLocalPort\":0,\"sshConfigFile\":\"{lima_home}/adytum-test-golden-clone/ssh.config\",\"hostAgentPID\":0,\"driverPID\":0,\"IdentityFile\":\"{lima_home}/_config/user\",\"sshAddress\":\"127.0.0.1\",\"protected\":false,\"limaVersion\":\"2.1.2\",\"HostOS\":\"darwin\",\"HostArch\":\"aarch64\",\"LimaHome\":\"{lima_home}\"}\n",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "stop",
+        "--tty=false",
+        "adytum-test-golden-clone"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "delete",
+        "--force",
+        "--tty=false",
+        "adytum-test-golden-clone"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "delete",
+        "--force",
+        "--tty=false",
+        "adytum-test-golden"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    },
+    {
+      "argv": [
+        "limactl",
+        "list",
+        "--json"
+      ],
+      "stdin": null,
+      "stdout": "",
+      "stderr": "",
+      "status": 0
+    }
+  ]
+}

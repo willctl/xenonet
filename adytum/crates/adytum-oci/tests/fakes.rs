@@ -268,3 +268,15 @@ async fn copy_paths_must_be_absolute_and_stay_put() {
     assert!(driver.copy_out(&n, "/tmp/x:y", Path::new("/tmp/f")).await.is_err());
     assert!(script.joined().iter().all(|c| !c.contains(" cp ")), "{:?}", script.joined());
 }
+
+#[tokio::test]
+async fn cloning_is_unsupported_and_runs_nothing() {
+    let script = Script::new(&[]);
+    let oci = oci(&script, OciTool::Podman);
+    let mut to = spec(DriverKind::Podman);
+    to.name = name("adytum-test-b");
+    to.clone_from = Some(name("adytum-test-a"));
+    let result = Driver::clone(&oci, &name("adytum-test-a"), &to).await;
+    assert!(matches!(result, Err(DriverError::Unsupported { .. })), "{result:?}");
+    assert_eq!(script.joined(), Vec::<String>::new());
+}

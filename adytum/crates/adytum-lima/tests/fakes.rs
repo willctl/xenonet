@@ -222,3 +222,57 @@ async fn limactl_gets_only_lima_home_path_and_home() {
         assert_eq!(cmd.env_vars().get(std::ffi::OsStr::new("LIMA_HOME")).map(|v| v.to_string_lossy().into_owned()), Some(home.0.to_string_lossy().into_owned()));
     }
 }
+
+#[tokio::test]
+async fn a_clone_asks_limactl_for_the_specs_settings_and_needs_a_stopped_source() {
+    let both = format!("{}{}", list_line("adytum-test-golden", "Stopped"), list_line("adytum-test-golden-clone", "Stopped"));
+    let (lima, fake, _home) = lima_with(
+        &[
+            (&["limactl", "list", "--json"], &list_line("adytum-test-golden", "Stopped"), "", 0),
+            (
+                &[
+                    "limactl",
+                    "clone",
+                    "--tty=false",
+                    "--set",
+                    ".cpus = 2",
+                    "--set",
+                    ".memory = \"2048MiB\"",
+                    "--set",
+                    ".mounts = []",
+                    "--set",
+                    ".portForwards = [{\"guestPort\":8080,\"hostPort\":18080,\"hostIP\":\"127.0.0.1\",\"proto\":\"tcp\"},{\"guestIP\":\"127.0.0.1\",\"proto\":\"any\",\"guestPortRange\":[1,65535],\"ignore\":true},{\"guestIP\":\"0.0.0.0\",\"proto\":\"any\",\"guestPortRange\":[1,65535],\"ignore\":true},{\"guestIP\":\"::\",\"proto\":\"any\",\"guestPortRange\":[1,65535],\"ignore\":true}]",
+                    "adytum-test-golden",
+                    "adytum-test-golden-clone",
+                ],
+                "",
+                "",
+                0,
+            ),
+            (&["limactl", "list", "--json"], &list_line("adytum-test-golden", "Running"), "", 0),
+            (&["limactl", "list", "--json"], &both, "", 0),
+            (&["limactl", "list", "--json"], "", "", 0),
+        ],
+        "clone",
+    );
+    let (source, to) = (common::name(), common::clone_spec());
+    lima.clone(&source, &to).await.unwrap();
+    // A source that is running is refused before limactl clone runs.
+    assert!(matches!(lima.clone(&source, &to).await, Err(DriverError::Unsupported { .. })));
+    // A name that is taken is refused.
+    let taken = lima.clone(&source, &to).await;
+    assert!(matches!(&taken, Err(DriverError::Refused(r)) if r.code == RefusalCode::NameTaken), "{taken:?}");
+    // A source that is not there is not found.
+    assert!(matches!(lima.clone(&source, &to).await, Err(DriverError::NotFound { .. })));
+    fake.assert_done();
+}
+
+#[tokio::test]
+async fn a_clone_spec_that_breaks_a_host_rule_never_reaches_limactl() {
+    let (lima, fake, _home) = lima_with(&[], "clonebad");
+    let mut to = common::clone_spec();
+    to.ports[0].bind = "0.0.0.0".parse().unwrap();
+    let Err(DriverError::Refused(r)) = lima.clone(&common::name(), &to).await else { panic!("not refused") };
+    assert_eq!(r.code, RefusalCode::PortNotLocalhost);
+    fake.assert_done();
+}

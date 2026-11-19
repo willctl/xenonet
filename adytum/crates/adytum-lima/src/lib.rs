@@ -308,6 +308,36 @@ impl Driver for Lima {
         self.run_ok(cmd, "limactl delete", name).await.map(|_| ())
     }
 
+    async fn clone(&self, from: &CellName, to: &CellSpec) -> Result<(), DriverError> {
+        adytum_policy::name_is_ours(from.as_str())?;
+        adytum_policy::name_is_ours(to.name.as_str())?;
+        self.check_home()?;
+        self.check_socket_path(&to.name)?;
+        let edits = template::clone_edits(to)?;
+        let cells = self.list().await?;
+        match cells.iter().find(|c| &c.name == from).map(|c| c.state) {
+            None => return Err(DriverError::NotFound { name: from.to_string() }),
+            Some(CellState::Stopped) => {}
+            Some(_) => return Err(DriverError::Unsupported { what: format!("cloning {from} while it is not stopped (stop it first)") }),
+        }
+        // limactl clone would stop at an existing name too, but its message is
+        // about files; this one says what to do.
+        if cells.iter().any(|c| c.name == to.name) {
+            return Err(adytum_model::Refusal::new(
+                adytum_model::RefusalCode::NameTaken,
+                format!("A cell named {} already exists.", to.name),
+                "Pick another name or remove that cell first.",
+            )
+            .into());
+        }
+        let mut cmd = self.limactl().arg("clone").arg("--tty=false");
+        for edit in &edits {
+            cmd = cmd.arg("--set").arg(edit);
+        }
+        let cmd = cmd.arg(from.as_str()).arg(to.name.as_str()).deadline(CREATE_DEADLINE);
+        self.run_ok(cmd, "limactl clone", from).await.map(|_| ())
+    }
+
     async fn list(&self) -> Result<Vec<Listed>, DriverError> {
         self.check_home()?;
         if !self.home.exists() {

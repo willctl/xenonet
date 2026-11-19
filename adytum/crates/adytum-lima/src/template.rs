@@ -12,6 +12,9 @@ use adytum_model::{Arch, CellSpec, DriverKind};
 /// The guest account's name. The host user's name is never copied in.
 const GUEST_USER: &str = "adytum";
 
+/// Guest addresses whose every port is ignored, after the spec's own rules.
+const IGNORE_GUEST_IPS: [&str; 3] = ["127.0.0.1", "0.0.0.0", "::"];
+
 fn quoted(text: &str) -> String {
     // A JSON string is also a YAML double-quoted string.
     serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_owned())
@@ -108,13 +111,56 @@ pub fn render(spec: &CellSpec) -> Result<String, DriverError> {
         line(&format!("  hostIP: {}", quoted(&p.bind.to_string())));
         line("  proto: tcp");
     }
-    for guest_ip in ["127.0.0.1", "0.0.0.0", "::"] {
+    for guest_ip in IGNORE_GUEST_IPS {
         line(&format!("- guestIP: {}", quoted(guest_ip)));
         line("  proto: any");
         line("  guestPortRange: [1, 65535]");
         line("  ignore: true");
     }
     Ok(out)
+}
+
+/// The `--set` edits that make a clone of another cell match `spec`: its
+/// CPUs, memory, mounts and port rules replace the source's, so the clone
+/// never keeps a host port or folder that only the source's spec named.
+/// Disk is left as the source has it; Lima can grow a disk but not shrink one.
+///
+/// Runs the same host-guarding checks as [`render`].
+pub fn clone_edits(spec: &CellSpec) -> Result<Vec<String>, DriverError> {
+    adytum_policy::name_is_ours(spec.name.as_str())?;
+    adytum_policy::ports_on_localhost(spec)?;
+    adytum_policy::automation_port_kept_inside(spec)?;
+    adytum_policy::sealed_has_no_mounts(spec)?;
+    if spec.driver != DriverKind::Lima {
+        return Err(unsupported("a cell for another driver"));
+    }
+    if spec.network.is_some() {
+        return Err(unsupported("a named network"));
+    }
+    if !spec.secrets.is_empty() {
+        return Err(unsupported("secrets"));
+    }
+    let mut mounts = Vec::new();
+    for m in if spec.sealed { &[][..] } else { &spec.mounts[..] } {
+        let source = m.source.to_string_lossy();
+        if !m.source.is_absolute() || !m.target.starts_with('/') || source.contains("..") || m.target.contains("..") {
+            return Err(unsupported("a mount whose folder or target is not an absolute path without .."));
+        }
+        mounts.push(serde_json::json!({ "location": source, "mountPoint": m.target, "writable": m.writable }));
+    }
+    let mut forwards = Vec::new();
+    for p in &spec.ports {
+        forwards.push(serde_json::json!({ "guestPort": p.guest, "hostPort": p.host, "hostIP": p.bind.to_string(), "proto": "tcp" }));
+    }
+    for guest_ip in IGNORE_GUEST_IPS {
+        forwards.push(serde_json::json!({ "guestIP": guest_ip, "proto": "any", "guestPortRange": [1, 65535], "ignore": true }));
+    }
+    Ok(vec![
+        format!(".cpus = {}", spec.resources.cpus),
+        format!(".memory = \"{}MiB\"", spec.resources.memory_mib),
+        format!(".mounts = {}", serde_json::Value::Array(mounts)),
+        format!(".portForwards = {}", serde_json::Value::Array(forwards)),
+    ])
 }
 
 #[cfg(test)]
@@ -232,5 +278,34 @@ mod tests {
         let mut s = spec(true);
         s.driver = DriverKind::Podman;
         assert!(matches!(render(&s), Err(DriverError::Unsupported { .. })));
+    }
+
+    #[test]
+    fn clone_edits_replace_the_sources_ports_mounts_and_size() {
+        let mut s = spec(false);
+        s.ports.push(Port { guest: 8080, host: 18080, bind: "127.0.0.1".parse().unwrap() });
+        s.mounts.push(mount());
+        let edits = clone_edits(&s).unwrap();
+        assert_eq!(edits[0], ".cpus = 2");
+        assert_eq!(edits[1], ".memory = \"2048MiB\"");
+        assert_eq!(edits[2], r#".mounts = [{"location":"/srv/share","mountPoint":"/mnt/share","writable":false}]"#);
+        assert!(edits[3].starts_with(r#".portForwards = [{"guestPort":8080,"hostPort":18080,"hostIP":"127.0.0.1","proto":"tcp"},"#), "{}", edits[3]);
+        assert!(edits[3].ends_with(r#""guestPortRange":[1,65535],"ignore":true}]"#), "{}", edits[3]);
+        // A sealed spec that lists a mount is refused; one without has none.
+        let mut sealed = spec(true);
+        sealed.mounts.push(mount());
+        assert!(matches!(clone_edits(&sealed), Err(DriverError::Refused(_))));
+        assert_eq!(clone_edits(&spec(true)).unwrap()[2], ".mounts = []");
+    }
+
+    #[test]
+    fn clone_edits_refuse_what_render_refuses() {
+        let mut s = spec(true);
+        s.ports.push(Port { guest: 80, host: 8080, bind: "0.0.0.0".parse().unwrap() });
+        let Err(DriverError::Refused(r)) = clone_edits(&s) else { panic!("not refused") };
+        assert_eq!(r.code, adytum_model::RefusalCode::PortNotLocalhost);
+        let mut s = spec(true);
+        s.network = Some("net-1".parse().unwrap());
+        assert!(matches!(clone_edits(&s), Err(DriverError::Unsupported { .. })));
     }
 }

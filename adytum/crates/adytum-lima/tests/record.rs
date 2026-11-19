@@ -31,7 +31,9 @@ impl Cleanup {
         let home = self.0.clone();
         let _ = std::thread::spawn(move || {
             if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
-                let _ = rt.block_on(Lima::system(home.clone()).remove(&common::name()));
+                let lima = Lima::system(home.clone());
+                let _ = rt.block_on(lima.remove(&common::clone_name()));
+                let _ = rt.block_on(lima.remove(&common::name()));
             }
             let _ = std::fs::remove_dir_all(home.parent().unwrap_or(&home));
         })
@@ -96,5 +98,24 @@ async fn record_the_lifecycle() -> Res {
     assert_eq!(std::fs::read(work.join("out.txt"))?, lifecycle::FILE_BYTES);
 
     sanitize(recorder.transcript()).write_to(Path::new(lifecycle::GOLDEN))?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn record_the_clone() -> Res {
+    if std::env::var("ADYTUM_LIVE").as_deref() != Ok("1") || std::env::var("ADYTUM_RECORD_GOLDEN").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let base = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".adytum-golden-clone");
+    let home = base.join("lima");
+    let guard = Cleanup(home.clone());
+    guard.run();
+    std::fs::create_dir_all(&home)?;
+
+    let recorder = Arc::new(RecordingRunner::new(SystemRunner::new(), "limactl", "2.1.2").with_var("lima_home", &home));
+    let lima = Lima::new(recorder.clone(), "limactl".into(), home);
+    lifecycle::clone_lifecycle(&lima).await?;
+
+    sanitize(recorder.transcript()).write_to(Path::new(lifecycle::CLONE_GOLDEN))?;
     Ok(())
 }

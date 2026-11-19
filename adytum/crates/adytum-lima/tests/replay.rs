@@ -33,9 +33,29 @@ async fn the_recorded_lifecycle_replays_through_the_fake() -> Res {
     Ok(())
 }
 
+#[tokio::test]
+async fn the_recorded_clone_replays_through_the_fake() -> Res {
+    let dir = scratch("clone");
+    let home = dir.join("lima");
+    std::fs::create_dir_all(&home)?;
+    let fake = Arc::new(FakeRunner::from_file(lifecycle::CLONE_GOLDEN)?.with_var("lima_home", &home));
+    let lima = Lima::new(fake.clone(), "limactl".into(), home);
+    lifecycle::clone_lifecycle(&lima).await?;
+    fake.assert_done();
+    std::fs::remove_dir_all(dir)?;
+    Ok(())
+}
+
 #[test]
 fn the_golden_file_holds_no_path_or_name_of_the_machine_it_was_recorded_on() -> Res {
-    let text = std::fs::read_to_string(lifecycle::GOLDEN)?;
+    for golden in [lifecycle::GOLDEN, lifecycle::CLONE_GOLDEN] {
+        let text = std::fs::read_to_string(golden)?;
+        assert_no_machine_details(&text);
+    }
+    Ok(())
+}
+
+fn assert_no_machine_details(text: &str) {
     assert!(!text.contains("/Users/"), "a home path");
     for var in ["HOME", "USER", "LOGNAME"] {
         if let Some(value) = std::env::var_os(var).map(|v| v.to_string_lossy().into_owned()).filter(|v| v.len() > 3) {
@@ -43,5 +63,4 @@ fn the_golden_file_holds_no_path_or_name_of_the_machine_it_was_recorded_on() -> 
         }
     }
     assert!(text.contains("{lima_home}"));
-    Ok(())
 }

@@ -77,6 +77,14 @@ pub trait Driver: Send + Sync {
 
     /// The cells this driver holds.
     async fn list(&self) -> Result<Vec<Listed>, DriverError>;
+
+    /// Makes `to` as a copy of the stopped cell `from`, with the settings
+    /// the spec lists (`to.clone_from` names the source). Stopped afterwards.
+    /// A driver that cannot copy a cell refuses with `Unsupported`.
+    async fn clone(&self, from: &CellName, to: &CellSpec) -> Result<(), DriverError> {
+        let _ = (from, to);
+        Err(DriverError::Unsupported { what: "cloning a cell".to_owned() })
+    }
 }
 
 #[cfg(test)]
