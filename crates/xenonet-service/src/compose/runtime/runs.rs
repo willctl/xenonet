@@ -314,6 +314,9 @@ impl Runner {
             }
         };
         let pid = child.pid();
+        // A job object: adytum-exec has no process group on Windows.
+        #[cfg(windows)]
+        let tree = xenonet_os::process::Tree::of(child.child_mut());
         let run = Run { id, key: key.to_string(), app: app.to_string(), pid: Some(f64::from(pid)), at, end: None, exit: None, ms: None, timed_out: false };
         self.state.locked().runs.push(run);
         self.save();
@@ -335,18 +338,35 @@ impl Runner {
         std::thread::spawn(move || {
             let mut code = None;
             let mut timed_out = false;
+            #[cfg(windows)]
+            let started = std::time::Instant::now();
             loop {
                 // The turn has ended, and so has everything it started.
+                #[cfg(windows)]
+                let others = {
+                    // adytum-exec's deadline stops only the child here, so
+                    // the job (the child's whole tree) is stopped by this.
+                    if started.elapsed().as_secs_f64() * 1000.0 >= runs::TURN_MS && tree.others() {
+                        tree.kill(child.child_mut());
+                        timed_out = true;
+                    }
+                    tree.others()
+                };
+                #[cfg(not(windows))]
+                let others = child.group_running();
                 match child.try_wait() {
-                    Ok(Some(exit)) if !child.group_running() => {
+                    Ok(Some(exit)) if !others => {
                         code = exit.code;
-                        timed_out = exit.timed_out;
+                        timed_out |= exit.timed_out;
                         break;
                     }
                     Err(_) => break,
                     _ => {}
                 }
                 if me.state.locked().stopping.contains(&key) {
+                    #[cfg(windows)]
+                    tree.kill(child.child_mut());
+                    #[cfg(not(windows))]
                     child.kill_group();
                     break;
                 }
