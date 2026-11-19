@@ -61,6 +61,10 @@ impl Purpose {
     /// context key a forward grant is collected for: over XenoNet's
     /// challenge, so it counts for that one collect.
     pub const FORWARD_COLLECT: Purpose = Purpose("xenonet-forward-collect/1");
+    /// An Eidolon's seat record: which machine may open it now.
+    pub const EIDOLON_SEAT: Purpose = Purpose("eidolon-seat/1");
+    /// An Eidolon's signed manifest, written by the seat's machine.
+    pub const EIDOLON_MANIFEST: Purpose = Purpose("eidolon-manifest/1");
     /// A signature nothing verifies, which the doctor times a key with:
     /// its own tag, so it can't be taken for any other.
     pub const PROBE: Purpose = Purpose("xenonet-probe/1");
