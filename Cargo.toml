@@ -93,6 +93,10 @@ getrandom = "0.3"
 # each system defines it, for reading a review's files without following
 # a link.
 libc = "0.2"
+# Signals to a whole process group (adytum-exec stops a command's children
+# with SIGTERM, then SIGKILL) without an unsafe block: killpg. Already in
+# the lock; only the signal feature, on unix.
+nix = { version = "0.28", default-features = false, features = ["signal"] }
 # Windows's job objects, so a headless turn and every process it starts
 # (cmd.exe, then the node it runs) stop together. tokio already brings it.
 windows-sys = "0.61"
@@ -192,6 +196,13 @@ turmoil = "0.7.2"
 # base64url for the network's keys, signatures and sealed bodies (in the
 # lock already through reqwest).
 base64 = "0.23"
+# Wipes an Eidolon key from memory when it is dropped (the vault's EidolonKey);
+# in the lock already through x25519-dalek.
+zeroize = "1"
+
+# Random seats, generations and clocks in the property tests of Eidolon's
+# policy (already in the lock through xenonet-id's dev-dependencies).
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 # Adytum (adytum/): cells, per machine. Eidolon (eidolon/): an entity's
 # state, sealed, opened in a cell and moved. Both keep to their own layer

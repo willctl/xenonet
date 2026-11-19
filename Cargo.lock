@@ -48,6 +48,11 @@ version = "0.1.0"
 [[package]]
 name = "adytum-exec"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nix",
+ "tokio",
+]
 
 [[package]]
 name = "adytum-ledger"
@@ -60,6 +65,11 @@ version = "0.1.0"
 [[package]]
 name = "adytum-model"
 version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "adytum-oci"
@@ -68,6 +78,10 @@ version = "0.1.0"
 [[package]]
 name = "adytum-policy"
 version = "0.1.0"
+dependencies = [
+ "adytum-model",
+ "proptest",
+]
 
 [[package]]
 name = "adytum-testkit"
@@ -1154,6 +1168,15 @@ dependencies = [
 [[package]]
 name = "eidolon-bidi"
 version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "eidolon-testkit",
+ "getrandom 0.3.4",
+ "ring",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "eidolon-browser"
@@ -1174,6 +1197,11 @@ version = "0.1.0"
 [[package]]
 name = "eidolon-model"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "xenonet-id",
+]
 
 [[package]]
 name = "eidolon-move"
@@ -1186,14 +1214,37 @@ version = "0.1.0"
 [[package]]
 name = "eidolon-policy"
 version = "0.1.0"
+dependencies = [
+ "eidolon-model",
+ "proptest",
+ "xenonet-id",
+]
 
 [[package]]
 name = "eidolon-testkit"
 version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "eidolon-bidi",
+ "getrandom 0.3.4",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "eidolon-vault"
 version = "0.1.0"
+dependencies = [
+ "flate2",
+ "proptest",
+ "ring",
+ "serde",
+ "serde_json",
+ "x25519-dalek",
+ "xenonet-id",
+ "xenonet-os",
+ "zeroize",
+]
 
 [[package]]
 name = "eidolon-view"
