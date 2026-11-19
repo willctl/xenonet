@@ -24,7 +24,7 @@
 //! The requests sent from here are kept in memory: after a restart, a late
 //! answer to one is let go.
 
-use crate::compose::runtime::network::{clip, ms, net, quiet_note, send, sender_kind, start_end_note};
+use crate::compose::runtime::network::{clip, ms, net, quiet_note, sender_kind, start_end_note};
 use crate::compose::runtime::runs::{Runner, Turn};
 use crate::compose::runtime::Runtime;
 use serde_json::{json, Value};
@@ -50,8 +50,24 @@ pub(crate) fn mcp_tool_timeout_ms(w: &Runtime) -> u64 {
 struct Asked {
     by: Value,
     host: String,
+    /// The network it was sent into, and the only one its answers and its
+    /// run's prompts are taken from.
+    network: String,
+    /// The run it started there, as that machine's own receipts name it:
+    /// its session, and its agent when it had no session yet.
+    runs: Vec<Named>,
     at: f64,
 }
+
+/// A run a receipt names, by its session and its agent.
+#[derive(Clone, Default, PartialEq)]
+struct Named {
+    session: Option<String>,
+    agent: Option<String>,
+}
+
+/// The most runs one request is kept as naming.
+const NAMED_MAX: usize = 8;
 
 #[derive(Default)]
 pub struct StartSide {
@@ -65,6 +81,31 @@ pub struct StartSide {
     /// Copies of sessions XenoNet forked to answer a message, each with the
     /// session it came from: the last 200.
     forks: Mutex<Vec<(String, String)>>,
+}
+
+impl StartSide {
+    /// Whether `host`, in `network`, was asked from here to start a run
+    /// that is still open and that its own receipts name by `session` or
+    /// by `agent`. Nothing else it says about a run is believed.
+    pub fn names_run(&self, host: &str, network: &str, session: &str, agent: Option<&str>) -> bool {
+        self.asked.locked().values().any(|a| {
+            a.host == host
+                && a.network == network
+                && a.runs.iter().any(|r| (!session.is_empty() && r.session.as_deref() == Some(session)) || (agent.is_some() && r.agent.as_deref() == agent))
+        })
+    }
+
+    /// A run `host` started for a request of ours, in `network`, as its
+    /// receipt named it: what `answer_in` keeps, and what a test of a
+    /// machine that was never asked leaves out.
+    pub fn note_run(&self, mid: &str, host: &str, network: &str, session: Option<&str>, agent: Option<&str>) {
+        let mut asked = self.asked.locked();
+        let Some(a) = asked.get_mut(mid).filter(|a| a.host == host && a.network == network) else { return };
+        let run = Named { session: session.map(str::to_string), agent: agent.map(str::to_string) };
+        if run != Named::default() && !a.runs.contains(&run) && a.runs.len() < NAMED_MAX {
+            a.runs.push(run);
+        }
+    }
 }
 
 /// One turn: of XENONET_RUNS_BIN's program when it names one (the tests'
@@ -719,7 +760,9 @@ pub fn tell(w: &Runtime, by: &Value, host: &str, state: &str, a: &Value) {
 pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value, (u16, String)> {
     let r = starts::request(req).map_err(|why| (400, why))?;
     let me = net(w).me();
-    let machine = s(req, "machine").filter(|m| !m.is_empty() && me.as_ref().is_none_or(|me| me.host != *m));
+    // This machine goes by a host id in each network: any of them is this machine.
+    let mine = net(w).networks();
+    let machine = s(req, "machine").filter(|m| !m.is_empty() && mine.iter().all(|me| me.host != *m));
     let kind = kind_of(by.get("kind").and_then(Value::as_str).unwrap_or(""));
     // An actor's own token, as it called with it: decided here, and never
     // kept with the start.
@@ -769,6 +812,9 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     if !net(w).host_can(&host, "start") {
         return Err((409, format!("{host}'s XenoNet is too old to start sessions: update it there")));
     }
+    // The network it goes through: the one that has the machine, which
+    // the request names when two of this machine's networks do.
+    let network = network_for(w, &host, s(req, "network").as_deref()).map_err(|why| (409, why))?;
     let mid = xenonet_engine::network::new_id("msg").map_err(|t| (500, t.message))?;
     let id = s(&by, "id").unwrap_or_else(|| YOU.into());
     let kind = by.get("kind").and_then(Value::as_str).unwrap_or("session");
@@ -811,19 +857,43 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         "hops": 0,
         "at": ms(now_ms()),
     });
-    w.starts.asked.locked().insert(mid.clone(), Asked { by: by.clone(), host: host.clone(), at: now_ms() });
-    crate::compose::runtime::network::send_with(w, To::Host(host.clone()), FrameKind::Message, body, Some(authority));
+    w.starts.asked.locked().insert(mid.clone(), Asked { by: by.clone(), host: host.clone(), network: network.clone(), runs: Vec::new(), at: now_ms() });
+    crate::compose::runtime::network::send_in(w, Some(network), To::Host(host.clone()), FrameKind::Message, body, Some(authority));
     Ok(
         json!({ "request": mid, "host": host, "state": "sent", "way": format!("sent to {host}: the answer comes as a message, started or refused, and again when the session ends") }),
     )
 }
 
-fn start_receipt(w: &Runtime, to: &str, mid: &str, state: &str, extra: &Value) {
+/// The network a request to `host` goes through: the only one that has it,
+/// else the one `named` says (by id or name). A machine that is in several
+/// of this machine's networks is not guessed at.
+fn network_for(w: &Runtime, host: &str, named: Option<&str>) -> Result<String, String> {
+    let net = net(w);
+    let has = net.networks_with(host);
+    let in_names = || net.networks().into_iter().filter(|m| has.contains(&m.network)).map(|m| format!("{} ({})", m.name, m.network)).collect::<Vec<_>>().join(", ");
+    match (has.as_slice(), named.map(str::trim).filter(|n| !n.is_empty())) {
+        ([], _) => Err(format!("{host} isn't a machine in your network")),
+        ([one], None) => Ok(one.clone()),
+        (_, None) => Err(format!("{host} is in several of this machine's networks ({}): say which with network", in_names())),
+        (_, Some(n)) => {
+            let found: Vec<String> = net.networks().into_iter().filter(|m| has.contains(&m.network) && (m.network == n || m.name == n)).map(|m| m.network).collect();
+            match found.as_slice() {
+                [one] => Ok(one.clone()),
+                [] => Err(format!("{host} isn't in a network of yours called {n}: {}", in_names())),
+                _ => Err(format!("two of this machine's networks are called {n}: say which by its id")),
+            }
+        }
+    }
+}
+
+/// A start's receipt, into `network`: the one its request came in, which
+/// a run's watcher on another thread no longer has in hand.
+fn start_receipt(w: &Runtime, network: Option<&str>, to: &str, mid: &str, state: &str, extra: &Value) {
     let mut body = json!({ "schema": "network/receipt/v1", "mid": mid, "agent": TARGET, "state": state, "reason": null, "at": ms(now_ms()) });
     for (k, v) in extra.as_object().into_iter().flatten() {
         body[k.as_str()] = if k == "reason" { v.as_str().map_or(Value::Null, |r| json!(clip(r, 280))) } else { v.clone() };
     }
-    send(w, To::Host(to.to_string()), FrameKind::Receipt, body);
+    crate::compose::runtime::network::send_in(w, network.map(str::to_string), To::Host(to.to_string()), FrameKind::Receipt, body, None);
 }
 
 /// A start request from another machine (`message_in` routes the target
@@ -832,7 +902,10 @@ fn start_receipt(w: &Runtime, to: &str, mid: &str, state: &str, extra: &Value) {
 /// machine's own facts.
 #[expect(clippy::too_many_arguments, reason = "the frame's parts")]
 pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, agent: &str, body: Information<String>, authority: &Value, at: f64) {
-    let refuse = |why: &str| start_receipt(w, from, mid, "refused", &json!({ "reason": why }));
+    // What the request came in, which the run's receipts go back into
+    // from whatever thread they are made on.
+    let network = xenonet_net::ground::current();
+    let refuse = |why: &str| start_receipt(w, network.as_deref(), from, mid, "refused", &json!({ "reason": why }));
     let now = now_ms();
     {
         let mut taken = w.starts.taken.locked();
@@ -864,10 +937,10 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, ag
     // Who asked, by its agt_ (its machine's), or you.
     let qualified = if k == Kind::You { YOU.to_string() } else { agent.to_string() };
     let by = json!({ "kind": k.as_str(), "id": qualified, "title": v.get("by").and_then(|b| b.get("title")).and_then(Value::as_str) });
-    let (to, m) = (from.to_string(), mid.to_string());
-    let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| start_receipt(w, &to, &m, state, &a));
+    let (to, m, n) = (from.to_string(), mid.to_string(), network.clone());
+    let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| start_receipt(w, n.as_deref(), &to, &m, state, &a));
     match run_here(w, &by, Some(from), k, &qualified, &start, answer) {
-        Ok(first) => start_receipt(w, from, mid, "started", &first),
+        Ok(first) => start_receipt(w, network.as_deref(), from, mid, "started", &first),
         Err(why) => {
             w.log("info", "start", &format!("a start from {from} was refused: {why}"));
             refuse(&why);
@@ -881,7 +954,9 @@ pub fn answer_in(w: &Runtime, from: &str, mid: &str, b: &Value) -> bool {
     let (by, host) = {
         let mut asked = w.starts.asked.locked();
         let Some(a) = asked.get(mid) else { return false };
-        if a.host != from {
+        // Only the machine asked, and only in the network the request went
+        // through, answers it.
+        if a.host != from || xenonet_net::ground::current().is_some_and(|n| n != a.network) {
             return true;
         }
         let out = (a.by.clone(), a.host.clone());
@@ -893,6 +968,12 @@ pub fn answer_in(w: &Runtime, from: &str, mid: &str, b: &Value) -> bool {
         asked.retain(|_, a| now_ms() - a.at < 7.0 * 24.0 * 3600e3);
         out
     };
+    // The run it names, for the prompts it will send.
+    if state != "refused" {
+        if let Some(network) = xenonet_net::ground::current() {
+            w.starts.note_run(mid, from, &network, b.get("session").and_then(Value::as_str), b.get("agent").and_then(Value::as_str).filter(|a| a.starts_with("agt_")));
+        }
+    }
     let mut a = b.clone();
     // An older XenoNet refuses the target as an id it doesn't have.
     if state == "refused" && b.get("reason").and_then(Value::as_str) == Some("no session or actor here has that id") {
@@ -913,7 +994,9 @@ pub fn sign_in_hint(w: &Runtime, host: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::Tail;
+    use super::{now_ms, Asked, StartSide, Tail};
+    use serde_json::json;
+    use xenonet_os::sync::Locked;
     use xenonet_engine::delivery::starts;
 
     // The token is kept under a name the credential store takes, and read
@@ -943,5 +1026,32 @@ mod tests {
         assert_eq!(t.rest(), "Not logged in", "at the end, the last unfinished line too");
         assert_eq!(t.rest(), "");
         let _ = std::fs::remove_dir_all(dir);
+    }
+    fn asked_of(side: &StartSide, mid: &str, host: &str, network: &str) {
+        side.asked.locked().insert(mid.into(), Asked { by: json!({}), host: host.into(), network: network.into(), runs: Vec::new(), at: now_ms() });
+    }
+
+    #[test]
+    fn a_machine_names_only_the_runs_it_was_asked_to_start_in_the_network_it_was_asked_through() {
+        let side = StartSide::default();
+        asked_of(&side, "msg_1", "contractor-vm", "net_work");
+        asked_of(&side, "msg_2", "tower", "net_home");
+        // Nothing is named before its receipt says so.
+        assert!(!side.names_run("contractor-vm", "net_work", "claude:a", None));
+        side.note_run("msg_1", "contractor-vm", "net_work", Some("claude:a"), Some("agt_one"));
+        side.note_run("msg_2", "tower", "net_home", Some("claude:b"), None);
+        assert!(side.names_run("contractor-vm", "net_work", "claude:a", None), "by its session");
+        assert!(side.names_run("contractor-vm", "net_work", "claude:other", Some("agt_one")), "or by its agent");
+        assert!(!side.names_run("contractor-vm", "net_work", "claude:b", None), "a run asked of tower is not contractor-vm's");
+        assert!(!side.names_run("contractor-vm", "net_home", "claude:a", None), "nor in another network");
+        assert!(!side.names_run("tower", "net_home", "claude:a", None), "nor from another machine");
+        assert!(!side.names_run("contractor-vm", "net_work", "", None), "an ask that names no run names none");
+        // A receipt from another machine, or through another network, names nothing.
+        side.note_run("msg_1", "tower", "net_work", Some("claude:c"), None);
+        side.note_run("msg_1", "contractor-vm", "net_home", Some("claude:c"), None);
+        assert!(!side.names_run("contractor-vm", "net_work", "claude:c", None) && !side.names_run("tower", "net_work", "claude:c", None));
+        // Once its last receipt has come, the request is dropped, and the run is not open.
+        side.asked.locked().remove("msg_1");
+        assert!(!side.names_run("contractor-vm", "net_work", "claude:a", Some("agt_one")));
     }
 }

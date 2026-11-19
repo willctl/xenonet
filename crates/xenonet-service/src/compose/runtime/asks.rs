@@ -580,15 +580,34 @@ pub fn answer_sent(w: &Runtime, id: &str, decision: &str) {
 }
 
 /// An ask from another machine (`message_in` routes the target here), or
-/// its end. What it asks is information, shown on this console: the
-/// answer is decided on the ask's id and the person's presence, never on
-/// its text.
-pub fn ask_in(w: &Runtime, from: &str, body: &xenonet_authz::Information<String>) {
+/// its end. `from` is the machine, `agent` the agent it says asks, and the
+/// network is the frame's.
+///
+/// A member that may message this machine is not thereby a run of its own:
+/// an ask is taken only for a run this machine asked `from` to start, in
+/// the network that start went through, which its own receipts named and
+/// have not ended (`StartSide::names_run`). Any other is dropped, and
+/// logged. What it asks is information, shown on this console: the answer
+/// is decided on the ask's id and the person's presence, never on its text.
+pub fn ask_in(w: &Runtime, from: &str, agent: Option<&str>, body: &xenonet_authz::Information<String>) {
     let Ok(v) = serde_json::from_str::<Value>(body.read()) else { return };
+    if v.get("op").and_then(Value::as_str) == Some("ask") {
+        let session = Ask::of(&v, from).map(|a| a.session).unwrap_or_default();
+        let network = xenonet_net::ground::current();
+        if !network.as_deref().is_some_and(|n| w.starts.names_run(from, n, &session, agent)) {
+            return w.log("info", "net.ask", &format!("an ask from {from} was dropped: it names no run this machine asked {from} to start in this network"));
+        }
+    }
+    take_ask(w, from, &v);
+}
+
+/// An ask or its end, once `ask_in` has checked what run it is for.
+#[doc(hidden)]
+pub fn take_ask(w: &Runtime, from: &str, v: &Value) {
     let side = &w.asks;
     match v.get("op").and_then(Value::as_str) {
         Some("ask") => {
-            let Some(a) = Ask::of(&v, from) else { return };
+            let Some(a) = Ask::of(v, from) else { return };
             let shown = a.to_json(None);
             {
                 let mut there = side.there.locked();

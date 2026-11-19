@@ -209,6 +209,27 @@ fn pick_delegation(w: &Runtime, target: &str, named: Option<&str>) -> Result<Str
 /// The person's new intent, made here: kept, told to the network as an
 /// entry of this machine's feed, and given to the machine it names.
 pub fn make(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
+    // An intent belongs to one network, which everything done for it is
+    // done in. This machine in several, the request says which.
+    let networks = net(w).networks();
+    let named = text(body, "network");
+    let network = match (networks.as_slice(), named.as_deref()) {
+        ([], _) => return Err(status(409, "an intent travels in your network: make or join one first")),
+        ([one], None) => one.network.clone(),
+        (_, None) => {
+            let names = networks.iter().map(|m| format!("{} ({})", m.name, m.network)).collect::<Vec<_>>().join(", ");
+            return Err(status(409, format!("this machine is in several networks ({names}): say which the intent is for with network")));
+        }
+        (_, Some(n)) => match networks.iter().filter(|m| m.network == n || m.name == n).collect::<Vec<_>>().as_slice() {
+            [one] => one.network.clone(),
+            [] => return Err(status(404, format!("this machine isn't in a network called {n}"))),
+            _ => return Err(status(409, format!("two of this machine's networks are called {n}: say which by its id"))),
+        },
+    };
+    xenonet_net::ground::within(&network, || make_in_network(w, body, at_window))
+}
+
+fn make_in_network(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
     let gov = ground::governance(w).ok_or_else(|| status(409, "this machine's governance isn't plugged in, so it makes no intents"))?;
     let facts = gov.facts();
     let (Some(here), Some(network)) = (me(w), facts.network()) else {
@@ -319,6 +340,13 @@ pub fn cancel(w: &Runtime, id: &str, at_window: bool) -> R<Value> {
     if !i.open() {
         return Err(status(409, format!("{id} has ended: it's {}", i.state)));
     }
+    // Told in the network the intent belongs to, and no other.
+    let network = i.network.clone();
+    xenonet_net::ground::within(&network, || cancel_here(w, &db, i, at_window))
+}
+
+fn cancel_here(w: &Runtime, db: &Db, i: IntentRow, at_window: bool) -> R<Value> {
+    let id = i.id.as_str();
     let (resource, act) = report_of(&i, IntentStep::Cancel).map_err(|e| status(400, e))?;
     let authority = signed(w, at_window, &resource, &act, &format!("cancel an intent of yours on {}", i.target))?;
     let now = now_ms() as i64;
@@ -773,7 +801,12 @@ pub fn work(w: &Runtime, id: &str) {
     if !w.intents.working.locked().insert(id.to_string()) {
         return;
     }
-    let outcome = work_now(w, id);
+    // On the thread that works it, in the network the intent belongs to.
+    let network = db(w).ok().and_then(|d| d.intent(id).ok().flatten()).map(|i| i.network);
+    let outcome = match network {
+        Some(n) => xenonet_net::ground::within(&n, || work_now(w, id)),
+        None => Ok(()),
+    };
     w.intents.working.locked().remove(id);
     match outcome {
         Ok(()) => {}
@@ -863,7 +896,13 @@ fn ran(w: &Runtime, id: &str, state: &str, a: &Value) {
 fn report_here(w: &Runtime, id: &str, step: IntentStep, body: &Value) {
     let Ok(db) = db(w) else { return };
     let Ok(Some(i)) = db.intent(id) else { return };
-    if let Err(why) = took(&db, &i, step, body) {
+    // Told in the network the intent belongs to: the thread that reports
+    // may be a run's, with no frame in hand.
+    xenonet_net::ground::within(&i.network, || report_in_network(w, &db, &i, id, step, body));
+}
+
+fn report_in_network(w: &Runtime, db: &Db, i: &IntentRow, id: &str, step: IntentStep, body: &Value) {
+    if let Err(why) = took(db, i, step, body) {
         w.log("warn", "intent", &format!("a report on {id} wasn't kept: {why}"));
         return;
     }
@@ -962,28 +1001,34 @@ pub fn report(w: &Runtime, by: Reporter, id: &str, step: &str, body: &Value) -> 
 pub fn tick(w: &Runtime) {
     let Ok(db) = db(w) else { return };
     let now = now_ms() as i64;
-    let here = me(w);
+    // Each intent is looked after in the network it belongs to, as this
+    // machine is named there.
     for i in db.intents_past(now).unwrap_or_default() {
-        if db.move_intent(&i.id, &["made", "assigned", "running"], "expired", now).unwrap_or(false) {
-            if here.is_some() && here.as_deref() == i.worked_on() {
-                stop_run(w, &i.id);
+        xenonet_net::ground::within(&i.network, || {
+            let here = me(w);
+            if db.move_intent(&i.id, &["made", "assigned", "running"], "expired", now).unwrap_or(false) {
+                if here.is_some() && here.as_deref() == i.worked_on() {
+                    stop_run(w, &i.id);
+                }
+                w.log("info", "intent", &format!("{} expired", i.id));
+                changed(w);
             }
-            w.log("info", "intent", &format!("{} expired", i.id));
-            changed(w);
-        }
+        });
     }
-    let Some(here) = here else { return };
     for i in db.intents().unwrap_or_default() {
-        if i.state == "assigned" && i.worked_on() == Some(here.as_str()) && !w.intents.working.locked().contains(&i.id) {
-            work_soon(w, &i.id);
-        }
-        // One for any machine not given out yet: a checkout confirmed
-        // since may let this machine take it, and as its arbiter, a take
-        // held may now be given it.
-        if i.any() && i.state == "made" {
-            offer(w, &db, &i.id);
-            arbitrate(w, &db, &i.id);
-        }
+        xenonet_net::ground::within(&i.network, || {
+            let Some(here) = me(w) else { return };
+            if i.state == "assigned" && i.worked_on() == Some(here.as_str()) && !w.intents.working.locked().contains(&i.id) {
+                work_soon(w, &i.id);
+            }
+            // One for any machine not given out yet: a checkout confirmed
+            // since may let this machine take it, and as its arbiter, a take
+            // held may now be given it.
+            if i.any() && i.state == "made" {
+                offer(w, &db, &i.id);
+                arbitrate(w, &db, &i.id);
+            }
+        });
     }
 }
 

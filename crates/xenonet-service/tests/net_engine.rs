@@ -387,6 +387,10 @@ async fn a_call_with_no_frame_and_two_networks_decides_in_neither() {
     let none = (net.reach(), governance.facts().network());
     assert_eq!((none.0.wake.as_str(), none.0.start.as_str()), ("consent", "you"), "N1's looser settings don't stand in for the call");
     assert_eq!(none.1, None, "the call decides in no network");
+    // An intent belongs to one network, so with two it has to say which.
+    let made = xenonet_service::compose::runtime::intents::make(&t.desk.world, &json!({ "goal": "Look at refunds", "project": t.atlas }), true).unwrap_err();
+    assert_eq!(made.status, Some(409));
+    assert!(made.message.contains("several networks") && made.message.contains("network"), "{}", made.message);
     // A frame of a network this machine isn't in is in none either.
     assert_eq!(within("net_00000000-0000-4000-8000-000000000000", || governance.facts().network()), None);
     drop(t);
@@ -1210,7 +1214,8 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     let started = studio.next("start", 15, |d| d["state"] == "started").await;
     let run = started["session"].as_str().unwrap().to_string();
     // Its Claude Code asks to run a tool, through the permission tool: held
-    // on desk, and shown on both window hosts, never on desk itself.
+    // on desk, and shown on studio, which asked for the run, and not on
+    // desk itself or on laptop, which didn't.
     let ask = |me: String, input: Value| {
         let ctx = c.ctx.clone();
         tokio::spawn(async move {
@@ -1232,13 +1237,15 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
             api(&h, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
         }
     };
-    let at_laptop = until_value("the ask at laptop", 10, || async { shown(&b).await.into_iter().find(|x| x["host"] == "desk") }).await;
-    assert_eq!((at_laptop["tool"].clone(), at_laptop["input"].clone(), at_laptop["session"].clone()), (json!("Bash"), json!("npm test"), json!(run)), "{at_laptop}");
-    assert!(at_laptop["title"].as_str().unwrap().starts_with("desk · "), "{at_laptop}");
-    until("the ask at studio", 10, || async { shown(&a).await.iter().any(|x| x["id"] == at_laptop["id"]) }).await;
-    // laptop answers Allow: the answer goes to desk as an operator frame,
+    let at_studio = until_value("the ask at studio", 10, || async { shown(&a).await.into_iter().find(|x| x["host"] == "desk") }).await;
+    assert_eq!((at_studio["tool"].clone(), at_studio["input"].clone(), at_studio["session"].clone()), (json!("Bash"), json!("npm test"), json!(run)), "{at_studio}");
+    assert!(at_studio["title"].as_str().unwrap().starts_with("desk · "), "{at_studio}");
+    // laptop never asked desk for this run, so it isn't shown there.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(shown(&b).await.is_empty(), "laptop didn't ask for the run");
+    // studio answers Allow: the answer goes to desk as an operator frame,
     // and the tool answers as Claude Code takes it.
-    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": at_laptop["id"], "decision": "allow" })).await;
+    let (s, v) = a.window("POST", "/api/runs/answer", json!({ "ask": at_studio["id"], "decision": "allow" })).await;
     assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
     let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
     assert_eq!((s, answer), (200, json!({ "behavior": "allow", "updatedInput": { "command": "npm test", "description": "Run the tests" } })));
@@ -1246,7 +1253,7 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     // An answer whose frame can't go (to a machine that isn't in the
     // network) leaves the ask on the console, to answer again.
     let ghost = json!({ "op": "ask", "id": "ask_ghost", "session": "claude:x", "tool": "Bash", "input": "ls", "at": now_ms(), "until": now_ms() + 60e3 });
-    xenonet_service::compose::runtime::asks::ask_in(&b.world, "ghost", &xenonet_authz::Information::new(ghost.to_string()));
+    xenonet_service::compose::runtime::asks::take_ask(&b.world, "ghost", &ghost);
     let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": "ask_ghost", "decision": "allow" })).await;
     assert_ne!(s, 200, "{v}");
     assert!(shown(&b).await.iter().any(|x| x["id"] == "ask_ghost"), "kept to answer again");

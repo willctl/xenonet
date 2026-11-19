@@ -257,7 +257,14 @@ pub(crate) fn send(w: &Runtime, to: To, kind: Kind, body: Value) {
 /// A body with the authority its act rests on, which goes beside its feed
 /// entry for its one recipient.
 pub(crate) fn send_with(w: &Runtime, to: To, kind: Kind, body: Value, authority: Option<Value>) {
-    if let Err(e) = net(w).send(Outgoing { network: None, to, kind, body, authority }) {
+    send_in(w, None, to, kind, body, authority);
+}
+
+/// A body into `network`, named: the network a request came in, for an
+/// answer made on another thread; or the one a request was sent through.
+/// None is the network of the frame in hand, else the only one.
+pub(crate) fn send_in(w: &Runtime, network: Option<String>, to: To, kind: Kind, body: Value, authority: Option<Value>) {
+    if let Err(e) = net(w).send(Outgoing { network, to, kind, body, authority }) {
         w.log("warn", "net.send", &format!("a {} for the network wasn't queued: {e}", kind.as_str()));
     }
 }
@@ -1052,9 +1059,10 @@ pub(crate) fn host_of_agent(w: &Runtime, id: &str) -> Option<String> {
     if row.machine == xenonet_store::projects::LOCAL {
         return None;
     }
-    let g = crate::compose::runtime::ground::governance(w)?;
-    let view = g.facts().view?;
-    view.members.values().find(|m| m.machine.id() == row.machine).map(|m| m.id.clone())
+    // Whichever network the machine is in names it: a call outside a frame
+    // is in none, so the chain of one network would miss a machine that
+    // is only in another.
+    crate::compose::runtime::ground::governance(w)?.host_of_machine(&row.machine)
 }
 
 // ---------- messages out ----------
@@ -1333,7 +1341,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         let own = xenonet_authz::Resource::Machine(g.facts.machine.clone());
         let decided = judge_remote(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, own, xenonet_authz::Act::Message);
         match decided {
-            Ok(()) => crate::compose::runtime::asks::ask_in(w, from, &body),
+            Ok(()) => crate::compose::runtime::asks::ask_in(w, from, agent.as_deref(), &body),
             Err(why) => w.log("info", "net.ask", &format!("an ask from {from} was refused: {why}")),
         }
         return Ok(());
