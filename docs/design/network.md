@@ -429,7 +429,7 @@ person, one endpoint with one connection per peer, and the HLC.
   entry came in) goes to that node alone. A machine in one network needs
   no name; one in several answers 409 `which-network` when none is named.
   Presence goes into every network, each shown what is shared into it, and
-  a claim into each network its project is shared into.
+  a claim or a handoff into each network its project is shared into.
 - **A call is in one network.** The network of a call is the one the body
   in hand arrived in (`ground::within`, carried to any thread that answers
   for it: a start's receipts name the network their request came in), else
@@ -452,16 +452,29 @@ person, one endpoint with one connection per peer, and the HLC.
   session it stops seeing goes out as removed, and a delta names only
   sessions the peer was shown.
 - **A network reaches only what it sees.** What comes in is held to the
-  same sharing as what goes out. A message to a session, a wake, a claim
-  and a handoff from a member are decided in the network they came in
-  (`decide`'s step 2): the project of the session or the one named must be
-  shared into that network, or the frame is refused in the words of an id
-  nobody has, so a member can't tell which ids exist. A message's wake is
-  decided in that network too: its wake setting, and whether it is shown
-  the session. Every network has a sharing row from the moment it is
-  adopted (the first shares all, the rest none; a store opened without one
-  writes "all", which is what a missing row meant); a network with no row
-  is shown nothing.
+  same sharing as what goes out. A message to a session or an actor, a
+  wake, a claim, a handoff (and an accept of one) and a start from a member
+  are decided in the network they came in (`decide`'s step 2): the project
+  of the session, the one named, the one the stored handoff names or the one
+  the start's folder is in must be shared into that network, or the frame is
+  refused. An actor, a session in no confirmed project, a handoff that names
+  no project and a folder in no project are placed nowhere, which only a
+  network shown everything reaches. The refusal is asked before the sender
+  is checked, in the words of an id nobody has (for a start, "that folder
+  isn't in a project this network is shown", which a folder that doesn't
+  exist also gets), so a member can't tell what exists, whoever sends. A
+  message's wake is decided in that network too: its wake setting, and
+  whether it is shown the session. Every network has a sharing row from the
+  moment it is adopted (the first shares all, the rest none; a store opened
+  without one writes "all", which is what a missing row meant); a network
+  with no row is shown nothing. What goes out is held to it the same way: a
+  claim or a handoff goes into each network its project is shared into, in
+  the network of the frame in hand too, and a handoff that names no project
+  only into a network shown everything. What comes in is held to it too: a
+  remote session in a project this machine doesn't show any network it
+  shares with that host warns of no edit collision and is not among the
+  sessions this machine shows. An admin's read of this machine (transcripts,
+  stats) is not narrowed by sharing.
 - **Grants name a network.** An actor's grant is minted with a network
   fact, and one with none or another network is refused, so a second
   network never widens an existing grant.

@@ -468,16 +468,29 @@ answer:
    A frame from another machine also reaches only what the network it came
    in is shown (`Ground::sees(network, project)`, answered from what the
    person shares into that network). A message or wake reaches the project
-   its session is in, a claim its project, a handoff the project it names
-   or the session it is handed to; a session in no confirmed project, and
-   a handoff that names none, are reached only by a network shown
-   everything. A network with no sharing row is shown nothing. The
-   signed act is for the machine, so what else a frame reaches is added by
-   the receiver (`Request::reaching`), outside the signature. A refusal
-   has the code `shared` and the words of an id nobody has ("no session or
-   actor here has that id"), and comes before the sender is checked, so
-   neither tells a member which sessions exist. This machine's own door
-   isn't limited by what any network is shown.
+   its session is in, a claim its project, a handoff and an accept of one
+   the project it names (an accept: the one the stored handoff names) or
+   the session it is handed to, and a start the project its folder is in
+   through a checkout the person confirmed. Whatever is in no confirmed
+   project is placed nowhere, and only a network shown everything reaches
+   it: a session in none, an actor (an actor is in no project, so one
+   is reached only from a network shown everything), a handoff that names
+   no project, a folder in no project, and a folder that isn't there. A
+   network with no sharing row is shown nothing. The signed act is for the
+   machine, so what else a frame reaches is added by the receiver
+   (`Request::reaching`, asked on its own as `shown`), outside the
+   signature. A start that adds nothing is placed nowhere. A refusal has
+   the code `shared`. For a session or an actor it has the words of an id
+   nobody has ("no session or actor here has that id"); for a start, "that
+   folder isn't in a project this network is shown", which is also what a
+   folder that doesn't exist gets. Both come before the sender is checked
+   (a message asks `shown` before it looks at a signature or a token), so
+   neither tells a member which sessions or folders exist, whoever sends.
+   This machine's own door isn't limited by what any network is shown.
+   What a member can read of this machine as an admin (`Act::Read` of the
+   machine's transcripts and stats) is not limited by it either: the
+   sharing narrows what a network reaches and is shown, not what its
+   admins read.
 3. **Who.** The person's device signature is for this act, from an
    unrevoked device of this machine's person. An actor holds a token for
    exactly them, whose root is still held and certified, with no id
