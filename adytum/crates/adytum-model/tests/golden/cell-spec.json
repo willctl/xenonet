@@ -1,0 +1,38 @@
+{
+  "name": "adytum-demo",
+  "driver": "lima",
+  "image": {
+    "location": "https://example.test/images/base-aarch64.img",
+    "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "arch": "aarch64"
+  },
+  "wall": "wall_team-a",
+  "resources": {
+    "cpus": 2,
+    "memory_mib": 2048,
+    "disk_gib": 10
+  },
+  "ports": [
+    {
+      "guest": 8080,
+      "host": 18080,
+      "bind": "127.0.0.1"
+    }
+  ],
+  "automation_port": 9222,
+  "mounts": [
+    {
+      "source": "/work/shared",
+      "target": "/mnt/shared",
+      "writable": false
+    }
+  ],
+  "sealed": false,
+  "network": "net-a",
+  "clone_from": "adytum-base",
+  "secrets": [
+    {
+      "name": "api-token"
+    }
+  ]
+}
