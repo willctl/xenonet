@@ -484,7 +484,8 @@ answer:
    caller that forgets to say fails closed; one that reaches nothing
    sharing governs says so (`Reaching::Nothing`: a membership check, a
    prompt of a run this machine started, a handoff passed by for another
-   machine). An intent reaches the project its act names, and a report on
+   machine, and what carries nothing of a project and only narrows: the
+   person's cancel of an intent, a handoff's taken or lapsed). An intent reaches the project its act names, and a report on
    one the intent's project. A refusal has
    the code `shared`. For a session or an actor it has the words of an id
    nobody has ("no session or actor here has that id"); for a start, "that
@@ -494,9 +495,12 @@ answer:
    neither tells a member which sessions or folders exist, whoever sends.
    What this machine sends is held to the same sharing: an intent, a
    handoff, a claim and a message go only into networks shown the project
-   they are about (a message: the project of the session sending and of the
-   session it is for, as that machine's presence names it, else it is
-   refused here in words). A handoff's accept and answers say which handoff
+   they are about (a message, and a start: the project of the session sending
+   or asking, else it is refused here in words; the project of the session
+   it is for is the receiver's to hold to its own sharing, since what a
+   machine shares is its own content). What a run says of its project
+   (a note, an outcome) is told only while the intent's network is shown it,
+   and a run whose project is no longer shared into its network is stopped. A handoff's accept and answers say which handoff
    and who, never what the work was, and are told in each network the
    offer went to. A stored claim is held to what is shared now, in the warning before an edit and in the reply to a claim alike. A message already stored, waiting for its session to read it, is not recalled when its project is unshared afterwards.
    This machine's own door isn't limited by what any network is shown. It does read the settings: a call in no frame, from a machine in several networks, is decided on the narrowest start and wake of those networks (`Facts::narrowed`), never the defaults.

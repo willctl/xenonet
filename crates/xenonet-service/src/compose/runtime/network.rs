@@ -441,6 +441,8 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
     }
     let Some(db) = w.setup.db.clone() else { return };
     let _one = w.net.taking.locked();
+    // What names a run is written once the transaction is over, rolled back or not.
+    let _writes = w.starts.hold_writes();
     let Arrived { host, entry, authority, .. } = a;
     let (author, network, kind, at) = (entry.author.clone(), entry.group.clone(), entry.kind, entry.pos());
     let copy = entry.body.clone();
@@ -515,6 +517,7 @@ pub fn compacted_in(w: &Runtime, a: CompactedIn) {
     }
     let Some(db) = w.setup.db.clone() else { return };
     let _one = w.net.taking.locked();
+    let _writes = w.starts.hold_writes();
     let CompactedIn { host, compacted, .. } = a;
     let (author, network) = (compacted.compact().author.clone(), compacted.compact().group.clone());
     let mut after = Vec::new();

@@ -480,8 +480,9 @@ pub fn shown(ground: &dyn Ground, network: &NetworkId, action: Action, resource:
     }
     // A frame that carries content reaches what the receiver says it
     // reaches (a start, the folder it runs in, by what it finds the folder
-    // in). One that says nothing, `Reaching::Nothing` included, is placed
-    // nowhere, so a caller that forgot to look fails closed.
+    // in). One that says nothing at all (no `Reaching`) is placed nowhere,
+    // so a caller that forgot to look fails closed; one that says it reaches
+    // nothing sharing governs (`Reaching::Nothing`) is not held to it.
     if reaching.is_empty() && reached.is_empty() && carries_content(action) {
         reached.push(None);
     }

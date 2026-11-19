@@ -443,10 +443,14 @@ person, one endpoint with one connection per peer, and the HLC.
   only if any network asks, load shared only if all do, no roster head, a
   delegation only if the networks agree on who gave it), and a body for everyone (`To::All`) is refused in words
   unless it names its network. `Net::me` still names this machine by the
-  first network, for labels only. A send to a host that is in two of this
-  machine's networks goes into the first that has it; a start names its
-  network (`network` in the request) and is refused without one, and an
-  intent is made in a named network and everything done for it runs in it.
+  first network, for labels only. A message to a host that is in two of this
+  machine's networks goes through the first that has it and is shown the
+  project of its sender (the network of the frame in hand, when that
+  fits); the reply, a receipt or an answer goes back into the network it
+  came in. A start names its network (`network` in the request) and is
+  refused without one that has the machine and is shown the project of
+  the session asking, and an intent is made in a named network and
+  everything done for it runs in it.
 - **What each network sees** (`share.rs`). A network's presence carries
   only the sessions in confirmed checkouts of the projects the person
   shares into it. The first network a machine is in shares all; each one

@@ -295,7 +295,8 @@ impl Host {
             xenonet_service::compose::runtime::network::plug(&plugged, svc);
         }));
         cores.verify = Arc::new(You);
-        let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
+        let logs = xenonet_os::log::log_dir(&config.state_dir);
+        let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(Some(&logs), "service", None, None, "/home/nova", 1 << 20)));
         // Its engine's events reach its console's stream, as they do in
         // `xenonet serve`.
         env.emitter.bind(&ctx);
@@ -394,6 +395,12 @@ impl Host {
     }
 
     /// The receipts this host has for the messages it sent, by agent.
+    /// The lines this machine's service logged under `code`, with their messages.
+    pub fn logged(&self, code: &str) -> Vec<String> {
+        let dir = xenonet_os::log::log_dir(&self.ctx.config.state_dir);
+        xenonet_os::log::read_logs(Path::new(&dir), 0.0, "info", None, Some(code), 100).iter().filter_map(|e| e["message"].as_str().map(str::to_string)).collect()
+    }
+
     pub fn receipts(&self) -> Vec<(String, Option<String>)> {
         self.world.store.with(|s| {
             s.recent(0.0)

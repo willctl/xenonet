@@ -2644,6 +2644,7 @@ async fn a_runs_prompt_is_taken_by_the_window_host_that_asked_for_it_and_not_by_
     xenonet_service::compose::runtime::asks::to_windows(&c.world, &run, &ask);
     until("the ask at studio", 15, || async { asks_shown(&a).await.contains(&"ask_two_windows".to_string()) }).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
+    until("laptop logs that it dropped the ask", 15, || async { b.logged("net.ask").iter().any(|l| l.contains("was dropped") && l.contains("desk")) }).await;
     assert!(asks_shown(&b).await.is_empty(), "laptop is sent the ask and takes none: it didn't ask for the run");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);

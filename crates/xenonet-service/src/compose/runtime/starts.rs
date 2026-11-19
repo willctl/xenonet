@@ -134,9 +134,51 @@ pub struct StartSide {
     /// The network each run another machine asked for was started through,
     /// by its session: the only network its prompts are sent into.
     run_networks: Mutex<HashMap<String, RunNet>>,
+    /// Writes to the store held while a transaction is open around what
+    /// names a run (`hold_writes`).
+    held: Mutex<Held>,
+}
+
+#[derive(Default)]
+struct Held {
+    depth: usize,
+    kept: bool,
+    runs: bool,
+}
+
+/// What `StartSide::hold_writes` returns: the writes held are made when the
+/// last of these is dropped.
+pub struct WritesHeld<'a>(&'a StartSide);
+
+impl Drop for WritesHeld<'_> {
+    fn drop(&mut self) {
+        let (kept, runs) = {
+            let mut h = self.0.held.locked();
+            h.depth -= 1;
+            if h.depth > 0 {
+                return;
+            }
+            (std::mem::take(&mut h.kept), std::mem::take(&mut h.runs))
+        };
+        if kept {
+            self.0.save_kept(&self.0.kept.locked());
+        }
+        if runs {
+            self.0.save_run_networks(&self.0.run_networks.locked());
+        }
+    }
 }
 
 impl StartSide {
+    /// Holds what names a run to the store until the guard is dropped, so a
+    /// transaction around it (an entry being taken) that rolls back doesn't
+    /// take back what this side kept: it is written, as it stands here, once
+    /// the transaction is over.
+    pub fn hold_writes(&self) -> WritesHeld<'_> {
+        self.held.locked().depth += 1;
+        WritesHeld(self)
+    }
+
     /// The side with what the store kept: the runs named and the networks
     /// of the runs, those still within their time.
     pub fn open(db: Option<Arc<xenonet_store::Db>>) -> Self {
@@ -168,6 +210,13 @@ impl StartSide {
     }
 
     fn save_kept(&self, kept: &[Kept]) {
+        {
+            let mut h = self.held.locked();
+            if h.depth > 0 {
+                h.kept = true;
+                return;
+            }
+        }
         let rows: Vec<Value> =
             kept.iter().map(|k| json!({ "host": k.host, "network": k.network, "session": k.run.session, "agent": k.run.agent, "at": k.at, "since": k.since })).collect();
         if let Some(db) = &self.db {
@@ -176,6 +225,13 @@ impl StartSide {
     }
 
     fn save_run_networks(&self, runs: &HashMap<String, RunNet>) {
+        {
+            let mut h = self.held.locked();
+            if h.depth > 0 {
+                h.runs = true;
+                return;
+            }
+        }
         let rows: serde_json::Map<String, Value> = runs.iter().map(|(s, r)| (s.clone(), json!({ "network": r.network, "at": r.at, "since": r.since }))).collect();
         if let Some(db) = &self.db {
             let _ = db.set_setting(RUN_NETWORKS_SETTING, Some(&Value::Object(rows)));
@@ -1336,6 +1392,28 @@ mod tests {
         assert_eq!(again.network_of("claude:b", None).as_deref(), Some("net_home"));
         assert_eq!(again.network_of("claude:old", None), None, "a run past its week has no network");
         assert_eq!(again.network_of("claude:child", Some("claude:a")).as_deref(), Some("net_work"), "a fork has its parent's");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // What names a run is written to the store when the transaction around
+    // the entry that named it ends, whether or not it commits: the side
+    // keeps what it was told, so the store must not lose it to a rollback.
+    #[test]
+    fn what_is_named_inside_a_transaction_that_rolls_back_is_still_kept_in_the_store() {
+        let (dir, db) = store("rollback");
+        let side = StartSide::open(Some(db.clone()));
+        let writes = side.hold_writes();
+        let rolled = db.transaction(|| -> Result<(), xenonet_store::sql::SqlError> {
+            side.note_intent_run("tower", "net_home", Some("agt_two"));
+            side.note_network("claude:a", Some("net_work".into()));
+            Err(xenonet_store::sql::SqlError::Other("the entry wasn't taken".into()))
+        });
+        assert!(rolled.is_err());
+        drop(writes);
+        assert!(side.names_run("tower", "net_home", "", Some("agt_two")), "the side kept it");
+        let again = StartSide::open(Some(db));
+        assert!(again.names_run("tower", "net_home", "", Some("agt_two")), "and the store has what the side has");
+        assert_eq!(again.network_of("claude:a", None).as_deref(), Some("net_work"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
