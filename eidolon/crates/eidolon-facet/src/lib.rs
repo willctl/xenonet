@@ -8,13 +8,16 @@
 //! - [`FolderFacet`]: a plain folder.
 //! - [`seal_facets`] and [`open_facets`]: all of an eidolon's facets in one
 //!   step each way.
+//! - [`abort_at`]: dies at a named step, for the kill tests only.
 //! - [`LocalCell`]: a host folder standing in for a cell, for tests.
 
+mod abort;
 mod cell;
 mod error;
 mod facet;
 mod flow;
 
+pub use abort::{abort_at, ABORT_VAR};
 pub use cell::{CellAccess, LocalCell, RunOutput};
 pub use error::{FacetError, Result};
 pub use facet::{Facet, FolderFacet};

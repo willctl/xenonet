@@ -1,5 +1,6 @@
 //! Sealing and opening all of an eidolon's facets.
 
+use crate::abort::abort_at;
 use crate::cell::CellAccess;
 use crate::error::{FacetError, Result};
 use crate::facet::Facet;
@@ -31,6 +32,9 @@ async fn seal_one(facet: &dyn Facet, cell: &dyn CellAccess, keys: &Keys, vault: 
         Ok(()) => facet.take(cell, &staging).await,
         Err(e) => Err(e),
     };
+    if taken.is_ok() {
+        abort_at("after_take");
+    }
     let resumed = facet.resume(cell).await;
     let packed = taken.and_then(|()| Ok(pack_folder(facet.spec().id, facet.kind(), &staging, &leave_out, keys, vault)?));
     // Our own staging folder; the chunks are in the vault by now.
@@ -99,6 +103,7 @@ pub async fn open_facets(head: &SignedHead, facets: &[Box<dyn Facet>], cell: &dy
         }
     }
     if result.is_ok() {
+        abort_at("after_unpack");
         for (facet, into) in &staged {
             if let Err(e) = facet.place(cell, into).await {
                 result = Err(e);

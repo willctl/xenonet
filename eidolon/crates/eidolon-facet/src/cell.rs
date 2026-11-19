@@ -84,6 +84,11 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
 #[cfg(unix)]
 fn copy_link(src: &Path, dst: &Path) -> Result<()> {
     let target = std::fs::read_link(src).map_err(FacetError::io("read a symlink"))?;
+    // A second copy into the same folder (an open that was cut short and run
+    // again) finds the link already there; a real cell's copy replaces it.
+    if std::fs::symlink_metadata(dst).is_ok_and(|m| m.file_type().is_symlink()) {
+        std::fs::remove_file(dst).map_err(FacetError::io("replace a symlink"))?;
+    }
     std::os::unix::fs::symlink(target, dst).map_err(FacetError::io("make a symlink"))
 }
 
