@@ -131,19 +131,31 @@ async fn only_one_path_and_post_answer_and_the_body_is_capped() {
     // A body claimed over the cap is refused before it is read.
     let a = raw(addr, "POST", PATH, &[bearer(TOKEN)], b"{}", Some(MAX_BODY + 1)).await;
     assert_eq!(a.status, 413);
-    // So is one that is sent chunked and runs over.
-    let big = vec![b' '; MAX_BODY + 1024];
-    let mut s = TcpStream::connect(addr).await.unwrap();
-    s.write_all(
-        format!("POST {PATH} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nAuthorization: Bearer {TOKEN}\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n", big.len()).as_bytes(),
-    )
-    .await
-    .unwrap();
-    let _ = s.write_all(&big).await;
-    let _ = s.write_all(b"\r\n0\r\n\r\n").await;
-    let mut out = String::new();
-    let _ = s.read_to_string(&mut out).await;
-    assert!(out.starts_with("HTTP/1.1 413"), "{}", out.lines().next().unwrap_or(""));
+    // So is one that is sent chunked and runs over. The server may answer 413
+    // and close while the client is still writing, and on some systems the
+    // reset then discards the unread answer. So the answer is read while the
+    // body is written, and "413" or "no answer at all" both count as refused.
+    // The padded message is a valid ping: if the cap let it through, the
+    // answer would be a 200 with a result, which fails the check below.
+    let mut padded = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" }).to_string().into_bytes();
+    padded.resize(MAX_BODY + 1024, b' ');
+    let s = TcpStream::connect(addr).await.unwrap();
+    let (mut rd, mut wr) = s.into_split();
+    let reader = tokio::spawn(async move {
+        let mut out = Vec::new();
+        let _ = rd.read_to_end(&mut out).await;
+        String::from_utf8_lossy(&out).into_owned()
+    });
+    let head = format!("POST {PATH} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nAuthorization: Bearer {TOKEN}\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n", padded.len());
+    let _ = wr.write_all(head.as_bytes()).await;
+    let _ = wr.write_all(&padded).await;
+    let _ = wr.write_all(b"\r\n0\r\n\r\n").await;
+    let out = tokio::time::timeout(std::time::Duration::from_secs(20), reader).await.expect("the server closed the connection").unwrap();
+    assert!(out.is_empty() || out.starts_with("HTTP/1.1 413"), "{}", out.lines().next().unwrap_or(""));
+    assert!(!out.contains("result"), "the over-cap body reached the handler: {out}");
+    // The server is still healthy on a new connection.
+    let a = post(addr, &json!({ "jsonrpc": "2.0", "id": 2, "method": "ping" })).await;
+    assert_eq!(a.status, 200, "{}", a.body);
 }
 
 #[tokio::test]
