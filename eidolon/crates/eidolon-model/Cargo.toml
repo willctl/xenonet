@@ -1,6 +1,6 @@
 [package]
 name = "eidolon-model"
-description = "Eidolon's vocabulary: typed ids (eid_, fct_), the manifest, facet kinds and the seat. No IO."
+description = "Eidolon's vocabulary: typed ids (eid_, fct_), walls, facet specs, holders, the seat and its refusals. No IO."
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+xenonet-id.workspace = true
 
 [lints]
 workspace = true
