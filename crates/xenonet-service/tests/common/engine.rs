@@ -557,7 +557,9 @@ pub async fn two_networks_with(root: &Path, guest_window: bool) -> TwoNetworks {
     let desk_atlas = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "main");
     let desk_ledger = clone(&root.join("desk/home/ledger"), "git@github.com:acme/ledger.git", "main");
     let vm_atlas = clone(&root.join("contractor-vm/home/atlas"), "https://github.com/acme/atlas", "main");
-    let desk = Host::open_with("desk", root.join("desk"), vec![sess(DESK_ATLAS, "Add partial refunds", &desk_atlas), sess(DESK_LEDGER, "Reconcile March", &desk_ledger)], None, true).await;
+    let desk =
+        Host::open_with("desk", root.join("desk"), vec![sess(DESK_ATLAS, "Add partial refunds", &desk_atlas), sess(DESK_LEDGER, "Reconcile March", &desk_ledger)], None, true)
+            .await;
     let n1 = founded(&desk, "home").await;
     let tower = Host::open("tower", root.join("tower"), Vec::new(), None).await;
     join(&tower, &invite_to(&desk, "tower", true, Some("home")).await).await;

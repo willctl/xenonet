@@ -970,7 +970,14 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, ag
     // the request came in must be shown.
     let reaching = vec![folder_reach(w, &r.folder)];
     let decided = run_act(&g.facts.machine, r).and_then(|(resource, act)| {
-        crate::compose::runtime::network::judge_remote_reaching(w, &mut g, &crate::compose::runtime::network::SentBy { host: from, kind, sender, authority }, resource, act, reaching)
+        crate::compose::runtime::network::judge_remote_reaching(
+            w,
+            &mut g,
+            &crate::compose::runtime::network::SentBy { host: from, kind, sender, authority },
+            resource,
+            act,
+            reaching,
+        )
     });
     if let Err(why) = decided {
         let why = delegated_words(w, r, k).unwrap_or(why);

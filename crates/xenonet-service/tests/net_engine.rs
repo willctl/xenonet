@@ -245,7 +245,11 @@ async fn a_session_a_network_isnt_shown_refuses_in_the_words_of_one_that_isnt_th
         }
     }
     for (kind, state, reason) in &refused {
-        assert_eq!((state, reason), (&json!("refused"), &json!("no session or actor here has that id")), "{kind}: what N2 isn't shown, and what isn't there, are refused alike: {refused:?}");
+        assert_eq!(
+            (state, reason),
+            (&json!("refused"), &json!("no session or actor here has that id")),
+            "{kind}: what N2 isn't shown, and what isn't there, are refused alike: {refused:?}"
+        );
     }
     // The same into atlas, as an agent, is stored: the words aren't the
     // refusal of everything.
@@ -260,7 +264,8 @@ async fn a_session_a_network_isnt_shown_refuses_in_the_words_of_one_that_isnt_th
         use xenonet_model::ops::{Kind, Outgoing, To};
         t.tower.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: from_tower }).unwrap();
     }
-    until("the actor is messaged from N1", 20, || async { texts(&t.desk.ctx.cores.engine.inbox(&wren, Duration::ZERO).await.unwrap()).iter().any(|m| m == "Is the mix done?") }).await;
+    until("the actor is messaged from N1", 20, || async { texts(&t.desk.ctx.cores.engine.inbox(&wren, Duration::ZERO).await.unwrap()).iter().any(|m| m == "Is the mix done?") })
+        .await;
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -439,10 +444,12 @@ async fn a_session_of_a_guest_in_a_project_its_network_isnt_shown_collides_with_
     let desk_home = root.join("desk/home");
     let (desk_atlas, desk_ledger) = (desk_home.join("atlas").to_string_lossy().into_owned(), desk_home.join("ledger").to_string_lossy().into_owned());
     // The positive control: contractor-vm's atlas edit warns desk's atlas session.
-    until("desk's atlas session is warned of contractor-vm's edit", 20, || async { t.desk.before_edit(DESK_ATLAS, &desk_atlas, "src/login.ts").await.contains("contractor-vm") }).await;
+    until("desk's atlas session is warned of contractor-vm's edit", 20, || async { t.desk.before_edit(DESK_ATLAS, &desk_atlas, "src/login.ts").await.contains("contractor-vm") })
+        .await;
     // The same file in the other project: both clones have the presence by now.
     assert_eq!(t.desk.before_edit(DESK_LEDGER, &desk_ledger, "src/import.ts").await, "", "its ledger edit isn't shown to desk, so it collides with nothing");
-    let ids: Vec<String> = t.desk.engine_state().await["agents"].as_array().unwrap().iter().filter(|a| a["host"] == "contractor-vm").filter_map(|a| a["id"].as_str().map(str::to_string)).collect();
+    let ids: Vec<String> =
+        t.desk.engine_state().await["agents"].as_array().unwrap().iter().filter(|a| a["host"] == "contractor-vm").filter_map(|a| a["id"].as_str().map(str::to_string)).collect();
     assert_eq!(ids, vec![t.contractor.agt(VM_ATLAS)], "nor is it among the sessions desk sees there");
     drop(t);
     let _ = std::fs::remove_dir_all(root);

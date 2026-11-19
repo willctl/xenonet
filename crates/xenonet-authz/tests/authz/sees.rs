@@ -162,7 +162,10 @@ fn a_refused_start_gives_the_same_words_for_a_folder_that_isnt_there() {
     // and places both nowhere or in a hidden project: either way, these words.
     let mut w = world();
     w.settings = Settings { start: StartSetting::Network, wake: WakeSetting::Consent };
-    assert_eq!(start_from_m2(&w, &[Reaching::Unplaced]).reason().map(|r| r.text().to_string()), start_from_m2(&w, &[Reaching::Project(ledger())]).reason().map(|r| r.text().to_string()));
+    assert_eq!(
+        start_from_m2(&w, &[Reaching::Unplaced]).reason().map(|r| r.text().to_string()),
+        start_from_m2(&w, &[Reaching::Project(ledger())]).reason().map(|r| r.text().to_string())
+    );
     assert_ne!(NOT_SEEN_FOLDER, NOT_SEEN);
 }
 
