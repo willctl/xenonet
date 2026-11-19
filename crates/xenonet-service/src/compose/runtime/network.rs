@@ -1431,6 +1431,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         ("verified", env["line"].clone()),
         ("attestation", env["auth"]["attestation"].clone()),
         ("host", json!(from)),
+        ("network", json!(xenonet_net::ground::current())),
         ("mid", json!(mid)),
     ]);
     if let Some(name) = name {

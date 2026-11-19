@@ -332,11 +332,40 @@ pub struct RouterHost<'a> {
     /// Who was listening when the message was sent, for a route that runs
     /// after it (route()); None asks the engine now.
     pub listening: Option<&'a [String]>,
+    /// For a message from another machine, the machine and the network it
+    /// came in: what its wake is decided on.
+    pub via: Option<Via>,
+}
+
+/// The machine a message came from, by its host id in the network it came
+/// in, and that network.
+pub struct Via {
+    pub host: String,
+    pub network: String,
 }
 
 impl<'a> RouterHost<'a> {
     pub fn of(w: &'a Runtime) -> Self {
-        RouterHost { w, listening: None }
+        RouterHost { w, listening: None, via: None }
+    }
+
+    /// A wake of `agent` by the machine the message came from, decided like
+    /// any act from another machine, in the network it came in (`decide`
+    /// with `Door::Network`). With `consenting`, the session's consent is
+    /// taken as given, so the answer is whether the network sees the
+    /// session; without, whether the network's wake setting lets it alone.
+    fn decides_wake(&self, via: &Via, agent: &str, consenting: bool) -> bool {
+        xenonet_net::ground::within(&via.network, || {
+            let Some(mut g) = crate::compose::runtime::ground::ground(self.w, None) else { return false };
+            let (Ok(session), Ok(host)) = (xenonet_authz::SessionId::new(agent), crate::compose::runtime::ground::machine(&via.host)) else { return false };
+            g.place(self.w, agent);
+            if consenting {
+                g.consents.insert(agent.to_string(), xenonet_authz::Consent { here: true, actors: true });
+            }
+            let request =
+                crate::compose::runtime::ground::remote(&g, xenonet_authz::Principal::Machine { id: host }, xenonet_authz::Resource::Session(session), xenonet_authz::Act::Wake);
+            crate::compose::runtime::ground::judge(&g, &request, None).is_ok()
+        })
     }
 }
 
@@ -499,8 +528,15 @@ impl router::Host for RouterHost<'_> {
     fn usage(&mut self, app: &str) -> Option<f64> {
         usage(self.w, app)
     }
-    fn wake_setting(&mut self) -> Wake {
-        Wake::parse(&crate::compose::runtime::network::net(self.w).reach().wake)
+    fn wake_setting(&mut self, agent: &str) -> Wake {
+        match &self.via {
+            None => Wake::parse(&crate::compose::runtime::network::net(self.w).reach().wake),
+            Some(via) if self.decides_wake(via, agent, false) => Wake::Network,
+            Some(_) => Wake::Consent,
+        }
+    }
+    fn shown(&mut self, agent: &str) -> bool {
+        self.via.as_ref().is_none_or(|via| self.decides_wake(via, agent, true))
     }
     fn notify(&mut self, notice: Value) {
         self.w.emit(From::Delivery, "notify", notice);
@@ -597,7 +633,11 @@ impl router::Host for RouterHost<'_> {
 /// was sent: a listening hook can take the message and go before the route
 /// runs.
 pub fn route(w: &Runtime, m: &Value, listening: &[String]) {
-    let mut h = RouterHost { w, listening: Some(listening) };
+    let via = match (m["host"].as_str(), m["network"].as_str()) {
+        (Some(host), Some(network)) => Some(Via { host: host.to_string(), network: network.to_string() }),
+        _ => None,
+    };
+    let mut h = RouterHost { w, listening: Some(listening), via };
     if let Err(e) = w.router.core.route(&mut h, m) {
         w.emit(From::Delivery, "error", serde_json::json!({ "message": e.0 }));
     }

@@ -191,6 +191,74 @@ async fn a_guest_reaches_a_project_its_network_doesnt_see() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// What a guest hears back when it reaches for a session it isn't shown is
+/// what it hears for an id nobody has, so it can't tell which exist.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_session_a_network_isnt_shown_refuses_in_the_words_of_one_that_isnt_there() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-guest-words-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let mut heard = Stream::of(&t.contractor);
+    // Messages the guest's store keeps as sent, to a session it isn't
+    // shown and to an id nobody has, so desk's receipts find them.
+    let nobody = "agt_00000000000000000000000000000000".to_string();
+    let mut refused = Vec::new();
+    for (n, target) in [(1, t.desk.agt(DESK_LEDGER)), (2, nobody)] {
+        let mut m = guest_message(&t, n, &target, "Is it there?");
+        m["mid"] = json!(format!("msg_00000000-0000-4000-8000-{:012}", 100 + n));
+        t.contractor.world.store.with(|s| {
+            let id = s.send(&json!({ "sender": VM_ATLAS, "target": target, "body": "Is it there?", "recipients": [target] }), now_ms()).unwrap();
+            s.set_message_net(id, None, m["mid"].as_str().unwrap()).unwrap();
+        });
+        guest_sends(&t, Kind::Message, m);
+        let got = heard.next("message-receipt", 20, |r| r["agent"] == json!(target)).await;
+        refused.push((got["state"].clone(), got["reason"].clone()));
+    }
+    assert_eq!(refused[0], (json!("refused"), json!("no session or actor here has that id")));
+    assert_eq!(refused[0], refused[1], "a session it isn't shown is refused as one nobody has is");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A wake is decided in the network the message came in: `desk` lets N2
+/// wake its sessions, and N2 is shown atlas only, so a message from
+/// contractor-vm can wake atlas's session and not ledger's, wake setting
+/// or your consent for it notwithstanding. In N1, shown everything, both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_wake_asks_what_the_network_the_message_came_in_is_shown() {
+    use xenonet_engine::delivery::router::{Host, Wake};
+    use xenonet_service::compose::runtime::delivery::{RouterHost, Via};
+    let root = std::env::temp_dir().join(format!("xenonet-guest-wake-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    for network in ["work", "home"] {
+        let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": network, "host": "desk", "wake": "network" })).await;
+        assert_eq!(s, 200, "{v}");
+    }
+    let from = |host: &str, network: &str| RouterHost { w: &t.desk.world, listening: None, via: Some(Via { host: host.into(), network: network.into() }) };
+    let is_network = |w: Wake| w == Wake::Network;
+    // From contractor-vm, in N2.
+    let mut guest = from("contractor-vm", &t.n2);
+    assert!(guest.shown(DESK_ATLAS) && is_network(guest.wake_setting(DESK_ATLAS)));
+    assert!(!guest.shown(DESK_LEDGER), "N2 isn't shown ledger's session");
+    assert!(!is_network(guest.wake_setting(DESK_LEDGER)), "so wake: network doesn't open it");
+    // From tower, in N1, which is shown everything.
+    let mut home = from("tower", &t.n1);
+    assert!(home.shown(DESK_ATLAS) && home.shown(DESK_LEDGER) && is_network(home.wake_setting(DESK_LEDGER)));
+    // A host in the wrong network, or one that isn't a member, is shown nothing.
+    assert!(!from("contractor-vm", &t.n1).shown(DESK_ATLAS) && !from("tower", &t.n2).shown(DESK_ATLAS));
+    // A message made here has no network to ask.
+    assert!(RouterHost::of(&t.desk.world).shown(DESK_LEDGER));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_hosts_with_their_engines_work_as_one_network() {
     let root = std::env::temp_dir().join(format!("xenonet-net-engine-{}", std::process::id()));

@@ -56,6 +56,9 @@ pub struct EngineGround {
     pub sharing: xenonet_net::share::Sharing,
     /// The project each of this machine's sessions named to `place` is in.
     pub placed: HashMap<String, xenonet_authz::ProjectId>,
+    /// The consent rows of the sessions a decision is given (by this
+    /// machine's id for them); a session with none given has none.
+    pub consents: HashMap<String, Consent>,
 }
 
 impl EngineGround {
@@ -114,7 +117,7 @@ impl Ground for EngineGround {
         self.facts.signing_key(machine)
     }
     fn consent(&self, session: &SessionId) -> Consent {
-        self.facts.consent(session)
+        self.consents.get(session.as_str()).copied().unwrap_or_default()
     }
     fn device_of(&self, machine: &MachineId) -> Option<DeviceId> {
         self.facts.device_of(machine)
@@ -181,7 +184,7 @@ pub fn ground(w: &Runtime, extra: Option<(&str, crate::compose::runtime::asks::W
         || xenonet_net::share::Sharing::default_for(false),
         |n| governance(w).map_or_else(|| xenonet_net::share::Sharing::default_for(false), |g| g.sharing(n.as_str())),
     );
-    Some(EngineGround { facts, asks, store: Some(w.store.clone()), roots: Vec::new(), sharing, placed: HashMap::new() })
+    Some(EngineGround { facts, asks, store: Some(w.store.clone()), roots: Vec::new(), sharing, placed: HashMap::new(), consents: HashMap::new() })
 }
 
 // An ask as a decision reads it: its caller as the process check found it
@@ -508,7 +511,7 @@ mod tests {
         }
         let facts = Facts { machine: MachineId::new("laptop").unwrap(), view: Some(view), identity: identity.clone(), synced_at: synced, now: NOW };
         let asks = HashMap::from([("ask_1".to_string(), waiting(None))]);
-        (EngineGround { facts, asks, store: None, roots: Vec::new(), sharing: xenonet_net::share::Sharing::All, placed: HashMap::new() }, identity, dir)
+        (EngineGround { facts, asks, store: None, roots: Vec::new(), sharing: xenonet_net::share::Sharing::All, placed: HashMap::new(), consents: HashMap::new() }, identity, dir)
     }
 
     #[test]

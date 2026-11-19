@@ -71,8 +71,15 @@ pub trait Host {
     /// How much of its plan an app's provider has used, 0 to 1 (`usage`);
     /// None without a fresh reading.
     fn usage(&mut self, app: &str) -> Option<f64>;
-    /// This machine's wake setting (Settings → Network).
-    fn wake_setting(&mut self) -> Wake;
+    /// This machine's wake setting (Settings → Network) for waking `agent`:
+    /// for a message from another machine, the setting of the network it
+    /// came in, and `Consent` when that network isn't shown the session.
+    fn wake_setting(&mut self, agent: &str) -> Wake;
+    /// Whether the message being routed may reach `agent` at all: one from
+    /// another machine only if the network it came in is shown the session
+    /// (a network reaches only what it sees), whatever the setting or your
+    /// consent say. A message made here always may.
+    fn shown(&mut self, agent: &str) -> bool;
     /// You're told a push nothing acknowledged: { message, agent, title,
     /// from }.
     fn notify(&mut self, notice: Value);
@@ -256,7 +263,10 @@ impl Router {
     /// the budgets; else your allowance for it, which has to cover actors
     /// (`--remote`) when an actor sends.
     fn may_wake(h: &mut dyn Host, from: &str, agent: &str) -> Decision {
-        if h.wake_setting() == Wake::Network {
+        if !h.shown(agent) {
+            return Decision::Refuse("no consent".into());
+        }
+        if h.wake_setting(agent) == Wake::Network {
             return Decision::Allow;
         }
         let actor = !is_you(from) && actor_of(from).is_some();
@@ -267,8 +277,8 @@ impl Router {
         }
     }
 
-    fn wake_network(h: &mut dyn Host) -> bool {
-        h.wake_setting() == Wake::Network
+    fn wake_network(h: &mut dyn Host, agent: &str) -> bool {
+        h.shown(agent) && h.wake_setting(agent) == Wake::Network
     }
 
     /// Whether a message to a Claude Code session that a process holds (its
@@ -290,7 +300,7 @@ impl Router {
         if !id.starts_with("claude:") || !h.resumes() || super::resume::resume_command(&id, None).is_none() {
             return false;
         }
-        granted || Self::wake_network(h)
+        granted || Self::wake_network(h, &id)
     }
 
     /// Whether a session can be reached without hooks (an OpenCode run
@@ -312,7 +322,7 @@ impl Router {
         if !h.resumes() || !truthy(view.get("ended")) || super::resume::resume_command(&id, None).is_none() {
             return false;
         }
-        Self::wake_network(h) || h.consented(&id, false)
+        Self::wake_network(h, &id) || h.consented(&id, false)
     }
 
     /// A wake for a session's listening Stop hook to hand a message over:
