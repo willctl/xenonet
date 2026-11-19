@@ -525,6 +525,7 @@ pub fn project_of(h: &Host, folder: &str) -> Option<String> {
 pub const DESK_ATLAS: &str = "claude:dddddddd-0001";
 pub const DESK_LEDGER: &str = "claude:dddddddd-0002";
 pub const VM_ATLAS: &str = "claude:eeeeeeee-0001";
+pub const VM_LEDGER: &str = "claude:eeeeeeee-0002";
 
 /// `desk` in two networks at once, as the daily-use plan has Nova's: N1 is
 /// `home`, with `tower`; N2 is `work`, with `contractor-vm`, a machine she
@@ -543,7 +544,8 @@ pub struct TwoNetworks {
 
 /// `desk` founds N1 and N2, `tower` joins N1 and `contractor-vm` N2, each
 /// as a server. `desk` holds atlas (a session in it) and ledger (a session
-/// in it); `contractor-vm` has its own clone of atlas and a session in it.
+/// in it); `contractor-vm` has its own clones of atlas and ledger and a
+/// session in each.
 /// N2 starts sharing nothing; only atlas is shared into it, so the network
 /// is waited on until `desk` and `contractor-vm` are in contact.
 pub async fn two_networks(root: &Path) -> TwoNetworks {
@@ -560,7 +562,15 @@ pub async fn two_networks_with(root: &Path, guest_window: bool) -> TwoNetworks {
     let tower = Host::open("tower", root.join("tower"), Vec::new(), None).await;
     join(&tower, &invite_to(&desk, "tower", true, Some("home")).await).await;
     let n2 = founded(&desk, "work").await;
-    let contractor = Host::open("contractor-vm", root.join("contractor-vm"), vec![sess(VM_ATLAS, "Fix the login form", &vm_atlas)], None).await;
+    // Both of its sessions are changing a file, so a machine that is shown
+    // them can be warned of the edit.
+    let vm_ledger = clone(&root.join("contractor-vm/home/ledger"), "git@github.com:acme/ledger.git", "main");
+    let editing = |s: Sess, cwd: &str, file: &str| Sess { edits: vec![format!("{cwd}/{file}")], ..s };
+    let vm_sessions = vec![
+        editing(sess(VM_ATLAS, "Fix the login form", &vm_atlas), &vm_atlas, "src/login.ts"),
+        editing(sess(VM_LEDGER, "Fix the March import", &vm_ledger), &vm_ledger, "src/import.ts"),
+    ];
+    let contractor = Host::open("contractor-vm", root.join("contractor-vm"), vm_sessions, None).await;
     join(&contractor, &invite_to(&desk, "contractor-vm", guest_window, Some("work")).await).await;
     // The projects are named once the person is known (their ids are keyed
     // into it), so after the networks.

@@ -91,7 +91,8 @@ async fn a_machine_in_a_second_network_is_shown_only_what_is_shared_into_it() {
     until("contractor-vm sees atlas's session", 20, || async { remote(&t.contractor.engine_state().await).contains(&atlas) }).await;
     assert_eq!(remote(&t.contractor.engine_state().await), std::slice::from_ref(&atlas), "desk's ledger session isn't shown to contractor-vm");
     assert_eq!(project_of(&t.contractor.engine_state().await, &atlas), Some(json!(t.atlas)));
-    assert_eq!(t.contractor.peers(VM_ATLAS).await, std::slice::from_ref(&atlas), "nor listed to its sessions");
+    // (Its own session in ledger is its peer; desk's ledger session is not.)
+    assert_eq!(t.contractor.peers(VM_ATLAS).await, vec![VM_LEDGER.to_string(), atlas.clone()], "nor listed to its sessions");
     // tower, in the first network, which shares everything, sees both.
     until("tower sees both of desk's sessions", 20, || async {
         let mut got = remote(&t.tower.engine_state().await);
@@ -151,8 +152,8 @@ async fn a_guest_reaches_a_project_its_network_doesnt_see() {
     let t = two_networks(&root).await;
     let (atlas, ledger) = (t.desk.agt(DESK_ATLAS), t.desk.agt(DESK_LEDGER));
     until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
-    // contractor-vm's own clone of ledger's remote: the same project id.
-    let vm_ledger = clone(&root.join("contractor-vm/home/ledger"), "git@github.com:acme/ledger.git", "main");
+    // contractor-vm's own clone of ledger's remote (it has a session in it): the same project id.
+    let vm_ledger = root.join("contractor-vm/home/ledger").to_string_lossy().into_owned();
     assert_eq!(project_of(&t.contractor, &vm_ledger).as_deref(), Some(t.ledger.as_str()));
 
     // Into ledger first, then into atlas: what arrives in order shows the
@@ -419,6 +420,30 @@ async fn what_desk_hands_off_or_claims_leaves_only_into_networks_that_see_its_pr
     until("atlas's handoff is taken by contractor-vm's session", 20, || async { handoff_by(&t.desk, &in_atlas).as_deref() == Some("taken") }).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handoff_by(&t.desk, &in_ledger).as_deref(), Some("open"), "ledger's handoff wasn't taken from N2");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// What another machine's sessions are doing is held to sharing too:
+/// `contractor-vm` has sessions in its own clones of atlas and of ledger,
+/// each changing a file, and `desk` shows N2 atlas only. Its ledger
+/// session's edit warns none of desk's sessions, and it isn't grouped with
+/// desk's ledger work, while the atlas one is warned of.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_session_of_a_guest_in_a_project_its_network_isnt_shown_collides_with_nothing() {
+    let root = std::env::temp_dir().join(format!("xenonet-guest-edits-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let desk_home = root.join("desk/home");
+    let (desk_atlas, desk_ledger) = (desk_home.join("atlas").to_string_lossy().into_owned(), desk_home.join("ledger").to_string_lossy().into_owned());
+    // The positive control: contractor-vm's atlas edit warns desk's atlas session.
+    until("desk's atlas session is warned of contractor-vm's edit", 20, || async { t.desk.before_edit(DESK_ATLAS, &desk_atlas, "src/login.ts").await.contains("contractor-vm") }).await;
+    // The same file in the other project: both clones have the presence by now.
+    assert_eq!(t.desk.before_edit(DESK_LEDGER, &desk_ledger, "src/import.ts").await, "", "its ledger edit isn't shown to desk, so it collides with nothing");
+    let ids: Vec<String> = t.desk.engine_state().await["agents"].as_array().unwrap().iter().filter(|a| a["host"] == "contractor-vm").filter_map(|a| a["id"].as_str().map(str::to_string)).collect();
+    assert_eq!(ids, vec![t.contractor.agt(VM_ATLAS)], "nor is it among the sessions desk sees there");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

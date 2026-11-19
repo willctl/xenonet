@@ -977,9 +977,20 @@ fn view_of(host: &Host, a: &Value, detail: bool) -> Value {
     v
 }
 
+/// Whether an agent `host` reports (its presence entry `agent`) is of a
+/// project that this machine shows a network it shares with `host`: what
+/// a member does in a project this machine shares with no network it has
+/// in common is none of this machine's business, and collides with
+/// nothing. An agent in no project is shown only where everything is.
+fn shown_with(w: &Runtime, host: &str, agent: &Value) -> bool {
+    let Some(g) = crate::compose::runtime::ground::governance(w) else { return false };
+    net(w).networks_with(host).iter().any(|n| g.sharing(n).shows(agent))
+}
+
 /// Every other host's agents, by the presence each last sent: only hosts
 /// in the roster, each host's working agents first. With `detail`, for the
-/// console's state, never for an agent.
+/// console's state, never for an agent. Only those of a project this
+/// machine shows a network it shares with the host (`shown_with`).
 pub fn remote_views(w: &Runtime, detail: bool) -> Vec<Value> {
     let net = net(w);
     if net.me().is_none() {
@@ -991,7 +1002,7 @@ pub fn remote_views(w: &Runtime, detail: bool) -> Vec<Value> {
     for r in rows {
         let Some(host) = r.text("host").and_then(|h| hosts.iter().find(|x| x.id == h)) else { continue };
         let agents: Vec<Value> = r.text("agents").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
-        let mut views: Vec<Value> = agents.iter().map(|a| view_of(host, a, detail)).collect();
+        let mut views: Vec<Value> = agents.iter().filter(|a| shown_with(w, &host.id, a)).map(|a| view_of(host, a, detail)).collect();
         views.sort_by(|a, b| {
             let w = |x: &Value| u8::from(x["status"] == "working");
             w(b).cmp(&w(a)).then_with(|| n(b, "lastActive").unwrap_or(0.0).partial_cmp(&n(a, "lastActive").unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal))
@@ -1678,7 +1689,7 @@ pub(crate) fn claim_hits(w: &Runtime, me: &str, files: &[String]) -> Result<Vec<
         for p in &presences {
             let host = p.text("host").unwrap_or("");
             let agents: Vec<Value> = p.text("agents").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
-            for a in agents.iter().filter(|a| s(a, "projectKey").as_deref() == Some(at.project.as_str())) {
+            for a in agents.iter().filter(|a| s(a, "projectKey").as_deref() == Some(at.project.as_str()) && shown_with(w, host, a)) {
                 if a.get("edits").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).any(|e| e == at.rel) {
                     out.push(obj(vec![
                         ("host", json!(host)),
