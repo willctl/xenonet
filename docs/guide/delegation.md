@@ -20,6 +20,8 @@ An assistant calls the xenonet MCP server's `delegate` tool with the machine, a 
 delegate machine: tower, task: "Update XenoNet to the latest release, then report the version and what the doctor says."
 ```
 
+When neo-rex is in two or more of this machine's networks, add `network` (its id or name); without it the tool is refused and says which.
+
 The answer comes at once. When the new session stops, the assistant is told what it came to (finished, stopped to ask something, was denied a tool, failed, or left nothing), with its last words, and is woken if it is idle. The session needn't be told to report: XenoNet does it.
 
 A machine that isn't set to Delegated refuses the task, and says how you set it. The assistant isn't started as a plain agent start instead: `delegate` is for machines you decided to delegate to, and `start_session` is the tool for a machine that lets the network start sessions without a delegation.
@@ -36,7 +38,7 @@ The machine writes that line from its own settings and its copy of your identity
 
 ## What it covers
 
-A delegated session is a Claude Code run, and its permission prompts come to XenoNet, as any run's do. XenoNet answers them itself when they are within the delegation, and shows the rest in **Needs you**, on the window host that asked for the run, where you allow or deny them. An Allow there asks you once (Touch ID on a Mac); a Deny asks nothing. An assistant can't answer for you.
+A delegated session is a Claude Code run, and its permission prompts come to XenoNet, as any run's do. XenoNet answers them itself when they are within the delegation, and shows the rest in **Needs you**, on the window host that asked for the run (the one that started it, or that made the intent it works, or arbitrates that intent), where you allow or deny them. Another machine that is a window host of the same network is shown nothing of it, and a copy of the run forked to answer a message, or a turn resumed for a later one, asks the same machine. An Allow there asks you once (Touch ID on a Mac); a Deny asks nothing. An assistant can't answer for you.
 
 Covered, with no question:
 

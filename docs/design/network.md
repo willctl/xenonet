@@ -433,8 +433,8 @@ person, one endpoint with one connection per peer, and the HLC.
 - **A call is in one network.** The network of a call is the one the body
   in hand arrived in (`ground::within`, carried to any thread that answers
   for it: a start's receipts name the network their request came in), else
-  the one network this machine is in. A call in no frame from a machine in
-  several networks is in none: it decides on the facts of no network, reads
+  the one network this machine is in (a network it was removed from does not
+  count). A call in no frame from a machine in several networks is in none: it decides on the facts of no network, reads
   the narrowest of their settings (`Reach::narrowest`: the lowest start and
   wake; titles only if any network asks, load shared only if all do, no
   roster head), and a body for everyone (`To::All`) is refused in words
@@ -910,11 +910,19 @@ whose presence lists `start`, and one over two minutes old is refused.
 Allow carries the person's presence block; a Deny needs none. The run's
 machine decides it, and holds the call ten minutes. A machine takes an ask
 only for a run it asked that machine to start: the request records the
-network it went through, the started receipts name the run (its session,
-or its agent), and the ask is taken while the request is open and arrives
-in that network. Any other ask is dropped and logged, so a member that may
-message a machine can't put prompts in its Needs you, and a window host
-shows the prompts of the runs it asked for.
+network it went through, and the started receipts name the run (its
+session, or its agent). The start report of an intent this machine made or
+arbitrates names the run of the machine it is worked on the same way, in the
+intent's network. A copy forked from a run asks under its own session, so
+its ask also carries the run it was forked from (followed back through
+copies of copies), which the receiver checks for the sending machine in
+place of the copy. An ask is taken when it arrives in that network from a
+machine that has such a run named. A run stays named for a day after it was
+last named or last asked from (each ask taken renews it), so a turn resumed
+by a later message is taken after its request is over. Any other ask is
+dropped and logged, so a member that may message a machine can't put
+prompts in its Needs you, and a window host shows the prompts of the runs
+it asked for.
 
 **Intents** for any machine the delegation names are given out once by
 the arbiter the intent names, from takes that carry the person's signed
