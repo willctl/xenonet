@@ -300,6 +300,12 @@ impl Runner {
             cmd.args(&how.args);
         }
         cmd.current_dir(cwd).env_clear().envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::piped()).stdout(out()).stderr(out());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            // Its own group, so stopping the turn stops what it started.
+            cmd.process_group(0);
+        }
         let at = now_ms();
         let mut child = match cmd.spawn() {
             Ok(c) => c,
