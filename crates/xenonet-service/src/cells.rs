@@ -245,7 +245,7 @@ impl CellRunner {
         argv.extend(plan.env.iter().map(|(k, v)| format!("{k}={v}")));
         argv.push(plan.program.clone());
         argv.extend(plan.args.iter().cloned());
-        let opts = ExecOpts { env: Vec::new(), stdin: plan.stdin.clone(), deadline: Some(plan.deadline.unwrap_or(DEFAULT_DEADLINE)) };
+        let opts = ExecOpts { env: Vec::new(), stdin: plan.stdin.clone(), deadline: Some(plan.deadline.unwrap_or(DEFAULT_DEADLINE)), root: false };
         let out = self.driver.exec(name, &argv, opts).await.map_err(host)?;
 
         let mut result = None;
