@@ -22,6 +22,10 @@ unmaintained = "all"
 unsound = "all"
 yanked = "deny"
 ignore = [
+  # chrono is unmaintained, with no fixed version and no vulnerability
+  # named. rmcp, schemars and a2a-lf depend on it, and Xenolith uses it
+  # directly; moving off it is its own change, not a lint fix.
+  { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; it comes in through rmcp, schemars and a2a-lf" },
   # crypto-bigint 0.5's constant-time bugs, through p256, which biscuit-auth
   # always depends on. XenoNet holds no P-256 secret in biscuit: token roots
   # and appended blocks are Ed25519, so p256 only verifies public data.
