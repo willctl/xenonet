@@ -273,10 +273,13 @@ async fn a_projects_rule_is_checked_on_the_map() {
     assert_eq!(d["rules"][&id]["git"], "ada@acme.example");
     let n = s.node_of(&id).expect("the project");
     assert_eq!((n["identityRule"]["git"]["state"].as_str(), n["identityRule"]["mismatch"].as_bool()), (Some("differs"), Some(true)), "{}", n["identityRule"]);
+    let warned = s.summary().expect("a summary");
+    assert_eq!(warned["identityWarnings"][0]["id"], id.as_str(), "{warned}");
     // A rule for the one it does commit with matches.
     let uses = n["identityRule"]["git"]["uses"].as_str().expect("the email it commits with").to_string();
     s.set_identity_rule(json!(id), json!({ "git": uses })).await.expect("another rule");
     assert_eq!(s.node_of(&id).unwrap()["identityRule"]["mismatch"], false);
+    assert!(s.summary().unwrap().get("identityWarnings").is_none(), "nothing to warn of");
     assert!(s.set_identity_rule(json!(SESSION1), json!({ "git": "ada@acme.example" })).await.is_err(), "only a project has a rule");
     assert!(s.set_identity_rule(json!(id), json!({ "git": "not an email" })).await.is_err());
     // Naming neither takes the rule out.

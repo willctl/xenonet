@@ -620,9 +620,33 @@ pub fn check_rule(rule: &Value, links: &[Value], list: &[Value]) -> Value {
     let state = |k: &str| out.get(k).and_then(|p| p.get("state")).and_then(Value::as_str);
     let mismatch = state("git") == Some("differs") || state("push") == Some("differs");
     let unknown = state("git") == Some("unknown") || state("push") == Some("unknown");
+    if mismatch {
+        // In words that name no account, so the Needs you queue can show
+        // them with identities masked.
+        let words = match (state("git") == Some("differs"), state("push") == Some("differs")) {
+            (true, true) => "Commits and pushes here don't use the identity this project's rule names.",
+            (true, false) => "Commits here don't use the git identity this project's rule names.",
+            _ => "A push from here doesn't sign in as the account this project's rule names.",
+        };
+        out.insert("words".into(), words.into());
+    }
     out.insert("mismatch".into(), Value::Bool(mismatch));
     out.insert("unknown".into(), Value::Bool(unknown));
     Value::Object(out)
+}
+
+/// The projects whose rule doesn't match, one `{ id, title, text }` each,
+/// for the Needs you queue: from the nodes as `apply_rules` left them.
+pub fn identity_warnings(nodes: &[Value]) -> Vec<Value> {
+    nodes
+        .iter()
+        .filter(|n| n.get("identityRule").and_then(|r| r.get("mismatch")) == Some(&Value::Bool(true)))
+        .map(|n| {
+            let id = n.get("id").cloned().unwrap_or(Value::Null);
+            let title = n.get("name").or_else(|| n.get("title")).cloned().unwrap_or_else(|| id.clone());
+            json!({ "id": id, "title": title, "text": n["identityRule"].get("words").cloned().unwrap_or(Value::Null) })
+        })
+        .collect()
 }
 
 /// Puts each rule's check on its project's node (`identityRule`), given
@@ -1507,6 +1531,7 @@ mod tests {
         ];
         apply_rules(&mut nodes, &json!({ "project:atlas": { "git": "nova@example.com" }, "claude:s1": { "git": "nova@example.com" } }), &list);
         assert_eq!(nodes[0]["identityRule"]["mismatch"], true);
+        assert_eq!(identity_warnings(&nodes), vec![json!({ "id": "project:atlas", "title": "project:atlas", "text": "Commits here don't use the git identity this project's rule names." })]);
         assert!(nodes[1].get("identityRule").is_none(), "no rule, no check");
         assert!(nodes[2].get("identityRule").is_none(), "only a project has one");
     }

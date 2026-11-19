@@ -2012,11 +2012,35 @@ impl Engine {
             None => Vec::new(),
         };
         let offered = Self::offers(&offers);
-        if others.is_empty() {
-            return Ok(offered);
+        // First, what can't wait: a project whose identity rule doesn't
+        // match what git here would use.
+        let rule = Self::identity_note(c, &me_view)?;
+        let peers = if others.is_empty() { String::new() } else { Self::peers_briefing(c, me, &me_view, &all, &others)? };
+        Ok([rule, peers, offered].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n"))
+    }
+
+    /// What a session is told when its project's rule for a git identity
+    /// and push account doesn't match what git here would use: the map
+    /// checked it (`identityRule` on the project's node), and a part it
+    /// couldn't read doesn't count. Empty when there's nothing to say.
+    fn identity_note(c: &Collaborators<'_>, me_view: &Value) -> Result<String> {
+        let Some(project) = as_str(get(me_view, "projectId")).filter(|_| as_str(get(me_view, "projectKind")) == Some("project")) else { return Ok(String::new()) };
+        let Some(node) = c.map.node(project)? else { return Ok(String::new()) };
+        let Some(check) = get(&node, "identityRule").filter(|r| get(r, "mismatch") == Some(&Value::Bool(true))) else { return Ok(String::new()) };
+        let part = |k: &str| get(check, k).filter(|p| get(p, "state").and_then(Value::as_str) == Some("differs"));
+        let uses = |p: &Value, other: &str| as_str(get(p, "uses")).map_or_else(|| other.to_string(), str::to_string);
+        let mut said = Vec::new();
+        if let (Some(p), Some(want)) = (part("git"), as_str(get(get(check, "rule").unwrap_or(&Value::Null), "git"))) {
+            said.push(format!("commits should carry {want}, but git here would use {}", uses(p, "another identity")));
         }
-        let peers = Self::peers_briefing(c, me, &me_view, &all, &others)?;
-        Ok(if offered.is_empty() { peers } else { format!("{peers}\n\n{offered}") })
+        if let (Some(p), Some(rule)) = (part("push"), get(check, "rule").and_then(|r| get(r, "push"))) {
+            let (login, host) = (as_str(get(rule, "login")).unwrap_or(""), as_str(get(rule, "host")).unwrap_or("github.com"));
+            said.push(format!("pushes should sign in as {login} on {host}, but a push from here would sign in as {}", uses(p, "another account")));
+        }
+        Ok(format!(
+            "XenoNet: this project has an identity rule that doesn't match what git here would use. The rule says {}. Don't commit or push until this is fixed, and tell your user.",
+            said.join("; and ")
+        ))
     }
 
     /// The handoffs a starting session is offered, in words.

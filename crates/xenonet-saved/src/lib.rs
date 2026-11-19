@@ -201,7 +201,7 @@ mod tests {
         s.set_identity_rule("project:atlas", Some(&json!({ "git": "nova@example.com" }))).unwrap();
         assert_eq!(s.identities().unwrap()["rules"], json!({ "project:atlas": { "git": "nova@example.com" } }));
         s.set_identity_rule("project:atlas", None).unwrap();
-        assert_eq!(s.identities().unwrap()["rules"], json!({}));
+        assert!(s.identities().unwrap().get("rules").is_none(), "none left, none shown");
         assert_eq!(s.theme().unwrap(), Value::Null);
         s.set_theme("rime").unwrap();
         assert_eq!(s.theme().unwrap(), "rime");

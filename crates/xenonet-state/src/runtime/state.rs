@@ -1616,7 +1616,16 @@ impl State for MapState {
     fn summary(&self) -> R<Value> {
         let snap = self.snapshot();
         let mut title = |id: &Value| self.title(id);
-        Ok(decide::summary(&snap, &mut title, &decide::url(&self.cfg.host, &self.cfg.port)))
+        let mut out = decide::summary(&snap, &mut title, &decide::url(&self.cfg.host, &self.cfg.port));
+        // Projects whose identity rule doesn't match, once there are any.
+        let warnings = {
+            let g = lock(&self.inner);
+            g.map.graph.as_ref().and_then(|gr| gr.get("nodes")).and_then(Value::as_array).map(|n| crate::identities::identity_warnings(n)).unwrap_or_default()
+        };
+        if !warnings.is_empty() {
+            out["identityWarnings"] = Value::Array(warnings);
+        }
+        Ok(out)
     }
     async fn session_stats(&self, id: &str) -> R<Option<Value>> {
         self.stats.stats(id).await.map_err(err)
