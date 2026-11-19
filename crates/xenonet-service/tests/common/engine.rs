@@ -444,7 +444,17 @@ pub async fn until<F: std::future::Future<Output = bool>>(what: &str, secs: u64,
 /// and the loopback address of the invite's door, which the person gives
 /// the joining machine.
 pub async fn invite(maker: &Host, host: &str, window: bool) -> (String, String, String) {
-    let (s, t) = maker.window("POST", "/api/net/invite", json!({ "host": host, "window": window })).await;
+    invite_to(maker, host, window, None).await
+}
+
+/// The same for the network named `network`, which a machine in two
+/// networks must say.
+pub async fn invite_to(maker: &Host, host: &str, window: bool, network: Option<&str>) -> (String, String, String) {
+    let mut body = json!({ "host": host, "window": window });
+    if let Some(n) = network {
+        body["network"] = json!(n);
+    }
+    let (s, t) = maker.window("POST", "/api/net/invite", body).await;
     assert_eq!(s, 200, "an invite at {}: {t}", maker.name);
     assert_eq!((t["host"].as_str(), t["window"].as_bool()), (Some(host), Some(window)), "{t}");
     let at = t["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).expect("the door on loopback").to_string();
@@ -479,7 +489,6 @@ pub fn sess(id: &'static str, title: &'static str, cwd: &str) -> Sess {
     Sess { id, title, cwd: cwd.to_string(), edits: Vec::new(), live: Value::Null }
 }
 
-
 /// studio founds a network (a window host), laptop joins as a window host
 /// and desk as a server, each with `sessions`, with invites from studio's
 /// window; all three connected on link/2.
@@ -501,8 +510,72 @@ pub async fn three(root: &Path, sessions: [Vec<Sess>; 3]) -> (Host, Host, Host) 
     (a, b, c)
 }
 
-
 /// A session's own call, by its header, to any route.
 pub async fn as_agent(h: &Host, me: &str, method: &str, path: &str, body: Value) -> (u16, Value) {
     h.call(method, path, body, &[("x-xenonet-agent", me)]).await
+}
+
+/// The project (`prj_…`) `h` holds the folder in, as its presence names it.
+pub fn project_of(h: &Host, folder: &str) -> Option<String> {
+    xenonet_service::compose::runtime::checkouts::project_of(h.world.setup.db.as_ref()?, folder)
+}
+
+/// The session of Nova's on `desk` in atlas, and in ledger; the one on
+/// `contractor-vm`, in its own clone of atlas.
+pub const DESK_ATLAS: &str = "claude:dddddddd-0001";
+pub const DESK_LEDGER: &str = "claude:dddddddd-0002";
+pub const VM_ATLAS: &str = "claude:eeeeeeee-0001";
+
+/// `desk` in two networks at once, as the daily-use plan has Nova's: N1 is
+/// `home`, with `tower`; N2 is `work`, with `contractor-vm`, a machine she
+/// doesn't own. Every machine runs the real engine and the fake CLI.
+pub struct TwoNetworks {
+    pub desk: Host,
+    pub tower: Host,
+    pub contractor: Host,
+    /// N1's and N2's ids.
+    pub n1: String,
+    pub n2: String,
+    /// `atlas` (shared into N2) and `ledger` (not), as `desk` names them.
+    pub atlas: String,
+    pub ledger: String,
+}
+
+/// `desk` founds N1 and N2, `tower` joins N1 and `contractor-vm` N2, each
+/// as a server. `desk` holds atlas (a session in it) and ledger (a session
+/// in it); `contractor-vm` has its own clone of atlas and a session in it.
+/// N2 starts sharing nothing; only atlas is shared into it, so the network
+/// is waited on until `desk` and `contractor-vm` are in contact.
+pub async fn two_networks(root: &Path) -> TwoNetworks {
+    let desk_atlas = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "main");
+    let desk_ledger = clone(&root.join("desk/home/ledger"), "git@github.com:acme/ledger.git", "main");
+    let vm_atlas = clone(&root.join("contractor-vm/home/atlas"), "https://github.com/acme/atlas", "main");
+    let desk = Host::open("desk", root.join("desk"), vec![sess(DESK_ATLAS, "Add partial refunds", &desk_atlas), sess(DESK_LEDGER, "Reconcile March", &desk_ledger)], None).await;
+    let n1 = founded(&desk, "home").await;
+    let tower = Host::open("tower", root.join("tower"), Vec::new(), None).await;
+    join(&tower, &invite_to(&desk, "tower", true, Some("home")).await).await;
+    let n2 = founded(&desk, "work").await;
+    let contractor = Host::open("contractor-vm", root.join("contractor-vm"), vec![sess(VM_ATLAS, "Fix the login form", &vm_atlas)], None).await;
+    join(&contractor, &invite_to(&desk, "contractor-vm", false, Some("work")).await).await;
+    // The projects are named once the person is known (their ids are keyed
+    // into it), so after the networks.
+    let (atlas, ledger) = (project_of(&desk, &desk_atlas).expect("desk's atlas"), project_of(&desk, &desk_ledger).expect("desk's ledger"));
+    assert_ne!(atlas, ledger);
+    let (s, v) = desk.window("PUT", "/api/net/sharing", json!({ "network": "work", "sharing": [atlas] })).await;
+    assert_eq!(s, 200, "{v}");
+    live(&tower, 2).await;
+    until("desk and contractor-vm in contact in N2", 20, || async {
+        let (d, c) = (desk.state().await, contractor.state().await);
+        let online = |hosts: &Value| hosts.as_array().is_some_and(|h| h.len() == 2 && h.iter().all(|x| x["online"] == true));
+        online(&d["networks"][1]["hosts"]) && c["link"]["state"] == "live" && online(&c["hosts"])
+    })
+    .await;
+    TwoNetworks { desk, tower, contractor, n1, n2, atlas, ledger }
+}
+
+/// `h` founds a network named `name`; its id.
+async fn founded(h: &Host, name: &str) -> String {
+    let (s, v) = h.window("POST", "/api/net/create", json!({ "name": name, "host": h.name })).await;
+    assert_eq!(s, 200, "{v}");
+    v["networks"].as_array().and_then(|n| n.iter().find(|n| n["name"] == name)).expect("the new network in the state")["id"].as_str().unwrap().to_string()
 }

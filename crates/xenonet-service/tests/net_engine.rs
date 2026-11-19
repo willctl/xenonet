@@ -71,6 +71,41 @@ fn the_fake_cli_keeps_its_settings_and_the_names_of_its_environment() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// What works today in the plan's second network: `desk` shares only
+/// atlas into `work`, so `contractor-vm` sees atlas's session and no
+/// ledger session, while `tower`, in `home`, sees both. (What a guest can
+/// still reach from there is the receive side, which this doesn't test.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_machine_in_a_second_network_is_shown_only_what_is_shared_into_it() {
+    let root = std::env::temp_dir().join(format!("xenonet-two-networks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    assert_ne!(t.n1, t.n2);
+    let (atlas, ledger) = (t.desk.agt(DESK_ATLAS), t.desk.agt(DESK_LEDGER));
+    // The sessions of other machines, which carry the machine they are on.
+    let remote =
+        |st: &Value| -> Vec<String> { st["agents"].as_array().unwrap().iter().filter(|a| a["host"].is_string()).filter_map(|a| a["id"].as_str().map(str::to_string)).collect() };
+    let project_of = |st: &Value, id: &str| st["agents"].as_array().unwrap().iter().find(|a| a["id"] == id).map(|a| a["projectKey"].clone());
+    until("contractor-vm sees atlas's session", 20, || async { remote(&t.contractor.engine_state().await).contains(&atlas) }).await;
+    assert_eq!(remote(&t.contractor.engine_state().await), std::slice::from_ref(&atlas), "desk's ledger session isn't shown to contractor-vm");
+    assert_eq!(project_of(&t.contractor.engine_state().await, &atlas), Some(json!(t.atlas)));
+    assert_eq!(t.contractor.peers(VM_ATLAS).await, std::slice::from_ref(&atlas), "nor listed to its sessions");
+    // tower, in the first network, which shares everything, sees both.
+    until("tower sees both of desk's sessions", 20, || async {
+        let mut got = remote(&t.tower.engine_state().await);
+        got.sort();
+        let mut want = vec![atlas.clone(), ledger.clone()];
+        want.sort();
+        got == want
+    })
+    .await;
+    assert_eq!(project_of(&t.tower.engine_state().await, &ledger), Some(json!(t.ledger)));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_hosts_with_their_engines_work_as_one_network() {
     let root = std::env::temp_dir().join(format!("xenonet-net-engine-{}", std::process::id()));
