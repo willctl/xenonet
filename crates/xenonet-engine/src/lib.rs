@@ -11,6 +11,7 @@
 //! runtime (the service's compose::runtime) and the tests implement.
 
 pub mod attest;
+pub mod confine;
 pub mod delivery;
 pub mod engine;
 pub mod host;
