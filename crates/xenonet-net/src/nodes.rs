@@ -544,7 +544,13 @@ impl Nodes {
         match ground::current() {
             Some(n) => self.common.shared_of(&n),
             None => {
+                // A network this machine was removed from no longer counts:
+                // with one other, this machine is in one network. (In none
+                // but a removed one, that one still names it.)
                 let mut all = self.common.shareds();
+                if all.len() > 1 {
+                    all.retain(|s| !s.is_removed());
+                }
                 (all.len() == 1).then(|| all.remove(0))
             }
         }
@@ -739,8 +745,11 @@ impl Net for Nodes {
                 // One network, or none named: with several, a body for
                 // everyone has to say which of them it is for.
                 To::All => {
-                    let [s] = nets.as_slice() else {
-                        return Err(format!("this machine is in several networks ({}), so a body for everyone has to name the one it goes in", nets.len()));
+                    // One it was removed from doesn't make it several.
+                    let live: Vec<&Arc<Shared>> = nets.iter().filter(|s| !s.is_removed()).collect();
+                    let live = if live.is_empty() { nets.iter().collect() } else { live };
+                    let [s] = live.as_slice() else {
+                        return Err(format!("this machine is in several networks ({}), so a body for everyone has to name the one it goes in", live.len()));
                     };
                     let id = s.network().map(|n| n.id).ok_or("this machine is leaving that network")?;
                     s.send(out.within(id))

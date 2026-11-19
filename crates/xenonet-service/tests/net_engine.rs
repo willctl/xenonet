@@ -345,6 +345,39 @@ async fn a_message_wakes_a_session_under_the_wake_setting_of_the_network_it_came
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A network this machine was removed from isn't one it is in: a machine in
+/// two, removed from the second, is in one network again, so a body for
+/// everyone isn't refused for being in several, and the machine answers as
+/// the one it is in (a window host there) does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_network_a_machine_was_removed_from_stops_counting() {
+    use xenonet_model::ops::{Kind, Outgoing, To};
+    let root = std::env::temp_dir().join(format!("xenonet-removed-network-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    // tower is a window host of home, and joins work as a server too.
+    join(&t.tower, &invite_to(&t.desk, "tower", false, Some("work")).await).await;
+    let everyone = || Outgoing { network: None, authority: None, to: To::All, kind: Kind::Intent, body: json!({}) };
+    let in_two = t.tower.svc.net().send(everyone()).unwrap_err();
+    assert!(in_two.contains("several networks"), "{in_two}");
+    assert!(!t.tower.svc.net().is_window_host(), "a window host of home only; work is not");
+    // desk removes tower from work, which tower sees.
+    let (s, v) = t.desk.window("POST", "/api/net/remove", json!({ "host": "tower", "network": "work" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("tower knows it was removed from work", 20, || async {
+        t.tower.state().await["networks"].as_array().is_some_and(|n| n.iter().any(|x| x["name"] == "work" && x["link"]["state"] == "removed"))
+    })
+    .await;
+    // It is in one network now.
+    let still = t.tower.svc.net().send(everyone()).err().unwrap_or_default();
+    assert!(!still.contains("several networks"), "removed from work, tower is in home alone: {still}");
+    assert!(t.tower.svc.net().is_window_host(), "home's window host answers for the machine");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// The next XenoNet note `contractor-vm`'s session is told, which is where
 /// an agent's start answers come; `told` keeps what came with it.
 async fn vm_is_told(t: &TwoNetworks, told: &mut Vec<String>, what: &str) -> String {
