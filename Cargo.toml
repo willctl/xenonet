@@ -209,6 +209,7 @@ proptest = { version = "1", default-features = false, features = ["std"] }
 # rule in scripts/rust-layers.mjs, and no XenoNet crate depends on them.
 adytum-cli = { path = "adytum/crates/adytum-cli" }
 adytum-doctor = { path = "adytum/crates/adytum-doctor" }
+adytum-driver = { path = "adytum/crates/adytum-driver" }
 adytum-exec = { path = "adytum/crates/adytum-exec" }
 adytum-ledger = { path = "adytum/crates/adytum-ledger" }
 adytum-lima = { path = "adytum/crates/adytum-lima" }

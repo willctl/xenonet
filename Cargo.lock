@@ -40,6 +40,17 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 [[package]]
 name = "adytum-cli"
 version = "0.1.0"
+dependencies = [
+ "adytum-driver",
+ "adytum-exec",
+ "adytum-lima",
+ "adytum-model",
+ "adytum-policy",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "adytum-doctor"
@@ -54,7 +65,6 @@ dependencies = [
  "adytum-policy",
  "async-trait",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -69,10 +79,32 @@ dependencies = [
 [[package]]
 name = "adytum-ledger"
 version = "0.1.0"
+dependencies = [
+ "adytum-driver",
+ "adytum-exec",
+ "adytum-model",
+ "adytum-policy",
+ "async-trait",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
 
 [[package]]
 name = "adytum-lima"
 version = "0.1.0"
+dependencies = [
+ "adytum-driver",
+ "adytum-exec",
+ "adytum-model",
+ "adytum-policy",
+ "adytum-testkit",
+ "async-trait",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "adytum-model"
@@ -86,6 +118,18 @@ dependencies = [
 [[package]]
 name = "adytum-oci"
 version = "0.1.0"
+dependencies = [
+ "adytum-driver",
+ "adytum-exec",
+ "adytum-lima",
+ "adytum-model",
+ "adytum-policy",
+ "adytum-testkit",
+ "async-trait",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
 
 [[package]]
 name = "adytum-policy"
@@ -1200,10 +1244,49 @@ dependencies = [
 [[package]]
 name = "eidolon-browser"
 version = "0.1.0"
+dependencies = [
+ "adytum-driver",
+ "adytum-exec",
+ "adytum-lima",
+ "adytum-model",
+ "async-trait",
+ "eidolon-bidi",
+ "eidolon-facet",
+ "eidolon-model",
+ "eidolon-pack",
+ "eidolon-policy",
+ "eidolon-testkit",
+ "eidolon-vault",
+ "serde",
+ "serde_json",
+ "tokio",
+ "xenonet-id",
+]
 
 [[package]]
 name = "eidolon-cli"
 version = "0.1.0"
+dependencies = [
+ "adytum-driver",
+ "adytum-exec",
+ "adytum-ledger",
+ "adytum-lima",
+ "adytum-model",
+ "async-trait",
+ "eidolon-facet",
+ "eidolon-model",
+ "eidolon-move",
+ "eidolon-pack",
+ "eidolon-policy",
+ "eidolon-vault",
+ "serde",
+ "serde_json",
+ "tokio",
+ "x25519-dalek",
+ "xenonet-id",
+ "xenonet-os",
+ "zeroize",
+]
 
 [[package]]
 name = "eidolon-facet"
