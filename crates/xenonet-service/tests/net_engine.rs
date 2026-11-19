@@ -2698,3 +2698,30 @@ async fn a_message_goes_through_a_network_shown_both_projects_and_never_the_firs
     drop((t.desk, t.tower, contractor));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A guest's claim stored while its project was shared into the network
+/// warns desk's session of an edit in that project; once the project is
+/// unshared from that network it warns no more, though the claim is kept
+/// for hours: stored claims are held to what is shared now, as presence is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_claim_stored_before_its_project_was_unshared_warns_no_one() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-claim-unshared-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let desk_atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    // A file contractor-vm's presence doesn't say it is changing: only its claim on src/ covers it.
+    guest_sends(&t, Kind::Claims, guest_claim(&t, &t.atlas, "src/"));
+    until("desk's atlas session is warned of the claim", 20, || async { t.desk.before_edit(DESK_ATLAS, &desk_atlas, "src/refunds.ts").await.contains("contractor-vm") }).await;
+    // Atlas is unshared from N2: the claim is still stored, and means nothing.
+    let (s, v) = t.desk.window("PUT", "/api/net/sharing", json!({ "network": "work", "sharing": [] })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(desk_claims(&t, &t.atlas), 1, "the claim is still kept");
+    // (A thread hears a warning once per file, so a file not yet warned of.)
+    assert_eq!(t.desk.before_edit(DESK_ATLAS, &desk_atlas, "src/totals.ts").await, "", "but it warns no one");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

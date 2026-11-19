@@ -987,6 +987,12 @@ fn shown_with(w: &Runtime, host: &str, agent: &Value) -> bool {
     net(w).networks_with(host).iter().any(|n| g.sharing(n).shows(agent))
 }
 
+/// Whether `project` is shown a network this machine shares with `host`.
+fn project_shown_with(w: &Runtime, host: &str, project: &str) -> bool {
+    let Some(g) = crate::compose::runtime::ground::governance(w) else { return false };
+    net(w).networks_with(host).iter().any(|n| g.sharing(n).shows_project(project))
+}
+
 /// Every other host's agents, by the presence each last sent: only hosts
 /// in the roster, each host's working agents first. With `detail`, for the
 /// console's state, never for an agent. Only those of a project this
@@ -1770,7 +1776,10 @@ pub(crate) fn claim_hits(w: &Runtime, me: &str, files: &[String]) -> Result<Vec<
         }
         for r in store(w, |s| s.claims_in(&at.project, now))? {
             let (Some(host), Some(path)) = (r.text("host"), r.text("path")) else { continue };
-            if !xenonet_engine::engine::matches(path, &at.rel) {
+            // Held to what is shared now: a claim kept from before the
+            // project was unshared from every network shared with its host
+            // means nothing, as its host's presence doesn't.
+            if !project_shown_with(w, host, &at.project) || !xenonet_engine::engine::matches(path, &at.rel) {
                 continue;
             }
             out.push(obj(vec![
