@@ -234,3 +234,119 @@ fn mistakes_in_the_command_are_exit_2_and_a_machine_without_an_identity_says_so(
     assert!(String::from_utf8_lossy(&out.stderr).starts_with("eidolon: This machine holds no eidolon"), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(out.stdout.len(), 0);
 }
+
+/// A new eidolon on desk with a folder facet and a browser facet.
+fn browser_eidolon(w: &World) -> String {
+    let holders = [w.desk.holder_file(&w.sb.root), w.tower.holder_file(&w.sb.root)];
+    let out = w.desk.run(&[
+        "new",
+        "--wall",
+        WALL,
+        "--holder",
+        &holders[0],
+        "--holder",
+        &holders[1],
+        "--folder",
+        "notes=/home/agent/notes",
+        "--browser",
+        "web",
+        "--leave-out",
+        "extra/**",
+    ]);
+    assert_eq!(out.code, 0, "new: {}", out.stderr);
+    out.json()["eidolon"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn a_browser_facet_is_made_at_the_profile_path_with_its_own_leave_outs() {
+    let w = World::new();
+    let eid = browser_eidolon(&w);
+    let facets = w.desk.run(&["facets", &eid]).json();
+    let facets = facets["facets"].as_array().unwrap();
+    assert_eq!(facets.len(), 2);
+    assert_eq!((facets[0]["kind"].as_str(), facets[0]["path"].as_str()), (Some("folder"), Some("/home/agent/notes")));
+    assert_eq!((facets[1]["kind"].as_str(), facets[1]["name"].as_str(), facets[1]["path"].as_str()), (Some("browser"), Some("web"), Some("/home/eidolon/profile")));
+    assert_eq!(facets[1]["leave_out"], serde_json::json!(["extra/**"]));
+    // A leave-out that reaches outside the profile is refused, as for a folder.
+    let holders = w.desk.holder_file(&w.sb.root);
+    let outside = w.desk.run(&["new", "--wall", WALL, "--holder", &holders, "--browser", "web", "--leave-out", "../escape"]);
+    assert_eq!(outside.code, 1, "{}", outside.stdout);
+}
+
+#[test]
+fn a_folder_cell_has_no_browser_so_opening_a_browser_eidolon_there_is_refused_before_anything_is_recorded() {
+    let w = World::new();
+    let eid = browser_eidolon(&w);
+    let opened = w.desk.run(&["open", &eid, "--cell", "a"]);
+    assert_eq!((opened.code, opened.code_of_error().as_str()), (1, "no_driver"), "{}", opened.stdout);
+    assert_eq!(w.desk.run(&["ls"]).json()["eidolons"][0]["state"], "sealed");
+    assert!(!w.folder("a").exists(), "nothing was placed");
+}
+
+/// The error code of a failed command. `mcp` owns standard output, so its
+/// errors are on standard error.
+fn failed_with(command: &str, out: &common::Out) -> String {
+    let text = if command == "mcp" { &out.stderr } else { &out.stdout };
+    serde_json::from_str::<serde_json::Value>(text.trim()).unwrap()["code"].as_str().unwrap_or_default().to_owned()
+}
+
+/// Pretends the person's window is open: the marker holds a live pid, as
+/// `eidolon view` writes it, and the holding says open in cell `a`.
+fn window_is_open(w: &World, eid: &str) {
+    let dir = w.desk.home.join("holdings").join(eid);
+    std::fs::write(dir.join("state.json"), r#"{"open":{"cell":"a"}}"#).unwrap();
+    std::fs::write(dir.join("view.open"), format!("{}\n", std::process::id())).unwrap();
+}
+
+#[test]
+fn the_tools_and_a_second_window_are_refused_while_the_sign_in_window_is_open() {
+    let w = World::new();
+    let eid = browser_eidolon(&w);
+    window_is_open(&w, &eid);
+    for command in ["mcp", "view"] {
+        let refused = w.desk.run(&[command, &eid]);
+        assert_eq!((refused.code, failed_with(command, &refused).as_str()), (1, "view_open"), "{command}: {}{}", refused.stdout, refused.stderr);
+    }
+    // A marker whose process is gone counts as closed: the next refusal is
+    // about the folder cell, not the window.
+    let marker = w.desk.home.join("holdings").join(&eid).join("view.open");
+    std::fs::write(&marker, "2147483646\n").unwrap();
+    let after = w.desk.run(&["mcp", &eid]);
+    assert_eq!(failed_with("mcp", &after), "no_driver");
+    assert!(!marker.exists(), "a stale marker is removed");
+}
+
+#[test]
+fn view_and_mcp_need_an_open_eidolon_with_a_browser() {
+    let w = World::new();
+    let browserless = w.eidolon();
+    let sealed = browser_eidolon(&w);
+    for (eid, command, want) in [(&sealed, "view", "not_open"), (&sealed, "mcp", "not_open"), (&browserless, "view", "not_open")] {
+        assert_eq!(failed_with(command, &w.desk.run(&[command, eid])), want, "{command}");
+    }
+    assert_eq!(w.desk.run(&["seal", &browserless, "--cell", "a"]).code, 0);
+    w.empty("a");
+    assert_eq!(w.desk.run(&["open", &browserless, "--cell", "a"]).code, 0);
+    for command in ["view", "mcp"] {
+        assert_eq!(failed_with(command, &w.desk.run(&[command, &browserless])), "no_browser", "{command}");
+    }
+}
+
+#[test]
+fn mcp_keeps_standard_output_for_the_protocol_even_when_it_fails() {
+    let w = World::new();
+    let eid = browser_eidolon(&w);
+    let out = std::process::Command::new(common::BIN)
+        .env_clear()
+        .env("EIDOLON_HOME", &w.desk.home)
+        .args(["--json", "--cell-root"])
+        .arg(cells_dir(&w.sb))
+        .args(["mcp", &eid])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(out.stdout.len(), 0, "nothing but protocol may reach standard output");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not_open"));
+    let http = w.desk.run(&["mcp", &eid, "--http", "127.0.0.1:0"]);
+    assert_eq!((http.stdout.len(), failed_with("mcp", &http).as_str()), (0, "no_http"));
+}

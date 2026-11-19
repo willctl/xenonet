@@ -121,6 +121,31 @@ impl From<adytum_ledger::LedgerError> for CliError {
     }
 }
 
+impl From<eidolon_browser::BrowserError> for CliError {
+    fn from(e: eidolon_browser::BrowserError) -> CliError {
+        CliError::sentence("browser", e.to_string())
+    }
+}
+
+impl From<eidolon_view::ViewError> for CliError {
+    fn from(e: eidolon_view::ViewError) -> CliError {
+        match e {
+            eidolon_view::ViewError::Open => CliError::failed(
+                "view_open",
+                "The sign-in window is open, so the browser is not driven now.",
+                "Press Enter in the terminal running `eidolon view`, or stop that command, then try again.",
+            ),
+            other => CliError::sentence("view", other.to_string()),
+        }
+    }
+}
+
+impl From<eidolon_mcp::Error> for CliError {
+    fn from(e: eidolon_mcp::Error) -> CliError {
+        CliError::sentence("mcp", e.to_string())
+    }
+}
+
 impl From<serde_json::Error> for CliError {
     fn from(e: serde_json::Error) -> CliError {
         CliError::failed("bad_json", format!("That is not the JSON this command expects: {e}."), "Check the file and try again.")

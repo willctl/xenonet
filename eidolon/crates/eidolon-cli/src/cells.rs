@@ -25,6 +25,21 @@ pub trait Cells: Send + Sync {
     fn hold(&self, cell: &str, eidolon: &EidolonId) -> Result<()>;
     /// Records that `cell` no longer holds `eidolon`.
     fn release(&self, cell: &str, eidolon: &EidolonId) -> Result<()>;
+    /// Gets the cell ready and returns its driver and name, for what only a
+    /// real cell does (a browser's setup, its window, its automation).
+    async fn driver(&self, cell: &str) -> Result<(Arc<dyn Driver>, CellName)>;
+    /// Removes the folders at `guest_paths` from the cell, so that nothing
+    /// an unfinished open placed there stays behind.
+    async fn clear(&self, cell: &str, guest_paths: &[String]) -> Result<()>;
+}
+
+/// A path that may be cleared: absolute, without `..`, and not the root.
+fn clearable(path: &str) -> Result<()> {
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    if !path.starts_with('/') || parts.is_empty() || parts.contains(&"..") || path.contains('\0') {
+        return Err(CliError::failed("bad_path", format!("{path:?} is not a folder that can be cleared."), "A facet's folder is a path of its own, never the root."));
+    }
+    Ok(())
 }
 
 // ---- tests: folders ------------------------------------------------------
@@ -69,6 +84,26 @@ impl Cells for LocalCells {
     fn release(&self, _cell: &str, _eidolon: &EidolonId) -> Result<()> {
         Ok(())
     }
+
+    async fn driver(&self, cell: &str) -> Result<(Arc<dyn Driver>, CellName)> {
+        Self::check(cell)?;
+        Err(CliError::failed("no_driver", format!("{cell} is a folder, which has no browser."), "Use a cell Adytum made."))
+    }
+
+    async fn clear(&self, cell: &str, guest_paths: &[String]) -> Result<()> {
+        Self::check(cell)?;
+        let local = LocalCell::new(self.root.join(cell));
+        for path in guest_paths {
+            clearable(path)?;
+            let host = local.host_path(path)?;
+            match std::fs::remove_dir_all(&host) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(CliError::io("clear a folder", &e)),
+            }
+        }
+        Ok(())
+    }
 }
 
 // ---- Adytum --------------------------------------------------------------
@@ -97,6 +132,23 @@ impl AdytumCells {
         Ok(cell_name(cell)?)
     }
 
+    /// The cell's name once it is recorded, not broken and running (it is
+    /// started if it was stopped).
+    async fn ready(&self, cell: &str) -> Result<CellName> {
+        let name = Self::name(cell)?;
+        let recorded = self.recorded(&name)?;
+        if recorded.state == CellState::Broken {
+            return Err(CliError::failed("cell_broken", format!("{name} is broken."), "Run `adytum doctor` or remove the cell."));
+        }
+        let listed = self.driver.list().await?.into_iter().find(|l| l.name == name);
+        match listed.map(|l| l.state) {
+            Some(CellState::Running) => {}
+            Some(CellState::Stopped) => self.driver.start(&name).await?,
+            _ => return Err(CliError::failed("cell_missing", format!("The driver has no usable cell named {name}."), "Run `adytum ls` to see what exists.")),
+        }
+        Ok(name)
+    }
+
     fn recorded(&self, name: &CellName) -> Result<adytum_model::Cell> {
         self.ledger
             .cells()?
@@ -114,18 +166,27 @@ impl Cells for AdytumCells {
     }
 
     async fn access(&self, cell: &str) -> Result<Box<dyn CellAccess>> {
-        let name = Self::name(cell)?;
-        let recorded = self.recorded(&name)?;
-        if recorded.state == CellState::Broken {
-            return Err(CliError::failed("cell_broken", format!("{name} is broken."), "Run `adytum doctor` or remove the cell."));
-        }
-        let listed = self.driver.list().await?.into_iter().find(|l| l.name == name);
-        match listed.map(|l| l.state) {
-            Some(CellState::Running) => {}
-            Some(CellState::Stopped) => self.driver.start(&name).await?,
-            _ => return Err(CliError::failed("cell_missing", format!("The driver has no usable cell named {name}."), "Run `adytum ls` to see what exists.")),
-        }
+        let name = self.ready(cell).await?;
         Ok(Box::new(DriverAccess { driver: self.driver.clone(), name }))
+    }
+
+    async fn driver(&self, cell: &str) -> Result<(Arc<dyn Driver>, CellName)> {
+        let name = self.ready(cell).await?;
+        Ok((self.driver.clone(), name))
+    }
+
+    async fn clear(&self, cell: &str, guest_paths: &[String]) -> Result<()> {
+        let name = self.ready(cell).await?;
+        for path in guest_paths {
+            clearable(path)?;
+            // Root, because a browser's profile belongs to the cell's browser user.
+            let argv: Vec<String> = ["sudo", "rm", "-rf", "--", path].map(str::to_owned).to_vec();
+            let out = self.driver.exec(&name, &argv, ExecOpts::default()).await?;
+            if !out.success() {
+                return Err(CliError::failed("clear", format!("Could not clear {path} in {name}: {}", out.stderr_lossy().trim()), "Clear it by hand and run the command again."));
+            }
+        }
+        Ok(())
     }
 
     fn hold(&self, cell: &str, eidolon: &EidolonId) -> Result<()> {

@@ -4,6 +4,9 @@
 //! each test then checks what the next commands say and that a clean re-run
 //! ends byte for byte right. One more test kills `eidolon move` while it
 //! hands the seat over and settles the result by hand.
+//!
+//! `open` has one step of its own beyond the facet crate's list:
+//! `after_state_opening` (the state says opening, no file is placed).
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "in a test, a failure should say where")]
 
@@ -188,7 +191,7 @@ fn open_killed_at(step: &str) {
 
     if step == "after_state_open" {
         // Recorded as open, and the files are there.
-        assert!(w.state(&eid).contains("open"), "{which}");
+        assert!(w.state(&eid).contains("\"open\""), "{which}");
         assert_eq!(tree(&w.folder("b"), "cache"), want, "{which}: recorded open without the files");
         let second = w.desk.run(&["open", &eid, "--cell", "b2"]);
         assert_eq!((second.code, second.code_of_error().as_str()), (1, "second_seat"), "{which}");
@@ -198,14 +201,18 @@ fn open_killed_at(step: &str) {
         w.empty("b");
         assert_eq!(w.desk.run(&["open", &eid, "--cell", "b"]).code, 0, "{which}");
     } else {
-        // Not recorded as open: it is sealed, and no reader of `ls` is told
-        // otherwise. (`before_state_open` leaves unrecorded files in `b`.)
-        assert_eq!(w.state(&eid), "\"sealed\"", "{which}");
-        let sealed_open = w.desk.run(&["seal", &eid]);
-        assert_eq!(sealed_open.code, 2, "{which}: a sealed eidolon needs --cell: {}", sealed_open.stdout);
+        // Recorded as opening in `b`, whatever was placed there. Nothing
+        // seals or moves from a copy that may be partial.
+        assert_eq!(w.state(&eid), "{\"opening\":{\"cell\":\"b\"}}", "{which}");
+        for refused in [w.desk.run(&["seal", &eid]), w.desk.run(&["seal", &eid, "--cell", "b"])] {
+            assert_eq!((refused.code, refused.code_of_error().as_str()), (1, "open_unfinished"), "{which}: {}", refused.stdout);
+        }
+        let moved = w.desk.move_to(&eid, &w.tower);
+        assert_eq!((moved.code, moved.code_of_error().as_str()), (1, "open_unfinished"), "{which}");
         // Running open again, in the same cell, finishes it.
         let again = w.desk.run(&["open", &eid, "--cell", "b"]);
         assert_eq!(again.code, 0, "{which}: {}{}", again.stdout, again.stderr);
+        assert!(again.json()["cleared"].is_null(), "{which}: the same cell is not cleared");
         assert!(w.state(&eid).contains("\"cell\":\"b\""), "{which}");
     }
     assert!(w.work_is_clean(), "{which}: staging files left");
@@ -214,28 +221,45 @@ fn open_killed_at(step: &str) {
 }
 
 #[test]
-fn an_open_killed_at_any_step_leaves_it_sealed_or_open_with_its_files_and_opens_cleanly_again() {
-    for step in ["after_unpack", "before_state_open", "after_state_open"] {
+fn an_open_killed_at_any_step_leaves_it_opening_or_open_and_opens_cleanly_again() {
+    for step in ["after_state_opening", "after_unpack", "before_state_open", "after_state_open"] {
         open_killed_at(step);
     }
 }
 
 #[test]
-fn an_open_killed_after_placing_files_can_be_opened_in_another_cell_with_one_seat() {
+fn an_open_killed_after_placing_files_is_cleared_when_the_person_opens_elsewhere() {
     let w = World::new();
     let eid = w.eidolon();
     assert_eq!(w.desk.run(&["seal", &eid, "--cell", "a"]).code, 0);
     let want = tree(&w.folder("a"), "cache");
     assert_eq!(World::dying_at(&w.desk, "before_state_open").run(&["open", &eid, "--cell", "b"]).code, -1);
-    // `b` has files nothing records. Opening in `b2` records exactly one seat.
+    assert!(w.folder("b").exists(), "the kill left a copy in b");
+    // Opening in `b2` first clears `b`, says so, and records exactly one seat.
     let other = w.desk.run(&["open", &eid, "--cell", "b2"]);
     assert_eq!(other.code, 0, "{}{}", other.stdout, other.stderr);
+    assert_eq!(other.json()["cleared"], "b");
+    assert!(!w.folder("b").exists(), "the unrecorded copy in b is gone");
     let ls = w.desk.run(&["ls"]).json();
     assert_eq!(ls["eidolons"].as_array().unwrap().len(), 1);
     assert!(ls["eidolons"][0]["state"].to_string().contains("\"b2\""));
     assert_eq!(w.desk.run(&["open", &eid, "--cell", "b"]).code_of_error(), "second_seat");
     assert_eq!(w.desk.run(&["seal", &eid, "--cell", "b"]).code_of_error(), "second_seat", "only the recorded cell seals it");
     assert_eq!(w.desk.run(&["seal", &eid]).code, 0);
+    assert_eq!(tree(&w.folder("b2"), "cache"), want);
+}
+
+#[test]
+fn an_open_killed_before_any_file_is_placed_leaves_nothing_to_clear_and_opens_elsewhere() {
+    let w = World::new();
+    let eid = w.eidolon();
+    assert_eq!(w.desk.run(&["seal", &eid, "--cell", "a"]).code, 0);
+    let want = tree(&w.folder("a"), "cache");
+    assert_eq!(World::dying_at(&w.desk, "after_state_opening").run(&["open", &eid, "--cell", "b"]).code, -1);
+    assert!(!w.folder("b").exists());
+    let other = w.desk.run(&["open", &eid, "--cell", "b2"]);
+    assert_eq!(other.code, 0, "{}{}", other.stdout, other.stderr);
+    assert_eq!(other.json()["cleared"], "b", "it says where it looked, even when nothing was there");
     assert_eq!(tree(&w.folder("b2"), "cache"), want);
 }
 

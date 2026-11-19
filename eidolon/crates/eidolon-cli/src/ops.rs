@@ -1,17 +1,20 @@
 //! What each command does. Every function returns what happened as JSON;
 //! `lib.rs` prints it, as JSON or as a sentence.
 
-use crate::args::{FolderArg, Settle};
+use crate::args::{FacetArg, Settle};
+use crate::browser;
 use crate::cells::Cells;
 use crate::error::{CliError, Result};
 use crate::home::{read_holder, Home};
 use adytum_exec::{Command, Runner, SystemRunner};
+use eidolon_browser::BrowserFacet;
 use eidolon_facet::{abort_at, open_facets, seal_facets, Facet, FolderFacet};
 use eidolon_model::{EidolonId, EidolonSpec, FacetId, FacetKind, FacetSpec, Holder, SignedSeat, State, Wall};
 use eidolon_move::{receive, seat_first, send, Holding};
 use eidolon_pack::{load, seal, FacetManifest, Manifest, Node, SignedHead, FORMAT};
 use eidolon_policy::{leave_out_is_inside, may_hold, may_open, same_wall};
 use eidolon_vault::{ChunkName, EidolonKey, KeyRing, Keys, Vault};
+use eidolon_view::{OpenOptions, View, ViewGuard};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -41,16 +44,28 @@ fn holding_of(ctx: &Ctx, eid: &EidolonId) -> Result<Holding> {
     Ok(Holding::load(&root, eid)?)
 }
 
-fn facets_of(spec: &EidolonSpec) -> Result<Vec<Box<dyn Facet>>> {
+/// The spec's facets. With `sealing`, a browser is not started again after
+/// it was taken: a sealed eidolon is open nowhere.
+fn facets_of(spec: &EidolonSpec, sealing: bool) -> Result<Vec<Box<dyn Facet>>> {
     spec.facets
         .iter()
         .map(|f| match f.kind {
             FacetKind::Folder => Ok(Box::new(FolderFacet::new(f.clone())?) as Box<dyn Facet>),
             FacetKind::Browser => {
-                Err(CliError::failed("unsupported_facet", format!("The facet {} is a browser, which this build cannot carry yet.", f.name), "Use folder facets for now."))
+                let facet: Box<dyn Facet> = Box::new(BrowserFacet::new(f.clone())?);
+                Ok(if sealing { Box::new(browser::StaysStopped(facet)) as Box<dyn Facet> } else { facet })
             }
         })
         .collect()
+}
+
+/// An open that began and did not finish is not a seat to seal or move from.
+fn unfinished(eid: &EidolonId, cell: &str) -> CliError {
+    CliError::failed(
+        "open_unfinished",
+        format!("An open of that eidolon began in {cell} and did not finish, so the files there may be partial."),
+        format!("Run `eidolon open {eid} --cell {cell}` to finish it, or open it in another cell and {cell} is cleared first."),
+    )
 }
 
 fn keys_for(ring: &KeyRing<'_>, eid: &EidolonId) -> Result<Keys> {
@@ -140,24 +155,22 @@ pub fn machine_show(ctx: &Ctx) -> Result<Holder> {
 
 // ---- new --------------------------------------------------------------------
 
-pub fn new(ctx: &Ctx, wall: &str, holders: &[String], folders: &[FolderArg], stdin: &mut dyn FnMut() -> std::io::Result<Vec<u8>>) -> Result<Value> {
+pub fn new(ctx: &Ctx, wall: &str, holders: &[String], facets: &[FacetArg], stdin: &mut dyn FnMut() -> std::io::Result<Vec<u8>>) -> Result<Value> {
     let store = ctx.home.store()?;
     let machine = ctx.home.machine(&store)?;
     let wall: Wall = wall.parse()?;
     let holders: Vec<Holder> = holders.iter().map(|h| read_holder(h, stdin)).collect::<Result<_>>()?;
-    let mut facets = Vec::new();
-    for f in folders {
+    let mut specs = Vec::new();
+    for f in facets {
         for pattern in &f.leave_out {
             leave_out_is_inside(pattern)?;
         }
-        facets.push(FacetSpec { id: FacetId::new_random()?, kind: FacetKind::Folder, name: f.name.clone(), path: f.path.clone(), leave_out: f.leave_out.clone() });
+        specs.push(FacetSpec { id: FacetId::new_random()?, kind: f.kind, name: f.name.clone(), path: f.path.clone(), leave_out: f.leave_out.clone() });
     }
-    let spec = EidolonSpec { id: EidolonId::new_random()?, wall, holders, facets };
+    let spec = EidolonSpec { id: EidolonId::new_random()?, wall, holders, facets: specs };
     spec.validate()?;
     may_hold(&spec, &machine.key)?;
-    for facet in &spec.facets {
-        FolderFacet::new(facet.clone())?;
-    }
+    facets_of(&spec, false)?;
     let vault = ctx.home.vault()?;
     let key = EidolonKey::generate()?;
     let keys = Keys::new(&key)?;
@@ -191,6 +204,7 @@ pub async fn seal_cmd(ctx: &Ctx, eid: &EidolonId, cell: Option<&str>) -> Result<
     // Sealing from the cell it is open in, or taking a cell's files into a
     // sealed one. Both need the seat, and neither works on a retired copy.
     let from = match (&holding.state, cell) {
+        (State::Opening { cell: unfinished_in }, _) => return Err(unfinished(eid, unfinished_in)),
         (State::Open { cell: open }, Some(given)) if open != given => {
             return Err(CliError::failed("second_seat", format!("That eidolon is open in {open}, not {given}."), format!("Seal it from {open}.")));
         }
@@ -204,7 +218,7 @@ pub async fn seal_cmd(ctx: &Ctx, eid: &EidolonId, cell: Option<&str>) -> Result<
     same_wall(&holding.spec.wall, &cells.wall(&from).await?)?;
     let vault = ctx.home.vault()?;
     let keys = keys_for(&KeyRing::new(&store), eid)?;
-    let facets = facets_of(&holding.spec)?;
+    let facets = facets_of(&holding.spec, true)?;
     let access = cells.access(&from).await?;
     ctx.home.sweep_work();
     let work = ctx.home.run_dir()?;
@@ -239,21 +253,66 @@ pub async fn open_cmd(ctx: &Ctx, eid: &EidolonId, cell: &str) -> Result<Value> {
     let head = head_of(&holding)?;
     check_head(&holding.spec, &head)?;
     check_chunks(&head, &keys, &vault)?;
-    let facets = facets_of(&holding.spec)?;
+    let facets = facets_of(&holding.spec, false)?;
     let access = cells.access(cell).await?;
+    // A browser needs a real cell set up for it. This comes before anything
+    // is recorded or placed, so a refusal or a failed setup leaves nothing.
+    let has_browser = browser::has_browser(&holding.spec);
+    let provisioned = has_browser && browser::provision_if_needed(cells, cell).await?;
+    // An open that was cut short elsewhere left files nothing else records.
+    // They are cleared before this one starts, so one copy exists.
+    let cleared = match holding.state.clone() {
+        State::Opening { cell: earlier } if earlier != cell => {
+            clear_unfinished(cells, &holding, &earlier).await?;
+            Some(earlier)
+        }
+        _ => None,
+    };
+    // Recorded before the first file is placed: a kill from here on is
+    // found, and finished or cleared, by the next command.
+    holding.set_state(State::Opening { cell: cell.to_owned() })?;
+    cells.hold(cell, eid)?;
+    abort_at("after_state_opening");
+    if has_browser {
+        // A browser left running by the cut-short open would write over the profile.
+        browser::stop(&*access).await?;
+    }
     ctx.home.sweep_work();
     let work = ctx.home.run_dir()?;
     let placed = open_facets(&head, &facets, &*access, &keys, &vault, &work).await;
     let _ = std::fs::remove_dir_all(&work);
     placed?;
     // The files are in the cell before the state says open, so open is never
-    // recorded without them; a kill in between leaves it sealed, and running
+    // recorded without them; a kill in between leaves it opening, and running
     // open again places them again.
     abort_at("before_state_open");
+    if has_browser {
+        browser::start(cells, cell).await?;
+    }
     holding.set_state(State::Open { cell: cell.to_owned() })?;
     abort_at("after_state_open");
-    cells.hold(cell, eid)?;
-    Ok(json!({ "ok": true, "eidolon": eid, "cell": cell, "seconds": secs(started.elapsed()) }))
+    Ok(json!({ "ok": true, "eidolon": eid, "cell": cell, "provisioned": provisioned, "cleared": cleared, "seconds": secs(started.elapsed()) }))
+}
+
+/// Removes what an open that never finished placed in `cell`, and lets the
+/// cell go as holder. A cell that no longer exists has nothing to clear.
+async fn clear_unfinished(cells: &dyn Cells, holding: &Holding, cell: &str) -> Result<()> {
+    let eid = holding.spec.id;
+    let access = match cells.access(cell).await {
+        Ok(access) => access,
+        Err(e) if matches!(e.code.as_str(), "unknown_cell" | "cell_missing") => {
+            // Nothing there to hold or clear; a ledger that forgot the cell has no hold to drop.
+            let _ = cells.release(cell, &eid);
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
+    if browser::has_browser(&holding.spec) {
+        browser::stop(&*access).await?;
+    }
+    let paths: Vec<String> = holding.spec.facets.iter().map(|f| f.path.clone()).collect();
+    cells.clear(cell, &paths).await?;
+    cells.release(cell, &eid)
 }
 
 pub fn verify_cmd(ctx: &Ctx, eid: &EidolonId) -> Result<Value> {
@@ -276,6 +335,9 @@ pub async fn move_cmd(ctx: &Ctx, eid: &EidolonId, argv: &[String]) -> Result<Val
     let mut holding = holding_of(ctx, eid)?;
     if let State::Open { cell } = &holding.state {
         return Err(CliError::failed("second_seat", format!("That eidolon is open in {cell}, so it cannot be moved."), format!("Run `eidolon seal {eid}` first.")));
+    }
+    if let State::Opening { cell } = &holding.state {
+        return Err(unfinished(eid, cell));
     }
     let vault = ctx.home.vault()?;
     let ring = KeyRing::new(&store);
@@ -389,4 +451,66 @@ pub fn ls_cmd(ctx: &Ctx) -> Result<Value> {
         }));
     }
     Ok(json!({ "ok": true, "eidolons": rows }))
+}
+
+// ---- the browser: the window and the tools --------------------------------------
+
+/// Where an open eidolon with a browser lives: its cell, the cell's driver
+/// and the marker that says whether the sign-in window is open.
+struct Browsing {
+    cell: String,
+    driver: std::sync::Arc<dyn adytum_driver::Driver>,
+    name: adytum_model::CellName,
+    guard: ViewGuard,
+}
+
+async fn browsing(ctx: &Ctx, eid: &EidolonId) -> Result<Browsing> {
+    let holding = holding_of(ctx, eid)?;
+    let State::Open { cell } = &holding.state else {
+        return Err(CliError::failed("not_open", "That eidolon is not open in a cell.", format!("Run `eidolon open {eid} --cell <cell>` first.")));
+    };
+    if !browser::has_browser(&holding.spec) {
+        return Err(CliError::failed("no_browser", "That eidolon has no browser facet.", "Make one with `eidolon new ... --browser <name>`."));
+    }
+    // The marker lives in the holding's folder, beside the eidolon's state.
+    // It is read before the cell is touched: while a window is open, nothing
+    // else drives the browser, and nothing starts the cell for it.
+    let guard = ViewGuard::new(ctx.home.holdings().join(eid.to_string()));
+    guard.refuse_if_open()?;
+    let cells = ctx.cells()?;
+    same_wall(&holding.spec.wall, &cells.wall(cell).await?)?;
+    let (driver, name) = cells.driver(cell).await?;
+    Ok(Browsing { cell: cell.clone(), driver, name, guard })
+}
+
+/// Opens the sign-in window on the browser of an open eidolon. The caller
+/// shows the address and the secret, waits for the person, and closes it.
+pub async fn view_open(ctx: &Ctx, eid: &EidolonId) -> Result<(View, Value)> {
+    let b = browsing(ctx, eid).await?;
+    let mut view = View::open_with(b.driver, b.name, eidolon_browser::units::Ports::default(), OpenOptions { guard: Some(b.guard), ..OpenOptions::default() }).await?;
+    let secret = view.secret();
+    let info = json!({ "ok": true, "event": "open", "eidolon": eid, "cell": b.cell, "address": view.address().to_string(), "url": view.url(), "secret": secret });
+    Ok((view, info))
+}
+
+/// What `mcp` is serving, once the browser is reached.
+pub struct McpSetup {
+    pub tools: eidolon_mcp::BrowserTools,
+    pub cell: String,
+    pub files: std::path::PathBuf,
+}
+
+/// The tools for the browser of an open eidolon. Refused while the sign-in
+/// window is open: automation is off then.
+pub async fn mcp_setup(ctx: &Ctx, eid: &EidolonId) -> Result<McpSetup> {
+    let b = browsing(ctx, eid).await?;
+    let files = ctx.home.files_dir(eid)?;
+    let browser = std::sync::Arc::new(eidolon_browser::Browser::supervise(
+        b.driver.clone(),
+        b.name.clone(),
+        eidolon_browser::units::DEFAULT_AUTOMATION_PORT,
+        eidolon_browser::ConnectOptions::default(),
+    ));
+    let tools = eidolon_mcp::BrowserTools::new(browser, b.driver, b.name, files.clone());
+    Ok(McpSetup { tools, cell: b.cell, files })
 }

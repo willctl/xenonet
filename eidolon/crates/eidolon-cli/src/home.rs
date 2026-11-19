@@ -3,7 +3,7 @@
 
 use crate::error::{CliError, Result};
 use crate::store::FileKeyStore;
-use eidolon_model::{Holder, HolderKey};
+use eidolon_model::{EidolonId, Holder, HolderKey};
 use eidolon_vault::Vault;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -70,6 +70,20 @@ impl Home {
                 let _ = std::fs::remove_dir_all(entry.path());
             }
         }
+    }
+
+    /// The one host folder an eidolon's browser exchanges files through:
+    /// uploads come from it, fetched downloads go to it. Made owner-only.
+    pub fn files_dir(&self, eid: &EidolonId) -> Result<PathBuf> {
+        let dir = self.dir.join("files").join(eid.to_string());
+        make_private_dir(&dir).map_err(|e| CliError::io("make the files folder", &e))?;
+        // An earlier run, or a person, may have made it with looser rights.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| CliError::io("make the files folder private", &e))?;
+        }
+        Ok(dir)
     }
 
     fn machine_file(&self) -> PathBuf {

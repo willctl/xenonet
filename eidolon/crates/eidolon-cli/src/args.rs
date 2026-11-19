@@ -2,7 +2,8 @@
 //! what follows it is the receiving side's command, for `move`.
 
 use crate::error::{CliError, Result};
-use eidolon_model::EidolonId;
+use eidolon_browser::units::PROFILE_PATH;
+use eidolon_model::{EidolonId, FacetKind};
 use std::path::PathBuf;
 
 pub const USAGE: &str = "usage: eidolon [--json] <command>\n\
@@ -19,7 +20,8 @@ pub const USAGE: &str = "usage: eidolon [--json] <command>\n\
   ls";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FolderArg {
+pub struct FacetArg {
+    pub kind: FacetKind,
     pub name: String,
     pub path: String,
     pub leave_out: Vec<String>,
@@ -36,11 +38,13 @@ pub enum Cmd {
     Help,
     MachineInit { name: String, key_store: String },
     MachineShow,
-    New { wall: String, holders: Vec<String>, folders: Vec<FolderArg> },
+    New { wall: String, holders: Vec<String>, facets: Vec<FacetArg> },
     Seal { eidolon: EidolonId, cell: Option<String> },
     Open { eidolon: EidolonId, cell: String },
     Move { eidolon: EidolonId, argv: Vec<String> },
     Receive,
+    View { eidolon: EidolonId },
+    Mcp { eidolon: EidolonId, http: Option<String> },
     Settle { eidolon: EidolonId, how: Settle },
     Verify { eidolon: EidolonId },
     Facets { eidolon: EidolonId },
@@ -177,6 +181,19 @@ pub fn parse(args: &[String]) -> Result<Parsed> {
             exactly(&rest.words()?, 0)?;
             Cmd::Receive
         }
+        Some("view") => {
+            rest.0.remove(0);
+            let words = rest.words()?;
+            exactly(&words, 1)?;
+            Cmd::View { eidolon: eid(&words, 0)? }
+        }
+        Some("mcp") => {
+            rest.0.remove(0);
+            let http = rest.value("--http")?;
+            let words = rest.words()?;
+            exactly(&words, 1)?;
+            Cmd::Mcp { eidolon: eid(&words, 0)?, http }
+        }
         Some("move-settle") => {
             rest.0.remove(0);
             let abandon = rest.switch("--abandon");
@@ -213,22 +230,26 @@ pub fn parse(args: &[String]) -> Result<Parsed> {
 }
 
 /// `new` reads its flags in order: a `--leave-out` belongs to the
-/// `--folder` before it.
+/// `--folder` or `--browser` before it.
 fn new_args(mut rest: Rest) -> Result<Cmd> {
     let wall = rest.need("--wall")?;
     let holders = rest.values("--holder")?;
-    let mut folders: Vec<FolderArg> = Vec::new();
+    let mut facets: Vec<FacetArg> = Vec::new();
     let mut words = std::mem::take(&mut rest.0).into_iter();
     while let Some(word) = words.next() {
         match word.as_str() {
             "--folder" => {
                 let spec = words.next().ok_or_else(|| usage("--folder needs a value."))?;
                 let (name, path) = spec.split_once('=').ok_or_else(|| usage("--folder is written <name>=<guest path>."))?;
-                folders.push(FolderArg { name: name.to_owned(), path: path.to_owned(), leave_out: Vec::new() });
+                facets.push(FacetArg { kind: FacetKind::Folder, name: name.to_owned(), path: path.to_owned(), leave_out: Vec::new() });
+            }
+            "--browser" => {
+                let name = words.next().ok_or_else(|| usage("--browser needs a name."))?;
+                facets.push(FacetArg { kind: FacetKind::Browser, name, path: PROFILE_PATH.to_owned(), leave_out: Vec::new() });
             }
             "--leave-out" => {
                 let pattern = words.next().ok_or_else(|| usage("--leave-out needs a value."))?;
-                folders.last_mut().ok_or_else(|| usage("--leave-out comes after the --folder it belongs to."))?.leave_out.push(pattern);
+                facets.last_mut().ok_or_else(|| usage("--leave-out comes after the --folder or --browser it belongs to."))?.leave_out.push(pattern);
             }
             other => return Err(usage(&format!("{other:?} is not part of this command."))),
         }
@@ -236,7 +257,7 @@ fn new_args(mut rest: Rest) -> Result<Cmd> {
     if holders.is_empty() {
         return Err(usage("--holder is missing; list at least this machine."));
     }
-    Ok(Cmd::New { wall, holders, folders })
+    Ok(Cmd::New { wall, holders, facets })
 }
 
 #[cfg(test)]
@@ -261,10 +282,30 @@ mod tests {
     #[test]
     fn a_leave_out_belongs_to_the_folder_before_it() {
         let line = "new --wall wall_x --holder - --folder a=/a --leave-out cache/** --leave-out *.tmp --folder b=/b";
-        let Cmd::New { folders, .. } = p(line).unwrap().cmd else { panic!("not new") };
-        assert_eq!(folders[0].leave_out, ["cache/**", "*.tmp"]);
-        assert_eq!(folders[1].leave_out.len(), 0);
+        let Cmd::New { facets, .. } = p(line).unwrap().cmd else { panic!("not new") };
+        assert_eq!(facets[0].leave_out, ["cache/**", "*.tmp"]);
+        assert_eq!(facets[1].leave_out.len(), 0);
         assert_eq!(p("new --wall wall_x --holder - --leave-out x").unwrap_err().exit, 2);
+    }
+
+    #[test]
+    fn a_browser_facet_lives_at_the_profile_path_and_takes_its_own_leave_outs() {
+        let line = "new --wall wall_x --holder - --folder a=/a --browser web --leave-out extra/** --leave-out *.old";
+        let Cmd::New { facets, .. } = p(line).unwrap().cmd else { panic!("not new") };
+        assert_eq!((facets[1].kind, facets[1].name.as_str(), facets[1].path.as_str()), (FacetKind::Browser, "web", PROFILE_PATH));
+        assert_eq!(facets[1].leave_out, ["extra/**", "*.old"]);
+        assert_eq!(facets[0].leave_out.len(), 0);
+        assert_eq!(p("new --wall wall_x --holder - --browser").unwrap_err().exit, 2);
+    }
+
+    #[test]
+    fn view_and_mcp_read_their_arguments() {
+        assert!(matches!(p(&format!("view {EID}")).unwrap().cmd, Cmd::View { .. }));
+        assert!(matches!(p(&format!("mcp {EID}")).unwrap().cmd, Cmd::Mcp { http: None, .. }));
+        assert!(matches!(p(&format!("mcp {EID} --http 127.0.0.1:9000")).unwrap().cmd, Cmd::Mcp { http: Some(h), .. } if h == "127.0.0.1:9000"));
+        for line in ["view", &format!("view {EID} extra"), "mcp", &format!("mcp {EID} --http"), &format!("view {EID} --http x")] {
+            assert_eq!(p(line).unwrap_err().exit, 2, "{line:?}");
+        }
     }
 
     #[test]
