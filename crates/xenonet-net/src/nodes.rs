@@ -847,7 +847,22 @@ impl Governance for Nodes {
     fn facts(&self) -> Facts {
         match self.current() {
             Some(s) => s.facts(),
-            None => self.empty.shared().facts(),
+            None => {
+                // In no frame, with several networks, no chain decides: the
+                // narrowest settings of the networks this machine is in
+                // do, so a call that names none is never freer than the
+                // strictest of them. (Not those it was removed from.)
+                let mut facts = self.empty.shared().facts();
+                let mut all = self.common.shareds();
+                if all.iter().any(|s| !s.is_removed()) {
+                    all.retain(|s| !s.is_removed());
+                }
+                if !all.is_empty() {
+                    let settings: Vec<_> = all.iter().map(|s| xenonet_authz::Ground::settings(&s.facts(), None)).collect();
+                    facts.narrowed = Some(ground::narrowest(&settings));
+                }
+                facts
+            }
         }
     }
     fn identity(&self) -> Arc<Identity> {

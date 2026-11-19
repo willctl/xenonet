@@ -378,6 +378,46 @@ async fn a_network_a_machine_was_removed_from_stops_counting() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A start made on this machine, in no frame, with several networks, reads
+/// the narrowest of their settings, never the defaults: with every network
+/// setting start off, even the person's own start is refused; with every
+/// network letting the network start, a session of this machine's starts one
+/// as it would in a machine's only network.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_local_start_in_no_frame_reads_the_narrowest_settings_of_the_networks() {
+    let root = std::env::temp_dir().join(format!("xenonet-local-narrowest-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let set = |start: &'static str, nets: &'static [&'static str]| {
+        let desk = &t.desk;
+        async move {
+            for network in nets {
+                let (s, v) = desk.window("PUT", "/api/net/settings", json!({ "network": network, "host": "desk", "start": start })).await;
+                assert_eq!(s, 200, "{v}");
+            }
+        }
+    };
+    // Every network sets start off: nothing starts here, you included.
+    set("off", &["work", "home"]).await;
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("start setting is off")), "{v}");
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
+    assert_eq!(s, 409, "{v}");
+    // One network off and one letting the network start: the narrower rules.
+    set("network", &["home"]).await;
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
+    assert_eq!(s, 409, "{v}");
+    // Every network lets the network start: a session of this machine's does.
+    set("network", &["work"]).await;
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("started")), "{v}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// The next XenoNet note `contractor-vm`'s session is told, which is where
 /// an agent's start answers come; `told` keeps what came with it.
 async fn vm_is_told(t: &TwoNetworks, told: &mut Vec<String>, what: &str) -> String {

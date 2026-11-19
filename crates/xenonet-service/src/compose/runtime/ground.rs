@@ -509,7 +509,7 @@ mod tests {
         {
             view.members.insert(id.into(), member(id, window, s));
         }
-        let facts = Facts { machine: MachineId::new("laptop").unwrap(), view: Some(view), identity: identity.clone(), synced_at: synced, now: NOW };
+        let facts = Facts { machine: MachineId::new("laptop").unwrap(), view: Some(view), identity: identity.clone(), synced_at: synced, now: NOW, narrowed: None };
         let asks = HashMap::from([("ask_1".to_string(), waiting(None))]);
         (EngineGround { facts, asks, store: None, roots: Vec::new(), sharing: xenonet_net::share::Sharing::All, placed: HashMap::new(), consents: HashMap::new() }, identity, dir)
     }

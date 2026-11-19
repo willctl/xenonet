@@ -57,6 +57,10 @@ pub struct Facts {
     pub synced_at: Option<i64>,
     /// Now, by the network's clock: what a request is timed by.
     pub now: i64,
+    /// For a call in no network from a machine in several: the narrowest
+    /// settings of those networks, which `settings` answers in place of
+    /// this machine's own entry in a chain, since it has none.
+    pub narrowed: Option<Settings>,
 }
 
 impl Facts {
@@ -67,6 +71,25 @@ impl Facts {
 
     fn own(&self) -> Option<&network::Member> {
         self.view.as_ref()?.member(self.machine.as_str())
+    }
+}
+
+/// What several networks together allow: the narrowest start and the
+/// narrowest wake of them.
+pub fn narrowest(all: &[Settings]) -> Settings {
+    let start = |s: &Settings| match s.start {
+        StartSetting::Off => 0,
+        StartSetting::You => 1,
+        StartSetting::Network => 2,
+        StartSetting::Delegate => 3,
+    };
+    let wake = |s: &Settings| match s.wake {
+        WakeSetting::Consent => 0,
+        WakeSetting::Network => 1,
+    };
+    Settings {
+        start: all.iter().min_by_key(|s| start(s)).map_or_else(Default::default, |s| s.start),
+        wake: all.iter().min_by_key(|s| wake(s)).map_or_else(Default::default, |s| s.wake),
     }
 }
 
@@ -111,6 +134,9 @@ impl Ground for Facts {
 
     fn settings(&self, network: Option<&NetworkId>) -> Settings {
         let _ = network;
+        if let Some(n) = self.narrowed {
+            return n;
+        }
         self.own().map(|m| settings_of(&m.settings)).unwrap_or_default()
     }
 

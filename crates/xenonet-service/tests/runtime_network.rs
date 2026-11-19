@@ -226,6 +226,7 @@ impl Governance for Gov {
             identity: self.identity.clone(),
             synced_at: Some(now() as i64),
             now: now() as i64,
+            narrowed: None,
         }
     }
     fn identity(&self) -> Arc<Identity> {

@@ -393,7 +393,14 @@ impl Shared {
         let net = self.network();
         let machine = net.as_ref().map_or(crate::ground::LOCAL.to_string(), |n| n.host.clone());
         let machine = xenonet_authz::MachineId::new(&machine).unwrap_or_else(|_| xenonet_authz::MachineId::new(crate::ground::LOCAL).expect("a word"));
-        Facts { machine, view: net.and_then(|_| self.roster().view_ref().cloned()), identity: self.identity.clone(), synced_at: self.synced_at(), now: self.now() as i64 }
+        Facts {
+            machine,
+            view: net.and_then(|_| self.roster().view_ref().cloned()),
+            identity: self.identity.clone(),
+            synced_at: self.synced_at(),
+            now: self.now() as i64,
+            narrowed: None,
+        }
     }
 
     /// The network's owner's chain, as roster frames, answers and joins
