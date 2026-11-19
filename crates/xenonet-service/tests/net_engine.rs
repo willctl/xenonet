@@ -2611,6 +2611,65 @@ async fn an_ask_from_one_machine_never_replaces_the_ask_of_another_with_the_same
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// In one network with two window hosts, a run's prompt goes to both and is
+/// taken by the one that asked for the run: studio asked desk for it, so
+/// laptop, a window host too, is sent it and takes nothing. (To say who sees
+/// a run's prompts is `names_run`'s; this pins it as it is.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_runs_prompt_is_taken_by_the_window_host_that_asked_for_it_and_not_by_another() {
+    let root = std::env::temp_dir().join(format!("xenonet-two-windows-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("desk").join("home")).unwrap();
+    let (a, b, c) = three(&root, [vec![], vec![], vec![]]).await;
+    until("desk takes starts and sees both window hosts", 10, || async {
+        let hosts = c.state().await["hosts"].clone();
+        let window = |h: &str| hosts.as_array().is_some_and(|l| l.iter().any(|x| x["id"] == h && x["window"] == true));
+        row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) && window("studio") && window("laptop")
+    })
+    .await;
+    let mut studio = Stream::of(&a);
+    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    let run = studio.next("start", 15, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
+    let ask = json!({ "op": "ask", "id": "ask_two_windows", "session": run, "run": "run_1", "title": "a run", "tool": "Bash", "input": "npm test", "at": now_ms(), "until": now_ms() + 60e3 });
+    xenonet_service::compose::runtime::asks::to_windows(&c.world, &run, &ask);
+    until("the ask at studio", 15, || async { asks_shown(&a).await.contains(&"ask_two_windows".to_string()) }).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(asks_shown(&b).await.is_empty(), "laptop is sent the ask and takes none: it didn't ask for the run");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A release is held to what is shown as a claim is: contractor-vm, in N2,
+/// releases nothing in ledger, which N2 isn't shown, and a claim of its
+/// kept there stays; the same release for atlas, which N2 is shown, works.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_claim_release_in_a_project_the_network_is_not_shown_is_refused() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-release-unshown-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let agent = t.contractor.agt(VM_ATLAS);
+    // Claims of contractor-vm's kept on desk, in both projects (the ledger
+    // one is what an earlier sharing, or a hand-made store, could leave).
+    for project in [&t.atlas, &t.ledger] {
+        let row = json!({ "project": project, "path": "src/", "agent": agent, "author": "contractor-vm", "host": "contractor-vm", "branch": null, "note": null, "created_at": now_ms(), "expires_at": now_ms() + 3600e3 });
+        t.desk.world.store.with(|s| s.claim(&row)).unwrap();
+    }
+    let release = |project: &str| json!({ "schema": "network/claim/v1", "op": "release", "project": project, "path": "src/", "agent": agent });
+    guest_sends(&t, Kind::Claims, release(&t.ledger));
+    guest_sends(&t, Kind::Claims, release(&t.atlas));
+    until("the release in atlas works", 20, || async { desk_claims(&t, &t.atlas) == 0 }).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(desk_claims(&t, &t.ledger), 1, "the release in ledger was refused");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A copy of a run forked here asks under its own session, so what is sent
 /// with its ask names the run it was forked from, and the machine that
 /// asked for that run takes it.
