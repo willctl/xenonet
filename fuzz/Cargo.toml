@@ -53,6 +53,8 @@ xenonet-service = { path = "../crates/xenonet-service" }
 xenonet-sources = { path = "../crates/xenonet-sources" }
 xenonet-state = { path = "../crates/xenonet-state" }
 xenonet-saved = { path = "../crates/xenonet-saved" }
+# The BiDi client's frame parser, for the bidi_frame target.
+eidolon-bidi = { path = "../eidolon/crates/eidolon-bidi" }
 
 [[bin]]
 name = "json"
@@ -190,6 +192,13 @@ bench = false
 [[bin]]
 name = "feed_decode"
 path = "fuzz_targets/feed_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bidi_frame"
+path = "fuzz_targets/bidi_frame.rs"
 test = false
 doc = false
 bench = false

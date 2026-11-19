@@ -939,6 +939,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "eidolon-bidi"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "getrandom 0.3.4",
+ "ring",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5088,7 +5100,6 @@ name = "xenonet-adapter"
 version = "0.2.0"
 dependencies = [
  "async-trait",
- "libc",
  "notify",
  "regex",
  "serde",
@@ -5275,6 +5286,7 @@ name = "xenonet-fuzz"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "eidolon-bidi",
  "libfuzzer-sys",
  "serde_json",
  "tokio",
@@ -5497,6 +5509,7 @@ version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
+ "notify",
  "regex",
  "reqwest",
  "rustls",
