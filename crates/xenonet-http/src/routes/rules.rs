@@ -236,6 +236,7 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/identities/name", YOU, Nothing),
     r("POST",   "/api/identities/hidden", YOU, Nothing),
     r("POST",   "/api/identities/pin", YOU, Nothing),
+    r("POST",   "/api/identities/rule", YOU, Nothing),
     r("POST",   "/api/identities/rescan", LOCAL, Nothing),
     r("GET",    "/api/spotify", LOCAL, Nothing),
     r("POST",   "/api/spotify/disconnect", YOU, Nothing),

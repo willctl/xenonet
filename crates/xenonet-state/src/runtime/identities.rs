@@ -327,6 +327,10 @@ impl IdentityWatch {
                     n.insert("identities".into(), links);
                 }
             }
+            // Each project's rule, checked against what was just read.
+            if let Some(rules) = saved.get("rules") {
+                ids::apply_rules(list, rules, &out.list);
+            }
         }
         // What linking changed of the saved state: the sign-in timelines
         // and what's remembered of each identity, each kept as it changes.

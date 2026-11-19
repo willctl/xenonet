@@ -553,6 +553,96 @@ pub fn empty_saved() -> Value {
     json!({ "names": {}, "hidden": {}, "pins": {}, "known": {}, "signins": {} })
 }
 
+// ---------- a project's rule ----------
+
+/// A rule as it's kept, from what a person sent: `git` is the email the
+/// project commits with, `push` the GitHub account (`login`, and `host`,
+/// github.com unless it says another) a push signs in as. Either may be
+/// left out; with neither, there is no rule (Ok(None)).
+pub fn clean_rule(body: &Value) -> Result<Option<Value>, &'static str> {
+    let text = |v: Option<&Value>| match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(trim(s).to_string()).filter(|s| !s.is_empty())),
+        Some(_) => Err("A rule's names are text"),
+    };
+    let one_line = |s: &str| !s.chars().any(|c| c.is_control() || c.is_whitespace());
+    let mut rule = Map::new();
+    if let Some(git) = text(body.get("git"))? {
+        if !one_line(&git) || !git.contains('@') {
+            return Err("A rule's git identity is an email address");
+        }
+        rule.insert("git".into(), Value::String(git));
+    }
+    match body.get("push") {
+        None | Some(Value::Null) => {}
+        Some(p @ Value::Object(_)) => {
+            if let Some(login) = text(p.get("login"))? {
+                let host = text(p.get("host"))?.unwrap_or_else(|| "github.com".into()).to_lowercase();
+                if !one_line(&login) || !one_line(&host) {
+                    return Err("A rule's push account is a login and a host");
+                }
+                rule.insert("push".into(), json!({ "login": login, "host": host }));
+            }
+        }
+        Some(_) => return Err("A rule's push account is a login and a host"),
+    }
+    Ok((!rule.is_empty()).then_some(Value::Object(rule)))
+}
+
+/// A project's rule against what XenoNet read of it: who its commits carry
+/// (`commits-as`) and who a push signs in as (`pushes-as`) among its
+/// identity `links`, with `list` (the map's identities) to name them.
+/// A part is "ok" when it's the one the rule names, "differs" when XenoNet
+/// read another, and "unknown" when it read none: that is not a mismatch.
+/// `mismatch` is any part that differs.
+pub fn check_rule(rule: &Value, links: &[Value], list: &[Value]) -> Value {
+    let of = |role: &str| links.iter().find(|l| l.get("role").and_then(Value::as_str) == Some(role)).and_then(|l| l.get("id")).and_then(Value::as_str);
+    let rec = |id: &str| list.iter().find(|i| i.get("id").and_then(Value::as_str) == Some(id));
+    let part = |wants: String, found: Option<&str>, uses: &dyn Fn(&str) -> Option<String>| match found {
+        None => json!({ "state": "unknown", "uses": null }),
+        Some(id) => json!({ "state": if id == wants { "ok" } else { "differs" }, "uses": uses(id) }),
+    };
+    let mut out = Map::new();
+    out.insert("rule".into(), rule.clone());
+    if let Some(email) = rule.get("git").and_then(Value::as_str) {
+        out.insert("git".into(), part(git_id(email), of("commits-as"), &|id| rec(id).and_then(|r| r.get("handle")).and_then(Value::as_str).map(str::to_string)));
+    }
+    if let Some(push) = rule.get("push") {
+        let host = push.get("host").and_then(Value::as_str).unwrap_or("github.com");
+        let login = push.get("login").and_then(Value::as_str).unwrap_or("");
+        let uses = |id: &str| {
+            let r = rec(id)?;
+            let host = r.get("detail").and_then(|d| d.get("host")).and_then(Value::as_str).unwrap_or("github.com");
+            Some(format!("{}/{host}", r.get("handle").and_then(Value::as_str)?))
+        };
+        out.insert("push".into(), part(github_id(host, login), of("pushes-as"), &uses));
+    }
+    let state = |k: &str| out.get(k).and_then(|p| p.get("state")).and_then(Value::as_str);
+    let mismatch = state("git") == Some("differs") || state("push") == Some("differs");
+    let unknown = state("git") == Some("unknown") || state("push") == Some("unknown");
+    out.insert("mismatch".into(), Value::Bool(mismatch));
+    out.insert("unknown".into(), Value::Bool(unknown));
+    Value::Object(out)
+}
+
+/// Puts each rule's check on its project's node (`identityRule`), given
+/// the nodes as the map has them with their identity links, and the
+/// identities list. A project with no rule gets nothing.
+pub fn apply_rules(nodes: &mut [Value], rules: &Value, list: &[Value]) {
+    for n in nodes {
+        let Some(id) = n.get("id").and_then(Value::as_str) else { continue };
+        let Some(rule) = rules.get(id).filter(|r| r.is_object()) else { continue };
+        if n.get("kind").and_then(Value::as_str) != Some("project") {
+            continue;
+        }
+        let links = n.get("identities").and_then(Value::as_array).cloned().unwrap_or_default();
+        let check = check_rule(rule, &links, list);
+        if let Some(o) = n.as_object_mut() {
+            o.insert("identityRule".into(), check);
+        }
+    }
+}
+
 pub fn github_id(host: &str, login: &str) -> String {
     format!("github:{host}/{}", login.to_lowercase())
 }
@@ -1361,6 +1451,74 @@ mod tests {
         let cleared = parse_git_config("credential.helper !gh auth git-credential\ncredential.helper\ncredential.https://gitlab.example.helper !gh auth git-credential");
         assert_eq!(push_account(Some(&json!("https://github.com/a/b")), Some(&cleared), &[]).unwrap(), Value::Null);
         assert!(git_id("Nova@Example.com ").starts_with("git:") && git_id("x").len() == 20);
+    }
+
+    // A project read as: commits as `email`, pushes as `login` at `host`.
+    fn read_as(email: Option<&str>, push: Option<(&str, &str)>) -> (Vec<Value>, Vec<Value>) {
+        let (mut links, mut list) = (Vec::new(), Vec::new());
+        if let Some(e) = email {
+            links.push(json!({ "id": git_id(e), "role": "commits-as", "confidence": "exact" }));
+            list.push(json!({ "id": git_id(e), "kind": "git", "handle": e }));
+        }
+        if let Some((h, l)) = push {
+            links.push(json!({ "id": github_id(h, l), "role": "pushes-as", "confidence": "exact" }));
+            list.push(json!({ "id": github_id(h, l), "kind": "github", "handle": l, "detail": { "host": h } }));
+        }
+        (links, list)
+    }
+
+    #[test]
+    fn checks_a_rule_against_what_was_read() {
+        let rule = clean_rule(&json!({ "git": "Nova@Example.com ", "push": { "login": "Nova-Dev" } })).unwrap().unwrap();
+        assert_eq!(rule, json!({ "git": "Nova@Example.com", "push": { "login": "Nova-Dev", "host": "github.com" } }));
+        let check = |email, push| {
+            let (links, list) = read_as(email, push);
+            check_rule(&rule, &links, &list)
+        };
+        // Both as the rule says.
+        let ok = check(Some("nova@example.com"), Some(("github.com", "nova-dev")));
+        assert_eq!((ok["git"]["state"].as_str(), ok["push"]["state"].as_str(), ok["mismatch"].as_bool(), ok["unknown"].as_bool()), (Some("ok"), Some("ok"), Some(false), Some(false)));
+        // Git differs.
+        let git = check(Some("ada@acme.example"), Some(("github.com", "nova-dev")));
+        assert_eq!((git["git"]["state"].as_str(), git["git"]["uses"].as_str(), git["push"]["state"].as_str(), git["mismatch"].as_bool()), (Some("differs"), Some("ada@acme.example"), Some("ok"), Some(true)));
+        // Push differs, even on the same login at another host.
+        let push = check(Some("nova@example.com"), Some(("ghe.acme.example", "nova-dev")));
+        assert_eq!((push["git"]["state"].as_str(), push["push"]["state"].as_str(), push["push"]["uses"].as_str(), push["mismatch"].as_bool()), (Some("ok"), Some("differs"), Some("nova-dev/ghe.acme.example"), Some(true)));
+        // Both differ.
+        let both = check(Some("ada@acme.example"), Some(("github.com", "ledger-bot")));
+        assert_eq!((both["git"]["state"].as_str(), both["push"]["state"].as_str(), both["mismatch"].as_bool()), (Some("differs"), Some("differs"), Some(true)));
+        // What wasn't read is not a mismatch.
+        let unknown = check(None, None);
+        assert_eq!((unknown["git"]["state"].as_str(), unknown["push"]["state"].as_str(), unknown["mismatch"].as_bool(), unknown["unknown"].as_bool()), (Some("unknown"), Some("unknown"), Some(false), Some(true)));
+        let half = check(Some("ada@acme.example"), None);
+        assert_eq!((half["mismatch"].as_bool(), half["unknown"].as_bool()), (Some(true), Some(true)), "a part that differs is a mismatch even when another is unknown");
+        // A rule that names one part checks that part.
+        let git_only = check_rule(&json!({ "git": "nova@example.com" }), &read_as(Some("nova@example.com"), None).0, &[]);
+        assert!(git_only.get("push").is_none() && git_only["mismatch"] == false && git_only["unknown"] == false);
+    }
+
+    #[test]
+    fn puts_a_rules_check_only_on_its_project() {
+        let (links, list) = read_as(Some("ada@acme.example"), None);
+        let mut nodes = vec![
+            json!({ "id": "project:atlas", "kind": "project", "identities": links }),
+            json!({ "id": "project:ledger", "kind": "project", "identities": [] }),
+            json!({ "id": "claude:s1", "kind": "session" }),
+        ];
+        apply_rules(&mut nodes, &json!({ "project:atlas": { "git": "nova@example.com" }, "claude:s1": { "git": "nova@example.com" } }), &list);
+        assert_eq!(nodes[0]["identityRule"]["mismatch"], true);
+        assert!(nodes[1].get("identityRule").is_none(), "no rule, no check");
+        assert!(nodes[2].get("identityRule").is_none(), "only a project has one");
+    }
+
+    #[test]
+    fn cleans_a_rule() {
+        assert_eq!(clean_rule(&json!({})).unwrap(), None);
+        assert_eq!(clean_rule(&json!({ "git": "  ", "push": { "login": "" } })).unwrap(), None);
+        assert_eq!(clean_rule(&json!({ "push": { "login": "nova", "host": "GHE.acme.example" } })).unwrap().unwrap()["push"]["host"], "ghe.acme.example");
+        assert!(clean_rule(&json!({ "git": "nova" })).is_err());
+        assert!(clean_rule(&json!({ "git": 3 })).is_err());
+        assert!(clean_rule(&json!({ "push": "nova" })).is_err());
     }
 
     #[test]

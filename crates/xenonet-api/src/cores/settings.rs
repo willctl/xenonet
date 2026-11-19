@@ -123,9 +123,9 @@ pub trait Store: Send + Sync {
         pending(STORE)
     }
     /// `store.getIdentities()`: the names you gave identities, the ones
-    /// you hid, the ones you pinned to a node, what XenoNet knows of each
-    /// and the sign-ins it has seen (`{ names, hidden, pins, known,
-    /// signins }`), which a hub's merged map applies to other hosts'
+    /// you hid, the ones you pinned to a node, the rules for projects, what XenoNet
+    /// knows of each and the sign-ins it has seen (`{ names, hidden, pins,
+    /// rules, known, signins }`), which a hub's merged map applies to other hosts'
     /// identities too.
     fn identities(&self) -> R<Value> {
         pending(STORE)
@@ -138,6 +138,11 @@ pub trait Store: Send + Sync {
     }
     /// The identity pinned to a node, now, or (None) no pin.
     fn set_identity_pin(&self, _node: &str, _identity: Option<&str>) -> R<()> {
+        pending(STORE)
+    }
+    /// The rule for a project (its git email and push account), or (None)
+    /// none.
+    fn set_identity_rule(&self, _project: &str, _rule: Option<&Value>) -> R<()> {
         pending(STORE)
     }
     /// What XenoNet knows of an identity, in place of what it knew.

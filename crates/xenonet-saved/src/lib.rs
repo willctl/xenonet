@@ -165,6 +165,9 @@ impl Store for Saved {
     fn set_identity_pin(&self, node: &str, identity: Option<&str>) -> R<()> {
         self.db.set_identity_pin(node, identity.map(|i| (i, (self.clock)()))).map_err(failed)
     }
+    fn set_identity_rule(&self, project: &str, rule: Option<&Value>) -> R<()> {
+        self.db.set_identity_rule(project, rule).map_err(failed)
+    }
     fn set_identity_known(&self, id: &str, value: &Value) -> R<()> {
         self.db.set_identity_known(id, value).map_err(failed)
     }
@@ -195,6 +198,10 @@ mod tests {
         assert_eq!(s.identities().unwrap()["pins"]["claude:a"], json!({ "identity": "github:x/y", "at": 1000 }));
         s.set_identity_pin("claude:a", None).unwrap();
         assert_eq!(s.identities().unwrap()["pins"], json!({}));
+        s.set_identity_rule("project:atlas", Some(&json!({ "git": "nova@example.com" }))).unwrap();
+        assert_eq!(s.identities().unwrap()["rules"], json!({ "project:atlas": { "git": "nova@example.com" } }));
+        s.set_identity_rule("project:atlas", None).unwrap();
+        assert_eq!(s.identities().unwrap()["rules"], json!({}));
         assert_eq!(s.theme().unwrap(), Value::Null);
         s.set_theme("rime").unwrap();
         assert_eq!(s.theme().unwrap(), "rime");

@@ -222,7 +222,8 @@ pub fn known_identity(id: Option<&Value>, identities: &[Value], known: &Value) -
 }
 
 /// What identityDetection says: whether it's on, when the map was made, the
-/// identities, your pins (newest first) and the last sign-ins of each app.
+/// identities, your pins (newest first), the last sign-ins of each app and,
+/// once you've set any, your rules for projects.
 pub fn identity_detection(enabled: bool, at: Option<&Value>, identities: Option<&Value>, saved: &Value, node: &mut dyn FnMut(&str) -> Option<Value>) -> Value {
     let mut pins: Vec<Value> = get(saved, "pins")
         .and_then(Value::as_object)
@@ -251,7 +252,18 @@ pub fn identity_detection(enabled: bool, at: Option<&Value>, identities: Option<
             (app.clone(), Value::Array(list[list.len().saturating_sub(8)..].to_vec()))
         })
         .collect();
-    json!({ "enabled": enabled, "at": at.cloned().unwrap_or(Value::Null), "identities": identities.cloned().unwrap_or(json!([])), "pins": pins, "signins": signins })
+    let mut out = json!({ "enabled": enabled, "at": at.cloned().unwrap_or(Value::Null), "identities": identities.cloned().unwrap_or(json!([])), "pins": pins, "signins": signins });
+    // The rules for projects, once there are any.
+    if let Some(rules) = get(saved, "rules").filter(|r| r.as_object().is_some_and(|o| !o.is_empty())) {
+        out["rules"] = rules.clone();
+    }
+    out
+}
+
+/// A rule for a project as it's kept (`{ git, push: { login, host } }`),
+/// None for one that names neither, or why it can't be one.
+pub fn clean_rule(rule: &Value) -> Result<Option<Value>, &'static str> {
+    crate::identities::clean_rule(rule)
 }
 
 /// The kind of node an identity can be pinned to, or the error.

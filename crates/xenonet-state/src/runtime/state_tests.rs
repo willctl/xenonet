@@ -257,6 +257,35 @@ async fn identities_named_hidden_pinned_and_found_again() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_projects_rule_is_checked_on_the_map() {
+    let w = world();
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    s.refresh_repos().await;
+    s.refresh_map().await.expect("a map with the repos read");
+    let graph = s.graph().expect("graph").expect("a map");
+    let reads = |n: &Value, role: &str| items(n.get("identities")).iter().any(|l| l["role"] == role);
+    let project = items(graph.get("nodes")).iter().find(|n| n["kind"] == "project" && reads(n, "commits-as")).expect("a project that commits as someone").clone();
+    let id = project["id"].as_str().unwrap().to_string();
+    assert!(project.get("identityRule").is_none(), "no rule, no check");
+    // A rule for an email nobody here commits with.
+    let d = s.set_identity_rule(json!(id), json!({ "nodeId": id, "git": "ada@acme.example" })).await.expect("a rule");
+    assert_eq!(d["rules"][&id]["git"], "ada@acme.example");
+    let n = s.node_of(&id).expect("the project");
+    assert_eq!((n["identityRule"]["git"]["state"].as_str(), n["identityRule"]["mismatch"].as_bool()), (Some("differs"), Some(true)), "{}", n["identityRule"]);
+    // A rule for the one it does commit with matches.
+    let uses = n["identityRule"]["git"]["uses"].as_str().expect("the email it commits with").to_string();
+    s.set_identity_rule(json!(id), json!({ "git": uses })).await.expect("another rule");
+    assert_eq!(s.node_of(&id).unwrap()["identityRule"]["mismatch"], false);
+    assert!(s.set_identity_rule(json!(SESSION1), json!({ "git": "ada@acme.example" })).await.is_err(), "only a project has a rule");
+    assert!(s.set_identity_rule(json!(id), json!({ "git": "not an email" })).await.is_err());
+    // Naming neither takes the rule out.
+    let gone = s.set_identity_rule(json!(id), json!({})).await.expect("no rule");
+    assert!(gone.get("rules").is_none());
+    assert!(s.node_of(&id).unwrap().get("identityRule").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_consoles_simulations_and_clear() {
     let w = world();
     let s = &w.state;

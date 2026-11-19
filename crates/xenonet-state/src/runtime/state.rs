@@ -1593,6 +1593,17 @@ impl State for MapState {
         self.after_change().await?;
         self.identity_detection()
     }
+    async fn set_identity_rule(&self, project: Value, rule: Value) -> R<Value> {
+        let id = project.as_str().unwrap_or_default().to_string();
+        match self.node_of(&id) {
+            Some(n) if n.get("kind").and_then(Value::as_str) == Some("project") => {}
+            _ => return Err(err("Only a project has a rule")),
+        }
+        let rule = decide::clean_rule(&rule).map_err(err)?;
+        self.store.set_identity_rule(&id, rule.as_ref());
+        self.after_change().await?;
+        self.identity_detection()
+    }
     async fn rescan_identities(&self) -> R<Value> {
         if let Some(w) = &self.identities {
             w.forget();

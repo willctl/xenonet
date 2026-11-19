@@ -70,6 +70,18 @@ fn documents(c: &Connection, sql: &str) -> R<Value> {
     Ok(Value::Object(out))
 }
 
+// The identity rules live in one setting, so the schema (and with it every
+// store already on disk) stays as it is.
+const IDENTITY_RULES: &str = "identity-rules";
+
+fn identity_rules(c: &Connection) -> R<Value> {
+    let t: Option<String> = c.query_row("SELECT v FROM settings WHERE k = ?1", params![IDENTITY_RULES], |r| r.get(0)).optional()?;
+    Ok(match t.map(|t| value_of(&t)).transpose()? {
+        Some(v @ Value::Object(_)) => v,
+        _ => json!({}),
+    })
+}
+
 impl Db {
     /// One of your settings, or null when it was never saved.
     pub fn setting(&self, k: &str) -> R<Value> {
@@ -180,7 +192,9 @@ impl Db {
     }
 
     /// What you said of identities and what XenoNet has seen of them:
-    /// `{ names, hidden, pins, known, signins }`.
+    /// `{ names, hidden, pins, known, signins }`, and `rules` (`{ project:
+    /// rule }`) once there is one. They are a setting, so the schema, and
+    /// every store already on disk, stays as it is.
     pub fn identities(&self) -> R<Value> {
         self.read(|c| {
             let names = object(c, "SELECT id, name FROM identity_names ORDER BY rowid", |r| Ok((r.get(0)?, Value::String(r.get(1)?))))?;
@@ -190,7 +204,32 @@ impl Db {
             })?;
             let known = documents(c, "SELECT id, v FROM identity_known ORDER BY rowid")?;
             let signins = documents(c, "SELECT app, spans FROM signins ORDER BY rowid")?;
-            Ok(json!({ "names": names, "hidden": hidden, "pins": pins, "known": known, "signins": signins }))
+            let mut saved = json!({ "names": names, "hidden": hidden, "pins": pins, "known": known, "signins": signins });
+            // Only once there is one, so what was saved before reads as it did.
+            let rules = identity_rules(c)?;
+            if rules.as_object().is_some_and(|r| !r.is_empty()) {
+                saved["rules"] = rules;
+            }
+            Ok(saved)
+        })
+    }
+
+    /// The rule for a project (which git identity and push account it
+    /// uses), or (None) none.
+    pub fn set_identity_rule(&self, project: &str, rule: Option<&Value>) -> R<()> {
+        self.write(|c| {
+            let mut rules = identity_rules(c)?;
+            let map = rules.as_object_mut().expect("identity_rules answers an object");
+            match rule {
+                Some(r) => map.insert(project.to_string(), r.clone()),
+                None => map.remove(project),
+            };
+            if map.is_empty() {
+                c.execute("DELETE FROM settings WHERE k = ?1", params![IDENTITY_RULES])?;
+            } else {
+                c.execute("INSERT INTO settings (k, v) VALUES (?1, ?2) ON CONFLICT (k) DO UPDATE SET v = excluded.v", params![IDENTITY_RULES, text_of(&rules)])?;
+            }
+            Ok(())
         })
     }
 

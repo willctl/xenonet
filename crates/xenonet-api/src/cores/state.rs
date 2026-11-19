@@ -113,6 +113,11 @@ pub trait State: Send + Sync {
     async fn pin_identity(&self, _node: Value, _identity: Value) -> R<Value> {
         pending(M)
     }
+    /// The rule for a project: which git email and GitHub push account it
+    /// uses (`{ git, push: { login, host } }`); with neither, no rule.
+    async fn set_identity_rule(&self, _project: Value, _rule: Value) -> R<Value> {
+        pending(M)
+    }
     async fn rescan_identities(&self) -> R<Value> {
         pending(M)
     }

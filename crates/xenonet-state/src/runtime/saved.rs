@@ -156,7 +156,7 @@ impl Saved {
         read("a space's marker", self.store.space_tie(marker), json!({ "tie": "name" }))
     }
 
-    /// `{ names, hidden, pins, known, signins }`.
+    /// `{ names, hidden, pins, rules, known, signins }`.
     pub fn identities(&self) -> Value {
         read("the identities", self.store.identities(), json!({ "names": {}, "hidden": {}, "pins": {}, "known": {}, "signins": {} }))
     }
@@ -171,6 +171,10 @@ impl Saved {
 
     pub fn set_identity_pin(&self, node: &str, identity: Option<String>) {
         wrote("a pin", self.store.set_identity_pin(node, identity.as_deref()));
+    }
+
+    pub fn set_identity_rule(&self, project: &str, rule: Option<&Value>) {
+        wrote("a rule", self.store.set_identity_rule(project, rule));
     }
 
     pub fn set_identity_known(&self, id: &str, value: &Value) {

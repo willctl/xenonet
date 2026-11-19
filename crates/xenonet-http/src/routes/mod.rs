@@ -1046,6 +1046,10 @@ async fn identities(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError
             let b = req.json_body().await?;
             Ok(Some(Reply::json(200, state.pin_identity(get(&b, "nodeId"), get(&b, "identity")).await?)))
         }
+        ("POST", "/api/identities/rule") => {
+            let b = req.json_body().await?;
+            Ok(Some(Reply::json(200, state.set_identity_rule(get(&b, "nodeId"), b.clone()).await?)))
+        }
         ("POST", "/api/identities/rescan") => Ok(Some(Reply::json(200, state.rescan_identities().await?))),
         _ => Ok(None),
     }
