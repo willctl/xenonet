@@ -24,9 +24,11 @@ tokio.workspace = true
 [dev-dependencies]
 adytum-exec.workspace = true
 adytum-lima.workspace = true
+eidolon-mcp.workspace = true
 eidolon-pack.workspace = true
 eidolon-testkit.workspace = true
 eidolon-vault.workspace = true
+sha2.workspace = true
 xenonet-id.workspace = true
 
 [lints]

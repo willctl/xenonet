@@ -1286,6 +1286,7 @@ dependencies = [
  "adytum-lima",
  "adytum-model",
  "async-trait",
+ "eidolon-bidi",
  "eidolon-browser",
  "eidolon-facet",
  "eidolon-mcp",
