@@ -16,6 +16,17 @@ repository = "https://github.com/willctl/xenonet"
 publish = false
 
 [workspace.dependencies]
+# Adytum, the cells XenoNet confines work in (github.com/willctl/adytum).
+# A path beside this checkout until that repository is published.
+adytum-model = { path = "../adytum/crates/adytum-model" }
+adytum-policy = { path = "../adytum/crates/adytum-policy" }
+adytum-exec = { path = "../adytum/crates/adytum-exec" }
+adytum-driver = { path = "../adytum/crates/adytum-driver" }
+adytum-lima = { path = "../adytum/crates/adytum-lima" }
+adytum-oci = { path = "../adytum/crates/adytum-oci" }
+adytum-ledger = { path = "../adytum/crates/adytum-ledger" }
+adytum-doctor = { path = "../adytum/crates/adytum-doctor" }
+adytum-testkit = { path = "../adytum/crates/adytum-testkit" }
 xenonet-actors = { path = "crates/xenonet-actors" }
 # The formats XenoNet writes: JSON, text, times, units, orderings.
 xenonet-text = { path = "crates/xenonet-text" }

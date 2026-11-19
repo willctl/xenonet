@@ -226,6 +226,26 @@ for (const c of crates("adapters")) {
   }
 }
 
+// Adytum (github.com/willctl/adytum) makes the cells XenoNet confines work
+// in. Its types, wall rules and process runner are a library any crate may
+// use; the drivers that make VMs and containers, the ledger and the doctor
+// run only in the composition root and the doctor, so the engine reaches a
+// cell through a trait. Eidolon only in the root. Adytum takes nothing of
+// XenoNet's, which its own repository checks.
+{
+  const LIB = new Set(["adytum-model", "adytum-policy", "adytum-exec"]);
+  const RUNTIME_USERS = new Set([...ROOT, "xenonet-doctor"]);
+  for (const c of [...crates("crates"), ...crates("adapters")]) {
+    const name = packageName(c.dir);
+    for (const d of deps(path.join(c.dir, "Cargo.toml"), { prefix: "adytum" })) {
+      if (!LIB.has(d) && !RUNTIME_USERS.has(name)) breaches.push(`${name} depends on ${d}: of Adytum, only ${[...LIB].join(", ")} are a library; the rest is for ${[...RUNTIME_USERS].join(", ")}`);
+    }
+    for (const d of deps(path.join(c.dir, "Cargo.toml"), { prefix: "eidolon" })) {
+      if (!ROOT.has(name)) breaches.push(`${name} depends on Eidolon's ${d}, which only ${[...ROOT].join(", ")} may use`);
+    }
+  }
+}
+
 // A crate's registry id literals outside its tests, as breaches.
 function literalBreaches(dir) {
   const src = path.join(dir, "src");
