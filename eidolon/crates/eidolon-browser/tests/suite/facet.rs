@@ -184,7 +184,72 @@ async fn a_profile_is_sealed_without_its_caches_and_opened_with_its_cookies() {
     }
     // The copy arrived owned by the cell's user, so the facet hands it over.
     let placed = b.commands();
-    assert_eq!(placed, ["sudo chown -R eidolon:eidolon /home/eidolon/profile", "sudo chmod -R u+rwX,go-rwx /home/eidolon/profile"]);
+    assert_eq!(placed, PLACE_ARGV);
+}
+
+/// What placing a non-empty profile runs in the cell, in order.
+const PLACE_ARGV: [&str; 7] = [
+    "sudo rm -rf -- /home/eidolon/profile.incoming",
+    "id -un",
+    "sudo install -d -o builder -m 0700 /home/eidolon/profile.incoming",
+    "sudo rm -rf -- /home/eidolon/profile",
+    "sudo mv -- /home/eidolon/profile.incoming /home/eidolon/profile",
+    "sudo chown -R eidolon:eidolon /home/eidolon/profile",
+    "sudo chmod -R u+rwX,go-rwx /home/eidolon/profile",
+];
+
+#[tokio::test]
+async fn placing_a_profile_replaces_the_one_in_the_cell_whole() {
+    let s = Scratch::new();
+    let cell = RecordingCell::new(s.path("cell"), &[]);
+    let staged = s.path("staged");
+    fill_profile(&staged);
+    // The cell already has a profile with a browser's journal files in it.
+    let old = s.path("cell/home/eidolon/profile");
+    fs::create_dir_all(&old).unwrap();
+    fs::write(old.join("cookies.sqlite-wal"), b"journal").unwrap();
+    facet(&[]).place(&cell, &staged).await.unwrap();
+    let mut expected = PLACE_ARGV.to_vec();
+    expected.pop();
+    assert_eq!(cell.commands(), PLACE_ARGV);
+    assert!(!old.join("cookies.sqlite-wal").exists(), "the browser's journal is gone");
+    assert_eq!(fs::read(old.join("cookies.sqlite")).unwrap(), b"cookie jar");
+    assert!(!s.path("cell/home/eidolon/profile.incoming").exists());
+}
+
+#[tokio::test]
+async fn an_empty_staged_profile_places_nothing() {
+    let s = Scratch::new();
+    let cell = RecordingCell::new(s.path("cell"), &[]);
+    fs::create_dir_all(s.path("staged")).unwrap();
+    facet(&[]).place(&cell, &s.path("staged")).await.unwrap();
+    assert!(cell.commands().is_empty(), "{:?}", cell.commands());
+    assert!(!s.path("cell/home/eidolon").exists());
+}
+
+#[tokio::test]
+async fn a_leftover_incoming_folder_is_removed_before_anything_is_made() {
+    let s = Scratch::new();
+    let cell = RecordingCell::new(s.path("cell"), &[]);
+    fill_profile(&s.path("staged"));
+    let stale = s.path("cell/home/eidolon/profile.incoming");
+    fs::create_dir_all(&stale).unwrap();
+    fs::write(stale.join("half-copied"), b"x").unwrap();
+    facet(&[]).place(&cell, &s.path("staged")).await.unwrap();
+    assert!(!s.path("cell/home/eidolon/profile/half-copied").exists());
+    let commands = cell.commands();
+    assert_eq!(commands[0], "sudo rm -rf -- /home/eidolon/profile.incoming");
+    assert!(commands[2].starts_with("sudo install -d"));
+}
+
+#[tokio::test]
+async fn a_failed_swap_stops_before_the_old_profile_is_touched() {
+    let s = Scratch::new();
+    // Making the incoming folder fails: the old profile must not be removed.
+    let cell = RecordingCell::new(s.path("cell"), &[]).failing("install");
+    fill_profile(&s.path("staged"));
+    assert!(facet(&[]).place(&cell, &s.path("staged")).await.is_err());
+    assert!(!cell.commands().iter().any(|c| c == "sudo rm -rf -- /home/eidolon/profile"));
 }
 
 #[tokio::test]

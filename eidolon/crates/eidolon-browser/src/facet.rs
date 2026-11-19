@@ -118,11 +118,36 @@ impl Facet for BrowserFacet {
         copied.and(closed)
     }
 
-    /// Copies the profile in and gives it to `eidolon`: the copy arrives
-    /// owned by the cell's own user.
+    /// Replaces the cell's profile whole with the staged one. A browser that
+    /// ran in the cell leaves files of its own (a database's journal beside
+    /// the wrong database would corrupt it), and the profile folder is
+    /// private to `eidolon`, so the cell's login user could neither write
+    /// into it nor set its times. So the files are copied into a fresh
+    /// sibling folder owned by the login user, and only then swapped in:
+    /// a kill midway leaves the old profile or the new one, plus a stale
+    /// `.incoming` folder that the next place removes first. A staged
+    /// profile with nothing in it (never sealed) places nothing, which
+    /// keeps the preferences file provisioning wrote.
     async fn place(&self, cell: &dyn CellAccess, staging: &Path) -> Result<()> {
-        let path = self.spec.path.as_str();
-        cell.copy_in(staging, path).await?;
+        let has_files = std::fs::read_dir(staging).map_err(|e| FacetError::Cell(format!("Could not read the staged profile: {e}.")))?.next().is_some();
+        if !has_files {
+            return Ok(());
+        }
+        let path = self.spec.path.as_str().trim_end_matches('/');
+        // Two folders deep at least: never a top-level folder of the cell.
+        if path.split('/').filter(|p| !p.is_empty()).count() < 2 {
+            return Err(FacetError::Cell(format!("The profile folder {path:?} is too close to the cell's root to be replaced.")));
+        }
+        let incoming = format!("{path}.incoming");
+        run_ok(cell, "Removing a profile left half placed", &["sudo", "rm", "-rf", "--", &incoming]).await?;
+        let user = cell.run(&["id", "-un"]).await?;
+        if user.status != 0 {
+            return Err(run_failed("Asking who the cell's login user is", &user));
+        }
+        run_ok(cell, "Making the folder for the incoming profile", &["sudo", "install", "-d", "-o", user.stdout.trim(), "-m", "0700", &incoming]).await?;
+        cell.copy_in(staging, &incoming).await?;
+        run_ok(cell, "Removing the old profile", &["sudo", "rm", "-rf", "--", path]).await?;
+        run_ok(cell, "Moving the new profile into place", &["sudo", "mv", "--", &incoming, path]).await?;
         run_ok(cell, "Giving the profile to its user", &["sudo", "chown", "-R", "eidolon:eidolon", path]).await?;
         run_ok(cell, "Closing the profile", &["sudo", "chmod", "-R", "u+rwX,go-rwx", path]).await
     }

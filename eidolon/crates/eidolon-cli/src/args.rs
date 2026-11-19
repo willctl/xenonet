@@ -18,6 +18,8 @@ pub const USAGE: &str = "usage: eidolon [--json] <command>\n\
   move-settle <eid> --abandon | --confirm <seat.json|->\n\
   verify <eid>\n\
   facets <eid>\n\
+  view <eid>   (opens the sign-in window; automation is off while it is open)\n\
+  mcp <eid> [--http 127.0.0.1:<port>]   (serves the browser tools)\n\
   ls";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -307,6 +309,13 @@ mod tests {
         assert_eq!(facets[1].leave_out, ["extra/**", "*.old"]);
         assert_eq!(facets[0].leave_out.len(), 0);
         assert_eq!(p("new --wall wall_x --holder - --browser").unwrap_err().exit, 2);
+    }
+
+    #[test]
+    fn the_usage_lists_every_command() {
+        for word in ["machine init", "new --wall", "seal", "open", "move", "receive", "move-settle", "verify", "facets", "view <eid>", "mcp <eid>", "ls"] {
+            assert!(USAGE.contains(word), "{word} is missing from the usage");
+        }
     }
 
     #[test]

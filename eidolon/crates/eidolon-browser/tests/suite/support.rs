@@ -157,6 +157,29 @@ impl RecordingCell {
     }
 }
 
+impl RecordingCell {
+    /// Does what the two commands that rearrange the profile do, on the
+    /// host folder, so a test can look at the result.
+    fn act(&self, argv: &[&str]) {
+        if self.fail_on.is_some_and(|p| argv.contains(&p)) {
+            return;
+        }
+        match argv {
+            ["sudo", "rm", "-rf", "--", path] => {
+                if let Ok(host) = self.inner.host_path(path) {
+                    let _ = std::fs::remove_dir_all(host);
+                }
+            }
+            ["sudo", "mv", "--", from, to] => {
+                if let (Ok(from), Ok(to)) = (self.inner.host_path(from), self.inner.host_path(to)) {
+                    let _ = std::fs::rename(from, to);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 #[async_trait]
 impl CellAccess for RecordingCell {
     async fn copy_out(&self, guest_path: &str, host_dir: &Path) -> eidolon_facet::Result<()> {
@@ -166,6 +189,7 @@ impl CellAccess for RecordingCell {
         self.inner.copy_in(host_dir, guest_path).await
     }
     async fn run(&self, argv: &[&str]) -> eidolon_facet::Result<RunOutput> {
+        self.act(argv);
         self.runs.lock().unwrap().push(argv.iter().map(|a| (*a).to_owned()).collect());
         let status = if argv.first() == Some(&"pgrep") {
             // An empty script means nothing is left running.
@@ -173,6 +197,8 @@ impl CellAccess for RecordingCell {
         } else {
             i32::from(self.fail_on.is_some_and(|p| argv.contains(&p)))
         };
-        Ok(RunOutput { status, stdout: String::new(), stderr: if status == 0 { String::new() } else { "no".into() } })
+        // The cell's login user, for `id -un`.
+        let stdout = if argv == ["id", "-un"] { "builder\n".to_owned() } else { String::new() };
+        Ok(RunOutput { status, stdout, stderr: if status == 0 { String::new() } else { "no".into() } })
     }
 }
