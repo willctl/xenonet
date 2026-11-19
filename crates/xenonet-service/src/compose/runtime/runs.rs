@@ -115,7 +115,8 @@ fn drain(mut from: impl Read + Send + 'static, log: Option<Arc<Mutex<Log>>>) {
 }
 
 /// The command for `how`: its arguments as given, or on Windows (where a
-/// command line is one string) as written.
+/// command line is one string) as written. adytum-exec's `Spawned` starts
+/// every program with no window on Windows (`CREATE_NO_WINDOW`, 0x0800_0000).
 #[cfg(windows)]
 fn command(how: &runs::Launch) -> Command {
     let cmd = Command::new(&how.program);
