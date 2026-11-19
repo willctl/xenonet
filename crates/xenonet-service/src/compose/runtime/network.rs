@@ -1574,6 +1574,26 @@ fn offered_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
     out
 }
 
+/// What an accept of a handoff made here reaches: the handoff's own
+/// project and session, as its row keeps them, never what the accepting
+/// machine says it is. A handoff made here that names no project is
+/// placed nowhere.
+fn accepted_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
+    let Some(row) = s(b, "id").and_then(|id| store(w, |st| st.handoff(&id)).ok().flatten()).filter(|r| r.text("host").is_none()) else { return Vec::new() };
+    let mut out = Vec::new();
+    if let Some(local) = row.text("to_agent").map(|a| here_id(w, a)) {
+        // A session of another machine is no reach of this one's.
+        out.extend(xenonet_authz::SessionId::new(&local).ok().filter(|_| is_agent_id(&local)).map(Reaching::Session));
+    }
+    if let Some(p) = row.text("to_repo").and_then(|k| xenonet_authz::ProjectId::new(k).ok()) {
+        out.push(Reaching::Project(p));
+    }
+    if out.is_empty() {
+        out.push(Reaching::Unplaced);
+    }
+    out
+}
+
 /// A claim entry of `from`'s feed (its author's key id `author`): decided
 /// as that member's claim in its project, of one of its own agents, and
 /// kept as its; or a release of what it kept.
@@ -2046,7 +2066,11 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
 
 fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
     let meant_here = s(b, "for").is_none_or(|h| net(w).me().is_some_and(|me| me.host == h));
-    let reaching = if s(b, "op").as_deref() == Some("offer") && meant_here { offered_reach(w, b) } else { Vec::new() };
+    let reaching = match s(b, "op").as_deref() {
+        Some("offer") if meant_here => offered_reach(w, b),
+        Some("accept") if meant_here => accepted_reach(w, b),
+        _ => Vec::new(),
+    };
     member_act(w, from, xenonet_authz::Act::Handoff, &reaching)?;
     let (Some(id), Some(op)) = (s(b, "id"), s(b, "op")) else { return Err(fail("a handoff without its id or op")) };
     if !id.starts_with("hof_") {

@@ -626,6 +626,21 @@ async fn supervise(nodes: Weak<Nodes>) {
     }
 }
 
+/// Whether a network shown `sharing` is shown what `out` is about: a
+/// claim's project, a handoff's project (a handoff that names none is for
+/// whatever takes it, shown only where everything is). What is about no
+/// project is nobody's to hold back.
+fn shown_in(out: &Outgoing, sharing: &crate::share::Sharing) -> bool {
+    match out.kind {
+        Kind::Claims => sharing.shows_project(out.body.get("project").and_then(Value::as_str).unwrap_or("")),
+        Kind::Handoff => match out.body.pointer("/to/projectKey").and_then(Value::as_str) {
+            Some(p) => sharing.shows_project(p),
+            None => *sharing == crate::share::Sharing::All,
+        },
+        _ => true,
+    }
+}
+
 impl Net for Nodes {
     fn networks(&self) -> Vec<Me> {
         self.common.shareds().iter().filter_map(|s| s.network()).map(|n| Me { network: n.id, name: n.name, host: n.host }).collect()
@@ -667,6 +682,11 @@ impl Net for Nodes {
         // A network named, or the one the body in hand came in: there alone.
         if let Some(id) = out.network.clone().or_else(ground::current) {
             let s = self.common.shared_of(&id).ok_or_else(|| format!("this machine isn't in {id}"))?;
+            // What is about a project goes only into a network shown it,
+            // in a frame's network too.
+            if !shown_in(&out, &s.sharing(&id)) {
+                return Ok(());
+            }
             let presence = (out.kind == Kind::Presence).then(|| out.body.clone());
             s.send(out.within(id))?;
             if let Some(body) = presence {
@@ -694,12 +714,12 @@ impl Net for Nodes {
                 }
                 Ok(())
             }
-            // Into each network its project is shared into.
-            Kind::Claims => {
-                let project = out.body.get("project").and_then(Value::as_str).unwrap_or("");
+            // Into each network its project is shared into; a handoff
+            // that names no project only into a network shown everything.
+            Kind::Claims | Kind::Handoff => {
                 for s in &nets {
                     let Some(id) = s.network().map(|n| n.id) else { continue };
-                    if !s.is_removed() && s.sharing(&id).shows_project(project) {
+                    if !s.is_removed() && shown_in(&out, &s.sharing(&id)) {
                         s.send(Outgoing { network: Some(id), ..out.clone() })?;
                     }
                 }

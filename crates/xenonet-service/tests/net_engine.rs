@@ -362,6 +362,67 @@ async fn a_start_reaches_a_folder_only_in_a_project_the_network_is_shown() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The state of the handoff `id` on `h`, when it has it.
+fn handoff_by(h: &Host, id: &str) -> Option<String> {
+    h.world.store.with(|s| s.handoff(id).unwrap().map(|r| r.text("state").unwrap_or("").to_string()))
+}
+
+/// What a handoff or a claim of desk's does when it leaves, with two
+/// networks: it goes only into the networks its project is shown in, in a
+/// frame's network too, and one that names no project only into a network
+/// shown everything. A guest in N2 can't take a handoff of a project N2
+/// isn't shown by naming its id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn what_desk_hands_off_or_claims_leaves_only_into_networks_that_see_its_project() {
+    use xenonet_model::ops::{Kind, Outgoing, To};
+    let root = std::env::temp_dir().join(format!("xenonet-leave-shown-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    // A session of desk's in ledger and one in atlas each hand work to the repo.
+    let in_ledger = t.desk.agent(DESK_LEDGER, "handoff", json!({ "goal": "Reconcile April", "done": "March", "next": "April" })).await["id"].as_str().unwrap().to_string();
+    let in_atlas = t.desk.agent(DESK_ATLAS, "handoff", json!({ "goal": "Finish refunds", "done": "The form", "next": "The rest" })).await["id"].as_str().unwrap().to_string();
+    let has = |h: &Host, id: &str| handoff_by(h, id).is_some();
+    // tower, in N1, is shown everything; contractor-vm, in N2, atlas only.
+    until("tower has both offers and contractor-vm atlas's", 20, || async { has(&t.tower, &in_ledger) && has(&t.tower, &in_atlas) && has(&t.contractor, &in_atlas) }).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!has(&t.contractor, &in_ledger), "ledger's offer didn't leave into N2");
+
+    // A claim made while a frame of N2 is in hand is still only for what N2 is shown.
+    let net = t.desk.svc.net();
+    let claim = |project: &str, agent: &str| Outgoing {
+        network: None,
+        authority: None,
+        to: To::All,
+        kind: Kind::Claims,
+        body: json!({ "schema": "network/claim/v1", "op": "claim", "project": project, "path": "src/", "agent": agent }),
+    };
+    xenonet_net::ground::within(&t.n2, || net.send(claim(&t.ledger, &t.desk.agt(DESK_LEDGER)))).unwrap();
+    xenonet_net::ground::within(&t.n2, || net.send(claim(&t.atlas, &t.desk.agt(DESK_ATLAS)))).unwrap();
+    let kept = |h: &Host, project: &str| h.world.store.with(|s| s.claims_in(project, now_ms()).unwrap().len());
+    until("contractor-vm has desk's atlas claim", 20, || async { kept(&t.contractor, &t.atlas) == 1 }).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(kept(&t.contractor, &t.ledger), 0, "a claim in ledger, sent in N2's frame, was left out of N2");
+
+    // A guest takes what N2 is shown, and not what it isn't by naming it.
+    let accept = |id: &str| {
+        let mut b = guest_handoff(&t, 0, None, &t.atlas);
+        b["id"] = json!(id);
+        b["op"] = json!("accept");
+        b["by"] = json!(t.contractor.agt(VM_ATLAS));
+        b
+    };
+    guest_sends(&t, Kind::Handoff, accept(&in_ledger));
+    guest_sends(&t, Kind::Handoff, accept(&in_atlas));
+    until("atlas's handoff is taken by contractor-vm's session", 20, || async { handoff_by(&t.desk, &in_atlas).as_deref() == Some("taken") }).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(handoff_by(&t.desk, &in_ledger).as_deref(), Some("open"), "ledger's handoff wasn't taken from N2");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A frame `contractor-vm` sends desk over N2 as a run's permission prompt,
 /// naming `session` as the run that asks.
 fn guest_ask(t: &TwoNetworks, n: u32, id: &str, sender: &str, session: &str) -> Value {
@@ -434,11 +495,12 @@ async fn an_ask_from_another_machine_is_taken_only_for_a_run_it_was_asked_to_sta
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// What desk sends to everyone, with two networks: a body that names no
-/// network and arrives from none goes nowhere (it is refused, in words),
-/// one that names a network reaches that network's machines and no other's,
-/// and one made while handling a frame goes back into the network of the
-/// frame.
+/// What desk sends to everyone, with two networks: a body about no project
+/// that names no network and arrives from none goes nowhere (it is refused,
+/// in words); one about a project goes into every network that is shown the
+/// project; one that names a network reaches that network's machines and
+/// no other's, and one made while handling a frame goes back into the
+/// network of the frame.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn a_body_for_everyone_goes_in_one_named_network_and_never_the_first() {
     use xenonet_model::ops::{Kind, Outgoing, To};
@@ -454,10 +516,13 @@ async fn a_body_for_everyone_goes_in_one_named_network_and_never_the_first() {
         h["to"] = json!({ "agent": null, "projectKey": t.atlas, "host": null });
         Outgoing { network: None, authority: None, to: To::All, kind: Kind::Handoff, body: h }
     };
-    // Nothing names a network: refused, saying so, and nothing goes to
-    // N1's tower or N2's contractor-vm.
-    let refused = net.send(offer_for_all(1)).unwrap_err();
+    // About no project and naming no network: refused, saying so.
+    let about_nothing = Outgoing { kind: Kind::Intent, body: json!({}), ..offer_for_all(0) };
+    let refused = net.send(about_nothing).unwrap_err();
     assert!(refused.contains("several networks"), "{refused}");
+    // About atlas, which both networks are shown: into both.
+    net.send(offer_for_all(1)).unwrap();
+    until("both networks have the offer about atlas", 20, || async { has_handoff(&t.contractor, 1) && has_handoff(&t.tower, 1) }).await;
     // Named, N2: contractor-vm hears it, tower does not.
     net.send(Outgoing { network: Some(t.n2.clone()), ..offer_for_all(2) }).unwrap();
     until("contractor-vm has the offer sent into N2", 20, || async { has_handoff(&t.contractor, 2) }).await;
@@ -465,7 +530,6 @@ async fn a_body_for_everyone_goes_in_one_named_network_and_never_the_first() {
     xenonet_net::ground::within(&t.n1, || net.send(offer_for_all(3))).unwrap();
     until("tower has the offer sent in N1", 20, || async { has_handoff(&t.tower, 3) }).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(!has_handoff(&t.contractor, 1) && !has_handoff(&t.tower, 1), "the body that named no network went nowhere");
     assert!(!has_handoff(&t.tower, 2), "N1's tower isn't in N2");
     assert!(!has_handoff(&t.contractor, 3), "N2's contractor-vm isn't in N1");
     drop(t);
