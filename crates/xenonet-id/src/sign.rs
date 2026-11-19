@@ -65,6 +65,9 @@ impl Purpose {
     pub const EIDOLON_SEAT: Purpose = Purpose("eidolon-seat/1");
     /// An Eidolon's signed manifest, written by the seat's machine.
     pub const EIDOLON_MANIFEST: Purpose = Purpose("eidolon-manifest/1");
+    /// A machine proving it holds a key to an Eidolon move, and its
+    /// acknowledgement or refusal of one.
+    pub const EIDOLON_MOVE: Purpose = Purpose("eidolon-move/1");
     /// A signature nothing verifies, which the doctor times a key with:
     /// its own tag, so it can't be taken for any other.
     pub const PROBE: Purpose = Purpose("xenonet-probe/1");
