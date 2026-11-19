@@ -2987,3 +2987,35 @@ async fn a_claim_stored_before_its_project_was_unshared_warns_no_one() {
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A start leaves only into a network that is shown the project of the
+/// session that asks for it, as a message does: desk's ledger session can't
+/// start a run on contractor-vm (N2 isn't shown ledger, and the prompt and
+/// the session's title would land in N2), its atlas session can, and the
+/// person can from anywhere.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_start_leaves_only_into_a_network_shown_the_project_of_the_session_that_asks() {
+    let root = std::env::temp_dir().join(format!("xenonet-start-leaves-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "work", "host": "contractor-vm", "start": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("desk knows contractor-vm takes starts from the network", 20, || async {
+        let st = t.desk.state().await;
+        let row = row_of(&json!({ "hosts": st["networks"][1]["hosts"] }), "contractor-vm");
+        row["can"].as_array().is_some_and(|c| c.contains(&json!("start")))
+    })
+    .await;
+    let go = |prompt: &'static str| json!({ "machine": "contractor-vm", "network": "work", "prompt": prompt });
+    let (s, v) = as_agent(&t.desk, DESK_LEDGER, "POST", "/api/start", go("hold-on: tidy ledger")).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("is shown the project")), "{v}");
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", go("hold-on: tidy atlas")).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let (s, v) = t.desk.window("POST", "/api/start", go("hold-on: tidy anything")).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

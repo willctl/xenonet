@@ -1007,7 +1007,15 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     }
     // The network it goes through: the one that has the machine, which
     // the request names when two of this machine's networks do.
-    let network = network_for(w, &host, s(req, "network").as_deref()).map_err(|why| (409, why))?;
+    // The request carries the prompt and the asking session's title, so it
+    // goes only into a network shown the project that session is in; an
+    // actor or a session in no project, only into one shown everything. The
+    // person, signed, may start anywhere.
+    let shown = (kind != Kind::You).then(|| {
+        let project = s(&by, "id").and_then(|id| crate::compose::runtime::network::project_of_session(w, &id));
+        net(w).networks_for(project.as_ref().map(xenonet_authz::ProjectId::as_str))
+    });
+    let network = network_for(w, &host, s(req, "network").as_deref(), shown.as_deref()).map_err(|why| (409, why))?;
     let mid = xenonet_engine::network::new_id("msg").map_err(|t| (500, t.message))?;
     let id = s(&by, "id").unwrap_or_else(|| YOU.into());
     let kind = by.get("kind").and_then(Value::as_str).unwrap_or("session");
@@ -1059,10 +1067,19 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
 
 /// The network a request to `host` goes through: the only one that has it,
 /// else the one `named` says (by id or name). A machine that is in several
-/// of this machine's networks is not guessed at.
-fn network_for(w: &Runtime, host: &str, named: Option<&str>) -> Result<String, String> {
+/// of this machine's networks is not guessed at. Only the networks in
+/// `shown` count, when it is given: those shown what the start is from.
+fn network_for(w: &Runtime, host: &str, named: Option<&str>, shown: Option<&[String]>) -> Result<String, String> {
     let net = net(w);
-    let has = net.networks_with(host);
+    let mut has = net.networks_with(host);
+    if !has.is_empty() && shown.is_some_and(|shown| !has.iter().any(|n| shown.contains(n))) {
+        return Err(format!(
+            "no network this machine shares with {host} is shown the project of the session asking, so nothing was started: share that project into one, or start it from a session in a project one is shown"
+        ));
+    }
+    if let Some(shown) = shown {
+        has.retain(|n| shown.contains(n));
+    }
     let in_names = || net.networks().into_iter().filter(|m| has.contains(&m.network)).map(|m| format!("{} ({})", m.name, m.network)).collect::<Vec<_>>().join(", ");
     match (has.as_slice(), named.map(str::trim).filter(|n| !n.is_empty())) {
         ([], _) => Err(format!("{host} isn't a machine in your network")),
