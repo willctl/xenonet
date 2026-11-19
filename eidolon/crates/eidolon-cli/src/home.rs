@@ -49,6 +49,29 @@ impl Home {
         self.dir.join("tmp")
     }
 
+    /// A private staging folder for one seal or open, under [`Home::work`].
+    /// The name carries the process id so a later command can tell the
+    /// folders of dead processes from live ones; see [`Home::sweep_work`].
+    pub fn run_dir(&self) -> Result<PathBuf> {
+        let tag = xenonet_id::codec::hex(&random::<6>().map_err(|e| CliError::failed("random", e.to_string(), "Try again."))?);
+        let dir = self.work().join(format!("run-{}-{tag}", std::process::id()));
+        make_private_dir(&dir).map_err(|e| CliError::io("make the working folder", &e))?;
+        Ok(dir)
+    }
+
+    /// Removes the staging folders a killed command left behind: they hold
+    /// plain files from the cell. Folders of processes still running stay.
+    pub fn sweep_work(&self) {
+        let Ok(entries) = std::fs::read_dir(self.work()) else { return };
+        for entry in entries.filter_map(std::result::Result::ok) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let pid = name.strip_prefix("run-").and_then(|r| r.split('-').next()).and_then(|p| p.parse::<u32>().ok());
+            if pid.is_some_and(|p| p != std::process::id() && !process_is_running(p)) {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+
     fn machine_file(&self) -> PathBuf {
         self.dir.join("machine.json")
     }
@@ -97,6 +120,29 @@ impl Home {
         let holder = Holder { name: file.name, sign: key, seal: PublicKey::from(&seal_secret).to_bytes() };
         Ok(Machine { signer, key, seal_secret, holder, key_store: file.key_store })
     }
+}
+
+fn make_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        builder.mode(0o700);
+    }
+    builder.create(dir)
+}
+
+/// Whether process `pid` is alive, asked of the system's `kill -0`. When it
+/// cannot be asked, the answer is yes, so nothing live is ever swept.
+fn process_is_running(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_or(true, |s| s.success())
 }
 
 pub struct Machine {

@@ -6,7 +6,7 @@ use crate::cells::Cells;
 use crate::error::{CliError, Result};
 use crate::home::{read_holder, Home};
 use adytum_exec::{Command, Runner, SystemRunner};
-use eidolon_facet::{open_facets, seal_facets, Facet, FolderFacet};
+use eidolon_facet::{abort_at, open_facets, seal_facets, Facet, FolderFacet};
 use eidolon_model::{EidolonId, EidolonSpec, FacetId, FacetKind, FacetSpec, Holder, SignedSeat, State, Wall};
 use eidolon_move::{receive, seat_first, send, Holding};
 use eidolon_pack::{load, seal, FacetManifest, Manifest, Node, SignedHead, FORMAT};
@@ -89,11 +89,13 @@ fn chunks_of(head: &SignedHead, manifest: &Manifest) -> Vec<ChunkName> {
     names.into_iter().collect()
 }
 
-/// Opens every chunk the holding names; a chunk that is missing or does not
-/// match its name is a `changed_chunk`.
-fn check_chunks(holding: &Holding, keys: &Keys, vault: &Vault) -> Result<usize> {
+/// Opens every chunk the head needs (read from the head itself, not from the
+/// holding's list, which a kill between two writes can leave behind); a chunk
+/// that is missing or does not match its name is a `changed_chunk`.
+fn check_chunks(head: &SignedHead, keys: &Keys, vault: &Vault) -> Result<usize> {
+    let names = chunks_of(head, &load(head, keys, vault)?);
     let mut bad = 0;
-    for name in &holding.chunks {
+    for name in &names {
         if vault.get(name).and_then(|sealed| keys.open(name, &sealed)).is_err() {
             bad += 1;
         }
@@ -101,11 +103,11 @@ fn check_chunks(holding: &Holding, keys: &Keys, vault: &Vault) -> Result<usize> 
     if bad > 0 {
         return Err(CliError::failed(
             "changed_chunk",
-            format!("{bad} of {} chunks did not open or did not match their names.", holding.chunks.len()),
+            format!("{bad} of {} chunks did not open or did not match their names.", names.len()),
             "Do not open this copy; move the eidolon again from the machine that sealed it.",
         ));
     }
-    Ok(holding.chunks.len())
+    Ok(names.len())
 }
 
 fn file_count(manifest: &Manifest) -> usize {
@@ -204,13 +206,22 @@ pub async fn seal_cmd(ctx: &Ctx, eid: &EidolonId, cell: Option<&str>) -> Result<
     let keys = keys_for(&KeyRing::new(&store), eid)?;
     let facets = facets_of(&holding.spec)?;
     let access = cells.access(&from).await?;
-    let work = ctx.home.work();
-    std::fs::create_dir_all(&work).map_err(|e| CliError::io("make the working folder", &e))?;
-    let head = seal_facets(&facets, &*access, &keys, &vault, &machine.signer, *eid, holding.seat.record.generation, &work).await?;
+    ctx.home.sweep_work();
+    let work = ctx.home.run_dir()?;
+    let sealed = seal_facets(&facets, &*access, &keys, &vault, &machine.signer, *eid, holding.seat.record.generation, &work).await;
+    let _ = std::fs::remove_dir_all(&work);
+    let head = sealed?;
+    // Order matters: every chunk and the manifest are in the vault before the
+    // holding names the head, and the head is recorded before the state says
+    // sealed. A kill between any two leaves a holding that still opens.
+    abort_at("after_chunks");
     let manifest = load(&head, &keys, &vault)?;
     let chunks = chunks_of(&head, &manifest);
+    abort_at("before_head_recorded");
     holding.record_head(serde_json::to_vec(&head)?, chunks.clone())?;
+    abort_at("after_head_recorded");
     holding.set_state(State::Sealed)?;
+    abort_at("after_state_sealed");
     cells.release(&from, eid)?;
     Ok(json!({ "ok": true, "eidolon": eid, "cell": from, "files": file_count(&manifest), "chunks": chunks.len(), "seconds": secs(started.elapsed()) }))
 }
@@ -227,13 +238,20 @@ pub async fn open_cmd(ctx: &Ctx, eid: &EidolonId, cell: &str) -> Result<Value> {
     let keys = keys_for(&KeyRing::new(&store), eid)?;
     let head = head_of(&holding)?;
     check_head(&holding.spec, &head)?;
-    check_chunks(&holding, &keys, &vault)?;
+    check_chunks(&head, &keys, &vault)?;
     let facets = facets_of(&holding.spec)?;
     let access = cells.access(cell).await?;
-    let work = ctx.home.work();
-    std::fs::create_dir_all(&work).map_err(|e| CliError::io("make the working folder", &e))?;
-    open_facets(&head, &facets, &*access, &keys, &vault, &work).await?;
+    ctx.home.sweep_work();
+    let work = ctx.home.run_dir()?;
+    let placed = open_facets(&head, &facets, &*access, &keys, &vault, &work).await;
+    let _ = std::fs::remove_dir_all(&work);
+    placed?;
+    // The files are in the cell before the state says open, so open is never
+    // recorded without them; a kill in between leaves it sealed, and running
+    // open again places them again.
+    abort_at("before_state_open");
     holding.set_state(State::Open { cell: cell.to_owned() })?;
+    abort_at("after_state_open");
     cells.hold(cell, eid)?;
     Ok(json!({ "ok": true, "eidolon": eid, "cell": cell, "seconds": secs(started.elapsed()) }))
 }
@@ -246,7 +264,7 @@ pub fn verify_cmd(ctx: &Ctx, eid: &EidolonId) -> Result<Value> {
     let head = head_of(&holding)?;
     check_head(&holding.spec, &head)?;
     load(&head, &keys, &vault)?;
-    let chunks = check_chunks(&holding, &keys, &vault)?;
+    let chunks = check_chunks(&head, &keys, &vault)?;
     Ok(json!({ "ok": true, "eidolon": eid, "chunks": chunks }))
 }
 
