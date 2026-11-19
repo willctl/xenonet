@@ -81,9 +81,30 @@ pub struct StartSide {
     /// Copies of sessions XenoNet forked to answer a message, each with the
     /// session it came from: the last 200.
     forks: Mutex<Vec<(String, String)>>,
+    /// The network each run another machine asked for was started through,
+    /// by its session: the only network its prompts are sent into.
+    run_networks: Mutex<HashMap<String, String>>,
 }
 
 impl StartSide {
+    /// Keeps the network the run `session` was started through, when a
+    /// frame asked for it. A run started here for no one has none.
+    pub fn note_network(&self, session: &str, network: Option<String>) {
+        let Some(network) = network else { return };
+        let mut runs = self.run_networks.locked();
+        if runs.len() >= 500 {
+            runs.clear();
+        }
+        runs.insert(session.to_string(), network);
+    }
+
+    /// The network the run `session` (or the session it was forked from) was
+    /// started through; None for a run started here for no one.
+    pub fn network_of(&self, session: &str, parent: Option<&str>) -> Option<String> {
+        let runs = self.run_networks.locked();
+        runs.get(session).or_else(|| parent.and_then(|p| runs.get(p))).cloned()
+    }
+
     /// Whether `host`, in `network`, was asked from here to start a run
     /// that is still open and that its own receipts name by `session` or
     /// by `agent`. Nothing else it says about a run is believed.
@@ -317,6 +338,9 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         }
     };
     w.starts.history.locked().push((now, bucket));
+    if from.is_some() {
+        w.starts.note_network(&key, xenonet_net::ground::current());
+    }
     // The session's agent, from the start: its own id when the app takes
     // the one XenoNet gave it, else a pending row its process takes over
     // once the app names it.
@@ -411,6 +435,9 @@ fn over_acp(
                 if let Err(e) = w.store.0.db().put_delegated(&started.session, &d, xenonet_engine::delivery::runs::KEEP_MS) {
                     w.log("warn", "start.delegated", &format!("{}'s delegation couldn't be kept: {}", started.session, e.message));
                 }
+            }
+            if from.is_some() {
+                w.starts.note_network(&started.session, xenonet_net::ground::current());
             }
             w.log("info", "start", &format!("started {} over ACP in {folder} for {}", started.session, from.unwrap_or("this machine")));
             Some(Ok(json!({ "session": started.session, "pid": started.pid, "folder": folder, "app": r.app })))

@@ -31,7 +31,7 @@
 //! The answer is what Claude Code takes from a permission prompt tool:
 //! `{"behavior":"allow","updatedInput":…}` or `{"behavior":"deny","message":…}`.
 
-use crate::compose::runtime::network::{clip, ms, net, send};
+use crate::compose::runtime::network::{clip, ms, net};
 use crate::compose::runtime::Runtime;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -238,12 +238,21 @@ fn window_hosts(w: &Runtime) -> Vec<String> {
     net(w).hosts().into_iter().filter(|h| h.window).map(|h| h.id).collect()
 }
 
+/// Sends a run's ask, or its end, to the window hosts of the network the
+/// run's start came in, and to no other: a window host of another network
+/// is not shown a run it didn't ask for. A run started here for no one
+/// has no such network, and its ask goes to no other machine.
 fn to_windows(w: &Runtime, me: &str, body: &Value) {
     if net(w).me().is_none() {
         return;
     }
+    let parent = crate::compose::runtime::starts::forks(w).into_iter().find(|(child, _)| child == me).map(|(_, p)| p);
+    let Some(network) = w.starts.network_of(me, parent.as_deref()) else { return };
     let text = body.to_string();
     for host in window_hosts(w) {
+        if !net(w).networks_with(&host).contains(&network) {
+            continue;
+        }
         let Ok(mid) = xenonet_engine::network::new_id("msg") else { continue };
         let frame = json!({
             "schema": "network/send/v1",
@@ -259,7 +268,7 @@ fn to_windows(w: &Runtime, me: &str, body: &Value) {
             "hops": 0,
             "at": ms(now_ms()),
         });
-        send(w, To::Host(host), FrameKind::Message, frame);
+        crate::compose::runtime::network::send_in(w, Some(network.clone()), To::Host(host), FrameKind::Message, frame, None);
     }
 }
 

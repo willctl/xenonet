@@ -1116,7 +1116,7 @@ in several.
   the lazy dial past that isn't built.
 - **The engine in several networks.** Presence is one body for every
   network, carrying the narrowest settings of them (a per-network presence
-  is not built), prompts go to the window hosts of every network, and the
+  is not built), prompts go to the window hosts of the network their run was started through, and the
   engine's views name this machine by the first network, so a peer in two
   networks with this machine shows twice.
 - **Concurrent admin writes** can take the same place in the chain. The

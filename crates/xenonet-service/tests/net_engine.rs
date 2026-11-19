@@ -445,10 +445,10 @@ impl xenonet_model::ops::Net for Recording {
         self.inner.host_can(host, what)
     }
     fn ack(&self, network: &str, host: &str, inc: u64, high: u64) {
-        self.inner.ack(network, host, inc, high)
+        self.inner.ack(network, host, inc, high);
     }
     fn want(&self, network: &str, host: &str, inc: u64, from: u64) {
-        self.inner.want(network, host, inc, from)
+        self.inner.want(network, host, inc, from);
     }
 }
 
@@ -481,7 +481,12 @@ async fn a_runs_prompt_goes_only_to_the_window_hosts_of_the_network_its_start_ca
     let run = starts.next("start", 20, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
     let ctx = t.desk.ctx.clone();
     let asked = tokio::spawn(async move {
-        let req = Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", run.as_str())], Some(&json!({ "tool_name": "Bash", "input": { "command": "npm test" }, "tool_use_id": "toolu_1" }).to_string()));
+        let req = Req::fake(
+            "POST",
+            "/api/runs/permission",
+            &[("x-xenonet-agent", run.as_str())],
+            Some(&json!({ "tool_name": "Bash", "input": { "command": "npm test" }, "tool_use_id": "toolu_1" }).to_string()),
+        );
         api(&ctx, common::local(&ctx, req)).await.unwrap().status
     });
     let to_asks = |recording: &Recording| {
