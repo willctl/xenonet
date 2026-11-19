@@ -126,3 +126,52 @@ fn this_machines_own_door_reaches_what_the_network_isnt_shown() {
     let local = Request::new(own, Resource::Session(session("s-ledger")), Act::Message, Door::Local, NOW, None);
     assert!(decide(None, &local, &w, None).is_allow(), "what is shown to a network limits that network, not this machine");
 }
+
+fn start_from_m2(w: &World, reaching: &[Reaching]) -> Decision {
+    let app = AppId::new("claude").unwrap();
+    let folder = Folder::new("/home/work/ledger").unwrap();
+    let resource = Resource::Run { machine: machine("m1"), app: app.clone(), folder: folder.clone() };
+    from_m2(w, "agent", resource, Act::Start { app, folder, mode: StartMode::Asks }, reaching)
+}
+
+/// What a refused start says: words of its own, which don't claim a
+/// session or an actor is missing and don't say whether the folder exists.
+fn refused_as_unshown_folder(d: &Decision) {
+    let reason = d.reason().expect("refused");
+    assert_eq!((reason.code(), reason.text()), ("shared", NOT_SEEN_FOLDER));
+}
+
+#[test]
+fn a_start_reaches_a_folder_only_in_a_project_the_network_is_shown() {
+    let mut w = world();
+    w.settings = Settings { start: StartSetting::Network, wake: WakeSetting::Consent };
+    assert!(start_from_m2(&w, &[Reaching::Project(atlas())]).is_allow(), "into atlas");
+    refused_as_unshown_folder(&start_from_m2(&w, &[Reaching::Project(ledger())]));
+    // A folder in no confirmed project is placed nowhere, and a start that
+    // names no place at all is judged as one in none.
+    refused_as_unshown_folder(&start_from_m2(&w, &[Reaching::Unplaced]));
+    refused_as_unshown_folder(&start_from_m2(&w, &[]));
+    let mut all = w;
+    all.shared = None;
+    assert!(start_from_m2(&all, &[Reaching::Unplaced]).is_allow() && start_from_m2(&all, &[Reaching::Project(ledger())]).is_allow());
+}
+
+#[test]
+fn a_refused_start_gives_the_same_words_for_a_folder_that_isnt_there() {
+    // The receiver can't tell a folder that doesn't exist from a hidden one
+    // and places both nowhere or in a hidden project: either way, these words.
+    let mut w = world();
+    w.settings = Settings { start: StartSetting::Network, wake: WakeSetting::Consent };
+    assert_eq!(start_from_m2(&w, &[Reaching::Unplaced]).reason().map(|r| r.text().to_string()), start_from_m2(&w, &[Reaching::Project(ledger())]).reason().map(|r| r.text().to_string()));
+    assert_ne!(NOT_SEEN_FOLDER, NOT_SEEN);
+}
+
+#[test]
+fn an_actor_is_placed_nowhere_so_only_a_network_shown_everything_reaches_it() {
+    let w = world();
+    let to_actor = |w: &World| from_m2(w, "agent", Resource::Machine(machine("m1")), Act::Message, &[Reaching::Unplaced]);
+    refused_as_unseen(&to_actor(&w));
+    let mut all = world();
+    all.shared = None;
+    assert!(to_actor(&all).is_allow());
+}

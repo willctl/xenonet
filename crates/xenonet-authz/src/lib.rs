@@ -35,7 +35,7 @@ mod proof;
 mod token;
 mod vocab;
 
-pub use decide::{decide, Authority, Authorized, Decision, Reason, HOLD_AFTER_MS, NOT_SEEN};
+pub use decide::{decide, Authority, Authorized, Decision, Reason, HOLD_AFTER_MS, NOT_SEEN, NOT_SEEN_FOLDER};
 pub use ground::{AllowScope, Asked, Consent, Device, DeviceKind, Ground, HeldIntent, OutboundScope, Role, Set, Settings, SpaceLevel, StandingGrant, StartSetting, WakeSetting};
 pub use info::Information;
 pub use proof::{PersonSigned, VerifiedPresence};

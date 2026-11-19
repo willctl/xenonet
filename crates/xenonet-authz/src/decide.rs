@@ -128,6 +128,11 @@ pub const HOLD_AFTER_MS: i64 = 10 * 60_000;
 /// can't learn which ids exist among what it isn't shown.
 pub const NOT_SEEN: &str = "no session or actor here has that id";
 
+/// The same for a start whose folder is in a project the network isn't
+/// shown, or in none. It is the answer for a folder that doesn't exist
+/// too, so it never says whether the folder is there.
+pub const NOT_SEEN_FOLDER: &str = "that folder isn't in a project this network is shown";
+
 /// Why a request was held or refused: a short code and words for a person.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reason {
@@ -454,6 +459,11 @@ fn seen(request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<()> {
         (Action::Claim, Resource::Project(p)) => reached.push(Some(p.clone())),
         _ => {}
     }
+    // A start reaches the folder it runs in, which the receiver says by
+    // what it finds the folder in. One that says nothing is placed nowhere.
+    if request.action() == Action::Start && request.reaches().is_empty() {
+        reached.push(None);
+    }
     for r in request.reaches() {
         reached.push(match r {
             Reaching::Session(s) => by_session(s),
@@ -464,7 +474,8 @@ fn seen(request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<()> {
     if reached.iter().all(|p| ground.sees(network, p.as_ref())) {
         Ok(())
     } else {
-        Err(Reason::new("shared", NOT_SEEN))
+        // A start has words of its own: a folder is not a session id.
+        Err(Reason::new("shared", if request.action() == Action::Start { NOT_SEEN_FOLDER } else { NOT_SEEN }))
     }
 }
 
