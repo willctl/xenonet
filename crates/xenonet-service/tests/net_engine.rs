@@ -2535,6 +2535,44 @@ async fn a_run_started_for_another_machine_still_asks_it_after_its_own_machine_r
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// An ask is answered by its id, so a machine that sends an ask under an id
+/// another machine's waiting ask holds takes nothing of it: the first keeps
+/// its place, and the second's ask, and its end, change nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn an_ask_from_one_machine_never_replaces_the_ask_of_another_with_the_same_id() {
+    let root = std::env::temp_dir().join(format!("xenonet-ask-ids-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let ask = |title: &str| json!({ "op": "ask", "id": "ask_same", "session": "claude:a", "run": "run_1", "title": title, "tool": "Bash", "input": "npm test", "at": now_ms(), "until": now_ms() + 60e3 });
+    let asks = xenonet_service::compose::runtime::asks::take_ask;
+    let shown = || async {
+        let (s, v) = t.desk.window("GET", "/api/runs/asks", Value::Null).await;
+        assert_eq!(s, 200, "{v}");
+        v["asks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|a| a["id"] == "ask_same")
+            .map(|a| format!("{}: {}", a["host"].as_str().unwrap(), a["title"].as_str().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    asks(&t.desk.world, "tower", &ask("from tower"));
+    asks(&t.desk.world, "contractor-vm", &ask("from contractor-vm"));
+    assert_eq!(shown().await, ["tower: from tower"], "the second took nothing of the first's");
+    // Its end, from the one that doesn't hold it, ends nothing.
+    asks(&t.desk.world, "contractor-vm", &json!({ "op": "done", "id": "ask_same", "decision": "deny" }));
+    assert_eq!(shown().await, ["tower: from tower"]);
+    // The same machine's ask again is its own, and replaces it.
+    asks(&t.desk.world, "tower", &ask("from tower, again"));
+    assert_eq!(shown().await, ["tower: from tower, again"]);
+    asks(&t.desk.world, "tower", &json!({ "op": "done", "id": "ask_same", "decision": "deny" }));
+    assert_eq!(shown().await, Vec::<String>::new());
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A copy of a run forked here asks under its own session, so what is sent
 /// with its ask names the run it was forked from, and the machine that
 /// asked for that run takes it.

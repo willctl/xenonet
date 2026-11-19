@@ -636,7 +636,14 @@ pub fn take_ask(w: &Runtime, from: &str, v: &Value) {
             {
                 let mut there = side.there.locked();
                 let now = now_ms();
-                there.retain(|x| x.until > now && x.id != a.id);
+                there.retain(|x| x.until > now);
+                // An answer names the ask by its id alone, so an id one
+                // machine's ask holds is not another's to take: the first
+                // keeps it, and the same machine's ask again replaces its own.
+                if there.iter().any(|x| x.id == a.id && x.host != a.host) {
+                    return w.log("info", "net.ask", &format!("an ask from {from} was dropped: another machine's ask already waits under its id"));
+                }
+                there.retain(|x| x.id != a.id);
                 there.push(a);
                 let from = there.len().saturating_sub(THERE_MAX);
                 there.drain(..from);
