@@ -106,6 +106,91 @@ async fn a_machine_in_a_second_network_is_shown_only_what_is_shared_into_it() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A frame `contractor-vm` sends over N2 as its engine would write it, but
+/// to a session it was never shown: it knows the id (it was told, or it
+/// guessed), which is all a member needs.
+fn guest_message(t: &TwoNetworks, n: u32, target: &str, text: &str) -> Value {
+    json!({
+        "schema": "network/send/v1", "mid": format!("msg_00000000-0000-4000-8000-{n:012}"), "sender": VM_ATLAS, "senderKind": "agent", "agent": t.contractor.agt(VM_ATLAS),
+        "target": target, "body": text, "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now_ms() as i64,
+    })
+}
+
+fn guest_handoff(t: &TwoNetworks, n: u32, to_agent: Option<&str>, project: &str) -> Value {
+    let mut h = offer(n);
+    h["from"] = json!(t.contractor.agt(VM_ATLAS));
+    h["to"] = json!({ "agent": to_agent, "projectKey": project, "host": null });
+    h
+}
+
+fn guest_claim(t: &TwoNetworks, project: &str, path: &str) -> Value {
+    json!({ "schema": "network/claim/v1", "op": "claim", "project": project, "path": path, "agent": t.contractor.agt(VM_ATLAS) })
+}
+
+fn guest_sends(t: &TwoNetworks, kind: xenonet_model::ops::Kind, body: Value) {
+    use xenonet_model::ops::{Outgoing, To};
+    t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind, body }).unwrap();
+}
+
+fn desk_claims(t: &TwoNetworks, project: &str) -> usize {
+    t.desk.world.store.with(|s| s.claims_in(project, now_ms()).unwrap().len())
+}
+
+/// A member of a network acts on what that network is shown, and on
+/// nothing else: `contractor-vm` in N2 knows a ledger session's id, and
+/// has its own clone of ledger's remote, and still can't message that
+/// session, hand work to it or claim in its project, while the same three
+/// into atlas, which N2 is shown, work.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_guest_reaches_a_project_its_network_doesnt_see() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-guest-reach-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let (atlas, ledger) = (t.desk.agt(DESK_ATLAS), t.desk.agt(DESK_LEDGER));
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    // contractor-vm's own clone of ledger's remote: the same project id.
+    let vm_ledger = clone(&root.join("contractor-vm/home/ledger"), "git@github.com:acme/ledger.git", "main");
+    assert_eq!(project_of(&t.contractor, &vm_ledger).as_deref(), Some(t.ledger.as_str()));
+
+    // Into ledger first, then into atlas: what arrives in order shows the
+    // first was left out, not late.
+    guest_sends(&t, Kind::Message, guest_message(&t, 1, &ledger, "Drop the March rows."));
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 1, Some(&ledger), &t.atlas));
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 2, None, &t.ledger));
+    guest_sends(&t, Kind::Claims, guest_claim(&t, &t.ledger, "src/"));
+    guest_sends(&t, Kind::Message, guest_message(&t, 2, &atlas, "Is the login branch yours?"));
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 3, Some(&atlas), &t.atlas));
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 4, None, &t.atlas));
+    guest_sends(&t, Kind::Claims, guest_claim(&t, &t.atlas, "src/"));
+    let heard = |who: &'static str| {
+        let desk = &t.desk;
+        async move { texts(&desk.ctx.cores.engine.inbox(who, Duration::ZERO).await.unwrap()) }
+    };
+    until("atlas is messaged", 20, || async { heard(DESK_ATLAS).await.iter().any(|m| m.contains("Is the login branch yours?")) }).await;
+    until("atlas is handed work and claimed in", 20, || async { has_handoff(&t.desk, 3) && has_handoff(&t.desk, 4) && desk_claims(&t, &t.atlas) == 1 }).await;
+    // (Give what was left out time to show if it was only slow.)
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mut reached = Vec::new();
+    if !heard(DESK_LEDGER).await.is_empty() {
+        reached.push("a message reached the ledger session");
+    }
+    if has_handoff(&t.desk, 1) {
+        reached.push("a handoff to a ledger session was kept");
+    }
+    if has_handoff(&t.desk, 2) {
+        reached.push("a handoff from a clone of ledger was kept");
+    }
+    if desk_claims(&t, &t.ledger) != 0 {
+        reached.push("a claim in ledger was kept");
+    }
+    assert!(reached.is_empty(), "N2 is shown only atlas, and still: {reached:?}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_hosts_with_their_engines_work_as_one_network() {
     let root = std::env::temp_dir().join(format!("xenonet-net-engine-{}", std::process::id()));
