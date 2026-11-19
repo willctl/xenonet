@@ -89,6 +89,21 @@ pub struct Nodes {
     compactor: Mutex<Option<JoinHandle<()>>>,
 }
 
+/// A store from before every network got a sharing row lacks one only for
+/// the first network (a later one was given "nothing" when it was adopted),
+/// and a missing row then meant "everything": that row is written now, so
+/// the network stays as it was. `networks` is in the order they were
+/// adopted. Any other network with no row (lost, or never written) is left
+/// without one and shown nothing, however often the store is opened. If the
+/// store can't say or write, nothing is written, the safe side.
+fn write_missing_first_row(persist: &dyn crate::persist::Persist, networks: &[crate::files::NetFile]) {
+    if let Some(first) = networks.first() {
+        if persist.sharing(&first.id).ok().is_some_and(|row| row.is_none()) {
+            let _ = persist.put_sharing(&first.id, &crate::share::Sharing::All);
+        }
+    }
+}
+
 impl Nodes {
     /// Every network this machine is in, from `<state>/network` and the
     /// store, with a sink that takes what arrives; nothing runs until
@@ -98,15 +113,9 @@ impl Nodes {
         let identity = Identity::open(dir.identity_dir(), opts.persist.clone(), opts.vault.clone())?;
         let common = Common::new(identity.clone());
         let mut nets = Vec::new();
-        for net in dir.read_networks()? {
-            // A network from a store that kept no row for it was shown
-            // everything (a missing row used to mean that), and stays so:
-            // the row is written now, since without one it is shown nothing.
-            // If the store can't say or can't write, opening goes on: the
-            // network is then shown nothing, which is the safe side.
-            if opts.persist.sharing(&net.id).ok().flatten().is_none() {
-                let _ = opts.persist.put_sharing(&net.id, &crate::share::Sharing::All);
-            }
+        let found = dir.read_networks()?;
+        write_missing_first_row(opts.persist.as_ref(), &found);
+        for net in found {
             nets.push(Node::open_in(opts.clone(), sink.clone(), common.clone(), Some(net))?);
         }
         let empty = Node::open_in(opts.clone(), sink.clone(), common.clone(), None)?;
@@ -763,6 +772,51 @@ impl Drop for Nodes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn net(id: &str) -> crate::files::NetFile {
+        crate::files::NetFile { id: id.into(), name: id.into(), host: "me".into(), founder: "me".into(), titles_only: false, share_load: true, joined: 0 }
+    }
+
+    #[test]
+    fn opening_a_store_with_no_rows_shows_the_first_network_everything_and_no_other_anything() {
+        use crate::persist::{Memory, Persist};
+        use crate::share::Sharing;
+        let kept = Memory::default();
+        let (a, b) = (net("net_a"), net("net_b"));
+        kept.put_network(&a).unwrap();
+        kept.put_network(&b).unwrap();
+        for _ in 0..2 {
+            write_missing_first_row(&kept, &[a.clone(), b.clone()]);
+            assert_eq!(kept.sharing("net_a").unwrap(), Some(Sharing::All));
+            assert_eq!(kept.sharing("net_b").unwrap(), None, "a later network with no row is shown nothing, however often it opens");
+        }
+        // The second's explicit row is left alone, and a row the person
+        // narrowed on the first stays narrowed.
+        kept.put_sharing("net_b", &Sharing::Projects(["prj_x".to_string()].into())).unwrap();
+        kept.put_sharing("net_a", &Sharing::default_for(false)).unwrap();
+        write_missing_first_row(&kept, &[a, b]);
+        assert_eq!(kept.sharing("net_a").unwrap(), Some(Sharing::default_for(false)));
+        assert_eq!(kept.sharing("net_b").unwrap(), Some(Sharing::Projects(["prj_x".to_string()].into())));
+    }
+
+    #[test]
+    fn a_second_networks_lost_row_stays_lost_when_the_store_is_opened() {
+        use crate::persist::{Memory, Persist};
+        use crate::share::Sharing;
+        let kept = Memory::default();
+        let (a, b) = (net("net_a"), net("net_b"));
+        kept.put_network(&a).unwrap();
+        kept.put_network(&b).unwrap();
+        kept.put_sharing("net_a", &Sharing::All).unwrap();
+        kept.put_sharing("net_b", &Sharing::default_for(false)).unwrap();
+        // net_b's row goes (Memory forgets whole networks only, so put it back).
+        let networks = kept.networks().unwrap();
+        kept.forget("net_b").unwrap();
+        kept.put_network(&b).unwrap();
+        write_missing_first_row(&kept, &networks);
+        assert_eq!(kept.sharing("net_b").unwrap(), None, "still shown nothing");
+        assert_eq!(kept.sharing("net_a").unwrap(), Some(Sharing::All));
+    }
 
     #[test]
     fn the_home_relay_is_one_every_network_lists() {
