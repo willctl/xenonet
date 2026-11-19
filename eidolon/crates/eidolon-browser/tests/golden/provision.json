@@ -1,0 +1,230 @@
+{
+  "steps": [
+    {
+      "why": "refresh the package lists",
+      "argv": [
+        "sudo",
+        "env",
+        "DEBIAN_FRONTEND=noninteractive",
+        "apt-get",
+        "update"
+      ]
+    },
+    {
+      "why": "install the tools the browser and its window need",
+      "argv": [
+        "sudo",
+        "env",
+        "DEBIAN_FRONTEND=noninteractive",
+        "apt-get",
+        "install",
+        "-y",
+        "--no-install-recommends",
+        "ca-certificates",
+        "curl",
+        "gnupg",
+        "socat",
+        "xvfb",
+        "x11vnc",
+        "fonts-dejavu-core"
+      ]
+    },
+    {
+      "why": "make the keyring folder",
+      "argv": [
+        "sudo",
+        "install",
+        "-d",
+        "-m",
+        "0755",
+        "/etc/apt/keyrings"
+      ]
+    },
+    {
+      "why": "fetch Mozilla's signing key",
+      "argv": [
+        "sudo",
+        "curl",
+        "-fsSL",
+        "--proto",
+        "=https",
+        "-o",
+        "/etc/apt/keyrings/packages.mozilla.org.asc",
+        "https://packages.mozilla.org/apt/repo-signing-key.gpg"
+      ]
+    },
+    {
+      "why": "check the signing key's fingerprint",
+      "argv": [
+        "gpg",
+        "--show-keys",
+        "--with-colons",
+        "--fingerprint",
+        "/etc/apt/keyrings/packages.mozilla.org.asc"
+      ],
+      "expect_fingerprint": "35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3"
+    },
+    {
+      "why": "add Mozilla's repository",
+      "argv": [
+        "sudo",
+        "tee",
+        "/etc/apt/sources.list.d/mozilla.sources"
+      ],
+      "stdin": "Types: deb\nURIs: https://packages.mozilla.org/apt\nSuites: mozilla\nComponents: main\nSigned-By: /etc/apt/keyrings/packages.mozilla.org.asc\n"
+    },
+    {
+      "why": "prefer Mozilla's Firefox package",
+      "argv": [
+        "sudo",
+        "tee",
+        "/etc/apt/preferences.d/mozilla"
+      ],
+      "stdin": "Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n"
+    },
+    {
+      "why": "refresh the package lists with Mozilla's repository",
+      "argv": [
+        "sudo",
+        "env",
+        "DEBIAN_FRONTEND=noninteractive",
+        "apt-get",
+        "update"
+      ]
+    },
+    {
+      "why": "install Firefox",
+      "argv": [
+        "sudo",
+        "env",
+        "DEBIAN_FRONTEND=noninteractive",
+        "apt-get",
+        "install",
+        "-y",
+        "--no-install-recommends",
+        "firefox"
+      ]
+    },
+    {
+      "why": "make the browser's user",
+      "argv": [
+        "sudo",
+        "useradd",
+        "--create-home",
+        "--shell",
+        "/usr/sbin/nologin",
+        "eidolon"
+      ],
+      "skip_if": [
+        "id",
+        "-u",
+        "eidolon"
+      ]
+    },
+    {
+      "why": "let the home folder be entered",
+      "argv": [
+        "sudo",
+        "chmod",
+        "0755",
+        "/home/eidolon"
+      ]
+    },
+    {
+      "why": "make the profile folder",
+      "argv": [
+        "sudo",
+        "install",
+        "-d",
+        "-o",
+        "eidolon",
+        "-g",
+        "eidolon",
+        "-m",
+        "0700",
+        "/home/eidolon/profile"
+      ]
+    },
+    {
+      "why": "make the files folders",
+      "argv": [
+        "sudo",
+        "install",
+        "-d",
+        "-o",
+        "eidolon",
+        "-g",
+        "eidolon",
+        "-m",
+        "0755",
+        "/home/eidolon/files",
+        "/home/eidolon/files/downloads",
+        "/home/eidolon/files/uploads"
+      ]
+    },
+    {
+      "why": "write the profile's preferences",
+      "argv": [
+        "sudo",
+        "-u",
+        "eidolon",
+        "tee",
+        "/home/eidolon/profile/user.js"
+      ],
+      "stdin": "// What an unattended browser needs and nothing else. Nothing here changes\n// how the browser looks to a site.\nuser_pref(\"browser.shell.checkDefaultBrowser\", false);\nuser_pref(\"browser.aboutwelcome.enabled\", false);\nuser_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");\nuser_pref(\"startup.homepage_welcome_url\", \"\");\nuser_pref(\"startup.homepage_welcome_url.additional\", \"\");\nuser_pref(\"browser.sessionstore.resume_from_crash\", false);\nuser_pref(\"datareporting.policy.dataSubmissionEnabled\", false);\nuser_pref(\"datareporting.healthreport.uploadEnabled\", false);\nuser_pref(\"toolkit.telemetry.reportingpolicy.firstRun\", false);\nuser_pref(\"app.update.auto\", false);\nuser_pref(\"app.update.checkInstallTime\", false);\nuser_pref(\"app.update.service.enabled\", false);\nuser_pref(\"extensions.update.enabled\", false);\n// Downloads land in one folder of the cell. Uploads are read from\n// /home/eidolon/files/uploads: a file input is given that path.\nuser_pref(\"browser.download.folderList\", 2);\nuser_pref(\"browser.download.dir\", \"/home/eidolon/files/downloads\");\nuser_pref(\"browser.download.useDownloadDir\", true);\nuser_pref(\"browser.download.always_ask_before_handling_new_types\", false);\n"
+    },
+    {
+      "why": "install a unit",
+      "argv": [
+        "sudo",
+        "tee",
+        "/etc/systemd/system/eidolon-browser.service"
+      ],
+      "stdin": "[Unit]\nDescription=Eidolon browser, with its automation socket on 127.0.0.1\nConflicts=eidolon-view.service\nAfter=network.target\n\n[Service]\nUser=eidolon\nGroup=eidolon\nEnvironment=HOME=/home/eidolon\nExecStart=/usr/bin/firefox --headless --no-remote --profile /home/eidolon/profile --remote-debugging-port 9222\nRestart=always\nRestartSec=1\n\n[Install]\nWantedBy=multi-user.target\n"
+    },
+    {
+      "why": "install a unit",
+      "argv": [
+        "sudo",
+        "tee",
+        "/etc/systemd/system/eidolon-xvfb.service"
+      ],
+      "stdin": "[Unit]\nDescription=Eidolon sign-in window, the display\nPartOf=eidolon-view.service\n\n[Service]\nUser=eidolon\nGroup=eidolon\nExecStart=/usr/bin/Xvfb :99 -screen 0 1280x800x24 -nolisten tcp\nRestart=on-failure\n"
+    },
+    {
+      "why": "install a unit",
+      "argv": [
+        "sudo",
+        "tee",
+        "/etc/systemd/system/eidolon-vnc.service"
+      ],
+      "stdin": "[Unit]\nDescription=Eidolon sign-in window, the screen share on 127.0.0.1\nRequires=eidolon-xvfb.service\nAfter=eidolon-xvfb.service\nPartOf=eidolon-view.service\n\n[Service]\nUser=eidolon\nGroup=eidolon\nExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -passwdfile /run/eidolon/vnc.pass -forever -shared -noxdamage -quiet\nRestart=on-failure\n"
+    },
+    {
+      "why": "install a unit",
+      "argv": [
+        "sudo",
+        "tee",
+        "/etc/systemd/system/eidolon-view.service"
+      ],
+      "stdin": "[Unit]\nDescription=Eidolon sign-in window, a browser a person can use (automation is off)\nRequires=eidolon-xvfb.service eidolon-vnc.service\nAfter=eidolon-xvfb.service eidolon-vnc.service\nConflicts=eidolon-browser.service\n\n[Service]\nUser=eidolon\nGroup=eidolon\nEnvironment=HOME=/home/eidolon\nEnvironment=DISPLAY=:99\nExecStart=/usr/bin/firefox --no-remote --profile /home/eidolon/profile\nRestart=on-failure\n"
+    },
+    {
+      "why": "load the units",
+      "argv": [
+        "sudo",
+        "systemctl",
+        "daemon-reload"
+      ]
+    },
+    {
+      "why": "start the browser at boot",
+      "argv": [
+        "sudo",
+        "systemctl",
+        "enable",
+        "eidolon-browser.service"
+      ]
+    }
+  ]
+}

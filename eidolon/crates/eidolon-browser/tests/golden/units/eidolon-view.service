@@ -1,0 +1,13 @@
+[Unit]
+Description=Eidolon sign-in window, a browser a person can use (automation is off)
+Requires=eidolon-xvfb.service eidolon-vnc.service
+After=eidolon-xvfb.service eidolon-vnc.service
+Conflicts=eidolon-browser.service
+
+[Service]
+User=eidolon
+Group=eidolon
+Environment=HOME=/home/eidolon
+Environment=DISPLAY=:99
+ExecStart=/usr/bin/firefox --no-remote --profile /home/eidolon/profile
+Restart=on-failure

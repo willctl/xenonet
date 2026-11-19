@@ -1,0 +1,11 @@
+[Unit]
+Description=Eidolon sign-in window, the screen share on 127.0.0.1
+Requires=eidolon-xvfb.service
+After=eidolon-xvfb.service
+PartOf=eidolon-view.service
+
+[Service]
+User=eidolon
+Group=eidolon
+ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -passwdfile /run/eidolon/vnc.pass -forever -shared -noxdamage -quiet
+Restart=on-failure

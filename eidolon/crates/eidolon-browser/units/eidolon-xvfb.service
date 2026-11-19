@@ -1,0 +1,9 @@
+[Unit]
+Description=Eidolon sign-in window, the display
+PartOf=eidolon-view.service
+
+[Service]
+User=eidolon
+Group=eidolon
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x800x24 -nolisten tcp
+Restart=on-failure
