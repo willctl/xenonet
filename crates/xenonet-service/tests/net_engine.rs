@@ -305,6 +305,46 @@ async fn a_wake_asks_what_the_network_the_message_came_in_is_shown() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A message from another machine wakes a session that has ended under the
+/// wake setting of the network the message came in, through the whole path
+/// (the frame, the stored message, the router), not a hand-made one: with
+/// work's setting on and home's off, contractor-vm's message resumes
+/// desk's session; with home's on and work's off, it doesn't.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_message_wakes_a_session_under_the_wake_setting_of_the_network_it_came_in() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-guest-wake-path-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks_ended(&root).await;
+    let atlas = t.desk.agt(DESK_ATLAS_ENDED);
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS_ENDED).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let wake = |network: &str, wake: &'static str| {
+        let desk = &t.desk;
+        let network = network.to_string();
+        async move {
+            let (s, v) = desk.window("PUT", "/api/net/settings", json!({ "network": network, "host": "desk", "wake": wake })).await;
+            assert_eq!(s, 200, "{v}");
+        }
+    };
+    // home lets no one wake sessions unasked; work lets its machines.
+    wake("home", "consent").await;
+    wake("work", "network").await;
+    guest_sends(&t, Kind::Message, guest_message(&t, 71, &atlas, "The fixtures moved."));
+    let (args, prompt) = ran(&t.desk, 1).await;
+    assert_eq!(&args[..3], ["-p", "--resume", DESK_ATLAS_ENDED.trim_start_matches("claude:")], "{args:?}");
+    assert!(prompt.contains("The fixtures moved."), "{prompt}");
+    // The other way round: home's setting is not work's.
+    wake("home", "network").await;
+    wake("work", "consent").await;
+    guest_sends(&t, Kind::Message, guest_message(&t, 72, &atlas, "Once more."));
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 1, "work's setting decides a message from work: {:?}", fake_runs(&t.desk));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// The next XenoNet note `contractor-vm`'s session is told, which is where
 /// an agent's start answers come; `told` keeps what came with it.
 async fn vm_is_told(t: &TwoNetworks, told: &mut Vec<String>, what: &str) -> String {
