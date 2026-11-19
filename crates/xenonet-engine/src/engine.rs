@@ -1712,6 +1712,15 @@ impl Engine {
         for (_, pl) in &mapped {
             for r in c.store.claims_in(&pl.project, c.clock.now())? {
                 let path = text(get(&r, "path"));
+                // Another machine's claim, kept from when its project was
+                // shared with it, is none once the project isn't shown to
+                // any network that machine is in.
+                let host = as_str(get(&r, "host")).filter(|h| !h.is_empty());
+                if let Some(host) = host {
+                    if !c.net.is_some_and(|n| n.claim_shown(host, &pl.project)) {
+                        continue;
+                    }
+                }
                 if matches(&path, &pl.rel) || matches(&pl.rel, &path) {
                     let at = (num(get(&r, "created_at")), text(get(&r, "author")), text(get(&r, "agent")));
                     if first.as_ref().is_none_or(|f| (at.0, &at.1) < (f.0, &f.1)) {

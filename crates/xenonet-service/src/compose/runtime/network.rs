@@ -988,7 +988,7 @@ fn shown_with(w: &Runtime, host: &str, agent: &Value) -> bool {
 }
 
 /// Whether `project` is shown a network this machine shares with `host`.
-fn project_shown_with(w: &Runtime, host: &str, project: &str) -> bool {
+pub(crate) fn project_shown_with(w: &Runtime, host: &str, project: &str) -> bool {
     let Some(g) = crate::compose::runtime::ground::governance(w) else { return false };
     net(w).networks_with(host).iter().any(|n| g.sharing(n).shows_project(project))
 }

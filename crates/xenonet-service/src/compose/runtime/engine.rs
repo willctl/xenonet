@@ -406,6 +406,9 @@ impl host::Net for Side<'_> {
     fn claim_hits(&self, me: &str, files: &[String]) -> xenonet_engine::engine::Result<Vec<Value>> {
         crate::compose::runtime::network::claim_hits(self.w, me, files)
     }
+    fn claim_shown(&self, host: &str, project: &str) -> bool {
+        crate::compose::runtime::network::project_shown_with(self.w, host, project)
+    }
     fn handoffs(&self, view: &Value) -> xenonet_engine::engine::Result<Vec<Value>> {
         crate::compose::runtime::network::offers(self.w, view)
     }

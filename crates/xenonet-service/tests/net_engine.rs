@@ -2911,12 +2911,20 @@ async fn a_claim_stored_before_its_project_was_unshared_warns_no_one() {
     // A file contractor-vm's presence doesn't say it is changing: only its claim on src/ covers it.
     guest_sends(&t, Kind::Claims, guest_claim(&t, &t.atlas, "src/"));
     until("desk's atlas session is warned of the claim", 20, || async { t.desk.before_edit(DESK_ATLAS, &desk_atlas, "src/refunds.ts").await.contains("contractor-vm") }).await;
+    // While it is shared, the guest's claim is the one that stands.
+    let shared = t.desk.agent(DESK_ATLAS, "claim", json!({ "paths": [format!("{desk_atlas}/src/refunds.ts")] })).await;
+    assert_eq!(shared["first"], json!(t.contractor.agt(VM_ATLAS)), "{shared}");
     // Atlas is unshared from N2: the claim is still stored, and means nothing.
     let (s, v) = t.desk.window("PUT", "/api/net/sharing", json!({ "network": "work", "sharing": [] })).await;
     assert_eq!(s, 200, "{v}");
-    assert_eq!(desk_claims(&t, &t.atlas), 1, "the claim is still kept");
+    assert_eq!(desk_claims(&t, &t.atlas), 2, "the guest's claim is still kept, beside desk's own");
     // (A thread hears a warning once per file, so a file not yet warned of.)
     assert_eq!(t.desk.before_edit(DESK_ATLAS, &desk_atlas, "src/totals.ts").await, "", "but it warns no one");
+    // Nor does a session's own claim learn of it: the reply names the claim
+    // that stands, and the unshared guest's is not one.
+    let mine = t.desk.agent(DESK_ATLAS, "claim", json!({ "paths": [format!("{desk_atlas}/src/totals.ts")] })).await;
+    assert_ne!(mine["first"], json!(t.contractor.agt(VM_ATLAS)), "{mine}");
+    assert_eq!(mine["first"], json!(DESK_ATLAS), "{mine}");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

@@ -160,6 +160,9 @@ pub trait Net {
     /// Agents on other hosts with a hand in `files`, in their checkouts of
     /// the same project.
     fn claim_hits(&self, me: &str, files: &[String]) -> Result<Vec<Value>>;
+    /// Whether `project` is shown to a network `host` is in: a claim of
+    /// that host's, kept from when it was, means something only while it is.
+    fn claim_shown(&self, host: &str, project: &str) -> bool;
     /// The handoffs open to a session with this view.
     fn handoffs(&self, view: &Value) -> Result<Vec<Value>>;
     /// What another host last said of a delivery: { host, receipt }, or
