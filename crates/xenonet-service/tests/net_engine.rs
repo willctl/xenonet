@@ -289,7 +289,13 @@ async fn an_ask_from_another_machine_is_taken_only_for_a_run_it_was_asked_to_sta
     let t = two_networks(&root).await;
     until("desk knows tower and contractor-vm take starts", 20, || async {
         let nets = t.desk.state().await["networks"].clone();
-        let can = |h: &str| nets.as_array().unwrap().iter().flat_map(|n| n["hosts"].as_array().cloned().unwrap_or_default()).any(|x| x["id"] == h && x["can"].as_array().is_some_and(|c| c.contains(&json!("start"))));
+        let can = |h: &str| {
+            nets.as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|n| n["hosts"].as_array().cloned().unwrap_or_default())
+                .any(|x| x["id"] == h && x["can"].as_array().is_some_and(|c| c.contains(&json!("start"))))
+        };
         can("tower") && can("contractor-vm")
     })
     .await;

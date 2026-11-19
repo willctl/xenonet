@@ -996,8 +996,8 @@ pub fn sign_in_hint(w: &Runtime, host: &str) {
 mod tests {
     use super::{now_ms, Asked, StartSide, Tail};
     use serde_json::json;
-    use xenonet_os::sync::Locked;
     use xenonet_engine::delivery::starts;
+    use xenonet_os::sync::Locked;
 
     // The token is kept under a name the credential store takes, and read
     // back from it: each store checks the name the same way.

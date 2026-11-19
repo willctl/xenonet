@@ -638,7 +638,13 @@ impl Net for Nodes {
     }
 
     fn networks_with(&self, host: &str) -> Vec<String> {
-        self.common.shareds().iter().filter(|s| !s.is_removed()).filter(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some())).filter_map(|s| s.network().map(|n| n.id)).collect()
+        self.common
+            .shareds()
+            .iter()
+            .filter(|s| !s.is_removed())
+            .filter(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some()))
+            .filter_map(|s| s.network().map(|n| n.id))
+            .collect()
     }
 
     fn hosts(&self) -> Vec<Host> {
