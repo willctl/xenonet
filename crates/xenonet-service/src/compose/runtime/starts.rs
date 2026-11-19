@@ -22,7 +22,10 @@
 //!   message to a session or an actor, or a line in your console.
 //!
 //! The requests sent from here are kept in memory: after a restart, a late
-//! answer to one is let go.
+//! answer to one is let go. The runs other machines were asked for, and the
+//! network each run started here for another machine came through, are kept
+//! in the store (as two settings), for a day after last used and a week at
+//! most.
 
 use crate::compose::runtime::network::{clip, ms, net, quiet_note, sender_kind, start_end_note};
 use crate::compose::runtime::runs::{Runner, Turn};
@@ -65,27 +68,57 @@ struct Named {
     agent: Option<String>,
 }
 
-/// A run kept as named: whose it is, in which network, and when it was
-/// last named or last asked.
+/// A run kept as named: whose it is, in which network, when it was last
+/// named or last asked, and when it was first named.
 struct Kept {
     host: String,
     network: String,
     run: Named,
     at: f64,
+    since: f64,
+}
+
+/// A run started here for another machine, with the network its start came
+/// through: when it last asked, and when it was started.
+struct RunNet {
+    network: String,
+    at: f64,
+    since: f64,
 }
 
 /// How long a run stays named after it was last named or last asked from:
 /// a day. A run that ended can be resumed by a later message, and its turn
 /// asks under the same session; a day covers an evening's break and the
 /// next morning, and a machine that was once asked for a run keeps no
-/// longer a claim on this console than that. Every ask taken renews it.
+/// longer a claim on this console than that. Every ask taken renews it, up
+/// to `NAMED_MAX_MS`.
 const NAMED_FOR_MS: f64 = 24.0 * 3600e3;
 
-/// The most runs kept as named.
+/// The longest a run stays named or networked, renewals or not: seven days
+/// from the start. A week covers a run resumed over a few days of work; past
+/// it a machine asked for one run must be asked again, so no run it was
+/// once asked for lets it prompt this console for good.
+const NAMED_MAX_MS: f64 = 7.0 * 24.0 * 3600e3;
+
+/// The most runs kept as named, and the most with a network; past it the
+/// ones longest unused go first.
 const KEPT_MAX: usize = 200;
+const RUN_NETWORKS_MAX: usize = 500;
+
+/// The settings the two are kept in, which leave the store's schema (and
+/// every store on disk) as it is.
+const KEPT_SETTING: &str = "named-runs";
+const RUN_NETWORKS_SETTING: &str = "run-networks";
+
+fn live(at: f64, since: f64, now: f64) -> bool {
+    now - at < NAMED_FOR_MS && now - since < NAMED_MAX_MS
+}
 
 #[derive(Default)]
 pub struct StartSide {
+    /// Where the runs named and the networks of the runs are kept, so a
+    /// restart forgets neither.
+    db: Option<Arc<xenonet_store::Db>>,
     /// Starts here in the last hour: when, and from which machine ("" for
     /// this one).
     history: Mutex<Vec<(f64, String)>>,
@@ -100,26 +133,88 @@ pub struct StartSide {
     kept: Mutex<Vec<Kept>>,
     /// The network each run another machine asked for was started through,
     /// by its session: the only network its prompts are sent into.
-    run_networks: Mutex<HashMap<String, String>>,
+    run_networks: Mutex<HashMap<String, RunNet>>,
 }
 
 impl StartSide {
+    /// The side with what the store kept: the runs named and the networks
+    /// of the runs, those still within their time.
+    pub fn open(db: Option<Arc<xenonet_store::Db>>) -> Self {
+        let side = StartSide { db, ..StartSide::default() };
+        let now = now_ms();
+        if let Some(db) = &side.db {
+            let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64);
+            let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+            if let Some(rows) = db.setting(KEPT_SETTING).ok().as_ref().and_then(Value::as_array) {
+                let mut kept = side.kept.locked();
+                for r in rows {
+                    let (Some(host), Some(network), Some(at), Some(since)) = (text(r, "host"), text(r, "network"), num(r, "at"), num(r, "since")) else { continue };
+                    if live(at, since, now) {
+                        kept.push(Kept { host, network, run: Named { session: text(r, "session"), agent: text(r, "agent") }, at, since });
+                    }
+                }
+            }
+            if let Some(rows) = db.setting(RUN_NETWORKS_SETTING).ok().as_ref().and_then(Value::as_object) {
+                let mut runs = side.run_networks.locked();
+                for (session, r) in rows {
+                    let (Some(network), Some(at), Some(since)) = (text(r, "network"), num(r, "at"), num(r, "since")) else { continue };
+                    if live(at, since, now) {
+                        runs.insert(session.clone(), RunNet { network, at, since });
+                    }
+                }
+            }
+        }
+        side
+    }
+
+    fn save_kept(&self, kept: &[Kept]) {
+        let rows: Vec<Value> =
+            kept.iter().map(|k| json!({ "host": k.host, "network": k.network, "session": k.run.session, "agent": k.run.agent, "at": k.at, "since": k.since })).collect();
+        if let Some(db) = &self.db {
+            let _ = db.set_setting(KEPT_SETTING, Some(&Value::Array(rows)));
+        }
+    }
+
+    fn save_run_networks(&self, runs: &HashMap<String, RunNet>) {
+        let rows: serde_json::Map<String, Value> = runs.iter().map(|(s, r)| (s.clone(), json!({ "network": r.network, "at": r.at, "since": r.since }))).collect();
+        if let Some(db) = &self.db {
+            let _ = db.set_setting(RUN_NETWORKS_SETTING, Some(&Value::Object(rows)));
+        }
+    }
+
     /// Keeps the network the run `session` was started through, when a
     /// frame asked for it. A run started here for no one has none.
     pub fn note_network(&self, session: &str, network: Option<String>) {
         let Some(network) = network else { return };
+        let now = now_ms();
         let mut runs = self.run_networks.locked();
-        if runs.len() >= 500 {
-            runs.clear();
+        runs.retain(|_, r| live(r.at, r.since, now));
+        // Past the most kept, the one longest unused goes, never all.
+        while runs.len() >= RUN_NETWORKS_MAX {
+            let Some(oldest) = runs.iter().min_by(|a, b| a.1.at.total_cmp(&b.1.at)).map(|(k, _)| k.clone()) else { break };
+            runs.remove(&oldest);
         }
-        runs.insert(session.to_string(), network);
+        runs.insert(session.to_string(), RunNet { network, at: now, since: now });
+        self.save_run_networks(&runs);
     }
 
     /// The network the run `session` (or the session it was forked from) was
-    /// started through; None for a run started here for no one.
+    /// started through; None for a run started here for no one, or one past
+    /// its time. Asking renews it, to the longest a run is kept.
     pub fn network_of(&self, session: &str, parent: Option<&str>) -> Option<String> {
-        let runs = self.run_networks.locked();
-        runs.get(session).or_else(|| parent.and_then(|p| runs.get(p))).cloned()
+        let now = now_ms();
+        let mut runs = self.run_networks.locked();
+        let key = [Some(session), parent].into_iter().flatten().find(|k| runs.get(*k).is_some())?.to_string();
+        let r = runs.get_mut(&key)?;
+        if !live(r.at, r.since, now) {
+            runs.remove(&key);
+            self.save_run_networks(&runs);
+            return None;
+        }
+        r.at = now;
+        let network = r.network.clone();
+        self.save_run_networks(&runs);
+        Some(network)
     }
 
     /// Whether `host`, in `network`, has a run named as its own, by
@@ -127,15 +222,19 @@ impl StartSide {
     /// own receipts name it) or one it works for an intent made or
     /// arbitrated here. Nothing else it says about a run is believed. A
     /// run named stays named for a day (`NAMED_FOR_MS`), renewed each time
-    /// an ask is taken for it.
+    /// an ask is taken for it, and for a week at most (`NAMED_MAX_MS`).
     pub fn names_run(&self, host: &str, network: &str, session: &str, agent: Option<&str>) -> bool {
         let now = now_ms();
         let mut kept = self.kept.locked();
-        kept.retain(|k| now - k.at < NAMED_FOR_MS);
+        kept.retain(|k| live(k.at, k.since, now));
         let found = kept.iter_mut().find(|k| {
             k.host == host && k.network == network && ((!session.is_empty() && k.run.session.as_deref() == Some(session)) || (agent.is_some() && k.run.agent.as_deref() == agent))
         });
-        found.map(|k| k.at = now).is_some()
+        let named = found.map(|k| k.at = now).is_some();
+        if named {
+            self.save_kept(&kept);
+        }
+        named
     }
 
     /// A run `host` started for a request of ours, in `network`, as its
@@ -162,15 +261,18 @@ impl StartSide {
         }
         let now = now_ms();
         let mut kept = self.kept.locked();
-        kept.retain(|k| now - k.at < NAMED_FOR_MS);
+        kept.retain(|k| live(k.at, k.since, now));
         if let Some(k) = kept.iter_mut().find(|k| k.host == host && k.network == network && k.run == run) {
             k.at = now;
-            return;
+        } else {
+            // Past the most kept, the one longest unused goes.
+            while kept.len() >= KEPT_MAX {
+                let Some(i) = kept.iter().enumerate().min_by(|a, b| a.1.at.total_cmp(&b.1.at)).map(|(i, _)| i) else { break };
+                kept.remove(i);
+            }
+            kept.push(Kept { host: host.to_string(), network: network.to_string(), run, at: now, since: now });
         }
-        if kept.len() >= KEPT_MAX {
-            kept.remove(0);
-        }
-        kept.push(Kept { host: host.to_string(), network: network.to_string(), run, at: now });
+        self.save_kept(&kept);
     }
 }
 
@@ -1108,8 +1210,9 @@ pub fn sign_in_hint(w: &Runtime, host: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{now_ms, Asked, StartSide, Tail, NAMED_FOR_MS};
+    use super::{now_ms, Asked, StartSide, Tail, NAMED_FOR_MS, NAMED_MAX_MS};
     use serde_json::json;
+    use std::sync::Arc;
     use xenonet_engine::delivery::starts;
     use xenonet_os::sync::Locked;
 
@@ -1186,5 +1289,62 @@ mod tests {
         side.kept.locked()[0].at = now_ms() - NAMED_FOR_MS + 60e3;
         assert!(side.names_run("tower", "net_home", "", Some("agt_two")));
         assert!(side.kept.locked()[0].at > now_ms() - 60e3, "an ask taken renews it");
+    }
+
+    fn store(name: &str) -> (std::path::PathBuf, Arc<xenonet_store::Db>) {
+        let dir = std::env::temp_dir().join(format!("xenonet-named-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Arc::new(xenonet_store::Db::open(&dir).unwrap());
+        (dir, db)
+    }
+
+    #[test]
+    fn the_runs_named_and_their_networks_are_kept_across_a_restart_and_forgotten_by_age() {
+        let (dir, db) = store("kept");
+        let side = StartSide::open(Some(db.clone()));
+        side.note_intent_run("tower", "net_home", Some("agt_two"));
+        side.note_intent_run("tower", "net_home", Some("agt_old"));
+        side.note_network("claude:a", Some("net_work".into()));
+        side.note_network("claude:old", Some("net_work".into()));
+        // One of each was last used just under a day ago, and one a week and a moment after its start.
+        side.kept.locked().iter_mut().find(|k| k.run.agent.as_deref() == Some("agt_old")).unwrap().since = now_ms() - NAMED_MAX_MS - 1.0;
+        side.run_networks.locked().get_mut("claude:old").unwrap().since = now_ms() - NAMED_MAX_MS - 1.0;
+        side.note_intent_run("tower", "net_home", Some("agt_two"));
+        side.note_network("claude:b", Some("net_home".into()));
+        let again = StartSide::open(Some(db));
+        assert!(again.names_run("tower", "net_home", "", Some("agt_two")), "a named run survives a restart");
+        assert!(!again.names_run("tower", "net_home", "", Some("agt_old")), "one past its week does not");
+        assert_eq!(again.network_of("claude:a", None).as_deref(), Some("net_work"));
+        assert_eq!(again.network_of("claude:b", None).as_deref(), Some("net_home"));
+        assert_eq!(again.network_of("claude:old", None), None, "a run past its week has no network");
+        assert_eq!(again.network_of("claude:child", Some("claude:a")).as_deref(), Some("net_work"), "a fork has its parent's");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn renewing_stops_a_week_after_the_start_and_a_full_table_loses_its_oldest_only() {
+        let side = StartSide::default();
+        side.note_intent_run("tower", "net_home", Some("agt_two"));
+        side.note_network("claude:a", Some("net_home".into()));
+        // Asked all week, a day apart: still named, until the week is out.
+        for _ in 0..6 {
+            side.kept.locked()[0].at = now_ms() - NAMED_FOR_MS + 1e3;
+            side.kept.locked()[0].since -= NAMED_FOR_MS;
+            assert!(side.names_run("tower", "net_home", "", Some("agt_two")));
+        }
+        side.kept.locked()[0].at = now_ms() - NAMED_FOR_MS + 1e3;
+        side.kept.locked()[0].since -= NAMED_FOR_MS;
+        assert!(!side.names_run("tower", "net_home", "", Some("agt_two")), "past a week from its start, an ask renews nothing");
+        side.run_networks.locked().get_mut("claude:a").unwrap().since = now_ms() - NAMED_MAX_MS - 1.0;
+        assert_eq!(side.network_of("claude:a", None), None);
+        // A full table drops the one longest unused, not all of them.
+        for i in 0..super::RUN_NETWORKS_MAX {
+            side.note_network(&format!("claude:{i}"), Some("net_home".into()));
+            side.run_networks.locked().get_mut(&format!("claude:{i}")).unwrap().at = now_ms() - 1e3 * (super::RUN_NETWORKS_MAX - i) as f64;
+        }
+        side.note_network("claude:new", Some("net_home".into()));
+        assert_eq!(side.run_networks.locked().len(), super::RUN_NETWORKS_MAX);
+        assert!(side.network_of("claude:0", None).is_none() && side.network_of("claude:new", None).is_some() && side.network_of("claude:1", None).is_some());
     }
 }

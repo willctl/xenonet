@@ -180,6 +180,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
     let state_dir = Path::new(&state_dir);
     let policy_store = store.clone();
     let runs_db = setup.db.clone();
+    let runs_store = setup.db.clone();
     let w = Arc::new(Runtime {
         setup,
         env: env.clone(),
@@ -201,7 +202,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         observers: OnceLock::new(),
         me: OnceLock::new(),
         net: network::NetState::default(),
-        starts: starts::StartSide::default(),
+        starts: starts::StartSide::open(runs_store),
         asks: asks::AskSide::default(),
         intents: intents::IntentSide::default(),
         acp: OnceLock::new(),
