@@ -3099,3 +3099,94 @@ async fn an_answer_to_a_prompt_goes_into_the_network_the_prompt_came_in() {
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A person can always stop work: a project unshared from a network after
+/// an intent on it started is still cancelled from the network (the cancel
+/// carries nothing of the project and only narrows), and the machine that
+/// works it stops the run by itself once the project isn't shown to the
+/// network the intent belongs to.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn work_on_a_project_unshared_since_is_still_cancelled_and_stops_by_itself() {
+    let root = std::env::temp_dir().join(format!("xenonet-cancel-unshared-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let (a, b, c, project) = three_in_atlas(&root).await;
+    delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
+    let make = |goal: &str| json!({ "goal": goal, "target": "desk", "project": project, "delegation": DLG, "hours": 1 });
+    let runner = c.world.router.resume.as_ref().unwrap().runner.clone();
+    let unshare = || async {
+        let (s, v) = c.window("PUT", "/api/net/sharing", json!({ "sharing": [] })).await;
+        assert_eq!(s, 200, "{v}");
+    };
+
+    // The maker's cancel, after desk stopped sharing the project.
+    let (s, v) = b.window("POST", "/api/intents", make("hold-on: rebuild the docs")).await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (args, _) = ran(&c, 1).await;
+    let run = format!("claude:{}", args[2]);
+    intent_is(&c, &id, "running").await;
+    assert!(runner.running(&run));
+    unshare().await;
+    let (s, v) = b.window("POST", &format!("/api/intents/{id}/cancel"), json!({})).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("cancelled")), "{v}");
+    intent_is(&c, &id, "cancelled").await;
+    until("desk's run stopped by the cancel", 10, || async { !runner.running(&run) }).await;
+
+    // No cancel at all: desk stops working what it no longer shares.
+    let (s, v) = c.window("PUT", "/api/net/sharing", json!({ "sharing": "all" })).await;
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = b.window("POST", "/api/intents", make("hold-on: tag the release")).await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (args, _) = ran(&c, 2).await;
+    let run = format!("claude:{}", args[2]);
+    intent_is(&c, &id, "running").await;
+    assert!(runner.running(&run));
+    unshare().await;
+    // What it says of the project after that stays here.
+    let (s, v) = as_agent(&c, &run, "POST", &format!("/api/intents/{id}/note"), json!({ "text": "Found the secret ledger." })).await;
+    assert_eq!(s, 200, "{v}");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(intent(&b, &id).await["note"], Value::Null, "a note on a project the network isn't shown didn't leave");
+    xenonet_service::compose::runtime::intents::tick(&c.world);
+    intent_is(&c, &id, "cancelled").await;
+    until("desk's run stopped by itself", 10, || async { !runner.running(&run) }).await;
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// An answer that a handoff is taken or has lapsed carries nothing of the
+/// project and only closes the offer, so it is accepted from the machine
+/// that made it even after the project stopped being shared into the network:
+/// desk keeps contractor-vm's offer on atlas, unshares atlas from N2, and
+/// still hears that it was taken.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_handoff_taken_or_lapsed_is_heard_after_its_project_is_unshared() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-settled-unshared-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 1, None, &t.atlas));
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 2, None, &t.atlas));
+    until("desk holds both offers", 20, || async { has_handoff(&t.desk, 1) && has_handoff(&t.desk, 2) }).await;
+    let (s, v) = t.desk.window("PUT", "/api/net/sharing", json!({ "network": "work", "sharing": [] })).await;
+    assert_eq!(s, 200, "{v}");
+    let settle = |n: u32, op: &str| {
+        let mut b = guest_handoff(&t, n, None, &t.atlas);
+        b["op"] = json!(op);
+        b["by"] = json!(if op == "taken" { json!(t.contractor.agt(VM_ATLAS)) } else { Value::Null });
+        guest_sends(&t, Kind::Handoff, b);
+    };
+    settle(1, "taken");
+    settle(2, "lapsed");
+    until("desk hears it was taken and that the other lapsed", 20, || async {
+        (handoff_state(&t.desk, 1).as_deref(), handoff_state(&t.desk, 2).as_deref()) == (Some("taken"), Some("lapsed"))
+    })
+    .await;
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

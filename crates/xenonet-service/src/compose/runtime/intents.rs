@@ -760,7 +760,10 @@ fn cancel_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     let carried = Carried::parse(b.get("authority").unwrap_or(&Value::Null));
     let p = ground::person(w, &g, Some(host), &carried, &resource, &act)?;
-    ground::judge(&g, &ground::remote(&g, p, resource, act).reaching(project_of(&i)?), None)?;
+    // A cancel carries nothing of the project and only narrows, so it is
+    // held to no sharing: a project unshared since the intent started can
+    // still be stopped by the person who asked for it.
+    ground::judge(&g, &ground::remote(&g, p, resource, act).reaching(xenonet_authz::Reaching::Nothing), None)?;
     db.move_intent(&id, &["made", "assigned", "running"], "cancelled", now_ms() as i64).map_err(|e| e.message)?;
     if me(w).is_some_and(|m| i.worked_on() == Some(m.as_str())) {
         stop_run(w, &id);
@@ -963,7 +966,9 @@ fn report_in_network(w: &Runtime, db: &Db, i: &IntentRow, id: &str, step: Intent
     if let Some(t) = b.get("text").and_then(Value::as_str).map(|t| clip(t, NOTE_MAX)) {
         b["text"] = json!(t);
     }
-    if net(w).me().is_some() {
+    // Kept here, but told to a network only while it is shown the project:
+    // a note or an outcome is a word about it.
+    if net(w).me().is_some() && shown_in(w, &i.network, &i.project) {
         send(w, To::All, Kind::Report, b);
     }
     changed(w);
@@ -1063,6 +1068,21 @@ pub fn tick(w: &Runtime) {
     for i in db.intents().unwrap_or_default() {
         xenonet_net::ground::within(&i.network, || {
             let Some(here) = me(w) else { return };
+            // A project this machine no longer shares into the network the
+            // intent belongs to isn't worked for it: the run is stopped and
+            // the intent ends here. It tells the network nothing, since a
+            // word about the intent would be a word about the project.
+            if i.state == "running"
+                && i.worked_on() == Some(here.as_str())
+                && net(w).live_networks().iter().any(|n| n.network == i.network)
+                && !shown_in(w, &i.network, &i.project)
+                && db.move_intent(&i.id, &["running"], "cancelled", now).unwrap_or(false)
+            {
+                stop_run(w, &i.id);
+                w.log("info", "intent", &format!("{} was stopped: {} isn't shared into its network any more", i.id, i.project));
+                changed(w);
+                return;
+            }
             if i.state == "assigned" && i.worked_on() == Some(here.as_str()) && !w.intents.working.locked().contains(&i.id) {
                 work_soon(w, &i.id);
             }

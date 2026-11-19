@@ -1684,14 +1684,6 @@ fn accepted_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
     row_reach(w, &row)
 }
 
-/// What the answer to a handoff reaches (taken, lapsed): the handoff's
-/// own project and session, as the row `from` made here keeps them. With
-/// no such row there is nothing here for it to touch.
-fn settled_reach(w: &Runtime, from: &str, b: &Value) -> Vec<Reaching> {
-    let Some(row) = s(b, "id").and_then(|id| store(w, |st| st.handoff(&id)).ok().flatten()).filter(|r| r.text("host") == Some(from)) else { return vec![Reaching::Nothing] };
-    row_reach(w, &row)
-}
-
 fn row_reach(w: &Runtime, row: &Row) -> Vec<Reaching> {
     let mut out = Vec::new();
     if let Some(local) = row.text("to_agent").map(|a| here_id(w, a)) {
@@ -2236,7 +2228,11 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
         _ if !meant_here => vec![Reaching::Nothing],
         Some("offer") => offered_reach(w, b),
         Some("accept") => accepted_reach(w, b),
-        Some("taken" | "lapsed") => settled_reach(w, from, b),
+        // That it was taken or has lapsed carries nothing of the project
+        // and only closes an offer, so it is heard however sharing stands
+        // now: a network that stopped being shown the project must not
+        // keep offering a handoff that is gone.
+        Some("taken" | "lapsed") => vec![Reaching::Nothing],
         _ => Vec::new(),
     };
     member_act(w, from, xenonet_authz::Act::Handoff, &reaching)?;
