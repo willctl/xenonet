@@ -120,7 +120,7 @@ env | sort | cut -d= -f1 | tr '\n' ' '; echo
             project: &project,
             offered_env: &[("LANG".to_owned(), "C.UTF-8".to_owned())],
             host_home: &host_home,
-            protected: &[home.0.clone()],
+            protected: std::slice::from_ref(&home.0),
             copy_out: true,
             keep: false,
             deadline: Some(std::time::Duration::from_secs(120)),

@@ -143,7 +143,10 @@ struct Process {
 }
 
 impl Process {
-    fn new(mut spawned: Spawned) -> Process {
+    fn new(spawned: Spawned) -> Process {
+        // Only Windows needs the child itself, for its job object.
+        #[cfg(windows)]
+        let mut spawned = spawned;
         #[cfg(windows)]
         let tree = xenonet_os::process::Tree::of(spawned.child_mut());
         Process {

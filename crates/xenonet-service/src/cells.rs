@@ -484,9 +484,7 @@ mod tests {
         async fn exec(&self, _: &CellName, argv: &[String], opts: ExecOpts) -> Result<Output, DriverError> {
             self.log.0.lock().expect("lock").push(format!("exec {} stdin={}", argv.join(" "), opts.stdin.is_some()));
             let b = *self.behave.lock().expect("lock");
-            if b.panic_exec && argv.contains(&"env".to_owned()) {
-                panic!("this test's exec panics");
-            }
+            assert!(!(b.panic_exec && argv.contains(&"env".to_owned())), "this test's exec panics");
             if b.fail_exec && argv.contains(&"env".to_owned()) {
                 return Err(DriverError::Unsupported { what: "this test's exec".into() });
             }
