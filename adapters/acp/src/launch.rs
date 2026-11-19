@@ -3,16 +3,11 @@
 //! that holds no credential of XenoNet's and no token; and its standard
 //! input and output as the lines ACP's connection runs over.
 
+use adytum_exec::{Command, Spawned, StderrTail};
 use agent_client_protocol::Lines;
 use futures::{Sink, Stream};
-use std::collections::VecDeque;
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
-use xenonet_os::process::{Background as _, Tree};
-use xenonet_os::sync::Locked as _;
 
 /// How much of the agent's standard error is kept, for the error when it
 /// fails to start or exits: the last bytes of it.
@@ -81,72 +76,31 @@ impl Launch {
         &self.env
     }
 
-    /// Starts it: no window on Windows, its own process group elsewhere,
-    /// and a tree (a job object on Windows) so whatever it starts stops
-    /// with it. Its standard error is kept, the last of it, for errors.
+    /// Starts it through adytum-exec: no window on Windows, its own process
+    /// group (so a signal to the service's terminal doesn't reach it, and
+    /// stopping it stops what it started), and `env` as its whole
+    /// environment. Its standard error is kept, the last of it, for errors.
     pub(crate) fn spawn(&self) -> std::io::Result<Running> {
-        let mut cmd = Command::new(&self.program);
-        cmd.no_window();
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt as _;
-            // Not in the service's group: a signal to the service's
-            // terminal doesn't reach the agent, and the agent's own group
-            // is what it starts.
-            cmd.process_group(0);
-        }
-        cmd.args(&self.args).current_dir(&self.cwd).env_clear().envs(self.env.iter().map(|(k, v)| (k, v))).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = cmd.spawn()?;
-        let tree = Tree::of(&child);
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            let _ = child.kill();
+        let cmd = Command::new(&self.program).args(&self.args).cwd(&self.cwd);
+        let cmd = self.env.iter().fold(cmd, |c, (k, v)| c.env(k, v));
+        let mut process = Spawned::start(&cmd).map_err(|e| std::io::Error::other(e.to_string()))?;
+        let (Some(stdin), Some(stdout)) = (process.stdin.take(), process.stdout.take()) else {
+            process.kill_group();
             return Err(std::io::Error::other("the agent's standard input and output weren't there"));
         };
-        let stderr = Tail::default();
-        if let Some(mut e) = child.stderr.take() {
-            let tail = stderr.clone();
-            std::thread::spawn(move || {
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = e.read(&mut buf) {
-                    if n == 0 {
-                        break;
-                    }
-                    tail.push(&buf[..n]);
-                }
-            });
-        }
+        let stderr = process.stderr_tail(STDERR_KEPT).unwrap_or_default();
         let stdin = tokio::process::ChildStdin::from_std(stdin)?;
         let stdout = tokio::process::ChildStdout::from_std(stdout)?;
-        Ok(Running { child, tree, stdin, stdout, stderr })
-    }
-}
-
-/// The last bytes of the agent's standard error.
-#[derive(Clone, Default)]
-pub(crate) struct Tail(Arc<Mutex<VecDeque<u8>>>);
-
-impl Tail {
-    fn push(&self, bytes: &[u8]) {
-        let mut t = self.0.locked();
-        t.extend(bytes);
-        let over = t.len().saturating_sub(STDERR_KEPT);
-        t.drain(..over);
-    }
-
-    /// What it said, trimmed.
-    pub(crate) fn text(&self) -> String {
-        let t = self.0.locked();
-        String::from_utf8_lossy(&t.iter().copied().collect::<Vec<u8>>()).trim().to_string()
+        Ok(Running { process, stdin, stdout, stderr })
     }
 }
 
 /// A started agent.
 pub(crate) struct Running {
-    pub child: Child,
-    pub tree: Tree,
+    pub process: Spawned,
     pub stdin: tokio::process::ChildStdin,
     pub stdout: tokio::process::ChildStdout,
-    pub stderr: Tail,
+    pub stderr: StderrTail,
 }
 
 /// The agent's standard input and output as the newline-delimited JSON
@@ -192,15 +146,5 @@ mod tests {
         assert_eq!(names, ["PATH", "HOME", "GROK_HOME"]);
         let l = Launch::new("agent", vec![], "/w", [("XENONET_UPSTREAM".into(), "x".into()), ("LANG".into(), "C".into())], &[]);
         assert_eq!(l.env(), [("LANG".to_string(), "C".to_string())]);
-    }
-
-    #[test]
-    fn the_tail_keeps_the_last_of_it() {
-        let t = Tail::default();
-        t.push(&vec![b'a'; STDERR_KEPT]);
-        t.push(b"end");
-        let text = t.text();
-        assert_eq!(text.len(), STDERR_KEPT);
-        assert!(text.ends_with("aend"));
     }
 }

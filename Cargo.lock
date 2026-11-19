@@ -5722,6 +5722,7 @@ dependencies = [
 name = "xenonet-acp"
 version = "0.2.0"
 dependencies = [
+ "adytum-exec",
  "agent-client-protocol",
  "futures",
  "serde_json",

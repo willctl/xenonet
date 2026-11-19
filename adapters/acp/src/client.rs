@@ -3,13 +3,14 @@
 //! folder, prompted and cancelled, its updates passed to the host and its
 //! permission requests held as XenoNet's prompts.
 
-use crate::launch::{self, Launch, Mcp, Tail};
+use crate::launch::{self, Launch, Mcp};
 use crate::permission::{self, Answer, Prompt};
 use crate::schema::{
     CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest, Implementation, InitializeRequest, InitializeResponse, KillTerminalRequest, McpServer,
     McpServerStdio, NewSessionRequest, PromptRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionId, SessionNotification, SessionUpdate, StopReason, TerminalOutputRequest, TextContent, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
+use adytum_exec::{Spawned, StderrTail};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::{Agent, ErrorCode};
@@ -18,12 +19,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
-use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{oneshot, watch};
 use xenonet_authz::Information;
-use xenonet_os::process::Tree;
 use xenonet_os::sync::Locked as _;
 
 /// How long a closed agent has to exit by itself, once its input is
@@ -136,16 +135,17 @@ impl Shared {
 }
 
 /// The agent's process, until the client closes.
-struct Process {
-    child: Child,
-    tree: Tree,
-}
+struct Process(Spawned);
 
 impl Process {
+    fn exited(&mut self) -> bool {
+        matches!(self.0.try_wait(), Ok(Some(_)))
+    }
+
+    /// Stops the agent and everything it started, unless it has ended.
     fn stop(&mut self) {
-        if !matches!(self.child.try_wait(), Ok(Some(_))) {
-            self.tree.kill(&mut self.child);
-            let _ = self.child.wait();
+        if !self.exited() {
+            self.0.kill_group();
         }
     }
 }
@@ -158,7 +158,7 @@ pub struct Client {
     stop: Option<oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>>,
     process: Option<Process>,
-    stderr: Tail,
+    stderr: StderrTail,
 }
 
 /// Registers a refusal for each request of the file system and the
@@ -183,8 +183,8 @@ impl Client {
     /// client offering neither the file system nor a terminal.
     pub async fn start(launch: &Launch, host: Arc<dyn Host>) -> Result<Client, AcpError> {
         let running = launch.spawn().map_err(|e| AcpError::Start(e.to_string()))?;
-        let launch::Running { child, tree, stdin, stdout, stderr } = running;
-        let mut process = Process { child, tree };
+        let launch::Running { process, stdin, stdout, stderr } = running;
+        let mut process = Process(process);
         let shared = Arc::new(Shared { host, sessions: Mutex::new(HashMap::new()) });
         let (ready, readied) = oneshot::channel();
         let (stop, stopped) = oneshot::channel::<()>();
@@ -268,7 +268,7 @@ impl Client {
 
     /// The agent's process id, while the client holds it.
     pub fn pid(&self) -> Option<u32> {
-        self.process.as_ref().map(|p| p.child.id())
+        self.process.as_ref().map(|p| p.0.pid())
     }
 
     /// Opens a session in `cwd`, told of XenoNet's own MCP server (`mcp`)
@@ -293,7 +293,7 @@ impl Client {
         }
         if let Some(mut p) = self.process.take() {
             let until = tokio::time::Instant::now() + EXIT_GRACE;
-            while !matches!(p.child.try_wait(), Ok(Some(_))) && tokio::time::Instant::now() < until {
+            while !p.exited() && tokio::time::Instant::now() < until {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
             p.stop();
@@ -312,7 +312,7 @@ impl Drop for Client {
     }
 }
 
-fn with_stderr(why: String, stderr: &Tail) -> String {
+fn with_stderr(why: String, stderr: &StderrTail) -> String {
     let said = stderr.text();
     if said.is_empty() {
         why
