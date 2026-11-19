@@ -207,19 +207,16 @@ proptest = { version = "1", default-features = false, features = ["std"] }
 # Adytum (adytum/): cells, per machine. Eidolon (eidolon/): an entity's
 # state, sealed, opened in a cell and moved. Both keep to their own layer
 # rule in scripts/rust-layers.mjs, and no XenoNet crate depends on them.
-adytum-cli = { path = "adytum/crates/adytum-cli" }
 adytum-doctor = { path = "adytum/crates/adytum-doctor" }
 adytum-driver = { path = "adytum/crates/adytum-driver" }
 adytum-exec = { path = "adytum/crates/adytum-exec" }
 adytum-ledger = { path = "adytum/crates/adytum-ledger" }
 adytum-lima = { path = "adytum/crates/adytum-lima" }
 adytum-model = { path = "adytum/crates/adytum-model" }
-adytum-oci = { path = "adytum/crates/adytum-oci" }
 adytum-policy = { path = "adytum/crates/adytum-policy" }
 adytum-testkit = { path = "adytum/crates/adytum-testkit" }
 eidolon-bidi = { path = "eidolon/crates/eidolon-bidi" }
 eidolon-browser = { path = "eidolon/crates/eidolon-browser" }
-eidolon-cli = { path = "eidolon/crates/eidolon-cli" }
 eidolon-facet = { path = "eidolon/crates/eidolon-facet" }
 eidolon-mcp = { path = "eidolon/crates/eidolon-mcp" }
 eidolon-model = { path = "eidolon/crates/eidolon-model" }
