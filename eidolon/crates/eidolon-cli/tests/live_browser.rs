@@ -167,20 +167,52 @@ async fn clone_cell(ledger: &Ledger, lima: &Lima, from: &CellName, to: &str) {
     ledger.settle(op, Outcome::Done).unwrap();
 }
 
-/// Starts the test page in a cell, as a transient unit.
+/// Starts the test page in a cell, as a transient unit, and waits until it
+/// answers. A clone can carry a unit of the same name from the base, so any
+/// old one is stopped and cleared first. On failure the panic carries the
+/// unit's status and journal, so the cause is in the test output.
 async fn serve_page(lima: &Lima, cell: &CellName) {
-    sh(lima, cell, "sudo systemd-run --unit=eidolon-testpage python3 /opt/testpage/server.py >/dev/null 2>&1").await;
-    // Wait until it answers; the server is a moment behind its unit.
+    let run = |parts: &[&str]| {
+        let parts = argv(parts);
+        async move { lima.exec(cell, &parts, ExecOpts::default()).await.unwrap() }
+    };
+    // Best effort: the unit usually does not exist, and that is fine.
+    run(&["sudo", "systemctl", "stop", "eidolon-testpage.service"]).await;
+    run(&["sudo", "systemctl", "reset-failed", "eidolon-testpage.service"]).await;
+    let started = run(&["sudo", "systemd-run", "--unit=eidolon-testpage", "--collect", "--property=Restart=on-failure", "python3", "/opt/testpage/server.py"]).await;
+    assert!(started.success(), "systemd-run did not start the test page in {cell}: {}", started.stderr_lossy());
+    // The server is a moment behind its unit: poll until the unit is active
+    // and the page answers. Each poll is bounded.
+    let target = format!("http://127.0.0.1:{PAGE_PORT}/");
     let mut up = false;
     for _ in 0..50 {
-        let out = lima.exec(cell, &argv(&["curl", "-fsS", "-o", "/dev/null", &format!("http://127.0.0.1:{PAGE_PORT}/")]), ExecOpts::default()).await.unwrap();
-        up = out.success();
-        if up {
-            break;
+        let active = run(&["systemctl", "is-active", "--quiet", "eidolon-testpage.service"]).await;
+        if active.success() {
+            let answer = run(&["curl", "-fsS", "--max-time", "2", "-o", "/dev/null", &target]).await;
+            up = answer.success();
+            if up {
+                break;
+            }
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    assert!(up, "the test page did not answer in {cell}");
+    if up {
+        return;
+    }
+    let status = run(&["systemctl", "status", "eidolon-testpage.service", "--no-pager"]).await;
+    let journal = run(&["sudo", "journalctl", "-u", "eidolon-testpage.service", "--no-pager", "-n", "50"]).await;
+    let script = run(&["ls", "-l", "/opt/testpage/server.py"]).await;
+    let curl = run(&["curl", "-sv", "--max-time", "3", "-o", "/dev/null", &target]).await;
+    assert!(
+        up,
+        "the test page did not answer in {cell}\n-- status:\n{}{}\n-- journal:\n{}\n-- server.py:\n{}{}\n-- curl:\n{}",
+        status.stdout_lossy(),
+        status.stderr_lossy(),
+        journal.stdout_lossy(),
+        script.stdout_lossy(),
+        script.stderr_lossy(),
+        curl.stderr_lossy()
+    );
 }
 
 /// A fresh page in the cell's browser, over the stream.
