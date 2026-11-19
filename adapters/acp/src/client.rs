@@ -135,18 +135,39 @@ impl Shared {
 }
 
 /// The agent's process, until the client closes.
-struct Process(Spawned);
+struct Process {
+    spawned: Spawned,
+    /// A job object: adytum-exec has no process group on Windows.
+    #[cfg(windows)]
+    tree: xenonet_os::process::Tree,
+}
 
 impl Process {
+    fn new(mut spawned: Spawned) -> Process {
+        #[cfg(windows)]
+        let tree = xenonet_os::process::Tree::of(spawned.child_mut());
+        Process {
+            spawned,
+            #[cfg(windows)]
+            tree,
+        }
+    }
+
     fn exited(&mut self) -> bool {
-        matches!(self.0.try_wait(), Ok(Some(_)))
+        matches!(self.spawned.try_wait(), Ok(Some(_)))
     }
 
     /// Stops the agent and everything it started, unless it has ended.
     fn stop(&mut self) {
-        if !self.exited() {
-            self.0.kill_group();
+        if self.exited() {
+            return;
         }
+        #[cfg(windows)]
+        {
+            self.tree.kill(self.spawned.child_mut());
+        }
+        #[cfg(not(windows))]
+        self.spawned.kill_group();
     }
 }
 
@@ -184,7 +205,7 @@ impl Client {
     pub async fn start(launch: &Launch, host: Arc<dyn Host>) -> Result<Client, AcpError> {
         let running = launch.spawn().map_err(|e| AcpError::Start(e.to_string()))?;
         let launch::Running { process, stdin, stdout, stderr } = running;
-        let mut process = Process(process);
+        let mut process = Process::new(process);
         let shared = Arc::new(Shared { host, sessions: Mutex::new(HashMap::new()) });
         let (ready, readied) = oneshot::channel();
         let (stop, stopped) = oneshot::channel::<()>();
@@ -268,7 +289,7 @@ impl Client {
 
     /// The agent's process id, while the client holds it.
     pub fn pid(&self) -> Option<u32> {
-        self.process.as_ref().map(|p| p.0.pid())
+        self.process.as_ref().map(|p| p.spawned.pid())
     }
 
     /// Opens a session in `cwd`, told of XenoNet's own MCP server (`mcp`)
