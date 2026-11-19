@@ -232,6 +232,10 @@ impl Governance for Gov {
         self.identity.clone()
     }
     fn want_person(&self, _host: &str, _person: &str) {}
+    /// Every machine shares everything into the one network here.
+    fn sharing(&self, _network: &str) -> xenonet_net::share::Sharing {
+        xenonet_net::share::Sharing::All
+    }
 }
 
 /// One person, founded on studio, with laptop's and vm1's devices paired

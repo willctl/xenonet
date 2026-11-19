@@ -331,11 +331,12 @@ impl Shared {
         self.network().filter(|n| n.id == network)
     }
 
-    /// What the person shares into `network`: what they said, or
-    /// everything. A network joined or founded after the first is given
-    /// "nothing" when it's adopted, so no row means the first.
+    /// What the person shares into `network`: what they said, or nothing.
+    /// Every network has a row from the moment it is adopted (or opened
+    /// from a store older than that), so a row that is missing or can't be
+    /// read means something is wrong, and a network is then shown nothing.
     pub fn sharing(&self, network: &str) -> crate::share::Sharing {
-        self.opts.persist.sharing(network).ok().flatten().unwrap_or(crate::share::Sharing::All)
+        self.opts.persist.sharing(network).ok().flatten().unwrap_or_else(|| crate::share::Sharing::default_for(false))
     }
 
     /// What each network `host` (a member of this one) is in with this
@@ -1391,9 +1392,11 @@ impl Node {
         n.dir.write_roster(&net.id, &roster)?;
         // The first network this machine is in sees all of it; every one
         // after starts with nothing, until the person shares projects
-        // into it at the window (`share`).
-        if n.common.shareds().iter().any(|s| s.network().is_some_and(|o| o.id != net.id)) && n.opts.persist.sharing(&net.id)?.is_none() {
-            n.opts.persist.put_sharing(&net.id, &crate::share::Sharing::default_for(false))?;
+        // into it at the window (`share`). Either way the row is written
+        // now, since a network with no row is shown nothing.
+        if n.opts.persist.sharing(&net.id)?.is_none() {
+            let first = !n.common.shareds().iter().any(|s| s.network().is_some_and(|o| o.id != net.id));
+            n.opts.persist.put_sharing(&net.id, &crate::share::Sharing::default_for(first))?;
         }
         *n.writer.locked() = None;
         *n.key.writing() = Some(Arc::new(key));

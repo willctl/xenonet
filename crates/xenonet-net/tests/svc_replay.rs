@@ -68,6 +68,14 @@ async fn counting_service(hits: Arc<AtomicUsize>) -> u16 {
 /// studio's node, in a network with laptop, on a clock the test sets:
 /// its folder, the node, the clock, and both hosts' keys.
 fn studio(tag: &str) -> (std::path::PathBuf, Arc<Nodes>, Arc<Node>, Arc<AtomicI64>, HostKey, HostKey) {
+    let (dir, nodes, node, clock, studio, laptop, _kept) = studio_kept(tag);
+    (dir, nodes, node, clock, studio, laptop)
+}
+
+/// `studio` and the store its networks are kept in.
+type StudioKept = (std::path::PathBuf, Arc<Nodes>, Arc<Node>, Arc<AtomicI64>, HostKey, HostKey, Arc<dyn Persist>);
+
+fn studio_kept(tag: &str) -> StudioKept {
     let dir = std::env::temp_dir().join(format!("xenonet-svc-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -93,7 +101,7 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Nodes>, Arc<Node>, Arc<AtomicI6
         .write_network(&NetFile { id: NET.into(), name: "home".into(), host: "studio".into(), founder: "studio".into(), titles_only: false, share_load: true, joined: T0 })
         .unwrap();
     let clock = Arc::new(AtomicI64::new(T0 + 10 * MIN));
-    let mut o = Options::new(dir.join("network"), kept, "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));
+    let mut o = Options::new(dir.join("network"), kept.clone(), "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));
     o.vault = Some(vault);
     o.bind = Some("127.0.0.1:0".parse().unwrap());
     o.lan = LanLookup::Off;
@@ -101,7 +109,7 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Nodes>, Arc<Node>, Arc<AtomicI6
     o.clock = Arc::new(move || c.load(Ordering::SeqCst) as f64);
     let nodes = Nodes::open(o, Arc::new(SinkSlot::new(Arc::new(LogSink::new(Arc::new(|_: &str, _: &str| {})))))).unwrap();
     let node = nodes.first();
-    (dir, nodes, node, clock, studio, laptop)
+    (dir, nodes, node, clock, studio, laptop, kept)
 }
 
 const OTHER: &str = "net_ffeeddccbbaa99887766554433221100";
@@ -186,5 +194,27 @@ async fn a_svc_request_is_passed_on_once_however_often_its_stream_is_sent() {
     mesh.close().await;
     nodes.stop();
     drop(node);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A network is shown only what the person shares into it, and one with no
+/// row for that is shown nothing, however it came to have none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_network_with_no_row_of_what_is_shared_is_shown_nothing() {
+    use xenonet_net::ground::Governance;
+    use xenonet_net::share::Sharing;
+    let (dir, nodes, node, _clock, _studio, _laptop, kept) = studio_kept("sharing");
+    // The store kept no row for the network when it was opened (an older
+    // one): it was shown everything then, so opening writes that down.
+    assert_eq!(kept.sharing(NET).unwrap(), Some(Sharing::All));
+    assert_eq!(node.shared().sharing(NET), Sharing::All);
+    assert_eq!(nodes.sharing(NET), Sharing::All);
+    // The row is gone: nothing is shown, whichever way it is asked.
+    kept.forget(NET).unwrap();
+    assert_eq!(node.shared().sharing(NET), Sharing::default_for(false));
+    assert_eq!(nodes.sharing(NET), Sharing::default_for(false));
+    assert!(!node.shared().sharing(NET).shows_project("prj_web") && !nodes.sharing(NET).shows(&serde_json::json!({ "id": "claude:x" })));
+    // And a network this machine isn't in is shown nothing.
+    assert_eq!(nodes.sharing(OTHER), Sharing::default_for(false));
     let _ = std::fs::remove_dir_all(dir);
 }

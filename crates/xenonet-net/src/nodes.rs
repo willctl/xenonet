@@ -99,6 +99,14 @@ impl Nodes {
         let common = Common::new(identity.clone());
         let mut nets = Vec::new();
         for net in dir.read_networks()? {
+            // A network from a store that kept no row for it was shown
+            // everything (a missing row used to mean that), and stays so:
+            // the row is written now, since without one it is shown nothing.
+            // If the store can't say or can't write, opening goes on: the
+            // network is then shown nothing, which is the safe side.
+            if opts.persist.sharing(&net.id).ok().flatten().is_none() {
+                let _ = opts.persist.put_sharing(&net.id, &crate::share::Sharing::All);
+            }
             nets.push(Node::open_in(opts.clone(), sink.clone(), common.clone(), Some(net))?);
         }
         let empty = Node::open_in(opts.clone(), sink.clone(), common.clone(), None)?;
