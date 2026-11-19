@@ -265,6 +265,12 @@ pub trait Net: Send + Sync {
             Vec::new()
         }
     }
+    /// The networks shown `project` (None: a body about no project, which
+    /// only a network shown everything is): where a body about it may go.
+    fn networks_for(&self, project: Option<&str>) -> Vec<String> {
+        let _ = project;
+        self.networks().into_iter().map(|m| m.network).collect()
+    }
     /// The other hosts in the roster.
     fn hosts(&self) -> Vec<Host>;
     /// Queues a body. It refuses only when this machine isn't in a network

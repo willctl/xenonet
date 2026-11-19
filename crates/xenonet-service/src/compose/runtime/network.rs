@@ -1924,7 +1924,7 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
             (None, None) => key.as_ref().map(|_| None),
         };
         if let Some(d) = dest {
-            send_handoff(w, d.as_deref(), body);
+            send_handoff(w, None, d.as_deref(), body);
         }
     }
     Ok(
@@ -1933,10 +1933,16 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
 }
 
 /// A handoff, as an entry of this machine's feed: kept, so every member
-/// gets it in order, and it names the one machine it's for, if one.
-fn send_handoff(w: &Runtime, for_host: Option<&str>, mut body: Value) {
+/// gets it in order, and it names the one machine it's for, if one. Only
+/// an offer says what the work is: an accept or an answer says which
+/// handoff and who, so what one network's offer holds never goes into
+/// another with it.
+fn send_handoff(w: &Runtime, network: Option<String>, for_host: Option<&str>, mut body: Value) {
     if let Some(h) = for_host {
         body["for"] = json!(h);
+    }
+    if body["op"] != "offer" {
+        body = bare(body);
     }
     // Its agents by their agt_.
     for at in ["/from", "/by", "/to/agent"] {
@@ -1946,7 +1952,48 @@ fn send_handoff(w: &Runtime, for_host: Option<&str>, mut body: Value) {
             }
         }
     }
-    send(w, To::All, Kind::Handoff, body);
+    send_in(w, network, To::All, Kind::Handoff, body, None);
+}
+
+/// `body` without what the work is: the project it is about stays, since
+/// that is what decides where it may go.
+fn bare(mut body: Value) -> Value {
+    for k in ["goal", "done", "next", "branch", "commit"] {
+        body[k] = Value::Null;
+    }
+    body["files"] = json!([]);
+    body["from"] = json!("");
+    body["to"] = json!({ "agent": null, "projectKey": body["to"]["projectKey"].clone(), "host": null });
+    body
+}
+
+/// A handoff made here was taken or lapsed: told in every network its
+/// offer went to (the networks shown its project, with the machine it was
+/// for, if one), whichever network the one who took it came in, or none.
+/// Who took it goes only into a network that taker is known in.
+fn settled(w: &Runtime, r: &Row, op: &str, by: Option<&str>) {
+    let to_host = r.text("to_host");
+    for network in net(w).networks_for(r.text("to_repo")) {
+        if to_host.is_some_and(|h| !net(w).networks_with(h).contains(&network)) {
+            continue;
+        }
+        let mut body = body_of(r, op, by);
+        if by.is_some_and(|b| !known_in(w, b, &network)) {
+            body["by"] = Value::Null;
+        }
+        send_handoff(w, Some(network), None, body);
+    }
+}
+
+/// Whether `network` knows `agent`: a session of another machine, if that
+/// machine is in it; one of this machine's, if the network is shown the
+/// project it is in.
+fn known_in(w: &Runtime, agent: &str, network: &str) -> bool {
+    if is_remote(agent) {
+        return host_of_agent(w, agent).is_some_and(|h| net(w).networks_with(&h).iter().any(|n| n == network));
+    }
+    let project = project_of_session(w, agent);
+    net(w).networks_for(project.as_ref().map(xenonet_authz::ProjectId::as_str)).iter().any(|n| n == network)
 }
 
 /// A handoff's body, from its row here.
@@ -2063,7 +2110,7 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
                 let _ = send_from(w, me, &maker, &format!("I took your handoff {id}."), envelope);
             }
             if me_net.is_some() {
-                send_handoff(w, None, body_of(&r, "taken", Some(me)));
+                settled(w, &r, "taken", Some(me));
             }
             Ok(json!({ "taken": true, "handoff": shown(&r, me_net.as_ref().map(|m| m.host.as_str())), "words": details(&r) }))
         }
@@ -2073,7 +2120,7 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
                 return Err(fail(format!("{id} was made on {h}, and this machine isn't in a XenoNet network now")));
             };
             store(w, |s| s.ask_handoff(id, me))?;
-            send_handoff(w, Some(h), body_of(&r, "accept", Some(me)));
+            send_handoff(w, None, Some(h), body_of(&r, "accept", Some(me)));
             let away = !net(w).hosts().iter().any(|x| x.id == h && x.online);
             Ok(json!({
                 "taken": false,
@@ -2172,12 +2219,17 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
             if store(w, |s| s.take_handoff(&id, &by, now))? {
                 let maker = r.text("maker").unwrap_or("");
                 note(w, &by, maker, &format!("I took your handoff {id}."), Some(from));
-                send_handoff(w, None, body_of(&r, "taken", Some(&by)));
+                settled(w, &r, "taken", Some(&by));
             } else if let Some(now_row) = store(w, |s| s.handoff(&id))? {
                 // Taken already: the asking host hears by whom.
                 let taker = now_row.text("taken_by").unwrap_or("");
                 let state = now_row.text("state").unwrap_or("taken").to_string();
-                send_handoff(w, Some(from), body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(taker)));
+                // Who took it, only if the network it is told in knows them.
+                let mut body = body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(taker));
+                if xenonet_net::ground::current().is_none_or(|n| !known_in(w, taker, &n)) {
+                    body["by"] = Value::Null;
+                }
+                send_handoff(w, None, Some(from), body);
             }
         }
         // The making host decided.
@@ -2219,7 +2271,7 @@ fn lapse(w: &Runtime) {
             let maker = r.text("maker").unwrap_or("");
             note(w, maker, maker, &format!("No one took your handoff {id} in a week, so it lapsed."), None);
             if net(w).me().is_some() {
-                send_handoff(w, None, body_of(&r, "lapsed", None));
+                settled(w, &r, "lapsed", None);
             }
         }
     }

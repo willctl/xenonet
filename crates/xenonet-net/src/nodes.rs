@@ -647,6 +647,15 @@ fn shown_in(out: &Outgoing, sharing: &crate::share::Sharing) -> bool {
     }
 }
 
+/// Whether `s`, a network, can take `out`: a handoff that names the one
+/// machine it is for goes only into networks that machine is in.
+fn holds_target(out: &Outgoing, s: &Shared) -> bool {
+    match (out.kind, out.body.get("for").and_then(Value::as_str)) {
+        (Kind::Handoff, Some(h)) => s.roster().view_ref().is_some_and(|v| v.member(h).is_some()),
+        _ => true,
+    }
+}
+
 impl Net for Nodes {
     fn networks(&self) -> Vec<Me> {
         self.common.shareds().iter().filter_map(|s| s.network()).map(|n| Me { network: n.id, name: n.name, host: n.host }).collect()
@@ -656,6 +665,23 @@ impl Net for Nodes {
         let s = self.named()?;
         let n = s.network()?;
         Some(Me { network: n.id, name: n.name, host: n.host })
+    }
+
+    fn networks_for(&self, project: Option<&str>) -> Vec<String> {
+        self.common
+            .shareds()
+            .iter()
+            .filter(|s| !s.is_removed())
+            .filter_map(|s| {
+                let n = s.network()?;
+                let sharing = s.sharing(&n.id);
+                let shown = match project {
+                    Some(p) => sharing.shows_project(p),
+                    None => sharing == crate::share::Sharing::All,
+                };
+                shown.then_some(n.id)
+            })
+            .collect()
     }
 
     fn networks_with(&self, host: &str) -> Vec<String> {
@@ -690,7 +716,7 @@ impl Net for Nodes {
             let s = self.common.shared_of(&id).ok_or_else(|| format!("this machine isn't in {id}"))?;
             // What is about a project goes only into a network shown it,
             // in a frame's network too.
-            if !shown_in(&out, &s.sharing(&id)) {
+            if !shown_in(&out, &s.sharing(&id)) || !holds_target(&out, &s) {
                 return Ok(());
             }
             let presence = (out.kind == Kind::Presence).then(|| out.body.clone());
@@ -725,7 +751,7 @@ impl Net for Nodes {
             Kind::Claims | Kind::Handoff => {
                 for s in &nets {
                     let Some(id) = s.network().map(|n| n.id) else { continue };
-                    if !s.is_removed() && shown_in(&out, &s.sharing(&id)) {
+                    if !s.is_removed() && shown_in(&out, &s.sharing(&id)) && holds_target(&out, s) {
                         s.send(Outgoing { network: Some(id), ..out.clone() })?;
                     }
                 }

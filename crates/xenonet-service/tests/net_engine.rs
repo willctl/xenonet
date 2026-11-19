@@ -2555,3 +2555,64 @@ async fn an_intent_is_kept_taken_and_worked_only_for_a_project_its_network_is_sh
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// The handoff entries `h` has written into its feed in `network`, as the
+/// members of that network get them.
+fn handoffs_written(h: &Host, network: &str) -> Vec<Value> {
+    let kept = xenonet_service::serve::kept_network(&h.ctx.cores).unwrap();
+    kept.feed_out_after(network, xenonet_net::feed::Pos::ORIGIN, 1000).unwrap().into_iter().filter(|e| e.kind == xenonet_net::feed::Kind::Handoff).map(|e| e.body).collect()
+}
+
+fn ops_of(h: &Host, network: &str, id: &str) -> Vec<Value> {
+    handoffs_written(h, network).into_iter().filter(|b| b["id"] == id).collect()
+}
+
+/// What a handoff says goes into the networks it belongs to and no other:
+/// another network's offer, accepted here, answers only to that network
+/// (and carries nothing of the offer); and one made here for atlas, taken
+/// by a machine of one network, is settled in every network it went to,
+/// without saying who took it to a network that machine isn't in, or what
+/// it was.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_handoffs_accept_and_answer_go_only_where_the_offer_went_and_carry_none_of_it() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-handoff-nets-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+
+    // contractor-vm (N2) offers work on atlas; desk's atlas session takes it.
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 1, None, &t.atlas));
+    until("desk holds contractor-vm's offer", 20, || async { has_handoff(&t.desk, 1) }).await;
+    let theirs = "hof_00000000-0000-4000-8000-000000000001";
+    let v = t.desk.agent(DESK_ATLAS, "handoff", json!({ "accept": theirs })).await;
+    assert_eq!(v["waiting"], json!(true), "{v}");
+    let accepts = |network: &str| ops_of(&t.desk, network, theirs);
+    // The positive control: it answers to N2, where the offer came from.
+    assert_eq!(accepts(&t.n2).len(), 1, "{:?}", accepts(&t.n2));
+    // And not into N1, whose tower never heard of it; nor does it carry the offer.
+    assert!(accepts(&t.n1).is_empty(), "contractor-vm's handoff was answered into N1: {:?}", accepts(&t.n1));
+    assert_eq!(accepts(&t.n2)[0]["goal"], Value::Null, "an accept says which handoff and who accepts, not what it was: {:?}", accepts(&t.n2));
+
+    // desk's own offer on atlas goes into both networks; contractor-vm takes it.
+    let mine = t.desk.agent(DESK_ATLAS, "handoff", json!({ "goal": "Finish refunds", "done": "The form", "next": "The rest" })).await["id"].as_str().unwrap().to_string();
+    let mut accept = guest_handoff(&t, 0, None, &t.atlas);
+    accept["id"] = json!(mine);
+    accept["op"] = json!("accept");
+    accept["by"] = json!(t.contractor.agt(VM_ATLAS));
+    guest_sends(&t, Kind::Handoff, accept);
+    until("desk's offer is taken", 20, || async { handoff_by(&t.desk, &mine).as_deref() == Some("taken") }).await;
+    let settled = |network: &str| ops_of(&t.desk, network, &mine).into_iter().filter(|b| b["op"] == "taken").collect::<Vec<_>>();
+    assert_eq!(settled(&t.n2).len(), 1, "N2: {:?}", ops_of(&t.desk, &t.n2, &mine));
+    assert_eq!(settled(&t.n2)[0]["by"], json!(t.contractor.agt(VM_ATLAS)), "N2 knows who took it");
+    // N1 had the offer, so N1 hears it was taken, or its sessions are
+    // offered a handoff that is gone.
+    assert_eq!(settled(&t.n1).len(), 1, "N1: {:?}", ops_of(&t.desk, &t.n1, &mine));
+    // ... without who: contractor-vm isn't in N1. Nor what it was.
+    assert_eq!(settled(&t.n1)[0]["by"], Value::Null, "{:?}", settled(&t.n1));
+    assert_eq!(settled(&t.n1)[0]["goal"], Value::Null, "{:?}", settled(&t.n1));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
