@@ -51,7 +51,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 use xenonet_adapter::apps::is_session_id;
 use xenonet_api::From;
-use xenonet_authz::Information;
+use xenonet_authz::{Information, Reaching};
 use xenonet_engine::delivery::policy::Guard;
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Engine, Fail, Result, ACTIVE_MS};
 use xenonet_engine::host::Collaborators;
@@ -345,6 +345,14 @@ fn row_json(r: &Row) -> Value {
 fn project_key(w: &Runtime, cwd: Option<&Value>) -> Option<String> {
     let db = w.setup.db.as_ref()?;
     cwd.and_then(Value::as_str).filter(|c| !c.is_empty()).and_then(|c| crate::compose::runtime::checkouts::project_of(db, c))
+}
+
+/// The project one of this machine's sessions is in (`local` is its own id
+/// for it), through a checkout the person confirmed; None for a session in
+/// none, or one this machine doesn't know.
+pub(crate) fn project_of_session(w: &Runtime, local: &str) -> Option<xenonet_authz::ProjectId> {
+    let view = engine(w, |e, c| e.view(c, local)).ok()?;
+    project_key(w, view.get("cwd")).and_then(|p| xenonet_authz::ProjectId::new(&p).ok())
 }
 
 // ---------- from the link ----------
@@ -1270,8 +1278,23 @@ pub(crate) fn judge_remote(
     resource: xenonet_authz::Resource,
     act: xenonet_authz::Act,
 ) -> std::result::Result<(), String> {
+    judge_remote_reaching(w, g, from, resource, act, Vec::new())
+}
+
+/// `judge_remote` for a frame that also reaches something the act it is
+/// signed for doesn't name (a session, a handoff's project): the network
+/// it came in must be shown that too.
+pub(crate) fn judge_remote_reaching(
+    w: &Runtime,
+    g: &mut crate::compose::runtime::ground::EngineGround,
+    from: &SentBy<'_>,
+    resource: xenonet_authz::Resource,
+    act: xenonet_authz::Act,
+    reaching: Vec<Reaching>,
+) -> std::result::Result<(), String> {
     let (p, token) = principal_of(w, g, from, &resource, &act)?;
-    crate::compose::runtime::ground::judge_by(g, &crate::compose::runtime::ground::remote(g, p, resource, act), token.as_ref(), None)
+    let request = reaching.into_iter().fold(crate::compose::runtime::ground::remote(g, p, resource, act), xenonet_authz::Request::reaching);
+    crate::compose::runtime::ground::judge_by(g, &request, token.as_ref(), None)
 }
 
 fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) -> Result<()> {
@@ -1318,13 +1341,24 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
     // The target by its agt_: one of this machine's sessions or actors.
     let local = here_id(w, &target);
     if !(is_agent_id(&local) || is_actor_agent(&local)) {
-        receipt(w, from, &mid, &target, "refused", Some("no session or actor here has that id"));
+        receipt(w, from, &mid, &target, "refused", Some(xenonet_authz::NOT_SEEN));
         return Ok(());
     }
     // Decided here: who sent it, on this machine's own facts. A message as
-    // you carries your device's signature, bound to this machine.
+    // you carries your device's signature, bound to this machine. A session
+    // is reached only if the network it came in is shown its project, and
+    // a session that isn't is refused in the words of one that isn't here.
     let resource = xenonet_authz::Resource::Machine(g.facts.machine.clone());
-    let decided = judge_remote(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, resource, xenonet_authz::Act::Message);
+    let mut reaching = Vec::new();
+    if is_agent_id(&local) {
+        let Ok(session) = xenonet_authz::SessionId::new(&local) else {
+            receipt(w, from, &mid, &target, "refused", Some(xenonet_authz::NOT_SEEN));
+            return Ok(());
+        };
+        g.place(w, &local);
+        reaching.push(Reaching::Session(session));
+    }
+    let decided = judge_remote_reaching(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, resource, xenonet_authz::Act::Message, reaching);
     if let Err(why) = decided {
         receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());
@@ -1487,11 +1521,38 @@ pub(crate) fn claimed(w: &Runtime, mut body: Value) {
 
 /// `from`'s machine-level act here (a handoff), decided: a member of the
 /// network.
-fn member_act(w: &Runtime, from: &str, act: xenonet_authz::Act) -> Result<()> {
-    let Some(g) = crate::compose::runtime::ground::ground(w, None) else { return Err(fail("this machine's governance isn't plugged in")) };
+fn member_act(w: &Runtime, from: &str, act: xenonet_authz::Act, reaching: &[Reaching]) -> Result<()> {
+    let Some(mut g) = crate::compose::runtime::ground::ground(w, None) else { return Err(fail("this machine's governance isn't plugged in")) };
     let id = crate::compose::runtime::ground::machine(from).map_err(fail)?;
-    let request = crate::compose::runtime::ground::remote(&g, xenonet_authz::Principal::Machine { id }, xenonet_authz::Resource::Machine(g.facts.machine.clone()), act);
+    let mut request = crate::compose::runtime::ground::remote(&g, xenonet_authz::Principal::Machine { id }, xenonet_authz::Resource::Machine(g.facts.machine.clone()), act);
+    for r in reaching {
+        if let Reaching::Session(s) = r {
+            g.place(w, s.as_str());
+        }
+        request = request.reaching(r.clone());
+    }
     crate::compose::runtime::ground::judge(&g, &request, None).map_err(fail)
+}
+
+/// What an offer from `from` reaches here, beyond the machine: the session
+/// it is handed to, if one of this machine's, and the project it names; or
+/// no project at all, which only a network shown everything reaches. An
+/// offer meant for another machine is only passed by, so reaches nothing.
+fn offered_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
+    let to = b.get("to").cloned().unwrap_or(Value::Null);
+    let mut out = Vec::new();
+    if let Some(a) = s(&to, "agent").filter(|a| a.chars().count() <= 200) {
+        let local = here_id(w, &a);
+        // Any session not here is placed nowhere.
+        out.push(xenonet_authz::SessionId::new(&local).map_or(Reaching::Unplaced, Reaching::Session));
+    }
+    if let Some(p) = s(&to, "projectKey").and_then(|k| xenonet_authz::ProjectId::new(&k).ok()) {
+        out.push(Reaching::Project(p));
+    }
+    if out.is_empty() {
+        out.push(Reaching::Unplaced);
+    }
+    out
 }
 
 /// A claim entry of `from`'s feed (its author's key id `author`): decided
@@ -1965,7 +2026,9 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
 }
 
 fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
-    member_act(w, from, xenonet_authz::Act::Handoff)?;
+    let meant_here = s(b, "for").is_none_or(|h| net(w).me().is_some_and(|me| me.host == h));
+    let reaching = if s(b, "op").as_deref() == Some("offer") && meant_here { offered_reach(w, b) } else { Vec::new() };
+    member_act(w, from, xenonet_authz::Act::Handoff, &reaching)?;
     let (Some(id), Some(op)) = (s(b, "id"), s(b, "op")) else { return Err(fail("a handoff without its id or op")) };
     if !id.starts_with("hof_") {
         return Err(fail("a handoff that isn't network/handoff/v1"));

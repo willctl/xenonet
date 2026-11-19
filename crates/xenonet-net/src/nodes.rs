@@ -731,6 +731,10 @@ impl Governance for Nodes {
     fn identity(&self) -> Arc<Identity> {
         self.common.identity.clone()
     }
+    /// A network this machine isn't in is shown nothing.
+    fn sharing(&self, network: &str) -> crate::share::Sharing {
+        self.common.shared_of(network).map_or_else(|| crate::share::Sharing::default_for(false), |s| s.sharing(network))
+    }
     fn want_person(&self, host: &str, person: &str) {
         let s = self.current().filter(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some()));
         let s = s.or_else(|| self.common.shareds().into_iter().find(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some())));

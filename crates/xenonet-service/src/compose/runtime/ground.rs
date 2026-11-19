@@ -52,9 +52,38 @@ pub struct EngineGround {
     /// Another machine's root certificates an act carried, unverified: a
     /// token's parse checks each against that machine's signing key.
     pub roots: Vec<RootCertificate>,
+    /// What the person shares into the network these facts are for.
+    pub sharing: xenonet_net::share::Sharing,
+    /// The project each of this machine's sessions named to `place` is in.
+    pub placed: HashMap<String, xenonet_authz::ProjectId>,
+}
+
+impl EngineGround {
+    /// Notes the project `session` (this machine's own id for it) is in,
+    /// through a checkout the person confirmed, so a decision on a frame
+    /// that reaches it can ask whether its network is shown that project.
+    pub fn place(&mut self, w: &Runtime, session: &str) {
+        if let Some(p) = crate::compose::runtime::network::project_of_session(w, session) {
+            self.placed.insert(session.to_string(), p);
+        }
+    }
 }
 
 impl Ground for EngineGround {
+    /// A network is shown a project when the person shared it into that
+    /// network; one shown projects sees nothing that sits in none. The
+    /// sharing is this network's alone, so another network is never
+    /// answered from it.
+    fn sees(&self, network: &NetworkId, project: Option<&xenonet_authz::ProjectId>) -> bool {
+        self.facts.network().as_ref() == Some(network)
+            && match project {
+                Some(p) => self.sharing.shows_project(p.as_str()),
+                None => self.sharing == xenonet_net::share::Sharing::All,
+            }
+    }
+    fn session_project(&self, session: &SessionId) -> Option<xenonet_authz::ProjectId> {
+        self.placed.get(session.as_str()).cloned()
+    }
     fn own_machine(&self) -> &MachineId {
         self.facts.own_machine()
     }
@@ -148,7 +177,11 @@ pub fn ground(w: &Runtime, extra: Option<(&str, crate::compose::runtime::asks::W
         waiting.push((id.to_string(), a));
     }
     let asks = waiting.into_iter().filter_map(|(id, a)| Some((id, asked(&facts.machine, a)?))).collect();
-    Some(EngineGround { facts, asks, store: Some(w.store.clone()), roots: Vec::new() })
+    let sharing = facts.network().map_or_else(
+        || xenonet_net::share::Sharing::default_for(false),
+        |n| governance(w).map_or_else(|| xenonet_net::share::Sharing::default_for(false), |g| g.sharing(n.as_str())),
+    );
+    Some(EngineGround { facts, asks, store: Some(w.store.clone()), roots: Vec::new(), sharing, placed: HashMap::new() })
 }
 
 // An ask as a decision reads it: its caller as the process check found it
@@ -475,7 +508,7 @@ mod tests {
         }
         let facts = Facts { machine: MachineId::new("laptop").unwrap(), view: Some(view), identity: identity.clone(), synced_at: synced, now: NOW };
         let asks = HashMap::from([("ask_1".to_string(), waiting(None))]);
-        (EngineGround { facts, asks, store: None, roots: Vec::new() }, identity, dir)
+        (EngineGround { facts, asks, store: None, roots: Vec::new(), sharing: xenonet_net::share::Sharing::All, placed: HashMap::new() }, identity, dir)
     }
 
     #[test]

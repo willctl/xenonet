@@ -677,6 +677,9 @@ mod tests {
         fn own_machine(&self) -> &MachineId {
             &self.machine
         }
+        fn sees(&self, _: &NetworkId, _: Option<&crate::ProjectId>) -> bool {
+            false
+        }
         fn role(&self, _: &NetworkId, _: &MachineId) -> Option<crate::Role> {
             None
         }

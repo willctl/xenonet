@@ -16,6 +16,10 @@
 //!    the person; from the network, a member of the network the envelope
 //!    names, never this machine itself; at the gateway and A2A, only this
 //!    machine's actors.
+//!    A frame from another machine also reaches only what that network is
+//!    shown: a message or wake the project its session is in, a claim its
+//!    project, a handoff the project it names, each checked with
+//!    `Ground::sees` before the sender is.
 //! 3. **Who**: the person's device signature is for this act, from an
 //!    unrevoked device of this machine's person; an actor (a bot or a cloud
 //!    assistant too) holds a token for exactly them, whose root is still certified, with
@@ -110,12 +114,19 @@
 //!    Deny, which only narrows.
 
 use crate::proof::VerifiedPresence;
-use crate::vocab::{Act, Action, AnswerDecision, Attestation, DelegationId, DeviceId, IntentStep, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
+use crate::vocab::{
+    Act, Action, AnswerDecision, Attestation, DelegationId, DeviceId, IntentStep, NetworkId, Principal, ProjectId, Reaching, ReadScope, Request, Resource, StartMode,
+};
 use crate::{DeviceKind, Door, Ground, Role, SpaceLevel, StandingGrant, StartSetting, Token, WakeSetting};
 use std::fmt;
 
 /// How stale governance may be before acts for another machine hold.
 pub const HOLD_AFTER_MS: i64 = 10 * 60_000;
+
+/// The words of a refusal because a network isn't shown what a frame
+/// reaches. They are the words of "that session isn't here", so a member
+/// can't learn which ids exist among what it isn't shown.
+pub const NOT_SEEN: &str = "no session or actor here has that id";
 
 /// Why a request was held or refused: a short code and words for a person.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +316,7 @@ pub fn decide(token: Option<&Token>, request: &Request, ground: &dyn Ground, pre
     let judged = (|| -> Step<(Arrival, Authority, Option<&'static str>)> {
         resource(request, ground)?;
         let arrival = arrival(request, ground)?;
+        seen(request, ground, &arrival)?;
         let authority = who(token, request, ground, &arrival)?;
         let (authority, note) = row(request, ground, presence, &arrival, authority)?;
         Ok((arrival, authority, note))
@@ -424,6 +436,35 @@ fn arrival(request: &Request, ground: &dyn Ground) -> Step<Arrival> {
             Principal::Actor { machine, .. } if machine == own => Ok(Arrival { own: true, role: None }),
             _ => Err(Reason::new("door", format!("only this machine's actors come in through its {}", if request.door() == Door::Gateway { "gateway" } else { "A2A door" }))),
         },
+    }
+}
+
+// Step 2b: a frame from another machine reaches only what the network it
+// came in is shown. A message or wake reaches a session, a claim a project,
+// and a message or handoff whatever the receiver found it to reach
+// (`Request::reaching`). A session in no confirmed project is placed
+// nowhere, which only a network shown everything sees. This comes before
+// the sender is checked, so the answer can't depend on who is asking.
+fn seen(request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<()> {
+    let Some(network) = request.network().filter(|_| !arrival.own) else { return Ok(()) };
+    let by_session = |s| ground.session_project(s);
+    let mut reached: Vec<Option<ProjectId>> = Vec::new();
+    match (request.action(), request.resource()) {
+        (Action::Message | Action::Wake, Resource::Session(s)) => reached.push(by_session(s)),
+        (Action::Claim, Resource::Project(p)) => reached.push(Some(p.clone())),
+        _ => {}
+    }
+    for r in request.reaches() {
+        reached.push(match r {
+            Reaching::Session(s) => by_session(s),
+            Reaching::Project(p) => Some(p.clone()),
+            Reaching::Unplaced => None,
+        });
+    }
+    if reached.iter().all(|p| ground.sees(network, p.as_ref())) {
+        Ok(())
+    } else {
+        Err(Reason::new("shared", NOT_SEEN))
     }
 }
 

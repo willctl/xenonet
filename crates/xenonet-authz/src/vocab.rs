@@ -630,11 +630,39 @@ pub struct Request {
     door: Door,
     at: i64,
     network: Option<NetworkId>,
+    reaching: Vec<Reaching>,
+}
+
+/// What a frame from another machine reaches besides the machine the
+/// request names: the receiver's own reading of the frame, never signed
+/// and never the sender's word. A network reaches only what it is shown,
+/// so each of these must be shown in the network the frame came in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reaching {
+    /// A session of this machine, by the project the receiver finds it in.
+    Session(SessionId),
+    /// A project, as a handoff names the one it is for.
+    Project(ProjectId),
+    /// Whatever takes it, no project named: shown only where everything is.
+    Unplaced,
 }
 
 impl Request {
     pub fn new(principal: Principal, resource: Resource, act: Act, door: Door, at: i64, network: Option<NetworkId>) -> Request {
-        Request { principal, action: act.action(), resource, act, door, at, network }
+        Request { principal, action: act.action(), resource, act, door, at, network, reaching: Vec::new() }
+    }
+
+    /// This request, also reaching `what`. A message and a handoff are
+    /// signed for a machine, so what else they reach is added here by the
+    /// receiver, outside the signed act.
+    #[must_use]
+    pub fn reaching(mut self, what: Reaching) -> Request {
+        self.reaching.push(what);
+        self
+    }
+
+    pub fn reaches(&self) -> &[Reaching] {
+        &self.reaching
     }
 
     pub fn principal(&self) -> &Principal {

@@ -86,6 +86,13 @@ pub fn settings_of(s: &network::Settings) -> Settings {
 }
 
 impl Ground for Facts {
+    /// What is shared into a network is the person's choice, kept beside
+    /// the chain (`Governance::sharing`), not in it: the runtime's ground
+    /// answers, and this one, which holds none, shows nothing.
+    fn sees(&self, _network: &NetworkId, _project: Option<&xenonet_authz::ProjectId>) -> bool {
+        false
+    }
+
     fn own_machine(&self) -> &MachineId {
         &self.machine
     }
@@ -194,6 +201,12 @@ pub fn grant_of(d: &person::Delegation) -> Option<StandingGrant> {
 pub trait Governance: Send + Sync {
     fn facts(&self) -> Facts;
     fn identity(&self) -> Arc<Identity>;
+    /// What the person shares into `network`. The default is nothing: a
+    /// governance that can't say what is shared shows no network anything.
+    fn sharing(&self, network: &str) -> crate::share::Sharing {
+        let _ = network;
+        crate::share::Sharing::default_for(false)
+    }
     /// `host` sent a newer head of `person`'s chain than this machine holds.
     fn want_person(&self, host: &str, person: &str);
 }
@@ -204,6 +217,9 @@ impl Governance for crate::node::Shared {
     }
     fn identity(&self) -> Arc<Identity> {
         crate::node::Shared::identity(self).clone()
+    }
+    fn sharing(&self, network: &str) -> crate::share::Sharing {
+        crate::node::Shared::sharing(self, network)
     }
     fn want_person(&self, host: &str, person: &str) {
         crate::node::Shared::want_person(self, host, person);

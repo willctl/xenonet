@@ -83,9 +83,19 @@ pub struct World {
     pub intents: HashMap<IntentId, HeldIntent>,
     /// The intents every actor grant here may report on.
     pub grant_intents: Option<Vec<IntentId>>,
+    /// What every network the world is in is shown: None, everything.
+    pub shared: Option<Vec<ProjectId>>,
+    /// The project each of this machine's sessions is in.
+    pub session_projects: HashMap<SessionId, ProjectId>,
 }
 
 impl Ground for World {
+    fn sees(&self, network: &NetworkId, project: Option<&ProjectId>) -> bool {
+        self.roles.keys().any(|(n, _)| n == network) && self.shared.as_ref().is_none_or(|shared| project.is_some_and(|p| shared.contains(p)))
+    }
+    fn session_project(&self, session: &SessionId) -> Option<ProjectId> {
+        self.session_projects.get(session).cloned()
+    }
     fn intent(&self, id: &IntentId) -> Option<HeldIntent> {
         self.intents.get(id).cloned()
     }
@@ -199,6 +209,8 @@ pub fn fixture() -> Fixture {
         spaces: HashMap::from([(space(), Some(SpaceLevel::Append))]),
         intents: HashMap::new(),
         grant_intents: None,
+        shared: None,
+        session_projects: HashMap::new(),
     };
     Fixture { world, m1_root, m2_root }
 }
