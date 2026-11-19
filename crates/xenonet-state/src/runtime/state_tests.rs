@@ -265,7 +265,11 @@ async fn a_projects_rule_is_checked_on_the_map() {
     s.refresh_map().await.expect("a map with the repos read");
     let graph = s.graph().expect("graph").expect("a map");
     let reads = |n: &Value, role: &str| items(n.get("identities")).iter().any(|l| l["role"] == role);
-    let project = items(graph.get("nodes")).iter().find(|n| n["kind"] == "project" && reads(n, "commits-as") && n.get("identityRule").is_none()).expect("a project that commits as someone").clone();
+    let project = items(graph.get("nodes"))
+        .iter()
+        .find(|n| n["kind"] == "project" && reads(n, "commits-as") && n.get("identityRule").is_none())
+        .expect("a project that commits as someone")
+        .clone();
     let id = project["id"].as_str().unwrap().to_string();
     assert!(project.get("identityRule").is_none(), "no rule, no check");
     // A rule for an email nobody here commits with.
@@ -302,7 +306,11 @@ async fn the_demos_rule_doesnt_match_and_a_folder_finds_its_project() {
     // The project's folder and a folder inside it both find it, with the rule and its check.
     for folder in [path.clone(), format!("{path}/src/deeper")] {
         let found = s.identity_project(&folder).expect("a project");
-        assert_eq!((found["project"]["id"].as_str(), found["rule"]["git"].as_str(), found["check"]["mismatch"].as_bool()), (Some(id.as_str()), Some("hello@orbitworks.example"), Some(true)), "{found}");
+        assert_eq!(
+            (found["project"]["id"].as_str(), found["rule"]["git"].as_str(), found["check"]["mismatch"].as_bool()),
+            (Some(id.as_str()), Some("hello@orbitworks.example"), Some(true)),
+            "{found}"
+        );
     }
     let outside = s.identity_project("/nowhere/at/all").expect("an answer");
     assert!(outside["project"].is_null() && outside["rule"].is_null(), "{outside}");

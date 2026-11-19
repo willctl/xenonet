@@ -67,13 +67,18 @@ impl DemoWorld {
     /// servers running side by side don't wipe each other's.
     pub fn new(port: u16) -> DemoWorld {
         let tmp = xenonet_os::paths::real_path(&std::env::temp_dir());
-        DemoWorld { demo: Mutex::new(Demo::new(&tmp.to_string_lossy(), &port.to_string(), &local_day(now_ms()))), world: Mutex::new(None), clients: OnceCell::new(), ruled: Default::default() }
+        DemoWorld {
+            demo: Mutex::new(Demo::new(&tmp.to_string_lossy(), &port.to_string(), &local_day(now_ms()))),
+            world: Mutex::new(None),
+            clients: OnceCell::new(),
+            ruled: std::sync::atomic::AtomicBool::default(),
+        }
     }
 
     /// The demo over a world already written (`Demo::over`), as made.
     pub fn over(demo: Demo) -> DemoWorld {
         let world = demo.world.to_value();
-        DemoWorld { demo: Mutex::new(demo), world: Mutex::new(Some(world)), clients: OnceCell::new(), ruled: Default::default() }
+        DemoWorld { demo: Mutex::new(demo), world: Mutex::new(Some(world)), clients: OnceCell::new(), ruled: std::sync::atomic::AtomicBool::default() }
     }
 
     /// Builds the demo workspace from scratch (once).
@@ -105,7 +110,9 @@ impl DemoWorld {
         let mut found = Vec::new();
         for (path, rule) in &by_path {
             let key = xenonet_os::paths::path_key(path);
-            let node = nodes.iter().find(|n| n.get("kind").and_then(Value::as_str) == Some("project") && n.get("path").and_then(Value::as_str).and_then(xenonet_os::paths::path_key) == key);
+            let node = nodes
+                .iter()
+                .find(|n| n.get("kind").and_then(Value::as_str) == Some("project") && n.get("path").and_then(Value::as_str).and_then(xenonet_os::paths::path_key) == key);
             if let Some(id) = node.and_then(|n| n.get("id").and_then(Value::as_str)) {
                 found.push((id.to_string(), rule.clone()));
             }
