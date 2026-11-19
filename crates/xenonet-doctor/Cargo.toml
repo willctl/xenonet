@@ -28,6 +28,10 @@ xenonet-api.workspace = true
 xenonet-engine.workspace = true
 xenonet-net.workspace = true
 xenonet-sources.workspace = true
+# The cells group runs Adytum's own checks in this process, not its binary
+# (cells.rs). adytum-doctor may be used only by xenonet-service, -cli and
+# this crate (scripts/rust-layers.mjs).
+adytum-doctor.workspace = true
 
 # access(2), statvfs(3) and uname(2), which std doesn't wrap.
 [target.'cfg(unix)'.dependencies]

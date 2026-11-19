@@ -1,12 +1,13 @@
 //! The doctor's view of Adytum and Eidolon, the two tools that keep cells
-//! and identities beside XenoNet, each in its own repository. XenoNet drives
-//! both through their commands, never their crates: it looks for `adytum`
-//! and `eidolon` on the PATH it uses for tools, asks each for its own
-//! `--json` answers with an argument list and a short deadline, and
-//! turns what comes back into a verdict. A tool that isn't there is an
-//! info with the line that builds it, never a failure of XenoNet's
-//! doctor. Nothing secret is read or shown: Eidolon's holder entry holds
-//! only public keys and only its name is used here.
+//! and identities beside XenoNet, each in its own repository. Adytum's own
+//! checks run in this process, through `adytum-doctor` as a library, with a
+//! short deadline. Eidolon is driven through its command, never its crates:
+//! the doctor looks for `eidolon` on the PATH it uses for tools, asks it for
+//! its own `--json` answers with an argument list and a short deadline, and
+//! turns what comes back into a verdict. Eidolon not being there is an info
+//! with the line that builds it, never a failure of XenoNet's doctor.
+//! Nothing secret is read or shown: Eidolon's holder entry holds only
+//! public keys and only its name is used here.
 
 use crate::checks::{info, ok, unreadable, warn, Ctx};
 use serde_json::{json, Value};
@@ -17,9 +18,8 @@ use xenonet_text::units::plural;
 pub const CHECKS: [(&str, &str, &str); 2] =
     [("cells.adytum", "Integrations", "Adytum can keep cells"), ("cells.eidolon", "Integrations", "Eidolon holds this machine's identities")];
 
-/// How to get both programs, from a checkout of each repository.
-const BUILD: &str =
-    "From a checkout of github.com/willctl/adytum run cargo install --path crates/adytum-cli, and from github.com/willctl/eidolon run cargo install --path crates/eidolon-cli.";
+/// How to get Eidolon's program, from a checkout of its repository.
+const BUILD: &str = "From a checkout of github.com/willctl/eidolon run cargo install --path crates/eidolon-cli.";
 
 const ADYTUM_MS: f64 = 6000.0;
 const EIDOLON_MS: f64 = 3000.0;
@@ -40,7 +40,7 @@ const DEMO_LS: &str = r#"{"ok":true,"eidolons":[
 pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
     let demo = c.f.data.get("demo").and_then(Value::as_bool) == Some(true);
     match id {
-        "cells.adytum" => Ok(adytum(c, demo).await),
+        "cells.adytum" => Ok(adytum(demo).await),
         "cells.eidolon" => Ok(eidolon(c, demo).await),
         other => Err(Failure::msg(format!("no such check: {other}"))),
     }
@@ -70,16 +70,13 @@ async fn ask(c: &Ctx<'_>, file: &str, args: &[&str], ms: f64) -> Said {
     Said::Out { stdout: text("stdout"), stderr: text("stderr") }
 }
 
-async fn adytum(c: &Ctx<'_>, demo: bool) -> Value {
+async fn adytum(demo: bool) -> Value {
     if demo {
         return adytum_verdict(DEMO_ADYTUM);
     }
-    let Some(file) = c.which("adytum").await else { return absent("Adytum") };
-    match ask(c, &file, &["doctor", "--json"], ADYTUM_MS).await {
-        // It exits 1 when one of its checks fails and still prints them.
-        Said::Out { stdout, .. } => adytum_verdict(&stdout),
-        Said::Late => warn(format!("adytum didn't answer within {} seconds", ADYTUM_MS / 1000.0), Some("Run adytum doctor yourself to see where it waits.")),
-        Said::Gone => warn("adytum is on the PATH but doesn't start", Some(BUILD)),
+    match tokio::time::timeout(std::time::Duration::from_millis(ADYTUM_MS as u64), adytum_doctor::checks()).await {
+        Ok(checks) => adytum_checks_verdict(&checks),
+        Err(_) => warn(format!("adytum didn't answer within {} seconds", ADYTUM_MS / 1000.0), Some("Run adytum doctor yourself to see where it waits.")),
     }
 }
 
@@ -123,6 +120,12 @@ fn more(n: usize) -> String {
     } else {
         String::new()
     }
+}
+
+/// Adytum's checks as a verdict, through the same JSON `adytum doctor
+/// --json` prints.
+pub fn adytum_checks_verdict(checks: &[adytum_doctor::Check]) -> Value {
+    adytum_verdict(&adytum_doctor::render_json(checks))
 }
 
 /// `adytum doctor --json`'s answer as a verdict: what is failing or
@@ -275,39 +278,48 @@ mod tests {
     // The doctor's output with the tools there or not, through the real
     // check runner and a made-up machine.
     fn drive(id: &str, which: bool, run: impl Fn(&str, &[&str]) -> Value + 'static, demo: bool) -> Value {
-        let host = Fake { run: Box::new(run), missing: if which { vec![] } else { vec!["adytum", "eidolon"] }, ..Fake::default() };
+        let host = Fake { run: Box::new(run), missing: if which { vec![] } else { vec!["eidolon"] }, ..Fake::default() };
         ready(checks::run(&host, id.into(), Facts { data: json!({ "platform": "darwin", "home": "/Users/ada", "demo": demo }) })).unwrap_or_else(|f| panic!("{}", f.message()))
     }
 
     #[test]
-    fn missing_tools_are_an_info_with_the_build_line() {
-        for id in ["cells.adytum", "cells.eidolon"] {
-            let v = drive(id, false, |_, _| unreachable!("nothing runs when the tool is missing"), false);
-            assert_eq!(v["status"], "info", "{id}");
-            assert!(v["fix"].as_str().unwrap().contains("cargo install --path crates/adytum-cli"));
-        }
+    fn a_missing_eidolon_is_an_info_with_the_build_line() {
+        let v = drive("cells.eidolon", false, |_, _| unreachable!("nothing runs when the tool is missing"), false);
+        assert_eq!(v["status"], "info");
+        assert!(v["fix"].as_str().unwrap().contains("cargo install --path crates/eidolon-cli"));
     }
 
     #[test]
-    fn present_tools_are_asked_with_argument_lists() {
+    fn adytums_own_checks_make_the_same_verdict_its_json_does() {
+        use adytum_doctor::{Check, Level};
+        let checks = [
+            Check { id: "limactl".into(), ok: false, level: Level::Fail, message: "limactl isn't installed.".into(), fix: Some("Install Lima.".into()) },
+            Check { id: "disk".into(), ok: false, level: Level::Warn, message: "Low disk.".into(), fix: Some("Free space.".into()) },
+            Check { id: "fine".into(), ok: true, level: Level::Info, message: "fine".into(), fix: None },
+        ];
+        let v = adytum_checks_verdict(&checks);
+        assert_eq!(v["status"], "warn");
+        assert_eq!(v["detail"], "Adytum: 1 check failing, 1 warning. limactl (fail): limactl isn't installed.; disk (warn): Low disk.");
+        assert_eq!(v["fix"], "Install Lima. Free space.");
+        assert_eq!(adytum_checks_verdict(&checks[2..])["detail"], "Adytum: 1 check passed");
+    }
+
+    #[test]
+    fn eidolon_is_asked_with_argument_lists() {
         let asked = |file: &str, args: &[&str]| -> Value {
             match args {
-                ["doctor", "--json"] => {
-                    json!({ "code": 1, "stdout": r#"{"ok":false,"checks":[{"id":"x","ok":false,"level":"fail","message":"bad","fix":"fix it"}]}"#, "stderr": "" })
-                }
                 ["machine", "show", "--json"] => json!({ "code": 0, "stdout": HOLDER, "stderr": "" }),
                 ["ls", "--json"] => json!({ "code": 0, "stdout": r#"{"ok":true,"eidolons":[{"eidolon":"eid_a","state":"sealed"}]}"#, "stderr": "" }),
                 other => panic!("{file} {other:?}"),
             }
         };
-        assert_eq!(drive("cells.adytum", true, asked, false)["status"], "warn");
         assert_eq!(drive("cells.eidolon", true, asked, false)["detail"], "This machine is desk; it holds 1 eidolon (0 open, 1 sealed)");
     }
 
     #[test]
-    fn a_tool_that_hangs_or_cannot_start_is_a_warning() {
-        let v = drive("cells.adytum", true, |_, _| json!({ "code": null, "stdout": "", "stderr": "", "timedOut": true }), false);
-        assert!(v["detail"].as_str().unwrap().contains("didn't answer within 6 seconds"), "{v}");
+    fn an_eidolon_that_hangs_or_cannot_start_is_a_warning() {
+        let v = drive("cells.eidolon", true, |_, _| json!({ "code": null, "stdout": "", "stderr": "", "timedOut": true }), false);
+        assert!(v["detail"].as_str().unwrap().contains("didn't answer within 3 seconds"), "{v}");
         let v = drive("cells.eidolon", true, |_, _| json!({ "code": "ENOENT", "stdout": "", "stderr": "", "timedOut": false }), false);
         assert_eq!(v["status"], "warn");
     }
