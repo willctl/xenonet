@@ -743,14 +743,14 @@ Will's step on desk and tower.
       actors' grants again (Grok Bot's gateway token, the Hermes plugin's
       token); connect Claude Code and Codex again from the window
       (`/hooks` once in Codex).
-   6. The lab's checks ran once on desk (`npm run lab -- check`, on
-      macOS 26.5 with Lima 2.1.2): `xenolith-rehearsal` passes, and so do
-      each VM's own checks. `xenolith-join`, `xenolith-notes`,
-      `xenolith-offline`, `lan-udp` and the multicast check fail because
-      the two VMs can't reach each other at all: macOS puts each vzNAT
-      guest on the bridge as a private member, so a guest reaches the Mac
-      and never another guest. The lab's LAN has to move to a network
-      where guests talk before those five mean anything
+   6. The lab's checks on desk (`npm run lab -- check`, on macOS 26.5
+      with Lima 2.1.2): each VM's own checks, `xenolith-rehearsal` and
+      `lan-udp` pass. The VMs reach each other on Lima's `user-v2`
+      network, which carries no multicast between guests, so the
+      multicast and mDNS checks need `socket_vmnet` (root) and say
+      `owner`. `xenolith-join`, `xenolith-notes` and `xenolith-offline`
+      time out: the packets arrive both ways, and the join stalls after
+      the curator accepts it; the cause isn't found yet
       ([the lab's README](../../scripts/lab/README.md)).
    7. Xenolith on tower: desk's Xenolith never paired with it, so
       nothing waits in a 1.x queue. Install 2.0.1 there
@@ -769,6 +769,18 @@ Will's step on desk and tower.
    9. Check: a session on tower sees desk's pages in `context_start`, a
       note left on tower is filed by desk's curator, and `xenonet
       doctor` and `xenolith status` are clean on both.
+
+### Daily use
+
+After phase 6, the work is a person's real week on XenoNet
+([daily-use.md](daily-use.md)). Built on `feat/daily-use`: the shared
+engine test harness with two networks, an identity guard that warns
+(a project's rule, Needs you, the start briefing, an opt-in pre-push
+hook), and networks that reach only what they're shown, decided at the
+receiver before the sender is checked, with what leaves held to the same
+sharing. Next, once scenario 1 has run for real on two machines: work on
+a machine the person doesn't own, sandboxed starts, several accounts per
+app, more apps on the map, and release watch.
 
 ## Verification plan
 
