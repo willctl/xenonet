@@ -209,6 +209,15 @@ pub trait Governance: Send + Sync {
     }
     /// `host` sent a newer head of `person`'s chain than this machine holds.
     fn want_person(&self, host: &str, person: &str);
+    /// The host id the machine with signing key id `machine` goes by: in
+    /// the network the call is in, else in the first network that has it.
+    /// A machine is named by the roster of whichever network it is in, so
+    /// a lookup in one network's chain would miss one that is only in
+    /// another.
+    fn host_of_machine(&self, machine: &str) -> Option<String> {
+        let _ = machine;
+        None
+    }
 }
 
 impl Governance for crate::node::Shared {

@@ -534,10 +534,26 @@ impl Nodes {
         out
     }
 
-    // The node a call that names no network goes through: the network the
-    // body in hand arrived in, else the first.
+    /// The network a call is in: the one the body in hand arrived in
+    /// (`ground::within`), else the one network this machine is in. A call
+    /// in no frame from a machine in several networks is in none of them,
+    /// and so is one in a frame of a network this machine isn't in. What it
+    /// decides, it decides on no network's chain; what it reads of the
+    /// settings, it reads as `narrowest` does.
     fn current(&self) -> Option<Arc<Shared>> {
-        ground::current().and_then(|n| self.common.shared_of(&n)).or_else(|| self.common.shareds().into_iter().next())
+        match ground::current() {
+            Some(n) => self.common.shared_of(&n),
+            None => {
+                let mut all = self.common.shareds();
+                (all.len() == 1).then(|| all.remove(0))
+            }
+        }
+    }
+
+    /// The network that names this machine when nothing decides on it: the
+    /// call's own, else the one joined first (`Net::me`).
+    fn named(&self) -> Option<Arc<Shared>> {
+        self.current().or_else(|| self.common.shareds().into_iter().next())
     }
 }
 
@@ -616,9 +632,13 @@ impl Net for Nodes {
     }
 
     fn me(&self) -> Option<Me> {
-        let s = self.current()?;
+        let s = self.named()?;
         let n = s.network()?;
         Some(Me { network: n.id, name: n.name, host: n.host })
+    }
+
+    fn networks_with(&self, host: &str) -> Vec<String> {
+        self.common.shareds().iter().filter(|s| !s.is_removed()).filter(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some())).filter_map(|s| s.network().map(|n| n.id)).collect()
     }
 
     fn hosts(&self) -> Vec<Host> {
@@ -690,8 +710,12 @@ impl Net for Nodes {
                     let id = s.network().map(|n| n.id).ok_or("this machine is leaving that network")?;
                     s.send(out.within(id))
                 }
+                // One network, or none named: with several, a body for
+                // everyone has to say which of them it is for.
                 To::All => {
-                    let s = &nets[0];
+                    let [s] = nets.as_slice() else {
+                        return Err(format!("this machine is in several networks ({}), so a body for everyone has to name the one it goes in", nets.len()));
+                    };
                     let id = s.network().map(|n| n.id).ok_or("this machine is leaving that network")?;
                     s.send(out.within(id))
                 }
@@ -699,24 +723,43 @@ impl Net for Nodes {
         }
     }
 
+    // A call in no network, from a machine in several, reads the narrowest
+    // of them: titles only if any network asks for it, load shared only if
+    // every network takes it, a window host only where it is one in all,
+    // and no roster head, which is a network's own.
     fn roster_head(&self) -> Option<String> {
         self.current().and_then(|s| Net::roster_head(s.as_ref()))
     }
 
     fn titles_only(&self) -> bool {
-        self.current().is_some_and(|s| Net::titles_only(s.as_ref()))
+        match self.current() {
+            Some(s) => Net::titles_only(s.as_ref()),
+            None => self.common.shareds().iter().any(|s| Net::titles_only(s.as_ref())),
+        }
     }
 
     fn share_load(&self) -> bool {
-        self.current().is_none_or(|s| Net::share_load(s.as_ref()))
+        match self.current() {
+            Some(s) => Net::share_load(s.as_ref()),
+            None => self.common.shareds().iter().all(|s| Net::share_load(s.as_ref())),
+        }
     }
 
     fn is_window_host(&self) -> bool {
-        self.current().is_some_and(|s| Net::is_window_host(s.as_ref()))
+        match self.current() {
+            Some(s) => Net::is_window_host(s.as_ref()),
+            None => {
+                let all = self.common.shareds();
+                !all.is_empty() && all.iter().all(|s| Net::is_window_host(s.as_ref()))
+            }
+        }
     }
 
     fn reach(&self) -> Reach {
-        self.current().map(|s| Net::reach(s.as_ref())).unwrap_or_default()
+        match self.current() {
+            Some(s) => Net::reach(s.as_ref()),
+            None => Reach::narrowest(&self.common.shareds().iter().map(|s| Net::reach(s.as_ref())).collect::<Vec<_>>()),
+        }
     }
 
     fn host_can(&self, host: &str, what: &str) -> bool {
@@ -737,7 +780,8 @@ impl Net for Nodes {
 }
 
 /// The governance an act is decided on: the chain of the network it came
-/// in (`ground::within`), else the first network's.
+/// in (`ground::within`), else the one network this machine is in. In no
+/// frame, with several networks, an act is decided on no network's chain.
 impl Governance for Nodes {
     fn facts(&self) -> Facts {
         match self.current() {
@@ -751,6 +795,13 @@ impl Governance for Nodes {
     /// A network this machine isn't in is shown nothing.
     fn sharing(&self, network: &str) -> crate::share::Sharing {
         self.common.shared_of(network).map_or_else(|| crate::share::Sharing::default_for(false), |s| s.sharing(network))
+    }
+    fn host_of_machine(&self, machine: &str) -> Option<String> {
+        let mut nets = self.common.shareds();
+        if let Some(now) = ground::current() {
+            nets.sort_by_key(|s| s.network().is_none_or(|n| n.id != now));
+        }
+        nets.iter().find_map(|s| s.roster().view_ref()?.members.values().find(|m| m.machine.id() == machine).map(|m| m.id.clone()))
     }
     fn want_person(&self, host: &str, person: &str) {
         let s = self.current().filter(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some()));
