@@ -1,8 +1,7 @@
-//! The browser in a real Lima VM. Skipped unless `ADYTUM_LIVE=1`, and
-//! `#[ignore]`d until `adytum-lima` is committed:
+//! The browser in a real Lima VM. Skipped unless `ADYTUM_LIVE=1`:
 //!
 //! ```text
-//! ADYTUM_LIVE=1 npm run cargo -- test -p eidolon-browser --test live -- --ignored --nocapture
+//! ADYTUM_LIVE=1 npm run cargo -- test -p eidolon-browser --test live -- --nocapture
 //! ```
 //!
 //! It makes a cell named `adytum-test-browser-<tag>` under a short temporary
@@ -98,7 +97,6 @@ async fn scenario(lima: &Lima, name: &CellName) -> Res {
 }
 
 #[tokio::test]
-#[ignore = "adytum-lima is not committed yet; run with --ignored once it is"]
 async fn a_browser_in_a_real_cell() {
     if std::env::var("ADYTUM_LIVE").as_deref() != Ok("1") {
         println!("skipped: set ADYTUM_LIVE=1 to run against a real VM");
