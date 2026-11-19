@@ -86,6 +86,13 @@ dependencies = [
 [[package]]
 name = "adytum-testkit"
 version = "0.1.0"
+dependencies = [
+ "adytum-exec",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "aead"

@@ -45,6 +45,13 @@ impl Duplex {
         control.finish().await
     }
 
+    /// Takes the stream apart: stdout, stdin and the control, for a wrapper
+    /// (the testkit's recorder) that watches the bytes go by.
+    #[expect(clippy::type_complexity, reason = "the three parts are named in the doc above")]
+    pub fn into_parts(self) -> (Box<dyn AsyncRead + Send + Unpin>, Option<Box<dyn AsyncWrite + Send + Unpin>>, Box<dyn DuplexControl>) {
+        (self.reader, self.writer, self.control)
+    }
+
     /// Stops the child now.
     pub fn kill(&mut self) {
         self.control.kill();

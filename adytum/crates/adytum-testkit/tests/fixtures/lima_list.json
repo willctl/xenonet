@@ -1,0 +1,9 @@
+{
+  "tool": "limactl",
+  "version": "2.1.2",
+  "calls": [
+    { "argv": ["limactl", "list", "--json"], "stdin": null, "stdout": "{\"name\":\"adytum-test-a\",\"dir\":\"{home}/.lima/adytum-test-a\"}\n", "stderr": "", "status": 0 },
+    { "argv": ["limactl", "start", "--name", "{any}", "{home}/tpl.yaml"], "stdin": null, "stdout": "", "stderr": "started\n", "status": 0 },
+    { "argv": ["limactl", "shell", "adytum-test-a", "--", "cat"], "stdin": null, "stdout": "pong\n", "stderr": "", "status": 0 }
+  ]
+}
