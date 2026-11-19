@@ -158,7 +158,21 @@
         "-m",
         "0755",
         "/home/eidolon/files",
-        "/home/eidolon/files/downloads",
+        "/home/eidolon/files/downloads"
+      ]
+    },
+    {
+      "why": "make the uploads folder",
+      "argv": [
+        "sudo",
+        "install",
+        "-d",
+        "-o",
+        "eidolon",
+        "-g",
+        "eidolon",
+        "-m",
+        "1777",
         "/home/eidolon/files/uploads"
       ]
     },

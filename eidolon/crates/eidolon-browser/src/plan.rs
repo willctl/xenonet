@@ -168,10 +168,12 @@ pub fn provision_plan(ports: Ports) -> Plan {
         // walk into the home folder.
         Step::sudo("let the home folder be entered", &["chmod", "0755", "/home/eidolon"]),
         Step::sudo("make the profile folder", &["install", "-d", "-o", units::USER, "-g", units::USER, "-m", "0700", units::PROFILE_PATH]),
-        Step::sudo(
-            "make the files folders",
-            &["install", "-d", "-o", units::USER, "-g", units::USER, "-m", "0755", "/home/eidolon/files", units::DOWNLOADS_PATH, units::UPLOADS_PATH],
-        ),
+        Step::sudo("make the files folders", &["install", "-d", "-o", units::USER, "-g", units::USER, "-m", "0755", "/home/eidolon/files", units::DOWNLOADS_PATH]),
+        // Uploads are copied in as the cell's login user, a different user
+        // from the browser's, so the folder takes files from anyone in the
+        // cell (sticky, so nobody removes another's file). The browser only
+        // reads from it. The cell holds no other users.
+        Step::sudo("make the uploads folder", &["install", "-d", "-o", units::USER, "-g", units::USER, "-m", "1777", units::UPLOADS_PATH]),
         Step { stdin: Some(units::USER_JS.to_owned()), ..Step::sudo("write the profile's preferences", &["-u", units::USER, "tee", &format!("{}/user.js", units::PROFILE_PATH)]) },
     ];
     for (name, text) in units::units(ports) {
