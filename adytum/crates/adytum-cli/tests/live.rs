@@ -8,6 +8,11 @@
 //! It uses an `ADYTUM_HOME` of its own under /tmp (short, for Lima's unix
 //! sockets), names its cells `adytum-test-live-*`, and removes them and the
 //! folder at the end, also when a step fails.
+//!
+//! Three scenarios: a sealed cell from create to rm, a cell with a published
+//! port, and a clone (with the eidolon-hold guard) and a kill test (`adytum
+//! create` killed with `kill -9` while Lima is making the instance, then the
+//! next command reconciles it away).
 
 #![expect(
     clippy::unwrap_used,
@@ -32,7 +37,10 @@ struct Env {
 
 struct Result_ {
     code: i32,
+    /// stdout and stderr together, for messages.
     out: String,
+    /// stdout alone: the JSON.
+    stdout: String,
 }
 
 impl Env {
@@ -45,7 +53,8 @@ impl Env {
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .output()
             .expect("the binary starts");
-        Result_ { code: out.status.code().unwrap_or(-1), out: String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr) }
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        Result_ { code: out.status.code().unwrap_or(-1), out: stdout.clone() + &String::from_utf8_lossy(&out.stderr), stdout }
     }
 
     fn json(&self, args: &[&str]) -> (i32, Value) {
@@ -54,7 +63,7 @@ impl Env {
         let at = all.iter().position(|a| *a == "--").unwrap_or(all.len());
         all.insert(at, "--json");
         let r = self.run(&all);
-        let value = serde_json::from_str(r.out.trim()).unwrap_or_else(|e| panic!("{args:?}: not JSON ({e}): {}", r.out));
+        let value = serde_json::from_str(r.stdout.trim()).unwrap_or_else(|e| panic!("{args:?}: not JSON ({e}): {}", r.out));
         (r.code, value)
     }
 
@@ -69,11 +78,29 @@ impl Env {
 impl Drop for Env {
     fn drop(&mut self) {
         // Remove every cell this home holds, then the folder.
-        let (_, listed) = self.json(&["ls"]);
-        for cell in listed["cells"].as_array().into_iter().flatten() {
-            if let Some(name) = cell["name"].as_str().filter(|n| n.starts_with("adytum-test-live-")) {
-                let _ = self.run(&["stop", name]);
-                let _ = self.run(&["rm", name]);
+        let listed = self.run(&["ls", "--json"]);
+        if let Ok(listed) = serde_json::from_str::<Value>(listed.stdout.trim()) {
+            for cell in listed["cells"].as_array().into_iter().flatten() {
+                if let Some(name) = cell["name"].as_str().filter(|n| n.starts_with("adytum-test-live-")) {
+                    let _ = self.run(&["stop", name]);
+                    let _ = self.run(&["rm", name]);
+                }
+            }
+        }
+        // Whatever the ledger lost track of: delete any instance left in
+        // this home's Lima folder, in Lima's own words, never by guessing.
+        if let Ok(entries) = std::fs::read_dir(self.home.join("lima")) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("adytum-test-live-") {
+                    let _ = Command::new("limactl")
+                        .args(["delete", "--force", "--tty=false", &name])
+                        .env_clear()
+                        .env("LIMA_HOME", self.home.join("lima"))
+                        .env("HOME", std::env::var_os("HOME").unwrap_or_default())
+                        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                        .output();
+                }
             }
         }
         let _ = std::fs::remove_dir_all(&self.home);
@@ -88,8 +115,11 @@ fn step<T>(label: &str, f: impl FnOnce() -> T) -> T {
 }
 
 fn random_tag() -> String {
+    // The counter keeps two tags made in the same instant apart.
+    static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
-    format!("{:05x}", (nanos ^ std::process::id().rotate_left(13)) & 0xf_ffff)
+    let count = COUNT.fetch_add(0x1_1111, std::sync::atomic::Ordering::Relaxed);
+    format!("{:05x}", (nanos ^ std::process::id().rotate_left(13) ^ count) & 0xf_ffff)
 }
 
 fn default_lima_names() -> Vec<String> {
@@ -209,7 +239,7 @@ fn sealed_cell(before: &[String]) {
     let (code, v) = step("rm", || env.json(&["rm", &name]));
     assert_eq!((code, v["removed"].as_bool()), (0, Some(true)), "{v}");
     let (_, listed) = env.json(&["ls"]);
-    assert!(listed["cells"].as_array().unwrap().is_empty(), "{listed}");
+    assert_eq!(listed["cells"].as_array().unwrap().len(), 0, "{listed}");
     assert!(!env.home.join("lima").join(&name).exists());
     assert_eq!(default_lima_names(), before, "Lima's own home changed");
 }
@@ -234,6 +264,119 @@ fn published_cell() {
     assert_eq!(env.json(&["rm", &name]).0, 0);
 }
 
+fn new_env() -> Env {
+    Env { home: PathBuf::from("/tmp").join(format!("adl-live-{}", random_tag())) }
+}
+
+fn listed_names(env: &Env) -> Vec<String> {
+    let (_, listed) = env.json(&["ls"]);
+    listed["cells"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap().to_owned()).collect()
+}
+
+/// create, stop, clone into a second cell, start and use the clone; a held
+/// source refuses the next clone; release; remove both.
+fn clone_cells() {
+    let env = new_env();
+    let (src, copy, third) = (format!("adytum-test-live-{}", random_tag()), format!("adytum-test-live-{}", random_tag()), format!("adytum-test-live-{}", random_tag()));
+    println!("clone: {src} -> {copy}, ADYTUM_HOME {}", env.home.display());
+
+    let (code, v) = step("create source", || env.json(&["create", &src, "--sealed", "--wall", "wall_live"]));
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(env.json(&["start", &src]).0, 0);
+    let marker = step("exec in source", || env.exec(&src, &["sh", "-c", "echo from-the-source > /var/tmp/marker && cat /var/tmp/marker"]));
+    assert_eq!(marker["stdout"], "from-the-source\n", "{marker}");
+    let (code, v) = step("stop source", || env.json(&["stop", &src]));
+    assert_eq!((code, v["state"].as_str()), (0, Some("stopped")), "{v}");
+
+    let (code, v) = step("clone", || env.json(&["clone", &src, &copy]));
+    assert_eq!((code, v["state"].as_str(), v["wall"].as_str()), (0, Some("stopped"), Some("wall_live")), "{v}");
+    assert_eq!(listed_names(&env).len(), 2);
+
+    let (code, v) = step("start the clone", || env.json(&["start", &copy]));
+    assert_eq!((code, v["state"].as_str()), (0, Some("running")), "{v}");
+    let seen = step("exec in the clone", || env.exec(&copy, &["cat", "/var/tmp/marker"]));
+    assert_eq!(seen["stdout"], "from-the-source\n", "the clone does not hold the source's disk: {seen}");
+    assert_eq!(env.exec(&copy, &["id", "-un"])["stdout"], "adytum\n");
+    // A clone is its own cell: a change in it does not reach the source.
+    assert_eq!(env.exec(&copy, &["rm", "/var/tmp/marker"])["status"], 0);
+    assert_eq!(env.json(&["stop", &copy]).0, 0);
+
+    // A held source is not cloned, however many times it is asked.
+    assert_eq!(env.json(&["hold", &src, "eid_live"]).0, 0);
+    let (code, v) = step("clone while held", || env.json(&["clone", &src, &third]));
+    assert_eq!((code, v["error"]["code"].as_str()), (1, Some("clone_open_eidolon")), "{v}");
+    assert_eq!(listed_names(&env).len(), 2, "a refused clone left a cell");
+    assert!(!env.home.join("lima").join(&third).exists());
+    let (code, v) = env.json(&["release", &src, "eid_live"]);
+    assert_eq!((code, v["held"].as_bool()), (0, Some(false)), "{v}");
+
+    // A clone across walls is refused as well.
+    let (code, v) = env.json(&["clone", &src, &third, "--wall", "wall_other"]);
+    assert_eq!((code, v["error"]["code"].as_str()), (1, Some("wall_clone")), "{v}");
+
+    for name in [&copy, &src] {
+        let (code, v) = step("rm", || env.json(&["rm", name]));
+        assert_eq!((code, v["removed"].as_bool()), (0, Some(true)), "{v}");
+    }
+    assert_eq!(listed_names(&env).len(), 0);
+}
+
+/// `adytum create` killed with SIGKILL while Lima is making the instance:
+/// the next command removes the half-made cell and closes the operation.
+fn kill_during_create() {
+    let env = new_env();
+    let name = format!("adytum-test-live-{}", random_tag());
+    println!("kill test: {name}, ADYTUM_HOME {}", env.home.display());
+    let instance = env.home.join("lima").join(&name);
+
+    let mut child = Command::new(BIN)
+        .args(["create", &name, "--sealed", "--wall", "wall_live"])
+        .env_clear()
+        .env("ADYTUM_HOME", &env.home)
+        .env("HOME", std::env::var_os("HOME").unwrap_or_default())
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the binary starts");
+    let waited = Instant::now();
+    while !instance.exists() {
+        assert!(waited.elapsed() < Duration::from_secs(120), "Lima never began making the instance");
+        assert!(child.try_wait().unwrap().is_none(), "adytum create ended before Lima began");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    child.kill().expect("SIGKILL");
+    child.wait().unwrap();
+    println!("  killed adytum create {:.2}s after it started waiting", waited.elapsed().as_secs_f64());
+    // Lima's own process would go on without it; a crash takes the machine's
+    // processes with it, so stop whatever still carries this cell's name.
+    let _ = Command::new("pkill").args(["-9", "-f", &name]).output();
+    std::thread::sleep(Duration::from_millis(500));
+
+    let ledger = adytum_ledger::Ledger::open(&env.home).unwrap();
+    let open = ledger.open_ops().unwrap();
+    assert_eq!(open.len(), 1, "the killed create left no open operation: {open:?}");
+    assert_eq!(open[0].name.as_str(), name);
+    drop(ledger);
+
+    let (code, v) = step("ls after the kill (reconcile)", || env.json(&["ls"]));
+    assert_eq!(code, 0, "{v}");
+    let removed: Vec<_> = v["reconciled"]["removed"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(removed, [name.as_str()], "{v}");
+    assert_eq!(v["cells"], serde_json::json!([]), "{v}");
+    assert!(!instance.exists(), "the half-made instance folder is still there");
+    let ledger = adytum_ledger::Ledger::open(&env.home).unwrap();
+    assert_eq!(ledger.open_ops().unwrap().len(), 0, "an operation is still open");
+    assert_eq!(ledger.cells().unwrap().len(), 0);
+    drop(ledger);
+
+    // The same name creates cleanly.
+    let (code, v) = step("create the same name", || env.json(&["create", &name, "--sealed", "--wall", "wall_live"]));
+    assert_eq!((code, v["state"].as_str()), (0, Some("stopped")), "{v}");
+    assert_eq!(env.json(&["rm", &name]).0, 0);
+    assert_eq!(listed_names(&env).len(), 0);
+}
+
 #[test]
 fn a_sealed_cell_from_create_to_rm() {
     if std::env::var("ADYTUM_LIVE").as_deref() != Ok("1") {
@@ -244,6 +387,8 @@ fn a_sealed_cell_from_create_to_rm() {
     let total = Instant::now();
     sealed_cell(&before);
     published_cell();
+    clone_cells();
+    kill_during_create();
     assert_eq!(default_lima_names(), before);
     println!("total: {:.1}s", total.elapsed().as_secs_f64());
 }

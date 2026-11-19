@@ -14,12 +14,13 @@ name = "adytum"
 path = "src/main.rs"
 
 [dependencies]
+adytum-doctor.workspace = true
 adytum-driver.workspace = true
 adytum-exec.workspace = true
+adytum-ledger.workspace = true
 adytum-lima.workspace = true
 adytum-model.workspace = true
 adytum-policy.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 

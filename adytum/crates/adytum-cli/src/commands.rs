@@ -1,55 +1,132 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use adytum_driver::{cell_name, ExecOpts};
+use adytum_driver::{cell_name, Driver, DriverError, ExecOpts};
+use adytum_ledger::{create_cell, reconcile, remove_cell, Ledger, LedgerError, OpKind, Outcome, Report};
 use adytum_model::{CellName, CellSpec, CellState, DriverKind, Port, Resources, Wall};
-use adytum_policy::World;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::args::{Command, CreateArgs, Usage};
-use crate::records::{self, Record};
 use crate::{Context, Done, Failure};
 
 const DEFAULT_WALL: &str = "wall_default";
 
-pub(crate) async fn execute(command: Command, ctx: &Context, out: &mut dyn Write, err: &mut dyn Write, json: bool) -> Result<Done, Failure> {
-    match command {
-        Command::Help => Ok(done(json!({}), String::new())),
-        Command::Create(args) => create(ctx, args).await,
-        Command::Start(name) => {
-            let name = cell_name(&name)?;
-            ctx.driver.start(&name).await?;
-            Ok(done(json!({ "name": name, "state": CellState::Running }), format!("started {name}")))
+/// The ledger, open, and what reconciling it did.
+struct Session {
+    ledger: Ledger,
+    report: Report,
+}
+
+impl Session {
+    /// Opens the ledger and reconciles it with the driver before anything
+    /// else happens. Says on `err` what it did, if it did anything.
+    async fn open(ctx: &Context, err: &mut dyn Write) -> Result<Session, Failure> {
+        let ledger = Ledger::open(&ctx.home)?;
+        let report = reconcile(&ledger, &*ctx.driver).await?;
+        for (what, names) in [("removed the half-made or vanished cell", &report.removed), ("finished removing", &report.finished)] {
+            for name in names {
+                // A closed pipe is the reader's choice.
+                let _ = writeln!(err, "adytum: reconciled: {what} {name}.");
+            }
         }
-        Command::Stop(name) => {
-            let name = cell_name(&name)?;
-            ctx.driver.stop(&name).await?;
-            Ok(done(json!({ "name": name, "state": CellState::Stopped }), format!("stopped {name}")))
+        Ok(Session { ledger, report })
+    }
+
+    fn reconciled(&self) -> Value {
+        json!({ "removed": self.report.removed, "finished": self.report.finished, "unrecorded": self.report.adopted_none })
+    }
+
+    fn done(&self, mut json: Value, text: String) -> Done {
+        if let Value::Object(map) = &mut json {
+            map.insert("reconciled".to_owned(), self.reconciled());
         }
-        Command::Rm(name) => {
-            let name = cell_name(&name)?;
-            ctx.driver.remove(&name).await?;
-            // The cell is gone; a record that cannot be deleted is only clutter.
-            let _ = records::remove(&ctx.home, &name);
-            Ok(done(json!({ "name": name, "removed": true }), format!("removed {name}")))
-        }
-        Command::Exec { name, argv } => exec(ctx, &name, &argv, out, err, json).await,
-        Command::Cp { src, dst } => copy(ctx, &src, &dst).await,
-        Command::Ls => list(ctx).await,
+        Done::new(json, text)
+    }
+
+    /// The recorded cell's spec, or `NotRecorded`: Adytum touches only what it wrote down.
+    fn recorded(&self, name: &CellName) -> Result<CellSpec, Failure> {
+        self.ledger.cells()?.into_iter().find(|c| &c.spec.name == name).map(|c| c.spec).ok_or_else(|| Failure::from(LedgerError::NotRecorded(name.clone())))
     }
 }
 
-fn done(json: serde_json::Value, text: String) -> Done {
-    Done { json, text, exit: 0 }
+pub(crate) async fn execute(command: Command, ctx: &Context, out: &mut dyn Write, err: &mut dyn Write, json: bool) -> Result<Done, Failure> {
+    // Names and options are checked before the ledger is opened, so a
+    // refused line leaves no trace on disk.
+    match command {
+        Command::Help => Ok(Done::new(json!({}), String::new())),
+        Command::Doctor => doctor().await,
+        Command::Create(args) => {
+            let spec = spec_from(&args, cell_name(&args.name)?)?;
+            create(ctx, err, spec).await
+        }
+        Command::Start(name) => {
+            let name = cell_name(&name)?;
+            let session = Session::open(ctx, err).await?;
+            let op = session.ledger.intend(OpKind::Start, &name)?;
+            let result = ctx.driver.start(&name).await;
+            settle(&session.ledger, op, &result)?;
+            result?;
+            Ok(session.done(json!({ "name": name, "state": CellState::Running }), format!("started {name}")))
+        }
+        Command::Stop(name) => {
+            let name = cell_name(&name)?;
+            let session = Session::open(ctx, err).await?;
+            let op = session.ledger.intend(OpKind::Stop, &name)?;
+            let result = ctx.driver.stop(&name).await;
+            settle(&session.ledger, op, &result)?;
+            result?;
+            Ok(session.done(json!({ "name": name, "state": CellState::Stopped }), format!("stopped {name}")))
+        }
+        Command::Rm(name) => {
+            let name = cell_name(&name)?;
+            let session = Session::open(ctx, err).await?;
+            remove_cell(&session.ledger, &*ctx.driver, &name).await?;
+            Ok(session.done(json!({ "name": name, "removed": true }), format!("removed {name}")))
+        }
+        Command::Clone { from, to, wall, ports } => {
+            let (from, to) = (cell_name(&from)?, cell_name(&to)?);
+            let wall = wall.map(|w| w.parse::<Wall>().map_err(|e| usage(format!("{e}."), "Write a wall like wall_work."))).transpose()?;
+            clone(ctx, err, &from, to, wall, &ports).await
+        }
+        Command::Hold { name, eidolon } => {
+            let name = cell_name(&name)?;
+            let session = Session::open(ctx, err).await?;
+            session.ledger.hold(&name, &eidolon)?;
+            Ok(session.done(json!({ "name": name, "eidolon": eidolon, "held": true }), format!("{name} holds {eidolon}")))
+        }
+        Command::Release { name, eidolon } => {
+            let name = cell_name(&name)?;
+            let session = Session::open(ctx, err).await?;
+            session.ledger.release(&name, &eidolon)?;
+            Ok(session.done(json!({ "name": name, "eidolon": eidolon, "held": false }), format!("{name} no longer holds {eidolon}")))
+        }
+        Command::Exec { name, argv } => exec(ctx, &name, &argv, out, err, json).await,
+        Command::Cp { src, dst } => copy(ctx, err, &src, &dst).await,
+        Command::Ls => list(ctx, err).await,
+    }
+}
+
+/// Closes an operation with how the driver did. A failed settle is reported
+/// only when the driver itself worked: the driver's error matters more.
+fn settle<T>(ledger: &Ledger, op: adytum_ledger::OpId, result: &Result<T, DriverError>) -> Result<(), Failure> {
+    let outcome = match result {
+        Ok(_) => Outcome::Done,
+        Err(e) => Outcome::Failed(e.to_string()),
+    };
+    match ledger.settle(op, outcome) {
+        Err(e) if result.is_ok() => Err(e.into()),
+        _ => Ok(()),
+    }
+}
+
+async fn doctor() -> Result<Done, Failure> {
+    let checks = adytum_doctor::checks().await;
+    let failed = adytum_doctor::has_failure(&checks);
+    Ok(Done { json: json!({ "ok": !failed, "checks": checks }), text: adytum_doctor::render_human(&checks).trim_end().to_owned(), exit: i32::from(failed) })
 }
 
 fn usage(message: impl Into<String>, fix: impl Into<String>) -> Failure {
     Failure::from(Usage { message: message.into(), fix: fix.into() })
-}
-
-async fn world(ctx: &Context) -> Result<World, Failure> {
-    let cells = ctx.driver.list().await?;
-    Ok(World { cells: cells.iter().map(|c| records::read(&ctx.home, &c.name).map_or_else(|| records::unrecorded(&c.name), |r| r.facts())).collect() })
 }
 
 fn spec_from(args: &CreateArgs, name: CellName) -> Result<CellSpec, Failure> {
@@ -62,14 +139,13 @@ fn spec_from(args: &CreateArgs, name: CellName) -> Result<CellSpec, Failure> {
     if resources.cpus == 0 || resources.memory_mib == 0 {
         return Err(usage("A cell needs at least one CPU and some memory.", "Give --cpus and --memory a number above 0."));
     }
-    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
     Ok(CellSpec {
         name,
         driver: DriverKind::Lima,
         image,
         wall,
         resources,
-        ports: args.ports.iter().map(|&(host, guest)| Port { guest, host, bind: loopback }).collect(),
+        ports: loopback_ports(&args.ports),
         automation_port: args.automation_port,
         mounts: Vec::new(),
         sealed: args.sealed,
@@ -79,34 +155,70 @@ fn spec_from(args: &CreateArgs, name: CellName) -> Result<CellSpec, Failure> {
     })
 }
 
-async fn create(ctx: &Context, args: CreateArgs) -> Result<Done, Failure> {
-    let name = cell_name(&args.name)?;
-    let spec = spec_from(&args, name)?;
-    adytum_policy::check_create(&spec, &world(ctx).await?).map_err(adytum_driver::DriverError::Refused)?;
-    ctx.driver.create(&spec).await?;
-    let record = Record {
-        name: spec.name.clone(),
-        wall: spec.wall.clone(),
-        sealed: spec.sealed,
-        network: spec.network.clone(),
-        mount_sources: spec.mounts.iter().map(|m| m.source.clone()).collect(),
-        secrets: spec.secrets.iter().map(|s| s.name.clone()).collect(),
-    };
-    records::write(&ctx.home, &record).map_err(|source| Failure::from(adytum_driver::DriverError::Io { what: "write the cell's record", source }))?;
+fn loopback_ports(ports: &[(u16, u16)]) -> Vec<Port> {
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    ports.iter().map(|&(host, guest)| Port { guest, host, bind: loopback }).collect()
+}
+
+async fn create(ctx: &Context, err: &mut dyn Write, spec: CellSpec) -> Result<Done, Failure> {
+    let session = Session::open(ctx, err).await?;
+    let id = create_cell(&session.ledger, &*ctx.driver, &spec).await?;
     let sealed = if spec.sealed { ", sealed" } else { "" };
-    Ok(done(
-        json!({ "name": spec.name, "state": CellState::Stopped, "wall": spec.wall, "sealed": spec.sealed }),
+    Ok(session.done(
+        json!({ "name": spec.name, "id": id.to_string(), "state": CellState::Stopped, "wall": spec.wall, "sealed": spec.sealed }),
         format!("created {} ({}{sealed}); start it with `adytum start {}`", spec.name, spec.wall, spec.name),
+    ))
+}
+
+/// Makes `to` as a copy of the stopped cell `from`. The new cell's spec is
+/// the source's, with the new name, the wall asked for (the source's by
+/// default) and only the ports asked for, since a published host port is
+/// the source's alone. The rules run against the ledger's world, so a clone
+/// across walls, or of a cell that holds an open eidolon, is refused before
+/// anything is written. Then the same order as a create: intent, driver,
+/// settle; a failed clone is removed, and a crash is cleaned up by the next
+/// reconcile.
+async fn clone(ctx: &Context, err: &mut dyn Write, from: &CellName, to: CellName, wall: Option<Wall>, ports: &[(u16, u16)]) -> Result<Done, Failure> {
+    let session = Session::open(ctx, err).await?;
+    let source = session.recorded(from)?;
+    let spec = CellSpec { name: to, wall: wall.unwrap_or_else(|| source.wall.clone()), ports: loopback_ports(ports), clone_from: Some(from.clone()), ..source };
+    adytum_policy::check_create(&spec, &session.ledger.world()?).map_err(DriverError::Refused)?;
+    if ctx.driver.list().await?.iter().any(|l| l.name == spec.name) {
+        return Err(Failure::from(DriverError::Refused(adytum_model::Refusal::new(
+            adytum_model::RefusalCode::NameTaken,
+            format!("The driver already has a cell named {} that Adytum did not make.", spec.name),
+            "Pick another name; Adytum does not touch cells it did not record.",
+        ))));
+    }
+    let op = session.ledger.intend_create(&spec)?;
+    match Driver::clone(&*ctx.driver, from, &spec).await {
+        Ok(()) => session.ledger.settle(op, Outcome::Done)?,
+        Err(e) => {
+            // Take away whatever half-made cell there is; if that fails the
+            // operation stays open and the next reconcile tries again.
+            if matches!(ctx.driver.remove(&spec.name).await, Ok(()) | Err(DriverError::NotFound { .. })) {
+                session.ledger.settle(op, Outcome::Failed(e.to_string()))?;
+            }
+            return Err(e.into());
+        }
+    }
+    Ok(session.done(
+        json!({ "name": spec.name, "state": CellState::Stopped, "wall": spec.wall, "sealed": spec.sealed, "cloned_from": from }),
+        format!("cloned {from} to {} ({}); start it with `adytum start {}`", spec.name, spec.wall, spec.name),
     ))
 }
 
 async fn exec(ctx: &Context, name: &str, argv: &[String], out: &mut dyn Write, err: &mut dyn Write, json: bool) -> Result<Done, Failure> {
     let name = cell_name(name)?;
+    let session = Session::open(ctx, err).await?;
+    session.recorded(&name)?;
     let output = ctx.driver.exec(&name, argv, ExecOpts::default()).await?;
     let exit = i32::from(!output.success());
     if json {
         let status = output.status;
-        return Ok(Done { json: json!({ "name": name, "status": status, "stdout": output.stdout_lossy(), "stderr": output.stderr_lossy() }), text: String::new(), exit });
+        let mut done = session.done(json!({ "name": name, "status": status, "stdout": output.stdout_lossy(), "stderr": output.stderr_lossy() }), String::new());
+        done.exit = exit;
+        return Ok(done);
     }
     // A closed pipe is the reader's choice.
     let _ = out.write_all(&output.stdout);
@@ -129,36 +241,43 @@ fn absolute(path: &str) -> Result<PathBuf, Failure> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
     }
-    let cwd = std::env::current_dir().map_err(|source| Failure::from(adytum_driver::DriverError::Io { what: "read the current folder", source }))?;
+    let cwd = std::env::current_dir().map_err(|source| Failure::from(DriverError::Io { what: "read the current folder", source }))?;
     Ok(cwd.join(path))
 }
 
-async fn copy(ctx: &Context, src: &str, dst: &str) -> Result<Done, Failure> {
-    match (guest_side(src), guest_side(dst)) {
-        (None, Some((name, path))) => {
-            let name = cell_name(name)?;
-            ctx.driver.copy_in(&name, &absolute(src)?, path).await?;
-        }
-        (Some((name, path)), None) => {
-            let name = cell_name(name)?;
-            ctx.driver.copy_out(&name, path, &absolute(dst)?).await?;
-        }
+async fn copy(ctx: &Context, err: &mut dyn Write, src: &str, dst: &str) -> Result<Done, Failure> {
+    let (name, to_cell) = match (guest_side(src), guest_side(dst)) {
+        (None, Some((name, _))) => (cell_name(name)?, true),
+        (Some((name, _)), None) => (cell_name(name)?, false),
         (Some(_), Some(_)) => return Err(usage("Both sides are paths inside cells.", "Copy through the host in two steps.")),
         (None, None) => return Err(usage("Neither side is a path inside a cell.", "Write one side as <name>:<absolute path>; start a host path with ./ if it holds a colon.")),
+    };
+    let session = Session::open(ctx, err).await?;
+    session.recorded(&name)?;
+    if to_cell {
+        let path = guest_side(dst).map_or("", |(_, p)| p);
+        ctx.driver.copy_in(&name, &absolute(src)?, path).await?;
+    } else {
+        let path = guest_side(src).map_or("", |(_, p)| p);
+        ctx.driver.copy_out(&name, path, &absolute(dst)?).await?;
     }
-    Ok(done(json!({ "from": src, "to": dst }), format!("copied {src} to {dst}")))
+    Ok(session.done(json!({ "from": src, "to": dst }), format!("copied {src} to {dst}")))
 }
 
-async fn list(ctx: &Context) -> Result<Done, Failure> {
-    let cells = ctx.driver.list().await?;
+async fn list(ctx: &Context, err: &mut dyn Write) -> Result<Done, Failure> {
+    let session = Session::open(ctx, err).await?;
     let mut rows = Vec::new();
     let mut lines = Vec::new();
-    for cell in &cells {
-        let wall = records::read(&ctx.home, &cell.name).map(|r| r.wall);
-        rows.push(json!({ "name": cell.name, "state": cell.state, "wall": wall }));
+    for cell in session.ledger.cells()? {
+        let name = &cell.spec.name;
+        rows.push(json!({ "name": name, "state": cell.state, "wall": cell.spec.wall }));
         let state = serde_json::to_value(cell.state).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
-        lines.push(format!("{}  {state}  {}", cell.name, wall.map_or_else(String::new, |w| w.to_string())).trim_end().to_owned());
+        lines.push(format!("{name}  {state}  {}", cell.spec.wall));
+    }
+    // Cells the driver has that Adytum never recorded: shown, never touched.
+    for name in &session.report.adopted_none {
+        lines.push(format!("{name}  (not recorded by adytum; left alone)"));
     }
     let text = if lines.is_empty() { "no cells".to_owned() } else { lines.join("\n") };
-    Ok(done(json!({ "cells": rows }), text))
+    Ok(session.done(json!({ "cells": rows }), text))
 }

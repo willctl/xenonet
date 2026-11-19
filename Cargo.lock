@@ -49,7 +49,6 @@ dependencies = [
  "adytum-model",
  "adytum-policy",
  "async-trait",
- "serde",
  "serde_json",
  "tokio",
 ]

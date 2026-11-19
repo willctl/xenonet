@@ -43,6 +43,10 @@ pub enum Command {
     Start(String),
     Stop(String),
     Rm(String),
+    Clone { from: String, to: String, wall: Option<String>, ports: Vec<(u16, u16)> },
+    Hold { name: String, eidolon: String },
+    Release { name: String, eidolon: String },
+    Doctor,
     Exec { name: String, argv: Vec<String> },
     Cp { src: String, dst: String },
     Ls,
@@ -64,9 +68,15 @@ Usage:
   adytum start <name>
   adytum stop <name>
   adytum rm <name>
+  adytum clone <from> <to> [--wall wall_x] [--port host:guest]...
+                                         (<from> must be stopped; the copy
+                                          keeps its wall unless you give one)
+  adytum hold <name> <eidolon>           (record that the cell holds an open
+  adytum release <name> <eidolon>         eidolon, or no longer does)
   adytum exec <name> -- <command> [args...]
   adytum cp <source> <destination>      (one side is <name>:<absolute path>)
   adytum ls
+  adytum doctor                          (what is wrong with the setup; exit 1 on a failure)
 
 Every command takes --json: one JSON object on stdout, and errors as
 {\"error\": {\"code\", \"message\", \"fix\"}}.
@@ -137,6 +147,16 @@ pub fn wants_json(tokens: &[String]) -> bool {
     tokens.iter().take_while(|t| *t != "--").any(|t| t == "--json")
 }
 
+/// An eidolon's id as the ledger stores it: short, plain text.
+fn eidolon_id(text: &str) -> Result<String, Usage> {
+    let ok = !text.is_empty() && text.len() <= 128 && text.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'));
+    if ok {
+        Ok(text.to_owned())
+    } else {
+        Err(Usage::new(format!("{text:?} is not an eidolon id."), "Use letters, digits, - _ . : and at most 128 characters."))
+    }
+}
+
 fn one_name(command: &str, raw: &Raw) -> Result<String, Usage> {
     match raw.positional.as_slice() {
         [name] => Ok(name.clone()),
@@ -190,6 +210,44 @@ pub fn parse(tokens: &[String]) -> Result<Parsed, Usage> {
                 "stop" => Command::Stop(name),
                 _ => Command::Rm(name),
             }
+        }
+        "clone" => {
+            if raw.sealed || raw.rest.is_some() || raw.values.iter().any(|(f, _)| f != "wall" && f != "port") {
+                return Err(Usage::new("`adytum clone` takes only --wall and --port.", "Write adytum clone <from> <to> [--wall wall_x] [--port host:guest]."));
+            }
+            let [from, to] = raw.positional.as_slice() else {
+                return Err(Usage::new("`adytum clone` needs the cell to copy and a name for the copy.", "Write adytum clone <from> <to>."));
+            };
+            let mut wall = None;
+            let mut ports = Vec::new();
+            for (flag, value) in &raw.values {
+                if flag == "wall" {
+                    wall = Some(value.clone());
+                } else {
+                    ports.push(port_pair(value)?);
+                }
+            }
+            Command::Clone { from: from.clone(), to: to.clone(), wall, ports }
+        }
+        "hold" | "release" => {
+            only_json(first, &raw)?;
+            let [name, eidolon] = raw.positional.as_slice() else {
+                return Err(Usage::new(format!("`adytum {first}` needs a cell name and an eidolon id."), format!("Write adytum {first} <name> <eidolon>.")));
+            };
+            let eidolon = eidolon_id(eidolon)?;
+            let name = name.clone();
+            if first == "hold" {
+                Command::Hold { name, eidolon }
+            } else {
+                Command::Release { name, eidolon }
+            }
+        }
+        "doctor" => {
+            only_json("doctor", &raw)?;
+            if !raw.positional.is_empty() {
+                return Err(Usage::new("`adytum doctor` takes no arguments.", "Write adytum doctor."));
+            }
+            Command::Doctor
         }
         "exec" => {
             if raw.sealed || !raw.values.is_empty() {
@@ -269,10 +327,26 @@ mod tests {
             "create adytum-a --bogus",
             "start adytum-a --sealed",
             "ls --wall wall_x",
+            "clone adytum-a",
+            "clone adytum-a adytum-b --sealed",
+            "clone adytum-a adytum-b --cpus 2",
+            "hold adytum-a",
+            "hold adytum-a bad/id",
+            "release adytum-a a b",
+            "doctor extra",
         ] {
             let err = p(bad).unwrap_err();
             assert!(!err.message.is_empty() && !err.fix.is_empty(), "{bad}");
         }
+    }
+
+    #[test]
+    fn clone_hold_release_and_doctor_read() {
+        let Command::Clone { from, to, wall, ports } = p("clone adytum-a adytum-b --wall wall_x --port 1:2").unwrap().command else { panic!("not clone") };
+        assert_eq!((from.as_str(), to.as_str(), wall.as_deref(), ports.as_slice()), ("adytum-a", "adytum-b", Some("wall_x"), &[(1, 2)][..]));
+        assert_eq!(p("hold adytum-a eid_1:x").unwrap().command, Command::Hold { name: "adytum-a".into(), eidolon: "eid_1:x".into() });
+        assert_eq!(p("release adytum-a e1 --json").unwrap().command, Command::Release { name: "adytum-a".into(), eidolon: "e1".into() });
+        assert_eq!(p("doctor --json").unwrap().command, Command::Doctor);
     }
 
     #[test]
