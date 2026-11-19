@@ -234,7 +234,10 @@ pub fn problems(project: &str, rule: &Value, check: &Value, commits: &[Commit]) 
 }
 
 fn git(dir: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git").arg("-C").arg(dir).args(args).output().map_err(|e| format!("couldn't run git: {e}"))?;
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(dir).args(args);
+    xenonet_os::process::Background::no_window(&mut cmd);
+    let out = cmd.output().map_err(|e| format!("couldn't run git: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
