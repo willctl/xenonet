@@ -1,0 +1,37 @@
+Which git email and GitHub push account a project uses, and a guard that
+stops a commit or push under the wrong one. XenoNet reads both for every
+project; a rule says which they should be, and warns when they aren't.
+
+  xenonet identity rule [<folder>]       the rule for the project the folder
+                                         is in (default: this one), and how it
+                                         checks now
+  xenonet identity rule [<folder>] --git <email> --push <login>[@host]
+                                         set it; either part alone works, and
+                                         a part you leave out stays as it is.
+                                         host is github.com unless you say
+  xenonet identity rule [<folder>] --clear
+                                         take the rule away
+  xenonet identity check [<folder>]      the check; exits 1 when the project
+                                         doesn't use what its rule names. A
+                                         part XenoNet couldn't read counts as
+                                         unknown, not as wrong
+  xenonet identity hook install [<folder>]
+                                         put a pre-push hook in the repo that
+                                         refuses a push under the wrong
+                                         identity, whatever program pushes
+  xenonet identity hook remove [<folder>]
+                                         take that hook out again
+  --json                                 the answer as JSON
+
+Setting or clearing a rule is yours, so it works from your own terminal and
+is refused from a session's.
+
+The hook refuses a push when the account it signs in as isn't the rule's, or
+when a commit being pushed has an author or committer email other than the
+rule's. It refuses too when it can't reach XenoNet, since it was installed to
+protect. A project with no rule is let through. git push --no-verify skips
+the hook, and that is yours to decide.
+
+The hook never replaces a pre-push hook that isn't its own, and removing it
+takes out only its own. It goes where git looks for hooks, core.hooksPath
+included, which for linked worktrees is the repo's one shared folder.

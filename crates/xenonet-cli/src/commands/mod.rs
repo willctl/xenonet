@@ -20,6 +20,7 @@ pub mod drift;
 pub mod film;
 pub mod gateway;
 pub mod hook;
+pub mod identity;
 pub mod install;
 pub mod intent;
 pub mod live;
@@ -92,6 +93,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("live", "Messages that reach sessions as they're sent: pause, consent, actors' scopes, audit", Some("[pause|resume|allow|disallow|grant|revoke|audit]")),
     cmd("spend", "About what today's work would cost at API prices, by app and by actor", None),
     cmd("messages", "What sessions and actors said to each other today", None),
+    cmd("identity", "The git email and push account a project should use, and a hook that stops a push under the wrong one", Some("<rule|check|hook> [<folder>]")),
     cmd("root", "The projects folder XenoNet reads, or read another", Some("[folder]")),
     cmd(
         "net",
@@ -156,6 +158,7 @@ fn text(name: &str) -> &'static str {
         "film" => film::HELP,
         "gateway" => gateway::HELP,
         "hook" => hook::HELP,
+        "identity" => identity::HELP,
         "install" => install::HELP,
         "live" => live::HELP,
         "logs" => logs::HELP,
@@ -201,6 +204,7 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "film" => film::run(args, flags),
         "gateway" => gateway::run(args, flags),
         "hook" => hook::run(args, flags),
+        "identity" => identity::run(args, flags),
         "install" => install::run(args, flags),
         "live" => live::run(args, flags),
         "logs" => logs::run(args, flags),
