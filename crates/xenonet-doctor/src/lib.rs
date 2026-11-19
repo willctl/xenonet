@@ -4,6 +4,7 @@
 //! someone helping you, safe to share. `runtime` runs them in the
 //! service: the Doctor and Diagnostics cores, over the other cores.
 
+pub mod cells;
 pub mod checks;
 pub mod diagnostics;
 #[cfg(test)]
