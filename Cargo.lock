@@ -46,6 +46,18 @@ name = "adytum-doctor"
 version = "0.1.0"
 
 [[package]]
+name = "adytum-driver"
+version = "0.1.0"
+dependencies = [
+ "adytum-exec",
+ "adytum-model",
+ "adytum-policy",
+ "async-trait",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "adytum-exec"
 version = "0.1.0"
 dependencies = [
@@ -1196,6 +1208,15 @@ version = "0.1.0"
 [[package]]
 name = "eidolon-facet"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "eidolon-model",
+ "eidolon-pack",
+ "eidolon-policy",
+ "eidolon-vault",
+ "tokio",
+ "xenonet-id",
+]
 
 [[package]]
 name = "eidolon-mcp"
@@ -1213,10 +1234,30 @@ dependencies = [
 [[package]]
 name = "eidolon-move"
 version = "0.1.0"
+dependencies = [
+ "eidolon-model",
+ "eidolon-policy",
+ "eidolon-vault",
+ "serde",
+ "serde_json",
+ "tokio",
+ "x25519-dalek",
+ "xenonet-id",
+ "xenonet-os",
+ "xenonet-text",
+]
 
 [[package]]
 name = "eidolon-pack"
 version = "0.1.0"
+dependencies = [
+ "eidolon-model",
+ "eidolon-vault",
+ "libc",
+ "serde",
+ "serde_json",
+ "xenonet-id",
+]
 
 [[package]]
 name = "eidolon-policy"
@@ -1233,7 +1274,6 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "eidolon-bidi",
- "getrandom 0.3.4",
  "serde_json",
  "tokio",
 ]
