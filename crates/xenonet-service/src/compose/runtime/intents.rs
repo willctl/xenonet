@@ -211,7 +211,7 @@ fn pick_delegation(w: &Runtime, target: &str, named: Option<&str>) -> Result<Str
 pub fn make(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
     // An intent belongs to one network, which everything done for it is
     // done in. This machine in several, the request says which.
-    let networks = net(w).networks();
+    let networks = net(w).live_networks();
     let named = text(body, "network");
     let network = match (networks.as_slice(), named.as_deref()) {
         ([], _) => return Err(status(409, "an intent travels in your network: make or join one first")),
@@ -417,7 +417,7 @@ pub fn list(w: &Runtime) -> R<Value> {
         .collect();
     // This machine's networks, which a new intent has to choose between
     // when there is more than one.
-    let networks: Vec<Value> = net(w).networks().into_iter().map(|m| json!({ "id": m.network, "name": m.name })).collect();
+    let networks: Vec<Value> = net(w).live_networks().into_iter().map(|m| json!({ "id": m.network, "name": m.name })).collect();
     Ok(json!({ "here": here, "intents": intents, "machines": machines, "networks": networks, "delegations": delegations, "projects": projects }))
 }
 

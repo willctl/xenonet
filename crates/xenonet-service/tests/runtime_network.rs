@@ -90,6 +90,19 @@ impl Net for FakeNet {
     fn networks(&self) -> Vec<Me> {
         vec![Me { network: "net_0123456789abcdef0123456789abcdef".into(), name: "home".into(), host: self.host.clone() }]
     }
+    fn live_networks(&self) -> Vec<Me> {
+        self.networks()
+    }
+    fn networks_with(&self, host: &str) -> Vec<String> {
+        if self.hosts().iter().any(|h| h.id == host) {
+            self.networks().into_iter().map(|m| m.network).collect()
+        } else {
+            Vec::new()
+        }
+    }
+    fn networks_for(&self, _project: Option<&str>) -> Vec<String> {
+        self.networks().into_iter().map(|m| m.network).collect()
+    }
     fn hosts(&self) -> Vec<Host> {
         self.hub.hosts.lock().unwrap().iter().filter(|(h, _)| *h != self.host).map(|(h, on)| Host { id: h.clone(), window: true, online: *on, seen: Some(now()) }).collect()
     }

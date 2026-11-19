@@ -219,5 +219,7 @@ test("a start must choose its network only on a machine that is in several of th
   assert.deepEqual(networksWith([home, work], "lab"), [{ id: work.id, name: "work" }]);
   assert.deepEqual(networksWith([home, work], "nobody"), []);
   assert.deepEqual(networksWith(undefined, "laptop"), []);
+  const gone = { ...work, link: { state: "removed" } };
+  assert.deepEqual(networksWith([home, gone], "laptop"), [{ id: home.id, name: "home" }], "a network this machine was removed from isn't one it is in");
   assert.deepEqual(networksWith([{ name: "no id", hosts: [host("laptop")] }, { id: "net_x", hosts: "nope" }], "laptop"), [], "a network with no id, or a host list that isn't one, has no machine");
 });

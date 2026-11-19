@@ -1209,6 +1209,34 @@ impl Net for Shared {
         self.network().map(|n| Me { network: n.id, name: n.name, host: n.host }).into_iter().collect()
     }
 
+    fn live_networks(&self) -> Vec<Me> {
+        if self.is_removed() {
+            return Vec::new();
+        }
+        Net::networks(self)
+    }
+
+    fn networks_with(&self, host: &str) -> Vec<String> {
+        match self.network() {
+            Some(n) if !self.is_removed() && self.roster().view_ref().is_some_and(|v| v.member(host).is_some()) => vec![n.id],
+            _ => Vec::new(),
+        }
+    }
+
+    fn networks_for(&self, project: Option<&str>) -> Vec<String> {
+        let Some(n) = self.network().filter(|_| !self.is_removed()) else { return Vec::new() };
+        let sharing = self.sharing(&n.id);
+        let shown = match project {
+            Some(p) => sharing.shows_project(p),
+            None => sharing == crate::share::Sharing::All,
+        };
+        if shown {
+            vec![n.id]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn roster_head(&self) -> Option<String> {
         self.network()?;
         self.roster().head()

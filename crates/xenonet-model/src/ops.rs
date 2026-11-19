@@ -212,7 +212,9 @@ impl Reach {
             return Reach::default();
         }
         let start = least(&STARTS, |r| &r.start);
-        let delegated = if start == "delegate" { all[0].delegated.clone() } else { None };
+        // Several networks that delegate agree on who delegated, or the run
+        // is under no delegation: the person answers its prompts.
+        let delegated = if start == "delegate" && all.iter().all(|r| r.delegated == all[0].delegated) { all[0].delegated.clone() } else { None };
         Reach { start, wake: least(&WAKES, |r| &r.wake), pending: all.iter().flat_map(|r| r.pending.clone()).collect(), delegated }
     }
 }
@@ -246,6 +248,9 @@ pub trait Net: Send + Sync {
     /// Every network this machine is in, with its host id in each: the one
     /// it founded or joined first, first.
     fn networks(&self) -> Vec<Me>;
+    /// `networks`, without those this machine was removed from: the ones it
+    /// is in now, which a choice between networks is made among.
+    fn live_networks(&self) -> Vec<Me>;
     /// This machine in the network a call is in (the one the body in hand
     /// arrived in, or the only one it is in), else in the first of
     /// `networks`: for naming this machine (its host id, its network's
@@ -258,19 +263,12 @@ pub trait Net: Send + Sync {
     }
     /// The networks whose roster has `host`, by id. A send to a host that
     /// is in several of them has to name one (`Outgoing::network`).
-    fn networks_with(&self, host: &str) -> Vec<String> {
-        if self.hosts().iter().any(|h| h.id == host) {
-            self.networks().into_iter().map(|m| m.network).collect()
-        } else {
-            Vec::new()
-        }
-    }
+    fn networks_with(&self, host: &str) -> Vec<String>;
     /// The networks shown `project` (None: a body about no project, which
     /// only a network shown everything is): where a body about it may go.
-    fn networks_for(&self, project: Option<&str>) -> Vec<String> {
-        let _ = project;
-        self.networks().into_iter().map(|m| m.network).collect()
-    }
+    /// Required, not defaulted, since an answer that doesn't say what is
+    /// shown would send a body everywhere.
+    fn networks_for(&self, project: Option<&str>) -> Vec<String>;
     /// The other hosts in the roster.
     fn hosts(&self) -> Vec<Host>;
     /// Queues a body. It refuses only when this machine isn't in a network
@@ -340,6 +338,15 @@ impl Net for NoNet {
     fn networks(&self) -> Vec<Me> {
         Vec::new()
     }
+    fn live_networks(&self) -> Vec<Me> {
+        Vec::new()
+    }
+    fn networks_with(&self, _host: &str) -> Vec<String> {
+        Vec::new()
+    }
+    fn networks_for(&self, _project: Option<&str>) -> Vec<String> {
+        Vec::new()
+    }
     fn hosts(&self) -> Vec<Host> {
         Vec::new()
     }
@@ -393,6 +400,16 @@ mod tests {
         assert_eq!(Kind::parse("frame"), None);
         assert_eq!(Kind::Presence.schema(), "network/presence/v1");
         assert_eq!(Kind::Message.schema(), "network/send/v1");
+    }
+
+    #[test]
+    fn several_networks_that_delegate_agree_on_who_delegated_or_no_one_did() {
+        let by = |who: &str| Reach { start: "delegate".into(), wake: "consent".into(), pending: Vec::new(), delegated: Some((who.into(), 7)) };
+        assert_eq!(Reach::narrowest(&[by("desk"), by("desk")]).delegated, Some(("desk".into(), 7)));
+        assert_eq!(Reach::narrowest(&[by("desk"), by("tower")]).delegated, None, "two networks that differ leave it to neither");
+        let network = Reach { start: "network".into(), ..by("desk") };
+        let narrowed = Reach::narrowest(&[by("desk"), network]);
+        assert_eq!((narrowed.start.as_str(), narrowed.delegated), ("network", None), "a delegation only where the narrowest start is one");
     }
 
     #[test]

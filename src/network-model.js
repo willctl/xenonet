@@ -41,10 +41,11 @@ export function networksOf(raw) {
 
 // The networks of this machine's that have the machine `host`: what a
 // start there must choose between when it is in more than one (the service
-// refuses to guess). Each as { id, name }.
+// refuses to guess). Each as { id, name }. A network this machine was removed
+// from is not one it is in.
 export function networksWith(networks, host) {
   return list(networks)
-    .filter((n) => n && typeof n.id === "string" && list(n.hosts).some((x) => x && x.id === host))
+    .filter((n) => n && typeof n.id === "string" && n.link?.state !== "removed" && list(n.hosts).some((x) => x && x.id === host))
     .map((n) => ({ id: n.id, name: typeof n.name === "string" ? n.name : n.id }));
 }
 

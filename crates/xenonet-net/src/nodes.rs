@@ -667,31 +667,16 @@ impl Net for Nodes {
         Some(Me { network: n.id, name: n.name, host: n.host })
     }
 
+    fn live_networks(&self) -> Vec<Me> {
+        self.common.shareds().iter().filter(|s| !s.is_removed()).filter_map(|s| s.network()).map(|n| Me { network: n.id, name: n.name, host: n.host }).collect()
+    }
+
     fn networks_for(&self, project: Option<&str>) -> Vec<String> {
-        self.common
-            .shareds()
-            .iter()
-            .filter(|s| !s.is_removed())
-            .filter_map(|s| {
-                let n = s.network()?;
-                let sharing = s.sharing(&n.id);
-                let shown = match project {
-                    Some(p) => sharing.shows_project(p),
-                    None => sharing == crate::share::Sharing::All,
-                };
-                shown.then_some(n.id)
-            })
-            .collect()
+        self.common.shareds().iter().flat_map(|s| Net::networks_for(s.as_ref(), project)).collect()
     }
 
     fn networks_with(&self, host: &str) -> Vec<String> {
-        self.common
-            .shareds()
-            .iter()
-            .filter(|s| !s.is_removed())
-            .filter(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some()))
-            .filter_map(|s| s.network().map(|n| n.id))
-            .collect()
+        self.common.shareds().iter().flat_map(|s| Net::networks_with(s.as_ref(), host)).collect()
     }
 
     fn hosts(&self) -> Vec<Host> {
@@ -795,14 +780,14 @@ impl Net for Nodes {
     fn titles_only(&self) -> bool {
         match self.current() {
             Some(s) => Net::titles_only(s.as_ref()),
-            None => self.common.shareds().iter().any(|s| Net::titles_only(s.as_ref())),
+            None => self.common.shareds().iter().filter(|s| !s.is_removed()).any(|s| Net::titles_only(s.as_ref())),
         }
     }
 
     fn share_load(&self) -> bool {
         match self.current() {
             Some(s) => Net::share_load(s.as_ref()),
-            None => self.common.shareds().iter().all(|s| Net::share_load(s.as_ref())),
+            None => self.common.shareds().iter().filter(|s| !s.is_removed()).all(|s| Net::share_load(s.as_ref())),
         }
     }
 
@@ -810,7 +795,7 @@ impl Net for Nodes {
         match self.current() {
             Some(s) => Net::is_window_host(s.as_ref()),
             None => {
-                let all = self.common.shareds();
+                let all: Vec<_> = self.common.shareds().into_iter().filter(|s| !s.is_removed()).collect();
                 !all.is_empty() && all.iter().all(|s| Net::is_window_host(s.as_ref()))
             }
         }
@@ -819,7 +804,7 @@ impl Net for Nodes {
     fn reach(&self) -> Reach {
         match self.current() {
             Some(s) => Net::reach(s.as_ref()),
-            None => Reach::narrowest(&self.common.shareds().iter().map(|s| Net::reach(s.as_ref())).collect::<Vec<_>>()),
+            None => Reach::narrowest(&self.common.shareds().iter().filter(|s| !s.is_removed()).map(|s| Net::reach(s.as_ref())).collect::<Vec<_>>()),
         }
     }
 

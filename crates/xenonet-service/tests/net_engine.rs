@@ -418,6 +418,41 @@ async fn a_local_start_in_no_frame_reads_the_narrowest_settings_of_the_networks(
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// An intent chooses among the networks this machine is in, not those it was
+/// removed from: tower, removed from work, is in home alone, so its intents
+/// are home's without saying so, and the page is offered home only.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_intent_chooses_among_the_networks_a_machine_is_in_not_one_it_was_removed_from() {
+    let root = std::env::temp_dir().join(format!("xenonet-removed-intents-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    join(&t.tower, &invite_to(&t.desk, "tower", false, Some("work")).await).await;
+    let offered = || async {
+        let (s, v) = t.tower.window("GET", "/api/intents", Value::Null).await;
+        assert_eq!(s, 200, "{v}");
+        v["networks"].as_array().unwrap().iter().filter_map(|n| n["name"].as_str().map(str::to_string)).collect::<Vec<_>>()
+    };
+    let mut both = offered().await;
+    both.sort();
+    assert_eq!(both, ["home", "work"]);
+    let (s, v) = t.tower.window("POST", "/api/intents", json!({ "goal": "tidy atlas", "target": "any" })).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("several networks")), "{v}");
+    let (s, v) = t.desk.window("POST", "/api/net/remove", json!({ "host": "tower", "network": "work" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("tower knows it was removed from work", 20, || async {
+        t.tower.state().await["networks"].as_array().is_some_and(|n| n.iter().any(|x| x["name"] == "work" && x["link"]["state"] == "removed"))
+    })
+    .await;
+    assert_eq!(offered().await, ["home"]);
+    let (_, v) = t.tower.window("POST", "/api/intents", json!({ "goal": "tidy atlas", "target": "any" })).await;
+    assert!(!v["error"].as_str().unwrap_or("").contains("several networks"), "{v}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// The next XenoNet note `contractor-vm`'s session is told, which is where
 /// an agent's start answers come; `told` keeps what came with it.
 async fn vm_is_told(t: &TwoNetworks, told: &mut Vec<String>, what: &str) -> String {
@@ -743,6 +778,9 @@ struct Recording {
 impl xenonet_model::ops::Net for Recording {
     fn networks(&self) -> Vec<xenonet_model::ops::Me> {
         self.inner.networks()
+    }
+    fn live_networks(&self) -> Vec<xenonet_model::ops::Me> {
+        self.inner.live_networks()
     }
     fn me(&self) -> Option<xenonet_model::ops::Me> {
         self.inner.me()
