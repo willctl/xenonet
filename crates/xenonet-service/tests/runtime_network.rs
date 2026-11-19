@@ -106,6 +106,9 @@ impl Net for FakeNet {
     fn hosts(&self) -> Vec<Host> {
         self.hub.hosts.lock().unwrap().iter().filter(|(h, _)| *h != self.host).map(|(h, on)| Host { id: h.clone(), window: true, online: *on, seen: Some(now()) }).collect()
     }
+    fn hosts_in(&self, _network: &str) -> Vec<Host> {
+        self.hosts()
+    }
     fn titles_only(&self) -> bool {
         self.hub.titles.lock().unwrap().contains(&self.host)
     }

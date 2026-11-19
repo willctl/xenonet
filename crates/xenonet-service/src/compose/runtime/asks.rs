@@ -66,6 +66,9 @@ pub struct Ask {
     pub warn: bool,
     pub at: f64,
     pub until: f64,
+    /// The network another machine's ask came in, which its answer goes
+    /// back into; None for an ask here.
+    pub network: Option<String>,
 }
 
 impl Ask {
@@ -102,6 +105,7 @@ impl Ask {
             warn,
             at: v.get("at").and_then(Value::as_f64).unwrap_or_else(now_ms),
             until: v.get("until").and_then(Value::as_f64).unwrap_or_else(|| now_ms() + HOLD_MS),
+            network: None,
         })
     }
 }
@@ -233,9 +237,10 @@ fn run_of_soon(w: &Runtime, me: &str) -> Option<String> {
     }
 }
 
-/// The other machines that are window hosts: where an ask shows.
-fn window_hosts(w: &Runtime) -> Vec<String> {
-    net(w).hosts().into_iter().filter(|h| h.window).map(|h| h.id).collect()
+/// The machines that are window hosts of `network`, by its own roster: where
+/// an ask of a run started in it shows.
+fn window_hosts(w: &Runtime, network: &str) -> Vec<String> {
+    net(w).hosts_in(network).into_iter().filter(|h| h.window).map(|h| h.id).collect()
 }
 
 /// Sends a run's ask, or its end, to the window hosts of the network the
@@ -256,10 +261,7 @@ pub fn to_windows(w: &Runtime, me: &str, body: &Value) {
         body["root"] = json!({ "session": root, "agent": crate::compose::runtime::network::wire_id(w, root) });
     }
     let text = body.to_string();
-    for host in window_hosts(w) {
-        if !net(w).networks_with(&host).contains(&network) {
-            continue;
-        }
+    for host in window_hosts(w, &network) {
         let Ok(mid) = xenonet_engine::network::new_id("msg") else { continue };
         let frame = json!({
             "schema": "network/send/v1",
@@ -336,6 +338,7 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
         warn: reads_env(&input),
         at: now,
         until: now + hold_ms(w),
+        network: None,
     };
     let answer = hold(w, me, a, kind, by).map(|(d, by, _)| (d, by));
     let (decision, why) = said(answer.as_ref(), hold_ms(w));
@@ -421,6 +424,7 @@ pub fn hold_acp(
         warn: reads_env(input),
         at: now,
         until: now + hold_ms(w),
+        network: None,
     };
     let (decision, _, allowed) = hold(w, me, a, kind, xenonet_authz::Attestation::ProcessChecked)?;
     allowed.filter(|_| decision == "allow")
@@ -509,14 +513,14 @@ pub fn answer(w: &Runtime, id: &str, decision: &str) -> Result<Option<String>, S
             return Ok(None);
         }
     }
-    let (host, session, tool) = there(w, id)?;
+    let (host, session, tool, network) = there(w, id)?;
     let authority = if allow {
         let (resource, act) = answer_act(&session, id, decision)?;
         crate::compose::runtime::ground::authority(&g.facts.identity, true, &resource, &act, &reason(&tool), g.facts.now)?
     } else {
         json!({})
     };
-    send_answer(w, &host, id, &session, decision, authority, g.facts.now)?;
+    send_answer(w, &host, network, id, &session, decision, authority, g.facts.now)?;
     Ok(Some(host))
 }
 
@@ -545,7 +549,7 @@ pub fn answer_as_actor(w: &Runtime, token: &str, id: &str, decision: &str) -> Re
             return Ok(None);
         }
     }
-    let (host, session, _) = there(w, id)?;
+    let (host, session, _, network) = there(w, id)?;
     if decision == "allow" {
         return Err(format!("an actor allows only the prompts asked on its own machine, inside its allow scope there: {host}'s is {host}'s to answer"));
     }
@@ -555,28 +559,34 @@ pub fn answer_as_actor(w: &Runtime, token: &str, id: &str, decision: &str) -> Re
         return Err("answering prompts needs the answer-prompts capability, which this actor wasn't allowed".into());
     }
     let authority = crate::compose::runtime::ground::actor_authority(w, bearer.slug.as_str(), vec![xenonet_authz::Action::Answer])?;
-    send_answer(w, &host, id, &session, decision, authority, g.facts.now)?;
+    send_answer(w, &host, network, id, &session, decision, authority, g.facts.now)?;
     Ok(Some(host))
 }
 
-// Another machine's ask waiting on this console: its host, session and tool.
-fn there(w: &Runtime, id: &str) -> Result<(String, String, String), String> {
+// Another machine's ask waiting on this console: its host, session, tool and the network it came in.
+fn there(w: &Runtime, id: &str) -> Result<(String, String, String, Option<String>), String> {
     let now = now_ms();
     let there = w.asks.there.locked();
     let Some(a) = there.iter().find(|a| a.id == id && a.until > now) else { return Err("that ask isn't waiting: it was answered, or its time ran out".into()) };
-    Ok((a.host.clone().unwrap_or_default(), a.session.clone(), a.tool.clone()))
+    Ok((a.host.clone().unwrap_or_default(), a.session.clone(), a.tool.clone(), a.network.clone()))
 }
 
 // An answer to another machine's ask, as `network/operator/v2`, then the ask
 // taken off this console.
-fn send_answer(w: &Runtime, host: &str, id: &str, session: &str, decision: &str, authority: Value, now: i64) -> Result<(), String> {
+//
+// It goes into the network the ask came in, not the first that has the
+// machine: that machine judges it there.
+#[allow(clippy::too_many_arguments)]
+fn send_answer(w: &Runtime, host: &str, network: Option<String>, id: &str, session: &str, decision: &str, authority: Value, now: i64) -> Result<(), String> {
     let body = json!({
         "schema": "network/operator/v2",
         "answer": { "ask": id, "session": session, "decision": decision },
         "authority": authority,
         "at": ms(now as f64),
     });
-    net(w).send(xenonet_model::ops::Outgoing::new(To::Host(host.to_string()), FrameKind::Operator, body))?;
+    let mut out = xenonet_model::ops::Outgoing::new(To::Host(host.to_string()), FrameKind::Operator, body);
+    out.network = network;
+    net(w).send(out)?;
     answer_sent(w, id, decision);
     Ok(())
 }
@@ -631,7 +641,8 @@ pub fn take_ask(w: &Runtime, from: &str, v: &Value) {
     let side = &w.asks;
     match v.get("op").and_then(Value::as_str) {
         Some("ask") => {
-            let Some(a) = Ask::of(v, from) else { return };
+            let Some(mut a) = Ask::of(v, from) else { return };
+            a.network = xenonet_net::ground::current();
             let shown = a.to_json(None);
             {
                 let mut there = side.there.locked();

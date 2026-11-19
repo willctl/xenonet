@@ -1296,6 +1296,14 @@ impl Net for Shared {
             .collect()
     }
 
+    fn hosts_in(&self, network: &str) -> Vec<Host> {
+        if self.network().is_some_and(|n| n.id == network) {
+            Net::hosts(self)
+        } else {
+            Vec::new()
+        }
+    }
+
     fn send(&self, out: Outgoing) -> Result<(), String> {
         let net = self.network().ok_or("this machine isn't in a XenoNet network")?;
         if let Some(n) = out.network.as_deref().filter(|n| *n != net.id) {

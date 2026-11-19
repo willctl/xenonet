@@ -271,6 +271,9 @@ pub trait Net: Send + Sync {
     fn networks_for(&self, project: Option<&str>) -> Vec<String>;
     /// The other hosts in the roster.
     fn hosts(&self) -> Vec<Host>;
+    /// The other hosts of one network's roster, as that network lists them
+    /// (a machine can be a window host in one network and not in another).
+    fn hosts_in(&self, network: &str) -> Vec<Host>;
     /// Queues a body. It refuses only when this machine isn't in a network
     /// or the host isn't in the roster; delivery is the link's to retry.
     fn send(&self, out: Outgoing) -> Result<(), String>;
@@ -348,6 +351,9 @@ impl Net for NoNet {
         Vec::new()
     }
     fn hosts(&self) -> Vec<Host> {
+        Vec::new()
+    }
+    fn hosts_in(&self, _network: &str) -> Vec<Host> {
         Vec::new()
     }
     fn send(&self, _out: Outgoing) -> Result<(), String> {

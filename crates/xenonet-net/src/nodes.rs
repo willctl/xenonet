@@ -691,6 +691,10 @@ impl Net for Nodes {
         out
     }
 
+    fn hosts_in(&self, network: &str) -> Vec<Host> {
+        self.common.shared_of(network).map(|s| Net::hosts(s.as_ref())).unwrap_or_default()
+    }
+
     fn send(&self, out: Outgoing) -> Result<(), String> {
         let nets = self.common.shareds();
         if nets.is_empty() {
