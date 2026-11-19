@@ -24,6 +24,7 @@ adytum-exec = { path = "../adytum/crates/adytum-exec" }
 adytum-driver = { path = "../adytum/crates/adytum-driver" }
 adytum-lima = { path = "../adytum/crates/adytum-lima" }
 adytum-oci = { path = "../adytum/crates/adytum-oci" }
+adytum-openshell = { path = "../adytum/crates/adytum-openshell" }
 adytum-ledger = { path = "../adytum/crates/adytum-ledger" }
 adytum-doctor = { path = "../adytum/crates/adytum-doctor" }
 adytum-testkit = { path = "../adytum/crates/adytum-testkit" }
