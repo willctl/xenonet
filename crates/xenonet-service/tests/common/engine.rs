@@ -529,6 +529,8 @@ pub const DESK_LEDGER: &str = "claude:dddddddd-0002";
 pub const DESK_ATLAS_ENDED: &str = "claude:0190d3e0-0000-7000-8000-0000000d0001";
 pub const VM_ATLAS: &str = "claude:eeeeeeee-0001";
 pub const VM_LEDGER: &str = "claude:eeeeeeee-0002";
+/// The one on `contractor-vm` in `scratch`, a project only it holds.
+pub const VM_SCRATCH: &str = "claude:eeeeeeee-0003";
 
 /// `desk` in two networks at once, as the daily-use plan has Nova's: N1 is
 /// `home`, with `tower`; N2 is `work`, with `contractor-vm`, a machine she
@@ -548,7 +550,7 @@ pub struct TwoNetworks {
 /// `desk` founds N1 and N2, `tower` joins N1 and `contractor-vm` N2, each
 /// as a server. `desk` holds atlas (a session in it) and ledger (a session
 /// in it); `contractor-vm` has its own clones of atlas and ledger and a
-/// session in each.
+/// session in each, and a session in `scratch`, which only it holds.
 /// N2 starts sharing nothing; only atlas is shared into it, so the network
 /// is waited on until `desk` and `contractor-vm` are in contact.
 pub async fn two_networks(root: &Path) -> TwoNetworks {
@@ -586,9 +588,11 @@ async fn two_networks_in(root: &Path, guest_window: bool, atlas_ended: bool) -> 
     // them can be warned of the edit.
     let vm_ledger = clone(&root.join("contractor-vm/home/ledger"), "git@github.com:acme/ledger.git", "main");
     let editing = |s: Sess, cwd: &str, file: &str| Sess { edits: vec![format!("{cwd}/{file}")], ..s };
+    let vm_scratch = clone(&root.join("contractor-vm/home/scratch"), "https://github.com/acme/scratch", "main");
     let vm_sessions = vec![
         editing(sess(VM_ATLAS, "Fix the login form", &vm_atlas), &vm_atlas, "src/login.ts"),
         editing(sess(VM_LEDGER, "Fix the March import", &vm_ledger), &vm_ledger, "src/import.ts"),
+        sess(VM_SCRATCH, "Try an idea", &vm_scratch),
     ];
     let contractor = Host::open("contractor-vm", root.join("contractor-vm"), vm_sessions, None).await;
     join(&contractor, &invite_to(&desk, "contractor-vm", guest_window, Some("work")).await).await;

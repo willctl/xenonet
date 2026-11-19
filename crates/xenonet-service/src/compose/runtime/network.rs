@@ -977,14 +977,30 @@ fn view_of(host: &Host, a: &Value, detail: bool) -> Value {
     v
 }
 
-/// Whether an agent `host` reports (its presence entry `agent`) is of a
-/// project that this machine shows a network it shares with `host`: what
-/// a member does in a project this machine shares with no network it has
-/// in common is none of this machine's business, and collides with
-/// nothing. An agent in no project is shown only where everything is.
+/// Whether this machine holds `project` in a checkout the person confirmed
+/// here: what its own sharing is about.
+fn held_here(w: &Runtime, project: &str) -> bool {
+    let Some(db) = w.setup.db.as_ref() else { return false };
+    let Ok(id) = xenonet_model::ids::ProjectId::parse(project) else { return false };
+    let id = db.resolve(&id).ok().flatten().unwrap_or(id);
+    db.checkouts().unwrap_or_default().iter().any(|c| c.confirmed && c.gone_at.is_none() && c.project == id)
+}
+
+/// Whether an agent `host` reports (its presence entry `agent`) is shown
+/// here. What this machine shares is its own content, so only a project it
+/// holds itself (in a confirmed checkout) is held to its sharing: one it
+/// shares into no network it has in common with `host` is none of this
+/// machine's business, and the member's work in it collides with nothing.
+/// A project only `host` holds is its own, whatever this machine shares,
+/// and `host` decides what of it reaches here. An agent in no project is
+/// shown only where everything is.
 fn shown_with(w: &Runtime, host: &str, agent: &Value) -> bool {
     let Some(g) = crate::compose::runtime::ground::governance(w) else { return false };
-    net(w).networks_with(host).iter().any(|n| g.sharing(n).shows(agent))
+    let networks = net(w).networks_with(host);
+    match agent.get("projectKey").and_then(Value::as_str) {
+        Some(k) if !held_here(w, k) => !networks.is_empty(),
+        _ => networks.iter().any(|n| g.sharing(n).shows(agent)),
+    }
 }
 
 /// Whether `project` is shown a network this machine shares with `host`.
@@ -1136,7 +1152,7 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
         let Some(host) = host_of_agent(w, &rid) else { continue };
         // Through a network shown what it is from and what it is for, else
         // told so here and not sent.
-        let network = match route(w, &host, &sender, &rid, named.as_deref()) {
+        let network = match route(w, &host, &sender, named.as_deref()) {
             Ok(n) => n,
             Err(why) => {
                 let _ = store(w, |s| s.set_receipt(id, &rid, "refused", now_ms()));
@@ -1179,35 +1195,36 @@ enum Sender {
     Placed(Option<String>),
 }
 
-/// The network a message from `sender` to `target`, an agent on `host`,
-/// goes through: one `host` is in that is shown the project the sender is
-/// in and the project the target is in, as its host's presence names it
-/// (the caller's pick, or the frame's, or the first that does). A message
-/// carries its sender and its text, so it never goes into a network that
-/// isn't shown what it is from or what it is for. Why not, in words.
-fn route(w: &Runtime, host: &str, sender: &Sender, target: &str, named: Option<&str>) -> std::result::Result<String, String> {
+/// The network a message from `sender` to an agent on `host` goes through:
+/// one `host` is in that is shown the project the sender is in (the
+/// caller's pick, which must fit, or the frame's, or the first that does).
+/// A message carries its sender and its text, so it never goes into a
+/// network that isn't shown what it is from. What it is for is the
+/// receiver's to hold to its own sharing: what this machine shares is its
+/// own content, not another machine's projects. Why not, in words.
+fn route(w: &Runtime, host: &str, sender: &Sender, named: Option<&str>) -> std::result::Result<String, String> {
     let net = net(w);
     let holding = net.networks_with(host);
     if holding.is_empty() {
         return Err(format!("{host} isn't in a network this machine is in"));
     }
-    let target_project = s(&remote_view(w, target), "projectKey");
-    let for_target = net.networks_for(target_project.as_deref());
     let for_sender = match sender {
         Sender::You => None,
         Sender::Placed(p) => Some(net.networks_for(p.as_deref())),
     };
-    let fit: Vec<String> = holding.into_iter().filter(|n| for_target.contains(n) && for_sender.as_ref().is_none_or(|f| f.contains(n))).collect();
-    let by_name = named.and_then(|name| net.networks().into_iter().find(|m| m.network == name || m.name == name)).map(|m| m.network);
-    let frame = xenonet_net::ground::current();
-    match (by_name, frame) {
-        (Some(n), _) if fit.contains(&n) => Ok(n),
-        (None, Some(n)) if fit.contains(&n) => Ok(n),
-        _ => fit.into_iter().next().ok_or_else(|| {
-            format!(
-                "no network this machine shares with {host} is shown both the project of the session sending and the project of {target}, so it isn't sent: share the project into one, or send from a session in a project one is shown"
-            )
-        }),
+    let fit: Vec<String> = holding.into_iter().filter(|n| for_sender.as_ref().is_none_or(|f| f.contains(n))).collect();
+    let no_fit = || {
+        format!("no network this machine shares with {host} is shown the project of the session sending, so it isn't sent: share the project into one, or send from a session in a project one is shown")
+    };
+    // A network the caller names is the one or none: another is not
+    // guessed at.
+    if let Some(name) = named {
+        let n = net.networks().into_iter().find(|m| m.network == name || m.name == name).map(|m| m.network);
+        return n.filter(|n| fit.contains(n)).ok_or_else(no_fit);
+    }
+    match xenonet_net::ground::current() {
+        Some(n) if fit.contains(&n) => Ok(n),
+        _ => fit.into_iter().next().ok_or_else(no_fit),
     }
 }
 
@@ -1264,14 +1281,14 @@ pub fn resend(w: &Runtime) {
         // Where it went first is preferred, and the only place it may go
         // again when it is still shown what the message is from and for.
         let routed = match &kept_in {
-            Some(n) => xenonet_net::ground::within(n, || route(w, host, &sender, rid, None)).and_then(|got| {
+            Some(n) => xenonet_net::ground::within(n, || route(w, host, &sender, None)).and_then(|got| {
                 if got == *n {
                     Ok(got)
                 } else {
                     Err(format!("{n} isn't shown what the message is from and for any more"))
                 }
             }),
-            None => route(w, host, &sender, rid, None),
+            None => route(w, host, &sender, None),
         };
         match routed {
             Ok(network) => {

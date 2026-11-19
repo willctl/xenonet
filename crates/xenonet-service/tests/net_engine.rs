@@ -92,7 +92,7 @@ async fn a_machine_in_a_second_network_is_shown_only_what_is_shared_into_it() {
     assert_eq!(remote(&t.contractor.engine_state().await), std::slice::from_ref(&atlas), "desk's ledger session isn't shown to contractor-vm");
     assert_eq!(project_of(&t.contractor.engine_state().await, &atlas), Some(json!(t.atlas)));
     // (Its own session in ledger is its peer; desk's ledger session is not.)
-    assert_eq!(t.contractor.peers(VM_ATLAS).await, vec![VM_LEDGER.to_string(), atlas.clone()], "nor listed to its sessions");
+    assert_eq!(t.contractor.peers(VM_ATLAS).await, vec![VM_LEDGER.to_string(), VM_SCRATCH.to_string(), atlas.clone()], "nor listed to its sessions");
     // tower, in the first network, which shares everything, sees both.
     until("tower sees both of desk's sessions", 20, || async {
         let mut got = remote(&t.tower.engine_state().await);
@@ -600,7 +600,12 @@ async fn a_session_of_a_guest_in_a_project_its_network_isnt_shown_collides_with_
     assert_eq!(t.desk.before_edit(DESK_LEDGER, &desk_ledger, "src/import.ts").await, "", "its ledger edit isn't shown to desk, so it collides with nothing");
     let ids: Vec<String> =
         t.desk.engine_state().await["agents"].as_array().unwrap().iter().filter(|a| a["host"] == "contractor-vm").filter_map(|a| a["id"].as_str().map(str::to_string)).collect();
-    assert_eq!(ids, vec![t.contractor.agt(VM_ATLAS)], "nor is it among the sessions desk sees there");
+    // (Its scratch session, in a project desk holds no checkout of, is its own.)
+    let mut want = vec![t.contractor.agt(VM_ATLAS), t.contractor.agt(VM_SCRATCH)];
+    want.sort();
+    let mut ids = ids;
+    ids.sort();
+    assert_eq!(ids, want, "nor is its ledger session among the sessions desk sees there");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -2891,13 +2896,12 @@ fn messages_to(recording: &Recording, host: &str, text: &str) -> Vec<Option<Stri
 }
 
 /// A message to a machine goes through a network shown the project of the
-/// session that sends it and the project of the session it is for, never
-/// the first network that has the machine. `desk` shares atlas into N2 and
-/// everything into N1: a session in ledger can't message contractor-vm
-/// while N2 is the only network they share (it is told so, and nothing is
-/// sent), and once contractor-vm is in N1 too, its messages go through N1,
-/// for ledger's session and for atlas's to a ledger one; atlas to atlas can
-/// go through either.
+/// session that sends it, never the first network that has the machine (the
+/// project of the session it is for is the receiver's to hold to its own
+/// sharing). `desk` shares atlas into N2 and everything into N1: a session
+/// in ledger can't message contractor-vm while N2 is the only network they
+/// share (it is told so, and nothing is sent), and once contractor-vm is in
+/// N1 too, ledger's messages go through N1; atlas's can go through either.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_message_goes_through_a_network_shown_both_projects_and_never_the_first_that_has_the_machine() {
     let root = std::env::temp_dir().join(format!("xenonet-message-route-{}", std::process::id()));
@@ -2942,7 +2946,8 @@ async fn a_message_goes_through_a_network_shown_both_projects_and_never_the_firs
     // Ledger's session, to either of contractor-vm's: N1 is the only network shown ledger.
     t.desk.agent(DESK_LEDGER, "send", json!({ "to": contractor.agt(VM_LEDGER), "text": "From ledger, to ledger." })).await;
     t.desk.agent(DESK_LEDGER, "send", json!({ "to": contractor.agt(VM_ATLAS), "text": "From ledger, to atlas." })).await;
-    // Atlas's, to ledger's: N2 isn't shown the target's project.
+    // Atlas's, to ledger's: both networks are shown the sender's project, and
+    // the first, N1, takes it.
     t.desk.agent(DESK_ATLAS, "send", json!({ "to": contractor.agt(VM_LEDGER), "text": "From atlas, to ledger." })).await;
     until("contractor-vm hears all three", 20, || async {
         let (a, l) = (heard(&contractor, VM_ATLAS).await, heard(&contractor, VM_LEDGER).await);
@@ -3280,6 +3285,34 @@ async fn a_take_from_another_network_is_not_kept_nor_does_it_assign_the_intent()
     let takes = t.desk.world.setup.db.as_ref().unwrap().takes(&made.id).unwrap();
     assert!(takes.is_empty(), "a take that came in N2 was kept for an intent of N1: {}", takes.len());
     assert_eq!(intent(&t.desk, &made.id).await["state"], "made", "and it was not given out");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// What desk shares decides what of desk's own others see, not what exists
+/// on other machines: contractor-vm's session in `scratch`, a project desk
+/// holds no checkout of, is seen from desk and can be messaged from desk's
+/// atlas session (contractor-vm's own sharing decides whether it takes it),
+/// while its session in ledger, which desk holds and shares nothing of into
+/// N2, is still hidden.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_project_only_the_guest_holds_is_seen_and_messaged_whatever_desk_shares() {
+    let root = std::env::temp_dir().join(format!("xenonet-guest-only-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk sees contractor-vm's atlas and scratch sessions", 20, || async {
+        let peers = t.desk.peers(DESK_ATLAS).await;
+        peers.contains(&t.contractor.agt(VM_ATLAS)) && peers.contains(&t.contractor.agt(VM_SCRATCH))
+    })
+    .await;
+    assert!(!t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_LEDGER)), "desk holds ledger and doesn't share it into N2");
+    t.desk.agent(DESK_ATLAS, "send", json!({ "to": t.contractor.agt(VM_SCRATCH), "text": "Is scratch worth keeping?" })).await;
+    until("contractor-vm's scratch session hears it", 20, || async {
+        texts(&t.contractor.ctx.cores.engine.inbox(VM_SCRATCH, Duration::ZERO).await.unwrap()).iter().any(|m| m == "Is scratch worth keeping?")
+    })
+    .await;
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
