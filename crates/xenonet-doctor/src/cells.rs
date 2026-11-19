@@ -18,8 +18,9 @@ use xenonet_text::units::plural;
 pub const CHECKS: [(&str, &str, &str); 2] =
     [("cells.adytum", "Integrations", "Adytum can keep cells"), ("cells.eidolon", "Integrations", "Eidolon holds this machine's identities")];
 
-/// How to get Eidolon's program, from a checkout of its repository.
-const BUILD: &str = "From a checkout of github.com/willctl/eidolon run cargo install --path crates/eidolon-cli.";
+/// How to get the tools' programs, from checkouts of their repositories.
+const BUILD: &str =
+    "From a checkout of github.com/willctl/adytum run cargo install --path crates/adytum-cli, and from github.com/willctl/eidolon run cargo install --path crates/eidolon-cli.";
 
 const ADYTUM_MS: f64 = 6000.0;
 const EIDOLON_MS: f64 = 3000.0;
@@ -40,7 +41,7 @@ const DEMO_LS: &str = r#"{"ok":true,"eidolons":[
 pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
     let demo = c.f.data.get("demo").and_then(Value::as_bool) == Some(true);
     match id {
-        "cells.adytum" => Ok(adytum(demo).await),
+        "cells.adytum" => Ok(adytum(c, demo).await),
         "cells.eidolon" => Ok(eidolon(c, demo).await),
         other => Err(Failure::msg(format!("no such check: {other}"))),
     }
@@ -70,9 +71,14 @@ async fn ask(c: &Ctx<'_>, file: &str, args: &[&str], ms: f64) -> Said {
     Said::Out { stdout: text("stdout"), stderr: text("stderr") }
 }
 
-async fn adytum(demo: bool) -> Value {
+async fn adytum(c: &Ctx<'_>, demo: bool) -> Value {
     if demo {
         return adytum_verdict(DEMO_ADYTUM);
+    }
+    // Its checks are linked in, but they only matter where Adytum is used,
+    // and a machine without its command has no cells to check.
+    if c.which("adytum").await.is_none() {
+        return absent("Adytum");
     }
     match tokio::time::timeout(std::time::Duration::from_millis(ADYTUM_MS as u64), adytum_doctor::checks()).await {
         Ok(checks) => adytum_checks_verdict(&checks),
