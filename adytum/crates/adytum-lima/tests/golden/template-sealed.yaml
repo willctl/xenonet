@@ -1,0 +1,35 @@
+# Written by adytum from a cell spec. Edit the spec, not this file.
+minimumLimaVersion: 2.0.0
+vmType: vz
+arch: aarch64
+images:
+- location: "https://cloud-images.ubuntu.com/releases/noble/release-20260518/ubuntu-24.04-server-cloudimg-arm64.img"
+  arch: aarch64
+  digest: "sha256:6a61b967ba4a27dd1966f835a67643073ed55c2860ce3dc1cb0517282e6b8bec"
+cpus: 2
+memory: 2048MiB
+disk: 10GiB
+mounts: []
+containerd:
+  system: false
+  user: false
+ssh:
+  forwardAgent: false
+  loadDotSSHPubKeys: false
+propagateProxyEnv: false
+user:
+  name: adytum
+  comment: ""
+portForwards:
+- guestIP: "127.0.0.1"
+  proto: any
+  guestPortRange: [1, 65535]
+  ignore: true
+- guestIP: "0.0.0.0"
+  proto: any
+  guestPortRange: [1, 65535]
+  ignore: true
+- guestIP: "::"
+  proto: any
+  guestPortRange: [1, 65535]
+  ignore: true

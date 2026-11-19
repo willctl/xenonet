@@ -1,0 +1,9 @@
+{
+  "images": {
+    "ubuntu-24.04": {
+      "location": "https://cloud-images.ubuntu.com/releases/noble/release-20260518/ubuntu-24.04-server-cloudimg-arm64.img",
+      "digest": "sha256:6a61b967ba4a27dd1966f835a67643073ed55c2860ce3dc1cb0517282e6b8bec",
+      "arch": "aarch64"
+    }
+  }
+}
