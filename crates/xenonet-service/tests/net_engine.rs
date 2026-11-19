@@ -710,6 +710,9 @@ impl xenonet_model::ops::Net for Recording {
     fn networks_with(&self, host: &str) -> Vec<String> {
         self.inner.networks_with(host)
     }
+    fn networks_for(&self, project: Option<&str>) -> Vec<String> {
+        self.inner.networks_for(project)
+    }
     fn hosts(&self) -> Vec<xenonet_model::ops::Host> {
         self.inner.hosts()
     }
@@ -2614,5 +2617,84 @@ async fn a_handoffs_accept_and_answer_go_only_where_the_offer_went_and_carry_non
     assert_eq!(settled(&t.n1)[0]["by"], Value::Null, "{:?}", settled(&t.n1));
     assert_eq!(settled(&t.n1)[0]["goal"], Value::Null, "{:?}", settled(&t.n1));
     drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The messages the engine of `recording` sent to `host`, by the network
+/// each was sent into.
+fn messages_to(recording: &Recording, host: &str, text: &str) -> Vec<Option<String>> {
+    recording
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|o| o.kind == xenonet_model::ops::Kind::Message && o.to == xenonet_model::ops::To::Host(host.into()) && o.body["body"] == text)
+        .map(|o| o.network.clone())
+        .collect()
+}
+
+/// A message to a machine goes through a network shown the project of the
+/// session that sends it and the project of the session it is for, never
+/// the first network that has the machine. `desk` shares atlas into N2 and
+/// everything into N1: a session in ledger can't message contractor-vm
+/// while N2 is the only network they share (it is told so, and nothing is
+/// sent), and once contractor-vm is in N1 too, its messages go through N1,
+/// for ledger's session and for atlas's to a ledger one; atlas to atlas can
+/// go through either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_message_goes_through_a_network_shown_both_projects_and_never_the_first_that_has_the_machine() {
+    let root = std::env::temp_dir().join(format!("xenonet-message-route-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let recording = Arc::new(Recording { inner: t.desk.world.engine.net.get(), sent: std::sync::Mutex::new(Vec::new()) });
+    t.desk.world.engine.net.set(recording.clone());
+    let mut receipts = Stream::of(&t.desk);
+    let heard = |c: &Host, who: &'static str| {
+        let ctx = c.ctx.clone();
+        async move { texts(&ctx.cores.engine.inbox(who, Duration::ZERO).await.unwrap()) }
+    };
+
+    // Only N2 reaches contractor-vm: the control, from atlas's session, goes
+    // through it; ledger's isn't shown to N2, so its message is refused here.
+    t.desk.agent(DESK_ATLAS, "send", json!({ "to": t.contractor.agt(VM_ATLAS), "text": "From atlas, over N2." })).await;
+    until("contractor-vm hears atlas", 20, || async { heard(&t.contractor, VM_ATLAS).await.iter().any(|m| m == "From atlas, over N2.") }).await;
+    assert_eq!(messages_to(&recording, "contractor-vm", "From atlas, over N2."), vec![Some(t.n2.clone())]);
+    t.desk.agent(DESK_LEDGER, "send", json!({ "to": t.contractor.agt(VM_ATLAS), "text": "From ledger, over N2?" })).await;
+    let refused = receipts.next("message-receipt", 20, |r| r["agent"] == json!(t.contractor.agt(VM_ATLAS)) && r["state"] == "refused").await;
+    assert!(refused["reason"].as_str().is_some_and(|r| r.contains("network")), "{refused}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(messages_to(&recording, "contractor-vm", "From ledger, over N2?").is_empty(), "a ledger session's message went into a network not shown ledger");
+    assert!(!heard(&t.contractor, VM_ATLAS).await.iter().any(|m| m.contains("From ledger")));
+
+    // contractor-vm joins N1 as well (sharing everything into it).
+    join(&t.contractor, &invite_to(&t.desk, "contractor-vm", false, Some("home")).await).await;
+    let (s, v) = t.contractor.window("PUT", "/api/net/sharing", json!({ "network": "home", "sharing": "all" })).await;
+    assert_eq!(s, 200, "{v}");
+    // (A connection already up isn't made again for the second network, so
+    // it starts again, and connects in both.)
+    let contractor = t.contractor.restart().await;
+    until("desk sees contractor-vm in both", 20, || async {
+        let nets = t.desk.state().await["networks"].clone();
+        nets.as_array().is_some_and(|n| n.iter().all(|n| n["hosts"].as_array().is_some_and(|h| h.iter().any(|x| x["id"] == "contractor-vm" && x["online"] == true))))
+    })
+    .await;
+    assert_eq!(t.desk.world.engine.net.get().networks_with("contractor-vm").len(), 2);
+    // Ledger's session, to either of contractor-vm's: N1 is the only network shown ledger.
+    t.desk.agent(DESK_LEDGER, "send", json!({ "to": contractor.agt(VM_LEDGER), "text": "From ledger, to ledger." })).await;
+    t.desk.agent(DESK_LEDGER, "send", json!({ "to": contractor.agt(VM_ATLAS), "text": "From ledger, to atlas." })).await;
+    // Atlas's, to ledger's: N2 isn't shown the target's project.
+    t.desk.agent(DESK_ATLAS, "send", json!({ "to": contractor.agt(VM_LEDGER), "text": "From atlas, to ledger." })).await;
+    until("contractor-vm hears all three", 20, || async {
+        let (a, l) = (heard(&contractor, VM_ATLAS).await, heard(&contractor, VM_LEDGER).await);
+        l.iter().any(|m| m == "From ledger, to ledger.") && a.iter().any(|m| m == "From ledger, to atlas.") && l.iter().any(|m| m == "From atlas, to ledger.")
+    })
+    .await;
+    for text in ["From ledger, to ledger.", "From ledger, to atlas.", "From atlas, to ledger."] {
+        assert_eq!(messages_to(&recording, "contractor-vm", text), vec![Some(t.n1.clone())], "{text}");
+    }
+    drop((t.desk, t.tower, contractor));
     let _ = std::fs::remove_dir_all(root);
 }

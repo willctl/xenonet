@@ -1115,6 +1115,10 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
     // receiver keeps as this machine's agent and names it by.
     let agent = (me != YOU).then(|| wire_id(w, &me)).filter(|a| AgentId::parse(a).is_ok());
     let mut signed: BTreeMap<String, Value> = BTreeMap::new();
+    // The person is nobody's project; a session is in its own, if any; an
+    // actor is in none.
+    let sender = if me == YOU { Sender::You } else { Sender::Placed(project_of_session(w, &me).map(|p| p.as_str().to_string())) };
+    let named = s(a, "network");
     // An actor's message carries a token minted for it here, once, whatever
     // machines it goes to: its own token was decided when it sent it.
     let mut minted: Option<Value> = None;
@@ -1124,6 +1128,16 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             continue;
         }
         let Some(host) = host_of_agent(w, &rid) else { continue };
+        // Through a network shown what it is from and what it is for, else
+        // told so here and not sent.
+        let network = match route(w, &host, &sender, &rid, named.as_deref()) {
+            Ok(n) => n,
+            Err(why) => {
+                let _ = store(w, |s| s.set_receipt(id, &rid, "refused", now_ms()));
+                w.emit(From::Engine, "receipt", json!({ "id": id, "agent": rid, "host": host, "state": "refused", "reason": why }));
+                continue;
+            }
+        };
         let authority = match parse_actor_id(&me) {
             _ if me == YOU => signed.entry(host.clone()).or_insert_with(|| person_authority(w, &host, at_window)).clone(),
             Some(slug) => minted.get_or_insert_with(|| actor_authority(w, slug)).clone(),
@@ -1143,11 +1157,63 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             "hops": num_of(a, "hops").max(0.0),
             "at": ms(num_of(a, "at")),
         });
-        let kept = json!({ "body": body, "authority": authority });
+        let kept = json!({ "body": body, "authority": authority, "network": network });
         store(w, |s| s.set_delivery_net(id, &rid, &host, &kept.to_string()))?;
-        send_with(w, To::Host(host), Kind::Message, body, Some(authority));
+        send_in(w, Some(network), To::Host(host), Kind::Message, body, Some(authority));
     }
     Ok(())
+}
+
+/// Whom a message is from, for the networks it may go through.
+enum Sender {
+    /// The person, from their window: nobody's project.
+    You,
+    /// A session in a project, or one in none (an actor is in none): a
+    /// network that isn't shown the project isn't one it goes through.
+    Placed(Option<String>),
+}
+
+/// The network a message from `sender` to `target`, an agent on `host`,
+/// goes through: one `host` is in that is shown the project the sender is
+/// in and the project the target is in, as its host's presence names it
+/// (the caller's pick, or the frame's, or the first that does). A message
+/// carries its sender and its text, so it never goes into a network that
+/// isn't shown what it is from or what it is for. Why not, in words.
+fn route(w: &Runtime, host: &str, sender: &Sender, target: &str, named: Option<&str>) -> std::result::Result<String, String> {
+    let net = net(w);
+    let holding = net.networks_with(host);
+    if holding.is_empty() {
+        return Err(format!("{host} isn't in a network this machine is in"));
+    }
+    let target_project = s(&remote_view(w, target), "projectKey");
+    let for_target = net.networks_for(target_project.as_deref());
+    let for_sender = match sender {
+        Sender::You => None,
+        Sender::Placed(p) => Some(net.networks_for(p.as_deref())),
+    };
+    let fit: Vec<String> = holding.into_iter().filter(|n| for_target.contains(n) && for_sender.as_ref().is_none_or(|f| f.contains(n))).collect();
+    let by_name = named.and_then(|name| net.networks().into_iter().find(|m| m.network == name || m.name == name)).map(|m| m.network);
+    let frame = xenonet_net::ground::current();
+    match (by_name, frame) {
+        (Some(n), _) if fit.contains(&n) => Ok(n),
+        (None, Some(n)) if fit.contains(&n) => Ok(n),
+        _ => fit.into_iter().next().ok_or_else(|| {
+            format!(
+                "no network this machine shares with {host} is shown both the project of the session sending and the project of {target}, so it isn't sent: share the project into one, or send from a session in a project one is shown"
+            )
+        }),
+    }
+}
+
+/// The network a receipt for a message from `host` to this machine's
+/// `agent` goes through: one `host` is in that is shown the project the
+/// agent is in, which the message came through, else the first that is.
+fn receipt_network(w: &Runtime, host: &str, agent: &str, came: Option<&str>) -> Option<String> {
+    let net = net(w);
+    let project = project_of_session(w, agent);
+    let shown = net.networks_for(project.as_ref().map(xenonet_authz::ProjectId::as_str));
+    let holding: Vec<String> = net.networks_with(host).into_iter().filter(|n| shown.contains(n)).collect();
+    came.filter(|c| holding.iter().any(|n| n == c)).map(str::to_string).or_else(|| holding.into_iter().next())
 }
 
 /// The person's authority for a message to `host`: their device's
@@ -1182,15 +1248,24 @@ pub fn resend(w: &Runtime) {
     for r in rows {
         let (Some(host), Some(frame)) = (r.text("host"), r.text("frame")) else { continue };
         let Ok(kept) = serde_json::from_str::<Value>(frame) else { continue };
-        send_with(w, To::Host(host.to_string()), Kind::Message, kept["body"].clone(), kept.get("authority").cloned());
+        // Again through the network it first went through; one kept before
+        // that was recorded goes nowhere but where it can be routed.
+        let Some(network) = s(&kept, "network") else { continue };
+        send_in(w, Some(network), To::Host(host.to_string()), Kind::Message, kept["body"].clone(), kept.get("authority").cloned());
     }
 }
 
 // ---------- messages in ----------
 
+/// A receipt for a message that came in the network of the frame in hand.
 fn receipt(w: &Runtime, to: &str, mid: &str, agent: &str, state: &str, reason: Option<&str>) {
+    receipt_in_network(w, None, to, mid, agent, state, reason);
+}
+
+/// A receipt into `network`: the one the message came in, or the frame's.
+fn receipt_in_network(w: &Runtime, network: Option<String>, to: &str, mid: &str, agent: &str, state: &str, reason: Option<&str>) {
     let body = json!({ "schema": "network/receipt/v1", "mid": mid, "agent": agent, "state": state, "reason": reason.map(|r| clip(r, 280)), "at": ms(now_ms()) });
-    send(w, To::Host(to.to_string()), Kind::Receipt, body);
+    send_in(w, network, To::Host(to.to_string()), Kind::Receipt, body, None);
 }
 
 /// How XenoNet knows who sent a message from another host: that host's
@@ -1518,7 +1593,11 @@ pub fn seen(w: &Runtime, agent: &str, ids: &[Value]) {
     for id in ids {
         let Ok(Some(m)) = store(w, |s| s.message(xenonet_text::text::to_number(Some(id)))) else { continue };
         if let (Some(host), Some(mid)) = (m.text("host"), m.text("mid")) {
-            receipt(w, host, mid, &wire_id(w, agent), "seen", None);
+            // Through a network that has the sender's machine and is shown
+            // the project this session is in; none, none.
+            if let Some(network) = receipt_network(w, host, agent, None) {
+                receipt_in_network(w, Some(network), host, mid, &wire_id(w, agent), "seen", None);
+            }
         }
     }
 }
@@ -1532,7 +1611,10 @@ pub fn delivered(w: &Runtime, m: &Value) {
         let Some(agent) = agent.as_str() else { continue };
         let live = w.router.core.list(200).iter().any(|r| r.get("message").and_then(Value::as_f64) == id && r["agent"] == agent && r["state"] == "live");
         if live {
-            receipt(w, &host, &mid, &wire_id(w, agent), "delivered", None);
+            // Into the network the message came in.
+            if let Some(network) = receipt_network(w, &host, agent, s(m, "network").as_deref()) {
+                receipt_in_network(w, Some(network), &host, &mid, &wire_id(w, agent), "delivered", None);
+            }
         }
     }
 }
