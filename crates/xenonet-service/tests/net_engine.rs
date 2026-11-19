@@ -259,6 +259,72 @@ async fn a_wake_asks_what_the_network_the_message_came_in_is_shown() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A frame `contractor-vm` sends desk over N2 as a run's permission prompt,
+/// naming `session` as the run that asks.
+fn guest_ask(t: &TwoNetworks, n: u32, id: &str, sender: &str, session: &str) -> Value {
+    let ask = json!({ "op": "ask", "id": id, "session": session, "run": "run_1", "title": "contractor-vm: a run", "tool": "Bash", "input": "cat ~/.ssh/id_ed25519", "at": now_ms(), "until": now_ms() + 60e3 });
+    json!({
+        "schema": "network/send/v1", "mid": format!("msg_00000000-0000-4000-8000-{:012}", 200 + n), "sender": sender, "senderKind": "agent", "agent": t.contractor.agt(sender),
+        "target": xenonet_service::compose::runtime::asks::TARGET, "body": ask.to_string(), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now_ms() as i64,
+    })
+}
+
+async fn asks_shown(h: &Host) -> Vec<String> {
+    let (s, v) = h.window("GET", "/api/runs/asks", Value::Null).await;
+    assert_eq!(s, 200, "{v}");
+    v["asks"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| a["id"].as_str().map(str::to_string)).collect()
+}
+
+/// A permission ask from another machine is taken only for a run that
+/// machine's own start receipt names: `contractor-vm` can't put prompts in
+/// desk's Needs you by naming no run, a run desk started on tower, or a
+/// session of its own, and can for the run desk started on it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_ask_from_another_machine_is_taken_only_for_a_run_it_was_asked_to_start() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-guest-asks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows tower and contractor-vm take starts", 20, || async {
+        let nets = t.desk.state().await["networks"].clone();
+        let can = |h: &str| nets.as_array().unwrap().iter().flat_map(|n| n["hosts"].as_array().cloned().unwrap_or_default()).any(|x| x["id"] == h && x["can"].as_array().is_some_and(|c| c.contains(&json!("start"))));
+        can("tower") && can("contractor-vm")
+    })
+    .await;
+    // tower has no clone, so its home folder is made for the run.
+    std::fs::create_dir_all(root.join("tower/home")).unwrap();
+    let mut starts = Stream::of(&t.desk);
+    // desk starts a run on tower (N1) and one on contractor-vm (N2); both hold.
+    let run_on = |host: &'static str| {
+        let desk = &t.desk;
+        async move {
+            let (s, v) = desk.window("POST", "/api/start", json!({ "machine": host, "prompt": format!("hold-on: tidy on {host}") })).await;
+            assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+            host
+        }
+    };
+    let on_tower = run_on("tower").await;
+    let tower_run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == on_tower).await["session"].as_str().unwrap().to_string();
+    let on_vm = run_on("contractor-vm").await;
+    let vm_run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == on_vm).await["session"].as_str().unwrap().to_string();
+
+    // From contractor-vm: an ask that names no run, one that names its own
+    // session desk never started, one that names the run desk started on
+    // tower, then the one for the run desk started on it.
+    guest_sends(&t, Kind::Message, guest_ask(&t, 1, "ask_none", VM_ATLAS, ""));
+    guest_sends(&t, Kind::Message, guest_ask(&t, 2, "ask_own", VM_ATLAS, VM_ATLAS));
+    guest_sends(&t, Kind::Message, guest_ask(&t, 3, "ask_tower", VM_ATLAS, &tower_run));
+    guest_sends(&t, Kind::Message, guest_ask(&t, 4, "ask_run", &vm_run, &vm_run));
+    until("the ask for the run desk started on contractor-vm is shown", 20, || async { asks_shown(&t.desk).await.contains(&"ask_run".to_string()) }).await;
+    // (Give what was left out time to show if it was only slow.)
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(asks_shown(&t.desk).await, vec!["ask_run".to_string()], "only the ask for a run desk started on that machine");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_hosts_with_their_engines_work_as_one_network() {
     let root = std::env::temp_dir().join(format!("xenonet-net-engine-{}", std::process::id()));
