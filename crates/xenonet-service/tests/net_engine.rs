@@ -3316,3 +3316,57 @@ async fn a_project_only_the_guest_holds_is_seen_and_messaged_whatever_desk_share
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// That a handoff was taken goes only where the offer went: desk's offer on
+/// atlas is made while atlas is shared into N1 alone, N2 is shown atlas
+/// after that, and N2 is not told of an offer it never had.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_handoff_taken_is_told_only_to_the_networks_the_offer_went_to() {
+    let root = std::env::temp_dir().join(format!("xenonet-settled-where-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let (s, v) = t.desk.window("PUT", "/api/net/sharing", json!({ "network": "work", "sharing": [] })).await;
+    assert_eq!(s, 200, "{v}");
+    let mine = t.desk.agent(DESK_ATLAS, "handoff", json!({ "goal": "Finish refunds", "done": "The form", "next": "The rest" })).await["id"].as_str().unwrap().to_string();
+    let (s, v) = t.desk.window("PUT", "/api/net/sharing", json!({ "network": "work", "sharing": [t.atlas] })).await;
+    assert_eq!(s, 200, "{v}");
+    // Another session of desk's takes it.
+    let v = t.desk.agent(DESK_LEDGER, "handoff", json!({ "accept": mine })).await;
+    assert_eq!(v["taken"], json!(true), "{v}");
+    let settled = |network: &str| ops_of(&t.desk, network, &mine).into_iter().filter(|b| b["op"] == "taken").count();
+    assert_eq!(settled(&t.n1), 1, "N1 had the offer, so hears it is gone");
+    assert_eq!(settled(&t.n2), 0, "N2 never had the offer: {:?}", ops_of(&t.desk, &t.n2, &mine));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// An accept names the session that accepts, so it goes only into a network
+/// that session is known in: desk's ledger session can't accept
+/// contractor-vm's offer on atlas, since N2, which made it, isn't shown
+/// ledger and would learn that session of desk's exists.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_accept_names_a_session_only_to_a_network_that_knows_it() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-accept-known-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    guest_sends(&t, Kind::Handoff, guest_handoff(&t, 1, None, &t.atlas));
+    until("desk holds contractor-vm's offer", 20, || async { has_handoff(&t.desk, 1) }).await;
+    let theirs = "hof_00000000-0000-4000-8000-000000000001";
+    let (s, v) = t.desk.agent_fails(DESK_LEDGER, "handoff", json!({ "accept": theirs })).await;
+    assert!(s >= 400, "{s} {v}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(ops_of(&t.desk, &t.n2, theirs).is_empty(), "N2 was told of desk's ledger session: {:?}", ops_of(&t.desk, &t.n2, theirs));
+    // The control: atlas's session, which N2 is shown, accepts.
+    let v = t.desk.agent(DESK_ATLAS, "handoff", json!({ "accept": theirs })).await;
+    assert_eq!(v["waiting"], json!(true), "{v}");
+    assert_eq!(ops_of(&t.desk, &t.n2, theirs).len(), 1);
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

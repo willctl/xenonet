@@ -2053,6 +2053,9 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
             (None, None) => key.as_ref().map(|_| None),
         };
         if let Some(d) = dest {
+            // Where it goes is kept, so that it is told to be gone there and
+            // nowhere else, whatever is shared by then.
+            offer_went_to(w, &id, key.as_deref(), d.as_deref());
             send_handoff(w, None, d.as_deref(), body);
         }
     }
@@ -2102,7 +2105,10 @@ fn bare(mut body: Value) -> Value {
 /// Who took it goes only into a network that taker is known in.
 fn settled(w: &Runtime, r: &Row, op: &str, by: Option<&str>) {
     let to_host = r.text("to_host");
-    for network in net(w).networks_for(r.text("to_repo")) {
+    // Where the offer went, as it was kept when it was made; an offer from
+    // before that was kept is told where it would go now.
+    let went = r.text("id").and_then(|id| went_to(w, id));
+    for network in went.unwrap_or_else(|| net(w).networks_for(r.text("to_repo"))) {
         if to_host.is_some_and(|h| !net(w).networks_with(h).contains(&network)) {
             continue;
         }
@@ -2112,6 +2118,26 @@ fn settled(w: &Runtime, r: &Row, op: &str, by: Option<&str>) {
         }
         send_handoff(w, Some(network), None, body);
     }
+    // Settled: where it went isn't needed again.
+    if let (Some(db), Some(id)) = (w.setup.db.as_ref(), r.text("id")) {
+        let _ = db.set_setting(&format!("handoff-nets:{id}"), None);
+    }
+}
+
+/// The networks an offer of `id` made here goes into: those shown its
+/// project, with the machine it is for (if one) in them. Kept with the
+/// store's settings until it is settled.
+fn offer_went_to(w: &Runtime, id: &str, project: Option<&str>, host: Option<&str>) {
+    let Some(db) = w.setup.db.as_ref() else { return };
+    let nets: Vec<String> = net(w).networks_for(project).into_iter().filter(|n| host.is_none_or(|h| net(w).networks_with(h).contains(n))).collect();
+    let _ = db.set_setting(&format!("handoff-nets:{id}"), Some(&json!(nets)));
+}
+
+/// What `offer_went_to` kept for `id`, or None for an offer made before it
+/// was kept.
+fn went_to(w: &Runtime, id: &str) -> Option<Vec<String>> {
+    let kept = w.setup.db.as_ref()?.setting(&format!("handoff-nets:{id}")).ok()?;
+    kept.as_array().map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect())
 }
 
 /// Whether `network` knows `agent`: a session of another machine, if that
@@ -2248,8 +2274,18 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
             let Some(m) = &me_net else {
                 return Err(fail(format!("{id} was made on {h}, and this machine isn't in a XenoNet network now")));
             };
+            // The accept names the session that accepts, so it goes into a
+            // network that is shown the offer's project, has the machine
+            // that made it, and knows that session: not into one that
+            // would learn of a session it isn't shown.
+            let shown_in = net(w).networks_for(r.text("to_repo"));
+            let Some(network) = net(w).networks_with(h).into_iter().find(|n| shown_in.contains(n) && known_in(w, me, n)) else {
+                return Err(fail(format!(
+                    "no network this machine shares with {h} is shown the project you are in, so your accept can't be sent: accept it from a session in a project one is shown"
+                )));
+            };
             store(w, |s| s.ask_handoff(id, me))?;
-            send_handoff(w, None, Some(h), body_of(&r, "accept", Some(me)));
+            send_handoff(w, Some(network), Some(h), body_of(&r, "accept", Some(me)));
             let away = !net(w).hosts().iter().any(|x| x.id == h && x.online);
             Ok(json!({
                 "taken": false,
