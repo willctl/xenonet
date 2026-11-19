@@ -195,31 +195,71 @@ async fn a_guest_reaches_a_project_its_network_doesnt_see() {
 /// what it hears for an id nobody has, so it can't tell which exist.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn a_session_a_network_isnt_shown_refuses_in_the_words_of_one_that_isnt_there() {
-    use xenonet_model::ops::Kind;
     let root = std::env::temp_dir().join(format!("xenonet-guest-words-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
-    let t = two_networks(&root).await;
+    // A window host, so a message as you from it is taken up for judging.
+    let t = two_networks_with(&root, true).await;
     until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
     let mut heard = Stream::of(&t.contractor);
     // Messages the guest's store keeps as sent, to a session it isn't
-    // shown and to an id nobody has, so desk's receipts find them.
+    // shown and to an id nobody has, so desk's receipts find them. Each is
+    // sent as an agent, as the person (with no device's signature) and as
+    // an actor (with a token that isn't one): whoever sends, the answer
+    // comes before the sender is looked at.
     let nobody = "agt_00000000000000000000000000000000".to_string();
+    let wren = actor(&t.desk, "Wren");
     let mut refused = Vec::new();
-    for (n, target) in [(1, t.desk.agt(DESK_LEDGER)), (2, nobody)] {
-        let mut m = guest_message(&t, n, &target, "Is it there?");
-        m["mid"] = json!(format!("msg_00000000-0000-4000-8000-{:012}", 100 + n));
-        t.contractor.world.store.with(|s| {
-            let id = s.send(&json!({ "sender": VM_ATLAS, "target": target, "body": "Is it there?", "recipients": [target] }), now_ms()).unwrap();
-            s.set_message_net(id, None, m["mid"].as_str().unwrap()).unwrap();
-        });
-        guest_sends(&t, Kind::Message, m);
-        let got = heard.next("message-receipt", 20, |r| r["agent"] == json!(target)).await;
-        refused.push((got["state"].clone(), got["reason"].clone()));
+    let mut n = 0;
+    for kind in ["agent", "person", "actor"] {
+        for target in [t.desk.agt(DESK_LEDGER), nobody.clone(), t.desk.agt(&wren)] {
+            n += 1;
+            let mut m = guest_message(&t, n, &target, "Is it there?");
+            m["mid"] = json!(format!("msg_00000000-0000-4000-8000-{:012}", 100 + n));
+            let mut authority = None;
+            match kind {
+                "person" => {
+                    m["senderKind"] = json!("person");
+                    m["sender"] = json!(xenonet_model::ids::YOU);
+                    m["agent"] = Value::Null;
+                }
+                "actor" => {
+                    m["senderKind"] = json!("actor");
+                    m["sender"] = json!("actor:ghost");
+                    authority = Some(json!({ "token": "not-a-token" }));
+                }
+                _ => {}
+            }
+            t.contractor.world.store.with(|s| {
+                let id = s.send(&json!({ "sender": VM_ATLAS, "target": target, "body": "Is it there?", "recipients": [target] }), now_ms()).unwrap();
+                s.set_message_net(id, None, m["mid"].as_str().unwrap()).unwrap();
+            });
+            {
+                use xenonet_model::ops::{Kind, Outgoing, To};
+                t.contractor.svc.net().send(Outgoing { network: None, authority, to: To::Host("desk".into()), kind: Kind::Message, body: m }).unwrap();
+            }
+            let got = heard.next("message-receipt", 20, |r| r["agent"] == json!(target)).await;
+            refused.push((kind, got["state"].clone(), got["reason"].clone()));
+        }
     }
-    assert_eq!(refused[0], (json!("refused"), json!("no session or actor here has that id")));
-    assert_eq!(refused[0], refused[1], "a session it isn't shown is refused as one nobody has is");
+    for (kind, state, reason) in &refused {
+        assert_eq!((state, reason), (&json!("refused"), &json!("no session or actor here has that id")), "{kind}: what N2 isn't shown, and what isn't there, are refused alike: {refused:?}");
+    }
+    // The same into atlas, as an agent, is stored: the words aren't the
+    // refusal of everything.
+    guest_sends(&t, xenonet_model::ops::Kind::Message, guest_message(&t, 90, &t.desk.agt(DESK_ATLAS), "Is it there?"));
+    until("atlas is messaged", 20, || async { texts(&t.desk.ctx.cores.engine.inbox(DESK_ATLAS, Duration::ZERO).await.unwrap()).iter().any(|m| m == "Is it there?") }).await;
+    // And into the actor, from tower in N1, which is shown everything.
+    const TOWER_SESSION: &str = "claude:ffffffff-0001";
+    let mut from_tower = guest_message(&t, 91, &t.desk.agt(&wren), "Is the mix done?");
+    from_tower["sender"] = json!(TOWER_SESSION);
+    from_tower["agent"] = json!(t.tower.agt(TOWER_SESSION));
+    {
+        use xenonet_model::ops::{Kind, Outgoing, To};
+        t.tower.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: from_tower }).unwrap();
+    }
+    until("the actor is messaged from N1", 20, || async { texts(&t.desk.ctx.cores.engine.inbox(&wren, Duration::ZERO).await.unwrap()).iter().any(|m| m == "Is the mix done?") }).await;
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

@@ -1300,6 +1300,12 @@ pub(crate) fn judge_remote_reaching(
     act: xenonet_authz::Act,
     reaching: Vec<Reaching>,
 ) -> std::result::Result<(), String> {
+    // What the network the frame came in isn't shown is refused first,
+    // before the sender is looked at, so what comes back can't tell which
+    // ids exist by whether the sender's proof was the problem.
+    if let Some(n) = g.facts.network() {
+        xenonet_authz::shown(g, &n, act.action(), &resource, &reaching).map_err(|r| r.text().to_string())?;
+    }
     let (p, token) = principal_of(w, g, from, &resource, &act)?;
     let request = reaching.into_iter().fold(crate::compose::runtime::ground::remote(g, p, resource, act), xenonet_authz::Request::reaching);
     crate::compose::runtime::ground::judge_by(g, &request, token.as_ref(), None)
@@ -1365,6 +1371,10 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         };
         g.place(w, &local);
         reaching.push(Reaching::Session(session));
+    } else {
+        // An actor is in no project: only a network shown everything
+        // reaches one, and a hidden one is refused as an unknown one is.
+        reaching.push(Reaching::Unplaced);
     }
     let decided = judge_remote_reaching(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, resource, xenonet_authz::Act::Message, reaching);
     if let Err(why) = decided {
