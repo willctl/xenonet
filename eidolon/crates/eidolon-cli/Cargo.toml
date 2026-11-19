@@ -37,5 +37,8 @@ xenonet-id.workspace = true
 xenonet-os.workspace = true
 zeroize.workspace = true
 
+[dev-dependencies]
+eidolon-bidi.workspace = true
+
 [lints]
 workspace = true

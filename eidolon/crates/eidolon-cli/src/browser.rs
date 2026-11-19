@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use eidolon_browser::plan::stop_argv;
 use eidolon_browser::units::{Ports, BROWSER_UNIT};
 use eidolon_browser::{provision_plan, start_browser_plan};
-use eidolon_facet::{CellAccess, Facet, Result as FacetResult};
+use eidolon_facet::{CellAccess, Facet, FacetError, Result as FacetResult, RunOutput};
 use eidolon_model::{EidolonSpec, FacetKind, FacetSpec};
 use std::path::Path;
 
@@ -18,38 +18,77 @@ pub fn has_browser(spec: &EidolonSpec) -> bool {
     spec.facets.iter().any(|f| f.kind == FacetKind::Browser)
 }
 
-/// A facet that is not started again after it was taken. A sealed eidolon
-/// is open nowhere, so its browser stays stopped; the next `open` starts it.
-pub struct StaysStopped(pub Box<dyn Facet>);
+/// A browser facet as the CLI uses it.
+///
+/// - While sealing, it is not started again after it was taken: a sealed
+///   eidolon is open nowhere, so its browser stays stopped. The next `open`
+///   starts it.
+/// - Before a profile is placed, the cell's profile folder is emptied and
+///   made over to the cell's login user, who copies the files in. A browser
+///   that ran in the cell has left files of its own (a database's journal
+///   beside the wrong database would corrupt it), and the copy cannot set
+///   the times of folders another user owns. The facet gives the folder
+///   back to the browser's user once the files are in. An eidolon sealed
+///   with no profile yet leaves the folder as provisioning made it, which
+///   keeps the browser's preferences file.
+pub struct CellBrowser {
+    inner: Box<dyn Facet>,
+    keep_stopped: bool,
+}
+
+impl CellBrowser {
+    pub fn new(inner: Box<dyn Facet>, keep_stopped: bool) -> CellBrowser {
+        CellBrowser { inner, keep_stopped }
+    }
+}
+
+async fn run_ok(cell: &dyn CellAccess, what: &str, argv: &[&str]) -> FacetResult<RunOutput> {
+    let out = cell.run(argv).await?;
+    if out.status != 0 {
+        return Err(FacetError::Cell(format!("{what} exited with status {}: {}", out.status, out.stderr.trim())));
+    }
+    Ok(out)
+}
 
 #[async_trait]
-impl Facet for StaysStopped {
+impl Facet for CellBrowser {
     fn kind(&self) -> FacetKind {
-        self.0.kind()
+        self.inner.kind()
     }
 
     fn spec(&self) -> &FacetSpec {
-        self.0.spec()
+        self.inner.spec()
     }
 
     async fn quiet(&self, cell: &dyn CellAccess) -> FacetResult<()> {
-        self.0.quiet(cell).await
+        self.inner.quiet(cell).await
     }
 
-    async fn resume(&self, _cell: &dyn CellAccess) -> FacetResult<()> {
-        Ok(())
+    async fn resume(&self, cell: &dyn CellAccess) -> FacetResult<()> {
+        if self.keep_stopped {
+            return Ok(());
+        }
+        self.inner.resume(cell).await
     }
 
     fn leave_out(&self) -> Vec<String> {
-        self.0.leave_out()
+        self.inner.leave_out()
     }
 
     async fn take(&self, cell: &dyn CellAccess, staging: &Path) -> FacetResult<()> {
-        self.0.take(cell, staging).await
+        self.inner.take(cell, staging).await
     }
 
     async fn place(&self, cell: &dyn CellAccess, staging: &Path) -> FacetResult<()> {
-        self.0.place(cell, staging).await
+        let path = self.inner.spec().path.as_str();
+        let has_files = std::fs::read_dir(staging).map_err(|e| FacetError::Cell(format!("Could not read the staged profile: {e}.")))?.next().is_some();
+        // Two folders deep at least: never a top-level folder of the cell.
+        if has_files && path.split('/').filter(|p| !p.is_empty()).count() >= 2 {
+            let user = run_ok(cell, "Asking who the cell's login user is", &["id", "-un"]).await?.stdout;
+            run_ok(cell, "Clearing the profile folder", &["sudo", "rm", "-rf", "--", path]).await?;
+            run_ok(cell, "Making the profile folder", &["sudo", "install", "-d", "-o", user.trim(), "-m", "0700", path]).await?;
+        }
+        self.inner.place(cell, staging).await
     }
 }
 

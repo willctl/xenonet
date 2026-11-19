@@ -45,7 +45,7 @@ fn holding_of(ctx: &Ctx, eid: &EidolonId) -> Result<Holding> {
 }
 
 /// The spec's facets. With `sealing`, a browser is not started again after
-/// it was taken: a sealed eidolon is open nowhere.
+/// it was taken: a sealed eidolon is open nowhere (see [`browser::CellBrowser`]).
 fn facets_of(spec: &EidolonSpec, sealing: bool) -> Result<Vec<Box<dyn Facet>>> {
     spec.facets
         .iter()
@@ -53,7 +53,7 @@ fn facets_of(spec: &EidolonSpec, sealing: bool) -> Result<Vec<Box<dyn Facet>>> {
             FacetKind::Folder => Ok(Box::new(FolderFacet::new(f.clone())?) as Box<dyn Facet>),
             FacetKind::Browser => {
                 let facet: Box<dyn Facet> = Box::new(BrowserFacet::new(f.clone())?);
-                Ok(if sealing { Box::new(browser::StaysStopped(facet)) as Box<dyn Facet> } else { facet })
+                Ok(Box::new(browser::CellBrowser::new(facet, sealing)) as Box<dyn Facet>)
             }
         })
         .collect()

@@ -4,6 +4,7 @@
 use crate::error::{CliError, Result};
 use eidolon_browser::units::PROFILE_PATH;
 use eidolon_model::{EidolonId, FacetKind};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 pub const USAGE: &str = "usage: eidolon [--json] <command>\n\
@@ -44,7 +45,7 @@ pub enum Cmd {
     Move { eidolon: EidolonId, argv: Vec<String> },
     Receive,
     View { eidolon: EidolonId },
-    Mcp { eidolon: EidolonId, http: Option<String> },
+    Mcp { eidolon: EidolonId, http: Option<SocketAddr> },
     Settle { eidolon: EidolonId, how: Settle },
     Verify { eidolon: EidolonId },
     Facets { eidolon: EidolonId },
@@ -109,6 +110,16 @@ impl Rest {
 fn eid(words: &[String], at: usize) -> Result<EidolonId> {
     let text = words.get(at).ok_or_else(|| usage("The eidolon id is missing."))?;
     text.parse().map_err(|_| usage(&format!("{text:?} is not an eidolon id; it is `eid_` and 26 characters.")))
+}
+
+/// `--http` takes a loopback address and a port, so a mistake is caught
+/// before any cell is touched.
+fn http_addr(text: &str) -> Result<SocketAddr> {
+    let addr: SocketAddr = text.parse().map_err(|_| usage(&format!("{text:?} is not an address; write it as 127.0.0.1:<port>.")))?;
+    if !addr.ip().is_loopback() {
+        return Err(usage(&format!("{text:?} is not on this machine. The tools are served on 127.0.0.1 only; XenoNet publishes them to other machines.")));
+    }
+    Ok(addr)
 }
 
 fn exactly(words: &[String], n: usize) -> Result<()> {
@@ -189,7 +200,7 @@ pub fn parse(args: &[String]) -> Result<Parsed> {
         }
         Some("mcp") => {
             rest.0.remove(0);
-            let http = rest.value("--http")?;
+            let http = rest.value("--http")?.map(|a| http_addr(&a)).transpose()?;
             let words = rest.words()?;
             exactly(&words, 1)?;
             Cmd::Mcp { eidolon: eid(&words, 0)?, http }
@@ -302,8 +313,17 @@ mod tests {
     fn view_and_mcp_read_their_arguments() {
         assert!(matches!(p(&format!("view {EID}")).unwrap().cmd, Cmd::View { .. }));
         assert!(matches!(p(&format!("mcp {EID}")).unwrap().cmd, Cmd::Mcp { http: None, .. }));
-        assert!(matches!(p(&format!("mcp {EID} --http 127.0.0.1:9000")).unwrap().cmd, Cmd::Mcp { http: Some(h), .. } if h == "127.0.0.1:9000"));
-        for line in ["view", &format!("view {EID} extra"), "mcp", &format!("mcp {EID} --http"), &format!("view {EID} --http x")] {
+        assert!(matches!(p(&format!("mcp {EID} --http 127.0.0.1:9000")).unwrap().cmd, Cmd::Mcp { http: Some(h), .. } if h.port() == 9000));
+        for line in [
+            "view",
+            &format!("view {EID} extra"),
+            "mcp",
+            &format!("mcp {EID} --http"),
+            &format!("view {EID} --http x"),
+            &format!("mcp {EID} --http 0.0.0.0:9000"),
+            &format!("mcp {EID} --http example.com:80"),
+            &format!("mcp {EID} --http 9000"),
+        ] {
             assert_eq!(p(line).unwrap_err().exit, 2, "{line:?}");
         }
     }

@@ -347,6 +347,9 @@ fn mcp_keeps_standard_output_for_the_protocol_even_when_it_fails() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(out.stdout.len(), 0, "nothing but protocol may reach standard output");
     assert!(String::from_utf8_lossy(&out.stderr).contains("not_open"));
+    // With --http standard output is free, but the errors still read the same.
     let http = w.desk.run(&["mcp", &eid, "--http", "127.0.0.1:0"]);
-    assert_eq!((http.stdout.len(), failed_with("mcp", &http).as_str()), (0, "no_http"));
+    assert_eq!((http.stdout.len(), failed_with("mcp", &http).as_str()), (0, "not_open"));
+    let off_machine = w.desk.run(&["mcp", &eid, "--http", "0.0.0.0:9000"]);
+    assert_eq!((off_machine.code, off_machine.code_of_error().as_str()), (2, "usage"), "a mistake in how it was typed is reported as for every command");
 }

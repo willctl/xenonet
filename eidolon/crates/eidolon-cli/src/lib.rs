@@ -6,6 +6,10 @@
 //! `eidolon receive` and `eidolon mcp` own standard output: the move and the
 //! protocol run over it, so their results and errors go to standard error.
 //!
+//! `eidolon mcp <eid> --http 127.0.0.1:<port>` serves the tools over HTTP
+//! instead; it makes a token, writes it once to standard error, and stops
+//! on Ctrl-C.
+//!
 //! `eidolon view` stays running while the person signs in. It writes the
 //! address and the one-time secret to standard error (with `--json`, as one
 //! JSON object on standard output with `"event": "open"`), waits for Enter
@@ -146,7 +150,7 @@ async fn dispatch(parsed: Parsed, out: &mut dyn Write, err: &mut dyn Write) -> R
             report(v, human)
         }
         Cmd::View { eidolon } => view(&ctx, eidolon, parsed.json, out, err).await,
-        Cmd::Mcp { eidolon, http } => mcp(&ctx, eidolon, http.as_deref(), err).await,
+        Cmd::Mcp { eidolon, http } => mcp(&ctx, eidolon, *http, err).await,
         Cmd::Move { eidolon, argv } => {
             let v = ops::move_cmd(&ctx, eidolon, argv).await?;
             let human =
@@ -195,18 +199,8 @@ async fn dispatch(parsed: Parsed, out: &mut dyn Write, err: &mut dyn Write) -> R
     }
 }
 
-/// Waits until the person presses Enter or the command is interrupted. A
-/// closed standard input is not an answer, so it waits for the interrupt.
-async fn wait_for_the_person() {
-    use tokio::io::AsyncBufReadExt as _;
-    let mut line = String::new();
-    let mut input = tokio::io::BufReader::new(tokio::io::stdin());
-    let enter = async {
-        if matches!(input.read_line(&mut line).await, Ok(n) if n > 0) {
-            return;
-        }
-        std::future::pending::<()>().await;
-    };
+/// Waits until the command is interrupted (Ctrl-C, or the terminate signal).
+async fn interrupted() {
     #[cfg(unix)]
     let term = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
@@ -219,9 +213,26 @@ async fn wait_for_the_person() {
     #[cfg(not(unix))]
     let term = std::future::pending::<()>();
     tokio::select! {
-        () = enter => {}
         _ = tokio::signal::ctrl_c() => {}
         () = term => {}
+    }
+}
+
+/// Waits until the person presses Enter or the command is interrupted. A
+/// closed standard input is not an answer, so it waits for the interrupt.
+async fn wait_for_the_person() {
+    use tokio::io::AsyncBufReadExt as _;
+    let mut line = String::new();
+    let mut input = tokio::io::BufReader::new(tokio::io::stdin());
+    let enter = async {
+        if matches!(input.read_line(&mut line).await, Ok(n) if n > 0) {
+            return;
+        }
+        std::future::pending::<()>().await;
+    };
+    tokio::select! {
+        () = enter => {}
+        () = interrupted() => {}
     }
 }
 
@@ -245,13 +256,34 @@ async fn view(ctx: &Ctx, eidolon: &eidolon_model::EidolonId, json: bool, out: &m
     Ok(Done::Report(Report { json: done, human: format!("Closed the window. The browser of {eidolon} is driven again.") }))
 }
 
-async fn mcp(ctx: &Ctx, eidolon: &eidolon_model::EidolonId, http: Option<&str>, err: &mut dyn Write) -> Result<Done> {
-    if http.is_some() {
-        return Err(CliError::failed("no_http", "This build serves the tools on standard input and output only.", "Run `eidolon mcp <eid>` without --http."));
-    }
+async fn mcp(ctx: &Ctx, eidolon: &eidolon_model::EidolonId, http: Option<std::net::SocketAddr>, err: &mut dyn Write) -> Result<Done> {
     let setup = ops::mcp_setup(ctx, eidolon).await?;
-    let _ = writeln!(err, "eidolon: serving the browser of {eidolon} in {} on standard input and output. Files go through {}.", setup.cell, setup.files.display());
-    let _ = err.flush();
-    eidolon_mcp::serve_stdio(setup.tools).await?;
+    match http {
+        None => {
+            let _ = writeln!(err, "eidolon: serving the browser of {eidolon} in {} on standard input and output. Files go through {}.", setup.cell, setup.files.display());
+            let _ = err.flush();
+            eidolon_mcp::serve_stdio(setup.tools).await?;
+        }
+        Some(addr) => {
+            // Made fresh each run and shown once, here; it is the service's own
+            // credential and nothing else keeps it.
+            let bytes = xenonet_id::codec::random::<32>().map_err(|e| CliError::failed("random", e.to_string(), "Try again."))?;
+            let token = xenonet_id::codec::b64(&bytes);
+            let server = eidolon_mcp::HttpServer::bind(addr, &token).await?;
+            let _ = writeln!(
+                err,
+                "eidolon: serving the browser of {eidolon} in {} at http://{}{}\n  Token: {token}\nSend it as `Authorization: Bearer <token>`. It is shown once. Files go through {}.\nPress Ctrl-C to stop.",
+                setup.cell,
+                server.local_addr()?,
+                eidolon_mcp::PATH,
+                setup.files.display()
+            );
+            let _ = err.flush();
+            tokio::select! {
+                served = server.serve(setup.tools) => served?,
+                () = interrupted() => {}
+            }
+        }
+    }
     Ok(Done::Silent)
 }
