@@ -17,6 +17,8 @@ XenoNet is a background service on each machine, the `xenonet` command, MCP tool
 - [A network across your machines](network.md) covers joining the machines you use, so their sessions see and message each other and you can act from any of them: starting a network, adding and removing machines, relays and mailboxes, sharing projects with each network, every machine's load in the Machines panel, and what crosses between machines.
 - [Running your own relay](own-relay.md) covers what a relay for your machines needs, its config file and service, adding it to a network or to one machine, and trusting a relay with a certificate from your own CA.
 - [Delegating work to another machine](delegation.md) covers setting a machine to take delegated work once, handing it a task from an assistant, what runs without a question, and what always comes to you.
+- [Adytum](adytum.md) covers sealed cells on your machine: setting them up, making, cloning and removing them, and what a wall keeps apart.
+- [Eidolon](eidolon.md) covers keeping a folder or a signed-in browser as one sealed eidolon, moving it between your machines, signing in yourself, giving an agent the browser, and publishing its tools to your network.
 - [Shared context](shared-context.md) covers Xenolith, the pages every session shares, and how they show on the map.
 - [Themes](themes.md) lists the themes that come with XenoNet, and says how to choose one or make your own.
 - [The xenonet command](cli.md) lists what the `xenonet` command does in a terminal.
