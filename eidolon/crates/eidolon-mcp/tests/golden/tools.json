@@ -1,0 +1,276 @@
+[
+  {
+    "name": "list_pages",
+    "description": "List the open pages with their ids, addresses and titles.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object",
+      "description": "No arguments.",
+      "properties": {}
+    }
+  },
+  {
+    "name": "new_page",
+    "description": "Open a new page, optionally at an address, and select it.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "description": "The address to open. Leave out for a blank page.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "select_page",
+    "description": "Make a page the one the other tools act on.",
+    "inputSchema": {
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The page's id, from list_pages.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "close_page",
+    "description": "Close a page.",
+    "inputSchema": {
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The page's id, from list_pages.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "navigate_page",
+    "description": "Open an address in the selected page and wait for it to finish loading.",
+    "inputSchema": {
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "The address to open: http, https or about:blank.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "navigate_history",
+    "description": "Go back or forward in the selected page's history.",
+    "inputSchema": {
+      "$defs": {
+        "Direction": {
+          "description": "Which way to go in the page's history.",
+          "type": "string",
+          "enum": [
+            "back",
+            "forward"
+          ]
+        }
+      },
+      "required": [
+        "direction"
+      ],
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "back or forward.",
+          "$ref": "#/$defs/Direction"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "take_snapshot",
+    "description": "List the elements on the selected page with a uid for each; the uids work until the page navigates.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object",
+      "description": "No arguments.",
+      "properties": {}
+    }
+  },
+  {
+    "name": "click_by_uid",
+    "description": "Click an element from the last snapshot.",
+    "inputSchema": {
+      "required": [
+        "uid"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "An element's uid from the last take_snapshot.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "hover_by_uid",
+    "description": "Move the pointer over an element from the last snapshot.",
+    "inputSchema": {
+      "required": [
+        "uid"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "An element's uid from the last take_snapshot.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "fill_by_uid",
+    "description": "Replace a field's content with a value, or choose an option in a select.",
+    "inputSchema": {
+      "required": [
+        "uid",
+        "value"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "An element's uid from the last take_snapshot.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The text to put in the field, or the option to choose in a select.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "type_text",
+    "description": "Type text into the element that has focus.",
+    "inputSchema": {
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "The text to type into the element that has focus.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "press_key",
+    "description": "Press a key or a combination such as Control+a.",
+    "inputSchema": {
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "A key name such as Enter, Tab, Escape or ArrowDown, a character, or a combination such as Control+a.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_page_text",
+    "description": "Return the visible text of the selected page.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object",
+      "description": "No arguments.",
+      "properties": {}
+    }
+  },
+  {
+    "name": "screenshot_page",
+    "description": "Take a PNG screenshot of the selected page.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object",
+      "description": "No arguments.",
+      "properties": {}
+    }
+  },
+  {
+    "name": "upload_file_by_uid",
+    "description": "Choose a file from the shared files folder in a file input from the last snapshot.",
+    "inputSchema": {
+      "required": [
+        "uid",
+        "filePath"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The file input's uid from the last take_snapshot.",
+          "type": "string"
+        },
+        "filePath": {
+          "description": "The file to upload: a path inside the shared files folder, absolute or relative to it.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "list_downloads",
+    "description": "List the files the browser has downloaded in the cell.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object",
+      "description": "No arguments.",
+      "properties": {}
+    }
+  },
+  {
+    "name": "fetch_download",
+    "description": "Copy a finished download to the downloads folder inside the shared files folder.",
+    "inputSchema": {
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The file's name from list_downloads.",
+          "type": "string"
+        }
+      }
+    }
+  }
+]
