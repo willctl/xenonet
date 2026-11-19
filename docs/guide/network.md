@@ -30,7 +30,7 @@ This machine is now the founder. Add `--relay https://relay.example.net` to name
 
 The form also asks whether this machine finds the network's machines on your LAN by mDNS, which is off unless you pick it: with it on, the machine announces its network key on every LAN it joins, the same key each time, so anyone there can tell it's the same machine (they can't connect with it). In a terminal, add `--mdns on` or `--mdns off`. It's the machine's own setting, for all its networks: change it later in **Network settings › This machine** (**Find machines on this LAN**), or with `xenonet net set --mdns on|off`.
 
-A machine already in a network can start another one beside it: **Start another network…** in Network settings, or `xenonet net create` again. Everything that acts on one network then takes `--network <id|name>`, and without it the command asks which.
+A machine already in a network can start another one beside it: **Start another network…** in Network settings, or `xenonet net create` again. Everything that acts on one network then takes `--network <id|name>`, and without it the command asks which. What goes to "everyone" has to name its network too: an intent made on a machine in several networks says which, and a start on a machine that is in two of them says which it goes through (`network` in the request).
 
 ### The firewall
 
@@ -182,7 +182,7 @@ From a window host, change another machine's on its row in the Network panel. Na
 
 A Claude Code session XenoNet starts, and a turn it resumes or forks, asks XenoNet, through the xenonet MCP server's `permission` tool, whenever its settings don't settle a tool call. XenoNet answers only for its own runs; any other session asks in its own app.
 
-The prompt shows in Needs you on that machine and on every window host: "tower · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. A call that may read the run's environment, where the sign-in token for XenoNet's runs is, says so on its row. Allow is yours, and works a moment after the row shows. It asks you once (Touch ID on a Mac), here or on any window host, and the machine the run is on checks it against its own copy of your identity. An Allow from another machine goes only while that machine is connected. Deny asks nothing.
+The prompt shows in Needs you on that machine and on the window host that started the run: "tower · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. A call that may read the run's environment, where the sign-in token for XenoNet's runs is, says so on its row. Allow is yours, and works a moment after the row shows. It asks you once (Touch ID on a Mac), here or on any window host, and the machine the run is on checks it against its own copy of your identity. An Allow from another machine goes only while that machine is connected. Deny asks nothing.
 
 Answers come only from XenoNet's window, never from a terminal or a session. An actor you gave `answer-prompts` may Deny, and Allow only the sessions and kinds of prompt you let it in the Actors panel, which asks you when you set or widen it. A run you delegated is answered by its machine within the delegation (see [Delegating work](delegation.md)). Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
 

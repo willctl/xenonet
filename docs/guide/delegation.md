@@ -36,7 +36,7 @@ The machine writes that line from its own settings and its copy of your identity
 
 ## What it covers
 
-A delegated session is a Claude Code run, and its permission prompts come to XenoNet, as any run's do. XenoNet answers them itself when they are within the delegation, and shows the rest in **Needs you**, on every window host, where you allow or deny them from any of your machines. An Allow there asks you once (Touch ID on a Mac); a Deny asks nothing. An assistant can't answer for you.
+A delegated session is a Claude Code run, and its permission prompts come to XenoNet, as any run's do. XenoNet answers them itself when they are within the delegation, and shows the rest in **Needs you**, on the window host that asked for the run, where you allow or deny them. An Allow there asks you once (Touch ID on a Mac); a Deny asks nothing. An assistant can't answer for you.
 
 Covered, with no question:
 

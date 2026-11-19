@@ -430,6 +430,19 @@ person, one endpoint with one connection per peer, and the HLC.
   no name; one in several answers 409 `which-network` when none is named.
   Presence goes into every network, each shown what is shared into it, and
   a claim into each network its project is shared into.
+- **A call is in one network.** The network of a call is the one the body
+  in hand arrived in (`ground::within`, carried to any thread that answers
+  for it: a start's receipts name the network their request came in), else
+  the one network this machine is in. A call in no frame from a machine in
+  several networks is in none: it decides on the facts of no network, reads
+  the narrowest of their settings (`Reach::narrowest`: the lowest start and
+  wake; titles only if any network asks, load shared only if all do, no
+  roster head), and a body for everyone (`To::All`) is refused in words
+  unless it names its network. `Net::me` still names this machine by the
+  first network, for labels only. A send to a host that is in two of this
+  machine's networks goes into the first that has it; a start names its
+  network (`network` in the request) and is refused without one, and an
+  intent is made in a named network and everything done for it runs in it.
 - **What each network sees** (`share.rs`). A network's presence carries
   only the sessions in confirmed checkouts of the projects the person
   shares into it. The first network a machine is in shares all; each one
@@ -882,7 +895,13 @@ whose presence lists `start`, and one over two minutes old is refused.
 `mcp__xenonet__permission`. The ask crosses as a message entry to
 `xenonet:ask`, one to each window host, and a second one takes it back. An
 Allow carries the person's presence block; a Deny needs none. The run's
-machine decides it, and holds the call ten minutes.
+machine decides it, and holds the call ten minutes. A machine takes an ask
+only for a run it asked that machine to start: the request records the
+network it went through, the started receipts name the run (its session,
+or its agent), and the ask is taken while the request is open and arrives
+in that network. Any other ask is dropped and logged, so a member that may
+message a machine can't put prompts in its Needs you, and a window host
+shows the prompts of the runs it asked for.
 
 **Intents** for any machine the delegation names are given out once by
 the arbiter the intent names, from takes that carry the person's signed
@@ -1095,9 +1114,11 @@ in several.
   address record a connection sends.
 - **Past 50 machines.** Connections are kept to every member up to 50;
   the lazy dial past that isn't built.
-- **The engine in several networks.** The engine still takes the first
-  network as its own, so a peer in two networks with this machine shows
-  twice.
+- **The engine in several networks.** Presence is one body for every
+  network, carrying the narrowest settings of them (a per-network presence
+  is not built), prompts go to the window hosts of every network, and the
+  engine's views name this machine by the first network, so a peer in two
+  networks with this machine shows twice.
 - **Concurrent admin writes** can take the same place in the chain. The
   members then hold different heads, which `rosterMismatch` and the
   doctor show, and an admin writes again from one window.
