@@ -438,6 +438,17 @@ person, one endpoint with one connection per peer, and the HLC.
   window's). A peer in two networks with this machine sees the union. A
   session it stops seeing goes out as removed, and a delta names only
   sessions the peer was shown.
+- **A network reaches only what it sees.** What comes in is held to the
+  same sharing as what goes out. A message to a session, a wake, a claim
+  and a handoff from a member are decided in the network they came in
+  (`decide`'s step 2): the project of the session or the one named must be
+  shared into that network, or the frame is refused in the words of an id
+  nobody has, so a member can't tell which ids exist. A message's wake is
+  decided in that network too: its wake setting, and whether it is shown
+  the session. Every network has a sharing row from the moment it is
+  adopted (the first shares all, the rest none; a store opened without one
+  writes "all", which is what a missing row meant); a network with no row
+  is shown nothing.
 - **Grants name a network.** An actor's grant is minted with a network
   fact, and one with none or another network is refused, so a second
   network never widens an existing grant.

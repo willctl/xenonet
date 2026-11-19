@@ -87,6 +87,8 @@ xenonet net share prj_1a2b…,prj_3c4d… --network work
 
 A project counts once you've confirmed its checkout on this machine ([Projects](projects.md)). Claims and warnings go only to the networks the project is shared into.
 
+A network also reaches only what it sees. A machine that knows the id of a session in a project you didn't share into its network can't message it, hand work to it, post claims in that project or wake it: the answer is the one for an id that doesn't exist. A session outside any confirmed project, and a handoff that names no project, are reachable only from a network that sees everything.
+
 ## Mailboxes
 
 A mailbox is a machine in the network that keeps what's sent to a machine that's away, sealed, and hands it over when that machine is back. It can't read what it keeps. It keeps a week at most, and up to 10,000 items or 50 MB for each machine, and it tells the sender what it took: the sender's `xenonet net status` and doctor show what's held, not delivered yet. A message that carries your presence (an Allow, say) never waits at a mailbox: it goes only to a machine that's connected.

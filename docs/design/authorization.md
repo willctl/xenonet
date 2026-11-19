@@ -465,6 +465,19 @@ answer:
    person. From the network, a member of the network the envelope names,
    never this machine itself. At the gateway and A2A, only this machine's
    actors.
+   A frame from another machine also reaches only what the network it came
+   in is shown (`Ground::sees(network, project)`, answered from what the
+   person shares into that network). A message or wake reaches the project
+   its session is in, a claim its project, a handoff the project it names
+   or the session it is handed to; a session in no confirmed project, and
+   a handoff that names none, are reached only by a network shown
+   everything. A network with no sharing row is shown nothing. The
+   signed act is for the machine, so what else a frame reaches is added by
+   the receiver (`Request::reaching`), outside the signature. A refusal
+   has the code `shared` and the words of an id nobody has ("no session or
+   actor here has that id"), and comes before the sender is checked, so
+   neither tells a member which sessions exist. This machine's own door
+   isn't limited by what any network is shown.
 3. **Who.** The person's device signature is for this act, from an
    unrevoked device of this machine's person. An actor holds a token for
    exactly them, whose root is still held and certified, with no id
