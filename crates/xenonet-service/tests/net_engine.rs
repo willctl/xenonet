@@ -403,6 +403,108 @@ async fn a_call_with_no_frame_and_two_networks_decides_in_neither() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A `Net` that keeps what is sent through it, and passes it on.
+struct Recording {
+    inner: Arc<dyn xenonet_model::ops::Net>,
+    sent: std::sync::Mutex<Vec<xenonet_model::ops::Outgoing>>,
+}
+
+impl xenonet_model::ops::Net for Recording {
+    fn networks(&self) -> Vec<xenonet_model::ops::Me> {
+        self.inner.networks()
+    }
+    fn me(&self) -> Option<xenonet_model::ops::Me> {
+        self.inner.me()
+    }
+    fn networks_with(&self, host: &str) -> Vec<String> {
+        self.inner.networks_with(host)
+    }
+    fn hosts(&self) -> Vec<xenonet_model::ops::Host> {
+        self.inner.hosts()
+    }
+    fn send(&self, out: xenonet_model::ops::Outgoing) -> Result<(), String> {
+        self.sent.lock().unwrap().push(out.clone());
+        self.inner.send(out)
+    }
+    fn roster_head(&self) -> Option<String> {
+        self.inner.roster_head()
+    }
+    fn titles_only(&self) -> bool {
+        self.inner.titles_only()
+    }
+    fn share_load(&self) -> bool {
+        self.inner.share_load()
+    }
+    fn is_window_host(&self) -> bool {
+        self.inner.is_window_host()
+    }
+    fn reach(&self) -> xenonet_model::ops::Reach {
+        self.inner.reach()
+    }
+    fn host_can(&self, host: &str, what: &str) -> bool {
+        self.inner.host_can(host, what)
+    }
+    fn ack(&self, network: &str, host: &str, inc: u64, high: u64) {
+        self.inner.ack(network, host, inc, high)
+    }
+    fn want(&self, network: &str, host: &str, inc: u64, from: u64) {
+        self.inner.want(network, host, inc, from)
+    }
+}
+
+/// A run's permission prompt goes to the window hosts of the network its
+/// start went through, and no other's: tower (a window host of N1) starts
+/// a run on desk, and contractor-vm (a window host of N2) is sent nothing
+/// of it. A run desk started itself, for no machine, is sent to no one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_runs_prompt_goes_only_to_the_window_hosts_of_the_network_its_start_came_in() {
+    let root = std::env::temp_dir().join(format!("xenonet-asks-network-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks_with(&root, true).await;
+    until("desk sees both as window hosts that take starts", 20, || async {
+        let hosts = t.desk.world.engine.net.get().hosts();
+        ["tower", "contractor-vm"].iter().all(|n| hosts.iter().any(|h| h.id == *n && h.window && h.online))
+    })
+    .await;
+    let recording = Arc::new(Recording { inner: t.desk.world.engine.net.get(), sent: std::sync::Mutex::new(Vec::new()) });
+    t.desk.world.engine.net.set(recording.clone());
+    until("tower knows desk takes starts", 20, || async {
+        let hosts = t.tower.state().await["hosts"].clone();
+        hosts.as_array().is_some_and(|h| h.iter().any(|x| x["id"] == "desk" && x["can"].as_array().is_some_and(|c| c.contains(&json!("start")))))
+    })
+    .await;
+    let mut starts = Stream::of(&t.tower);
+    let (s, v) = t.tower.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let run = starts.next("start", 20, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
+    let ctx = t.desk.ctx.clone();
+    let asked = tokio::spawn(async move {
+        let req = Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", run.as_str())], Some(&json!({ "tool_name": "Bash", "input": { "command": "npm test" }, "tool_use_id": "toolu_1" }).to_string()));
+        api(&ctx, common::local(&ctx, req)).await.unwrap().status
+    });
+    let to_asks = |recording: &Recording| {
+        recording
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|o| o.body["target"] == xenonet_service::compose::runtime::asks::TARGET)
+            .map(|o| (o.network.clone(), o.to.clone()))
+            .collect::<Vec<_>>()
+    };
+    until("the ask is sent", 20, || async { !to_asks(&recording).is_empty() }).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let sent = to_asks(&recording);
+    let host = |h: &str| xenonet_model::ops::To::Host(h.into());
+    assert!(sent.iter().any(|(_, to)| *to == host("tower")), "tower asked for the run: {sent:?}");
+    assert!(sent.iter().all(|(n, to)| *to == host("tower") && n.as_deref() == Some(t.n1.as_str())), "only tower, in N1: {sent:?}");
+    asked.abort();
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_hosts_with_their_engines_work_as_one_network() {
     let root = std::env::temp_dir().join(format!("xenonet-net-engine-{}", std::process::id()));

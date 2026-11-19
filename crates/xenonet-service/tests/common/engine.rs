@@ -547,6 +547,11 @@ pub struct TwoNetworks {
 /// N2 starts sharing nothing; only atlas is shared into it, so the network
 /// is waited on until `desk` and `contractor-vm` are in contact.
 pub async fn two_networks(root: &Path) -> TwoNetworks {
+    two_networks_with(root, false).await
+}
+
+/// `two_networks`, with `contractor-vm` a window host of N2 when `guest_window`.
+pub async fn two_networks_with(root: &Path, guest_window: bool) -> TwoNetworks {
     let desk_atlas = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "main");
     let desk_ledger = clone(&root.join("desk/home/ledger"), "git@github.com:acme/ledger.git", "main");
     let vm_atlas = clone(&root.join("contractor-vm/home/atlas"), "https://github.com/acme/atlas", "main");
@@ -556,7 +561,7 @@ pub async fn two_networks(root: &Path) -> TwoNetworks {
     join(&tower, &invite_to(&desk, "tower", true, Some("home")).await).await;
     let n2 = founded(&desk, "work").await;
     let contractor = Host::open("contractor-vm", root.join("contractor-vm"), vec![sess(VM_ATLAS, "Fix the login form", &vm_atlas)], None).await;
-    join(&contractor, &invite_to(&desk, "contractor-vm", false, Some("work")).await).await;
+    join(&contractor, &invite_to(&desk, "contractor-vm", guest_window, Some("work")).await).await;
     // The projects are named once the person is known (their ids are keyed
     // into it), so after the networks.
     let (atlas, ledger) = (project_of(&desk, &desk_atlas).expect("desk's atlas"), project_of(&desk, &desk_ledger).expect("desk's ledger"));
