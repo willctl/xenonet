@@ -107,16 +107,13 @@ impl MapReader for Fake {
     }
     fn node(&self, id: &str) -> Result<Option<Value>> {
         let w = self.w.locked();
-        Ok(w.nodes
-            .iter()
-            .find(|n| n.id == id)
-            .map(|n| {
-                let mut v = json!({ "id": n.id, "kind": n.kind, "title": format!("T {}", n.id), "cwd": "/w/p", "updatedAt": n.updated_at, "archived": n.archived });
-                if let (Some(rule), "project:p") = (&w.rule, n.id.as_str()) {
-                    v["identityRule"] = rule.clone();
-                }
-                v
-            }))
+        Ok(w.nodes.iter().find(|n| n.id == id).map(|n| {
+            let mut v = json!({ "id": n.id, "kind": n.kind, "title": format!("T {}", n.id), "cwd": "/w/p", "updatedAt": n.updated_at, "archived": n.archived });
+            if let (Some(rule), "project:p") = (&w.rule, n.id.as_str()) {
+                v["identityRule"] = rule.clone();
+            }
+            v
+        }))
     }
     fn live(&self, id: &str, _now: f64) -> Result<Option<Value>> {
         let w = self.w.locked();
@@ -475,7 +472,8 @@ fn a_session_is_told_at_its_start_when_its_projects_rule_does_not_match() {
     assert_eq!(brief(&f), "", "no rule, nothing to say");
     let rule = json!({ "git": "nova@example.com", "push": { "login": "nova-dev", "host": "github.com" } });
     // What XenoNet could not read is not a mismatch.
-    f.w.locked().rule = Some(json!({ "rule": rule, "git": { "state": "unknown", "uses": null }, "push": { "state": "ok", "uses": "nova-dev/github.com" }, "mismatch": false, "unknown": true }));
+    f.w.locked().rule =
+        Some(json!({ "rule": rule, "git": { "state": "unknown", "uses": null }, "push": { "state": "ok", "uses": "nova-dev/github.com" }, "mismatch": false, "unknown": true }));
     assert_eq!(brief(&f), "");
     f.w.locked().rule = Some(json!({
         "rule": rule,
@@ -490,7 +488,8 @@ fn a_session_is_told_at_its_start_when_its_projects_rule_does_not_match() {
     assert!(said.contains("pushes should sign in as nova-dev on github.com, but a push from here would sign in as ledger-bot/github.com"), "{said}");
     assert!(said.ends_with("Don't commit or push until this is fixed, and tell your user."), "{said}");
     // Only the part that differs is named.
-    f.w.locked().rule = Some(json!({ "rule": rule, "git": { "state": "ok", "uses": "nova@example.com" }, "push": { "state": "differs", "uses": null }, "mismatch": true, "unknown": false }));
+    f.w.locked().rule =
+        Some(json!({ "rule": rule, "git": { "state": "ok", "uses": "nova@example.com" }, "push": { "state": "differs", "uses": null }, "mismatch": true, "unknown": false }));
     let said = brief(&f);
     assert!(!said.contains("commits should carry") && said.contains("would sign in as another account"), "{said}");
 }

@@ -1501,19 +1501,31 @@ mod tests {
         };
         // Both as the rule says.
         let ok = check(Some("nova@example.com"), Some(("github.com", "nova-dev")));
-        assert_eq!((ok["git"]["state"].as_str(), ok["push"]["state"].as_str(), ok["mismatch"].as_bool(), ok["unknown"].as_bool()), (Some("ok"), Some("ok"), Some(false), Some(false)));
+        assert_eq!(
+            (ok["git"]["state"].as_str(), ok["push"]["state"].as_str(), ok["mismatch"].as_bool(), ok["unknown"].as_bool()),
+            (Some("ok"), Some("ok"), Some(false), Some(false))
+        );
         // Git differs.
         let git = check(Some("ada@acme.example"), Some(("github.com", "nova-dev")));
-        assert_eq!((git["git"]["state"].as_str(), git["git"]["uses"].as_str(), git["push"]["state"].as_str(), git["mismatch"].as_bool()), (Some("differs"), Some("ada@acme.example"), Some("ok"), Some(true)));
+        assert_eq!(
+            (git["git"]["state"].as_str(), git["git"]["uses"].as_str(), git["push"]["state"].as_str(), git["mismatch"].as_bool()),
+            (Some("differs"), Some("ada@acme.example"), Some("ok"), Some(true))
+        );
         // Push differs, even on the same login at another host.
         let push = check(Some("nova@example.com"), Some(("ghe.acme.example", "nova-dev")));
-        assert_eq!((push["git"]["state"].as_str(), push["push"]["state"].as_str(), push["push"]["uses"].as_str(), push["mismatch"].as_bool()), (Some("ok"), Some("differs"), Some("nova-dev/ghe.acme.example"), Some(true)));
+        assert_eq!(
+            (push["git"]["state"].as_str(), push["push"]["state"].as_str(), push["push"]["uses"].as_str(), push["mismatch"].as_bool()),
+            (Some("ok"), Some("differs"), Some("nova-dev/ghe.acme.example"), Some(true))
+        );
         // Both differ.
         let both = check(Some("ada@acme.example"), Some(("github.com", "ledger-bot")));
         assert_eq!((both["git"]["state"].as_str(), both["push"]["state"].as_str(), both["mismatch"].as_bool()), (Some("differs"), Some("differs"), Some(true)));
         // What wasn't read is not a mismatch.
         let unknown = check(None, None);
-        assert_eq!((unknown["git"]["state"].as_str(), unknown["push"]["state"].as_str(), unknown["mismatch"].as_bool(), unknown["unknown"].as_bool()), (Some("unknown"), Some("unknown"), Some(false), Some(true)));
+        assert_eq!(
+            (unknown["git"]["state"].as_str(), unknown["push"]["state"].as_str(), unknown["mismatch"].as_bool(), unknown["unknown"].as_bool()),
+            (Some("unknown"), Some("unknown"), Some(false), Some(true))
+        );
         let half = check(Some("ada@acme.example"), None);
         assert_eq!((half["mismatch"].as_bool(), half["unknown"].as_bool()), (Some(true), Some(true)), "a part that differs is a mismatch even when another is unknown");
         // A rule that names one part checks that part.
@@ -1531,7 +1543,10 @@ mod tests {
         ];
         apply_rules(&mut nodes, &json!({ "project:atlas": { "git": "nova@example.com" }, "claude:s1": { "git": "nova@example.com" } }), &list);
         assert_eq!(nodes[0]["identityRule"]["mismatch"], true);
-        assert_eq!(identity_warnings(&nodes), vec![json!({ "id": "project:atlas", "title": "project:atlas", "text": "Commits here don't use the git identity this project's rule names." })]);
+        assert_eq!(
+            identity_warnings(&nodes),
+            vec![json!({ "id": "project:atlas", "title": "project:atlas", "text": "Commits here don't use the git identity this project's rule names." })]
+        );
         assert!(nodes[1].get("identityRule").is_none(), "no rule, no check");
         assert!(nodes[2].get("identityRule").is_none(), "only a project has one");
     }

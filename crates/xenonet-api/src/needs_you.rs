@@ -314,7 +314,10 @@ mod tests {
             "identities": [{ "id": "project:atlas", "title": "atlas", "text": "Commits here don't use the git identity this project's rule names." }, { "title": "no id" }],
         }));
         let it = q.iter().find(|i| i["kind"] == "identity").expect("an identity item");
-        assert_eq!(*it, json!({ "key": "identity:project:atlas", "kind": "identity", "id": "project:atlas", "title": "atlas", "text": "Commits here don't use the git identity this project's rule names.", "since": null, "actions": ["show"] }));
+        assert_eq!(
+            *it,
+            json!({ "key": "identity:project:atlas", "kind": "identity", "id": "project:atlas", "title": "atlas", "text": "Commits here don't use the git identity this project's rule names.", "since": null, "actions": ["show"] })
+        );
         assert_eq!(waits_words(it), "would commit or push as the wrong identity");
         assert_eq!(q.len(), 2, "one item per project, and the dated wait first");
         let from_summary = queue_of_summary(Some(&json!({ "identityWarnings": [{ "id": "project:ledger", "title": "ledger", "text": "x" }] })));
