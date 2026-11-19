@@ -7,6 +7,7 @@
 //   npm run lab -- status
 //   npm run lab -- build ubuntu|fedora [--ref <git ref>]
 //   npm run lab -- clone vm1|vm2
+//   npm run lab -- refit [vm…]
 //   npm run lab -- up [vm…]
 //   npm run lab -- down [vm…]
 //   npm run lab -- push [vm…] [--ref <git ref>]
@@ -24,7 +25,7 @@ import dgram from "node:dgram";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { BASES, VMS, LAB_INSTANCES, DEMO_PORT, REAL_PORT, LAN_DEV, labPaths, envFileText, guestScript, newPassword, sha512crypt, shq } from "./config.mjs";
+import { BASES, VMS, LAB_INSTANCES, DEMO_PORT, REAL_PORT, LAN_DEV, MAC_DEV, labPaths, fitSets, envFileText, guestScript, newPassword, sha512crypt, shq } from "./config.mjs";
 import { reposScript } from "./fixtures.mjs";
 import { CHECKS, HEAL, UDP_PORT, addrsOf, nonce, runCheck } from "./transport.mjs";
 import { XCHECKS, runXCheck, xenolithOps } from "./xenolith.mjs";
@@ -93,14 +94,15 @@ function limaSsh(instance, command, opts = {}) {
 }
 
 // One of guest.sh's steps, as the lab user.
-const guest = (instance, name, vars = {}, opts = {}) => limaSsh(instance, ["bash", "-s"], { ...opts, input: guestScript(name, vars, GUEST) });
+const guestVars = (vars) => ({ LAN_DEV, MAC_DEV, ...vars });
+const guest = (instance, name, vars = {}, opts = {}) => limaSsh(instance, ["bash", "-s"], { ...opts, input: guestScript(name, guestVars(vars), GUEST) });
 
 // A guest step left running while the lab does something else: `waitFor`
 // resolves once its output matches, `done` when it exits.
 function later(instance, name, vars = {}) {
   const config = path.join(paths.instanceDir(instance), "ssh.config");
   const child = spawn("ssh", ["-F", config, "-T", "-o", "LogLevel=ERROR", `lima-${instance}`, "--", "bash", "-s"], { stdio: ["pipe", "pipe", "ignore"] });
-  child.stdin.end(guestScript(name, vars, GUEST));
+  child.stdin.end(guestScript(name, guestVars(vars), GUEST));
   let stdout = "";
   const seen = [];
   child.stdout.on("data", (d) => {
@@ -190,7 +192,8 @@ function report(id) {
   say(`127.0.0.1:${REAL_PORT} (xenonet.service, ${f.xenonet || "?"}): ${ok(f["health-47840"])}`);
   say(`127.0.0.1:${DEMO_PORT} (xenonet-demo.service, ${f["xenonet-demo"] || "?"}): ${ok(f["health-47841"])}`);
   say(`${f.versions ?? ""}; time zone ${f.zone ?? "?"}`);
-  say(`on the lab's LAN (${LAN_DEV}): ${f.lan || "no address"}`);
+  say(`on the lab's LAN (${LAN_DEV}, between the VMs): ${f.lan || "no address"}`);
+  say(`on the network it shares with this Mac (${MAC_DEV}): ${f.mac || "no address"}`);
 }
 
 // ---------- commands ----------
@@ -254,7 +257,7 @@ function clone([id]) {
   if (all[vm.instance]) fail(`${vm.instance} already exists`);
   const sudo = newSudo();
   step(`Cloning ${vm.instance} from ${b.instance}`);
-  limactl(["clone", "--tty=false", b.instance, vm.instance, `--ssh-port=${vm.sshPort}`, `--param=labSudoHash=${sudo.hash}`, `--param=labTimezone=${vm.timezone}`]);
+  limactl(["clone", "--tty=false", b.instance, vm.instance, `--ssh-port=${vm.sshPort}`, `--param=labSudoHash=${sudo.hash}`, `--param=labTimezone=${vm.timezone}`, ...fit()]);
   savePassword(vm.instance, sudo.password);
   step(`Starting it. Its first boot makes its own SSH host keys.`);
   limactl(["start", "--tty=false", vm.instance]);
@@ -263,6 +266,23 @@ function clone([id]) {
   step(`${id}: its settings and its two XenoNets`);
   guest(vm.instance, "vm", { XENONET_ENV: envFileText(vm.env) });
   report(id);
+}
+
+// The networks and firewall in lab.yaml, as the --set flags that put them in
+// a VM made from an older golden copy.
+const fit = () => fitSets(fs.readFileSync(path.join(HERE, "lima", "lab.yaml"), "utf8")).flatMap((expr) => ["--set", expr]);
+
+// Makes stopped working VMs' networks and firewall lab.yaml's. Lima writes a
+// VM's provision scripts again at every start, so the new rules load at its
+// next boot.
+function refit(ids) {
+  const all = instances();
+  for (const id of pick(ids)) {
+    const inst = all[VMS[id].instance];
+    if (inst?.status !== "Stopped") fail(`${id} must be stopped (npm run lab -- down ${id})`);
+    limactl(["edit", "--tty=false", ...fit(), VMS[id].instance]);
+    say(`${id}: networks and firewall from lab.yaml`);
+  }
 }
 
 function up(ids) {
@@ -321,11 +341,19 @@ function vmChecks(id, instance, target, mine, record) {
   record(/"ok":true/.test(f["health-47840"] ?? ""), `XenoNet answers on 127.0.0.1:${REAL_PORT}`);
   record(/"ok":true/.test(f["health-47841"] ?? ""), `the demo XenoNet answers on 127.0.0.1:${DEMO_PORT}`);
   const local = run("curl", ["-s", "-m", "3", `http://127.0.0.1:${target.port}/`], { capture: true, allowFail: true }).stdout;
-  const probe = sh(`curl -s -m 3 http://192.168.5.2:${target.port}/; echo " exit=$?"`).stdout.trim();
-  record(local === "xenonet-lab-canary" && !probe.includes("xenonet-lab-canary"), "can't reach this Mac's 127.0.0.1 through 192.168.5.2", `a server there answers here; from ${id}: curl ${probe.replace(/.*exit=/, "exit ")}`);
+  // Every address a guest could take for the Mac: Lima's name for it and each
+  // default gateway (user-v2's is host.lima.internal; vzNAT's is the Mac's
+  // bridge, which doesn't reach the loopback).
+  const lines = (step) => (guest(instance, step, {}, { capture: true, allowFail: true }).stdout ?? "").split("\n").filter(Boolean);
+  const host = lines("hostaddr");
+  const gateways = lines("macgateways");
+  const reached = gateways.filter((a) => sh(`curl -s -m 3 http://${a}:${target.port}/`).stdout.includes("xenonet-lab-canary"));
+  const detail = local !== "xenonet-lab-canary" ? "the canary server on this Mac doesn't answer here" : reached.length ? `from ${id}, ${reached.join(", ")} reached the server on this Mac's 127.0.0.1` : host.length ? `a server there answers here, and ${id} tried ${gateways.length} gateways` : `host.lima.internal doesn't resolve in ${id}`;
+  record(local === "xenonet-lab-canary" && host.length > 0 && reached.length === 0, `can't reach this Mac's 127.0.0.1 through ${gateways.join(", ") || "any gateway"}, host.lima.internal (${host.join(", ") || "not resolved"}) included`, detail);
   const net = sh("curl -s -o /dev/null -m 10 -w '%{http_code}' https://api.anthropic.com").stdout.trim();
   record(/^[1-5]\d\d$/.test(net), "reaches the internet", `api.anthropic.com: HTTP ${net}`);
-  record(Boolean(f.lan), `has an address on the lab's LAN (${LAN_DEV}, Lima's vzNAT)`, f.lan || "none: README.md, The VMs, says how to add it");
+  record(Boolean(f.lan), `has an address on the lab's LAN (${LAN_DEV}, Lima's user-v2)`, f.lan || "none: README.md, Changing things, says how to add it");
+  record(Boolean(f.mac), `has an address on the network it shares with this Mac (${MAC_DEV}, Lima's vzNAT)`, f.mac || "none: README.md, Changing things, says how to add it");
   const listening = sh("ss -ltnH").stdout.split("\n").map((l) => l.trim().split(/\s+/)[3]).filter((a) => /:(47840|47841)$/.test(a ?? ""));
   record(listening.length >= 2 && listening.every((a) => a.startsWith("127.0.0.1:")), "XenoNet's API listens on 127.0.0.1 only", listening.join(", "));
   // What Lima or a share would mount: virtiofs, 9p, sshfs (fuse.sshfs),
@@ -354,11 +382,14 @@ function transportCtx(both) {
   const g = (id, name, vars = {}, opts = {}) => guest(inst(id), name, vars, { capture: true, allowFail: true, ...opts });
   const vars = ({ session, project, calls = [], register = true, end = false }) => ({ SESSION: session, PROJECT: project, CALLS: JSON.stringify(calls), REGISTER: register ? "1" : "0", END: end ? "1" : "0" });
   const lan = (id) => addrsOf(g(id, "lanaddrs").stdout ?? "");
+  const macSide = (id) => addrsOf(g(id, "macaddrs").stdout ?? "");
   const answering = (id) => g(id, "answering", {}, { timeout: 90000 });
   const subjects = {};
   return {
     both,
     lanDev: LAN_DEV,
+    macDev: MAC_DEV,
+    hostAddr: (id) => String(g(id, "hostaddr").stdout ?? "").split("\n").filter(Boolean),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     session: () => randomUUID(),
     // The commits a VM's XenoNet was built from, or ("here") this checkout's.
@@ -418,18 +449,20 @@ function transportCtx(both) {
     },
     doctor: (id) => vmSh(inst(id), "~/.local/bin/xenonet doctor --json").stdout ?? "",
     logs: (id) => vmSh(inst(id), "~/.local/bin/xenonet logs --json").stdout ?? "",
-    // A datagram from one machine ("mac", or a VM) to a VM on the lab's
-    // LAN, or to a multicast group there, and whether it came.
+    // A datagram from one machine ("mac", or a VM) to a VM: from a VM on the
+    // lab's LAN, or to a multicast group there; from the Mac on the network
+    // it shares with the VMs. Whether it came.
     udp: async (from, to, { group } = {}) => {
-      const addr = lan(to).find((a) => !a.includes(":"));
+      const dev = from === "mac" ? MAC_DEV : LAN_DEV;
+      const addr = (from === "mac" ? macSide(to) : lan(to)).find((a) => !a.includes(":"));
       if (!addr) return false;
       const n = nonce("udp");
-      const listener = later(inst(to), "udplisten", { PORT: String(UDP_PORT), GROUP: group ?? "", NONCE: n });
+      const listener = later(inst(to), "udplisten", { PORT: String(UDP_PORT), GROUP: group ?? "", NONCE: n, DEV: dev });
       await listener.waitFor(/^ready$/m, 15000);
       if (from === "mac") {
         const s = dgram.createSocket("udp4");
         await new Promise((resolve) => s.send(n, UDP_PORT, addr, () => (s.close(), resolve())));
-      } else g(from, "udpsend", { ADDR: group ? "" : addr, GROUP: group ?? "", PORT: String(UDP_PORT), NONCE: n });
+      } else g(from, "udpsend", { ADDR: group ? "" : addr, GROUP: group ?? "", PORT: String(UDP_PORT), NONCE: n, DEV: dev });
       return /^got$/m.test((await listener.done).stdout);
     },
   };
@@ -516,6 +549,7 @@ function help() {
   status                         the lab's VMs and their XenoNets
   build ubuntu|fedora [--ref R]  a golden copy: create, provision, stop, protect
   clone vm1|vm2                  a working VM from its golden copy, set up and started
+  refit [vm…]                    stopped working VMs: networks and firewall from lab.yaml
   up [vm…]                       start working VMs
   down [vm…]                     stop them
   push [vm…] [--ref R]           XenoNet at a git ref (HEAD) into running VMs, and restart it
@@ -531,7 +565,7 @@ A transport check that waits on phase 5 code says "not in this build yet",
 and one that needs a network says what the owner runs; neither fails.`);
 }
 
-const COMMANDS = { status, build, clone, up, down, push, check, teardown, help };
+const COMMANDS = { status, build, clone, refit, up, down, push, check, teardown, help };
 
 function parse(argv) {
   const flags = {};

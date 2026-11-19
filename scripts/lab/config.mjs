@@ -4,6 +4,7 @@
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import yaml from "js-yaml";
 
 // The golden copies: built once from a template, stopped, protected, and
 // never signed in to. Working VMs are clones of them.
@@ -33,10 +34,25 @@ export const LAB_INSTANCES = ["xenonet-vm1", "xenonet-vm2", "xenonet-vm1-ckpt", 
 export const HOST_ID = /^[a-z][a-z0-9-]{1,31}$/;
 export const DEMO_PORT = 47841;
 export const REAL_PORT = 47840;
-// The interface Lima's vzNAT network gets in a guest (lab.yaml's
-// `networks`): the VMs and the Mac reach each other on it, UDP and
-// multicast included.
-export const LAN_DEV = "lima0";
+// The two interfaces a guest has (lab.yaml's `networks`). LAN_DEV is Lima's
+// user-v2 network: the VMs reach each other there, UDP and multicast
+// included, and the internet; the Mac can't reach a guest on it. MAC_DEV is
+// Apple's shared NAT (vzNAT): the Mac and each guest reach each other, but
+// on macOS 26.5 never two guests.
+export const LAN_DEV = "eth0";
+export const MAC_DEV = "lima0";
+
+// What `limactl clone` and `limactl edit` change in a VM to make its
+// networks and firewall the template's, as yq expressions for --set. A
+// clone brings its golden copy's, which a later build of the template
+// changes, and a working VM is not built again.
+export const FIREWALL_FILE = "/etc/xenonet-lab/nftables.nft";
+export function fitSets(labYamlText) {
+  const lab = yaml.load(labYamlText);
+  const nft = lab.provision?.find((p) => p.path === FIREWALL_FILE)?.content;
+  if (!Array.isArray(lab.networks) || !nft) throw new Error("lab.yaml has no networks or no firewall");
+  return [`.networks = ${JSON.stringify(lab.networks)}`, `(.provision[] | select(.path == ${JSON.stringify(FIREWALL_FILE)})).content = ${JSON.stringify(nft)}`];
+}
 
 // Where Lima keeps each VM's files. Each VM's sudo password sits in its
 // Lima folder, which limactl delete removes.
@@ -59,13 +75,14 @@ export function envFileText(env = {}) {
     .join("");
 }
 
-// Values for guest.sh, set as shell variables above its text.
+// Values for guest.sh, set as environment variables above its text (the
+// Node scripts inside it read them from there).
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 export function guestScript(step, vars, body) {
   if (!/^[a-z]+$/.test(step)) throw new Error(`bad step ${step}`);
   const header = Object.entries({ STEP: step, ...vars }).map(([k, v]) => {
     if (!/^[A-Z][A-Z0-9_]*$/.test(k)) throw new Error(`bad variable ${k}`);
-    return `${k}=${shq(v)}`;
+    return `export ${k}=${shq(v)}`;
   });
   return `${header.join("\n")}\n${body}`;
 }

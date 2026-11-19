@@ -46,10 +46,14 @@ export const RELAY_CHECKS = ["relay", "relay-sealed", "relay-unlisted", "relay-d
 // The lab's iroh-relays in vm1 (guest.sh's relay step): two the network
 // lists, and one it doesn't.
 export const RELAYS = { listed: ["a", "b"], unlisted: "elsewhere" };
-const RELAY_URLS = ["https://<vm1's lima0 address>:3443", "https://<vm1's lima0 address>:4443"];
+const RELAY_URLS = ["https://<vm1's LAN address>:3443", "https://<vm1's LAN address>:4443"];
 
 export const UDP_PORT = 47850;
 export const GROUP = "239.255.47.85";
+// Lima's user-v2 carries unicast between guests and nothing else: no
+// multicast, no broadcast (measured with tcpdump on the other guest). mDNS
+// can't find a VM there; socket_vmnet's shared network would carry it.
+export const NO_MULTICAST = "multicast doesn't cross user-v2, the lab's LAN, so mDNS can't find the other VM there; it needs socket_vmnet's shared network, whose install needs root (README.md, Networking and root)";
 export const nonce = (what) => `lab-${what}-${randomBytes(6).toString("hex")}`;
 
 // ---------- reading a VM's network ----------
@@ -115,11 +119,13 @@ const v6 = (addrs) => addrs.filter((a) => a.includes(":"));
 // nft rules a check adds in a table of its own, which `heal` (null) takes
 // away and a reboot forgets. `udpTo` drops UDP to and from those addresses
 // (the relay check: QUIC's direct path goes, TCP to the relay stays).
-// `isolate` drops everything on the lab's LAN interface except to and from
-// `allow` (the gap check).
+// `isolate` (an interface, or a list of them) drops everything on it except
+// to and from `allow` (the gap check).
 export function rules({ udpTo, isolate, allow = [] }) {
   for (const a of [...(udpTo ?? []), ...allow]) if (!/^[0-9a-f.:]+$/i.test(a)) throw new Error(`not an address: ${a}`);
-  if (isolate && !/^[\w.-]+$/.test(isolate)) throw new Error(`not an interface: ${isolate}`);
+  const ifaces = [].concat(isolate ?? []);
+  for (const i of ifaces) if (!/^[\w.-]+$/.test(i)) throw new Error(`not an interface: ${i}`);
+  const named = ifaces.length === 1 ? `"${ifaces[0]}"` : `{ ${ifaces.map((i) => `"${i}"`).join(", ")} }`;
   const out = [];
   const inn = [];
   if (udpTo?.length) {
@@ -129,14 +135,14 @@ export function rules({ udpTo, isolate, allow = [] }) {
       inn.push(`${fam} saddr ${set(list)} meta l4proto udp drop`);
     }
   }
-  if (isolate) {
+  if (ifaces.length) {
     for (const [fam, list] of [["ip", v4(allow)], ["ip6", v6(allow)]]) {
       if (!list.length) continue;
-      out.push(`oifname "${isolate}" ${fam} daddr ${set(list)} accept`);
-      inn.push(`iifname "${isolate}" ${fam} saddr ${set(list)} accept`);
+      out.push(`oifname ${named} ${fam} daddr ${set(list)} accept`);
+      inn.push(`iifname ${named} ${fam} saddr ${set(list)} accept`);
     }
-    out.push(`oifname "${isolate}" drop`);
-    inn.push(`iifname "${isolate}" drop`);
+    out.push(`oifname ${named} drop`);
+    inn.push(`iifname ${named} drop`);
   }
   if (!out.length) throw new Error("no rules: give udpTo or isolate");
   const chain = (name, hook, lines) => [`  chain ${name} {`, `    type filter hook ${hook} priority -10; policy accept;`, ...lines.map((l) => `    ${l}`), "  }"];
@@ -259,11 +265,11 @@ export const CHECKS = [
     what: "multicast on the lab's LAN reaches the other VM, as mDNS needs",
     needs: [],
     changes: "nothing",
-    run: async (ctx) => ((await ctx.udp("vm1", "vm2", { group: GROUP })) ? ok(`${GROUP} from vm1 to vm2`) : fail(`nothing from ${GROUP} reached vm2`)),
+    run: async (ctx) => ((await ctx.udp("vm1", "vm2", { group: GROUP })) ? ok(`${GROUP} from vm1 to vm2`) : owner(NO_MULTICAST)),
   },
   {
     id: "mac-udp",
-    what: "this Mac reaches each VM over UDP on the lab's LAN",
+    what: "this Mac reaches each VM over UDP on the network they share (vzNAT)",
     needs: [],
     changes: "nothing",
     // macOS may ask once whether the app this runs in may reach the local
@@ -286,6 +292,7 @@ export const CHECKS = [
     run: async (ctx) => {
       const p = await pair(ctx);
       if (p.why) return owner(p.why);
+      if (!(await ctx.udp("vm1", "vm2", { group: GROUP }))) return owner(NO_MULTICAST);
       const seen = {};
       const good = await poll(ctx, 30000, async () => {
         for (const vm of ["vm1", "vm2"]) {
@@ -347,8 +354,8 @@ export const CHECKS = [
     needs: ["link/2", "own relays"],
     owner: `${OWNER.join}; then ${OWNER.relays(RELAY_URLS)}`,
     standIn: "none: a_relay_sees_who_talks_never_what (crates/xenonet-net/src/relay_tests.rs), which reads what the relay itself sees",
-    changes: "as relay, and a packet capture on vm1's lima0 while one message goes, deleted afterwards",
-    reads: "a capture of vm1's lima0 (tcpdump, as root), and the relays' byte counters (their metrics, on 127.0.0.1 in vm1)",
+    changes: "as relay, and a packet capture on vm1's LAN while one message goes, deleted afterwards",
+    reads: "a capture of vm1's LAN (tcpdump, as root), and the relays' byte counters (their metrics, on 127.0.0.1 in vm1)",
     run: (ctx) =>
       withRelays(ctx, async ({ s }) => {
         const before = await relayBytes(ctx);
@@ -363,9 +370,9 @@ export const CHECKS = [
         if (!m.got) return fail("a message through the relay didn't come in 10 s");
         const through = (await relayBytes(ctx)) - before;
         if (!(through > 0)) return fail("the relays' counters didn't move: the message didn't go through them");
-        if (!(seen?.bytes > 0)) return fail("the capture on vm1's lima0 caught nothing");
+        if (!(seen?.bytes > 0)) return fail("the capture on vm1's LAN caught nothing");
         if (seen.found) return fail(`the message's text crossed vm1's LAN in the clear (${seen.bytes} bytes caught)`);
-        return ok(`${through} bytes through the relays, ${seen.bytes} caught on vm1's lima0, the message's text in none`);
+        return ok(`${through} bytes through the relays, ${seen.bytes} caught on vm1's LAN, the message's text in none`);
       }),
   },
   {
@@ -455,7 +462,7 @@ export const CHECKS = [
     needs: ["link/2", "holders"],
     owner: OWNER.join,
     standIn: "none: the turmoil tests (crates/xenonet-net/src/sim_tests.rs)",
-    changes: "cuts vm2 off the lab's LAN, then lets vm1 alone back in, then puts it back",
+    changes: "cuts vm2 off the lab's LAN and the Mac's, then lets vm1 alone back in, then puts it back",
     reads: "the engine's handoff tool, through stand-in sessions",
     run: async (ctx) => {
       const p = await pair(ctx);
@@ -464,11 +471,15 @@ export const CHECKS = [
       const goal = nonce("gap");
       try {
         await ctx.standin("vm2", { session: b, project: "atlas-api", calls: [{ name: "whoami" }] });
-        await ctx.nft("vm2", rules({ isolate: ctx.lanDev }));
+        // Both interfaces go, so the gap can't fill from the Mac either; the
+        // user-v2 gateway stays, since it carries the Mac's SSH into the VM.
+        const cut = { isolate: [ctx.lanDev, ctx.macDev] };
+        const gateway = await ctx.hostAddr("vm2");
+        await ctx.nft("vm2", rules({ ...cut, allow: gateway }));
         for (const i of [1, 2, 3]) await handoff(ctx, "vm1", `${goal} ${i}`);
         // Back on the LAN with vm1 only, so the gap can fill from nowhere
         // else.
-        await ctx.nft("vm2", rules({ isolate: ctx.lanDev, allow: await ctx.lanAddrs("vm1") }));
+        await ctx.nft("vm2", rules({ ...cut, allow: [...gateway, ...(await ctx.lanAddrs("vm1"))] }));
         const all = await offered(ctx, "vm2", b, `${goal} 3`, 60000);
         const first = all && (await offered(ctx, "vm2", b, `${goal} 1`, 0)) && (await offered(ctx, "vm2", b, `${goal} 2`, 0));
         return first ? ok("all three handoffs came from vm1") : fail(all ? "the last came, an earlier one didn't" : "the handoffs didn't come in 60 s");

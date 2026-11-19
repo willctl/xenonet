@@ -53,7 +53,7 @@ const as = (vm) => `XENOLITH_HOME=~/.local/share/xenonet-lab/xenolith/${NAMES[vm
 
 // What the owner runs, which the lab can't.
 export const XOWNER = {
-  join: `join vm2 to vm1's ${SPACE} yourself: in vm1 (limactl shell xenonet-vm1), ${as("vm1")} invite ${SPACE} --level write; in vm2, ${as("vm2")} join <the invite> --at <vm1's lima0 address>:${SYNC_PORT}, and type the code vm1 showed`,
+  join: `join vm2 to vm1's ${SPACE} yourself: in vm1 (limactl shell xenonet-vm1), ${as("vm1")} invite ${SPACE} --level write; in vm2, ${as("vm2")} join <the invite> --at <vm1's LAN address>:${SYNC_PORT}, and type the code vm1 showed`,
   grant: "give the Xenolith in vm1 and in vm2 its grant from XenoNet (key(id) and forward(xenolith/sync/2)): approve it for each in the Mac's XenoNet window, then pipe it into xenolith sync grant in that VM",
   share: `share vm1's ${SPACE} into the lab's network: the curator drafts the entry (${as("vm1")} spaces draft), a device of yours signs it with your presence in the Mac's XenoNet window, and the curator sequences it (spaces sequence)`,
   old: `fetch Xenolith ${OLD_TAG.slice(10)}'s tag into this checkout (git fetch origin tag ${OLD_TAG}), then run npm run lab -- check --only xenolith-rehearsal`,

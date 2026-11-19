@@ -182,7 +182,8 @@ facts() {
   for v in xenonet xenonet-demo; do echo "$v=$(systemctl --user is-active "$v" 2>/dev/null || true)"; done
   echo "health-47840=$(health 47840 2>/dev/null | head -c 60 || true)"
   echo "health-47841=$(health 47841 2>/dev/null | head -c 60 || true)"
-  echo "lan=$(ip -o -4 addr show dev lima0 2>/dev/null | awk '{print $4}' | paste -sd, -)"
+  echo "lan=$(ip -o -4 addr show dev "$LAN_DEV" 2>/dev/null | awk '{print $4}' | paste -sd, -)"
+  echo "mac=$(ip -o -4 addr show dev "$MAC_DEV" 2>/dev/null | awk '{print $4}' | paste -sd, -)"
   echo "zone=$(timedatectl show -p Timezone --value 2>/dev/null || true)"
   # Read from the installs rather than run: starting Claude Code writes ids
   # into ~/.claude.json.
@@ -196,9 +197,26 @@ subjects() {
   git -C "$HOME/xenonet" log --format=%s -n 5000 2>/dev/null || true
 }
 
-# The VM's addresses on the lab's LAN (lima0), as `ip -j` gives them.
+# The VM's addresses on the lab's LAN (LAN_DEV) and on the network it shares
+# with the Mac (MAC_DEV), as `ip -j` gives them.
 lanaddrs() {
-  ip -j addr show dev lima0
+  ip -j addr show dev "$LAN_DEV"
+}
+
+macaddrs() {
+  ip -j addr show dev "$MAC_DEV"
+}
+
+# Lima's name for the Mac, host.lima.internal: on user-v2, the gateway that
+# forwards to the Mac's 127.0.0.1 and carries the Mac's SSH into the VM.
+hostaddr() {
+  getent hosts host.lima.internal | awk '{print $1}'
+}
+
+# Every address a guest could take for the Mac, one a line: that name and
+# each default gateway.
+macgateways() {
+  { hostaddr; ip -4 route show default | awk '{print $3}'; } | sort -u
 }
 
 # This VM's XenoNet's network, as `xenonet net status --json` gives it, or
@@ -293,7 +311,7 @@ EOF
 # The lab's own relays for the relay checks: iroh-relay, built at the
 # version versions.json pins with its server feature and its own lockfile,
 # from a config file, with TLS from the lab's CA (made here once, in
-# ~/.local/share/xenonet-lab/relay) on a certificate for this VM's lima0
+# ~/.local/share/xenonet-lab/relay) on a certificate for this VM's LAN
 # address. RELAY names one: a and b, which the lab's network lists, and
 # elsewhere, which it doesn't. Each runs as a transient user service, so it
 # stops with `relayoff` or the VM. The first build takes a few minutes.
@@ -333,7 +351,7 @@ relay() {
     (cd "$HOME/xenonet" && rustup toolchain install >/dev/null && cargo install -q --locked --features server --root "$HOME/.local" iroh-relay --version "$RELAY_VERSION")
   fi
   local ip http https metrics qad
-  ip="$(ip -o -4 addr show dev lima0 | awk '{print $4}' | cut -d/ -f1 | head -1)"
+  ip="$(ip -o -4 addr show dev "$LAN_DEV" | awk '{print $4}' | cut -d/ -f1 | head -1)"
   read -r http https metrics qad <<<"$(relay_ports "$RELAY")"
   relay_certs "$ip"
   cat >"$RELAY_DIR/$RELAY.toml" <<EOF
@@ -398,15 +416,15 @@ relaymetrics() {
   curl -fsS -m 5 "http://127.0.0.1:$metrics/metrics" || true
 }
 
-# One UDP datagram, NONCE, to ADDR:PORT, or to the multicast group GROUP
-# on lima0; and a listener that waits 5 s for it, printing `ready` once it
-# listens, then `got` or `none`.
+# One UDP datagram, NONCE, to ADDR:PORT, or to the multicast group GROUP,
+# from the address of the interface DEV; and a listener on DEV that waits
+# 5 s for it, printing `ready` once it listens, then `got` or `none`.
 udpsend() {
   node - <<'EOF'
 const dgram = require("dgram");
 const os = require("os");
-const { ADDR, GROUP, PORT, NONCE } = process.env;
-const mine = (os.networkInterfaces().lima0 ?? []).find((a) => a.family === "IPv4")?.address;
+const { ADDR, GROUP, PORT, NONCE, DEV } = process.env;
+const mine = (os.networkInterfaces()[DEV] ?? []).find((a) => a.family === "IPv4")?.address;
 const s = dgram.createSocket("udp4");
 s.bind(0, mine, () => {
   if (GROUP) {
@@ -425,8 +443,8 @@ udplisten() {
   node - <<'EOF'
 const dgram = require("dgram");
 const os = require("os");
-const { GROUP, PORT, NONCE } = process.env;
-const mine = (os.networkInterfaces().lima0 ?? []).find((a) => a.family === "IPv4")?.address;
+const { GROUP, PORT, NONCE, DEV } = process.env;
+const mine = (os.networkInterfaces()[DEV] ?? []).find((a) => a.family === "IPv4")?.address;
 const s = dgram.createSocket({ type: "udp4", reuseAddr: true });
 const done = (word) => (console.log(word), s.close(), process.exit(0));
 s.on("message", (m) => String(m) === NONCE && done("got"));

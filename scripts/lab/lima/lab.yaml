@@ -12,13 +12,16 @@ disk: 20GiB
 plain: true
 mounts: []
 
-# A second interface, lima0, on Apple's shared NAT network: the VMs and the
-# Mac are on one LAN there (a subnet macOS picks, the Mac at its .1), with
-# UDP and multicast between them, as XenoNet's direct paths and mDNS need.
-# The first interface, Lima's user network, stays for SSH and the internet,
-# and the firewall below keeps the Mac's loopback out of reach.
+# Two interfaces. eth0 is Lima's user-v2 network, the lab's LAN: the VMs
+# reach each other there (UDP and multicast included), as XenoNet's direct
+# paths and mDNS need, and the internet; the Mac can't reach a guest on it.
+# lima0 is Apple's shared NAT: each guest reaches the Mac there and never
+# the other guest (macOS 26.5 makes them private members of its bridge), but
+# the Mac reaches the guests, which user-v2 can't do. The firewall below
+# keeps the Mac's loopback out of reach on both.
 networks:
 - vzNAT: true
+- lima: user-v2
 
 # Lima would otherwise copy proxy settings from the environment limactl runs
 # in.
@@ -51,27 +54,28 @@ provision:
 - mode: data
   path: /etc/xenonet-lab/nftables.nft
   content: |
-    # The XenoNet lab's firewall. Lima maps 192.168.5.2 to the Mac's 127.0.0.1,
-    # where XenoNet's API listens. DNS and DHCP there still work, and so do the
-    # Mac's SSH connections in; nothing in the VM may start a connection to
-    # it. The rules look at TCP's SYN flag rather than conntrack's state: an
-    # SSH connection open before the rules load would look new to conntrack,
-    # and its replies would be dropped. The first two lines make loading this
+    # The XenoNet lab's firewall. Lima's user-v2 gateway, 192.168.104.2
+    # (host.lima.internal), maps to the Mac's 127.0.0.1, where XenoNet's API
+    # listens. DNS and DHCP there still work, and so do the Mac's SSH
+    # connections in; nothing in the VM may start a connection to it. The
+    # rules look at TCP's SYN flag rather than conntrack's state: an SSH
+    # connection open before the rules load would look new to conntrack, and
+    # its replies would be dropped. The first two lines make loading this
     # replace the table, not add to it.
     table inet xenonet_lab
     delete table inet xenonet_lab
     table inet xenonet_lab {
       chain out {
         type filter hook output priority 0; policy accept;
-        ip daddr 192.168.5.2 udp dport { 53, 67 } accept
-        ip daddr 192.168.5.2 tcp dport 53 accept
-        ip daddr 192.168.5.2 tcp flags & (syn | ack) == syn drop
-        ip daddr 192.168.5.2 meta l4proto udp drop
+        ip daddr 192.168.104.2 udp dport { 53, 67 } accept
+        ip daddr 192.168.104.2 tcp dport 53 accept
+        ip daddr 192.168.104.2 tcp flags & (syn | ack) == syn drop
+        ip daddr 192.168.104.2 meta l4proto udp drop
       }
       chain forward {
         type filter hook forward priority 0; policy accept;
-        ip daddr 192.168.5.2 tcp flags & (syn | ack) == syn drop
-        ip daddr 192.168.5.2 meta l4proto udp drop
+        ip daddr 192.168.104.2 tcp flags & (syn | ack) == syn drop
+        ip daddr 192.168.104.2 meta l4proto udp drop
       }
     }
 - mode: data
