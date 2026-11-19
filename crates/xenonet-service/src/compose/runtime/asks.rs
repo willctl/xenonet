@@ -576,7 +576,7 @@ fn there(w: &Runtime, id: &str) -> Result<(String, String, String, Option<String
 //
 // It goes into the network the ask came in, not the first that has the
 // machine: that machine judges it there.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "an answer is these eight things, each from a different place")]
 fn send_answer(w: &Runtime, host: &str, network: Option<String>, id: &str, session: &str, decision: &str, authority: Value, now: i64) -> Result<(), String> {
     let body = json!({
         "schema": "network/operator/v2",
