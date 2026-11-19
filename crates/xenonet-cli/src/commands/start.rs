@@ -19,7 +19,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     }
     let mut body = Map::new();
     body.insert("prompt".into(), json!(prompt));
-    for (flag, key) in [("on", "machine"), ("in", "folder"), ("app", "app"), ("mode", "mode")] {
+    for (flag, key) in [("on", "machine"), ("in", "folder"), ("app", "app"), ("mode", "mode"), ("network", "network")] {
         if let Some(v) = flags.text(flag) {
             body.insert(key.into(), json!(v));
         }

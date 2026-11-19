@@ -35,6 +35,9 @@ test("the intents view lists the person's intents, drafts one, and leaves Make a
   assert.equal(st.draft.target, "any");
   assert.equal(await s.eval('return document.querySelector("[data-in-target]").value'), "any");
   assert.equal(await s.eval('return document.querySelector("[data-in-arbiter]") !== null'), true);
+  // This instance is in no network, so there is none to choose between.
+  assert.deepEqual(st.networks, []);
+  assert.equal(await s.eval('return document.querySelector("[data-in-network-field]").hidden'), true);
   await assert.rejects(s.driver("intents", "make"), /Unknown intents action/);
   await assert.rejects(s.driver("intents", "cancel", "int_x"), /Unknown intents action/);
   assert.equal(await s.eval('return document.querySelector("[data-in-make]").hasAttribute("data-yours")'), true);

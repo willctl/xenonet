@@ -411,7 +411,10 @@ pub fn list(w: &Runtime) -> R<Value> {
             json!({ "id": p.as_str(), "name": db.project(p).ok().flatten().map(|x| x.name), "checkout": checkout, "signed": db.confirmation(p.as_str()).ok().flatten().is_some() })
         })
         .collect();
-    Ok(json!({ "here": here, "intents": intents, "machines": machines, "delegations": delegations, "projects": projects }))
+    // This machine's networks, which a new intent has to choose between
+    // when there is more than one.
+    let networks: Vec<Value> = net(w).networks().into_iter().map(|m| json!({ "id": m.network, "name": m.name })).collect();
+    Ok(json!({ "here": here, "intents": intents, "machines": machines, "networks": networks, "delegations": delegations, "projects": projects }))
 }
 
 /// The page hears that the intents changed.

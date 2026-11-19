@@ -4,7 +4,7 @@ Claude Code and Codex run headless, through XenoNet's runner; Grok Build
 and Hermes Agent run over ACP, in a session XenoNet holds open for
 replies.
 
-  xenonet start [--on <machine>] [--in <folder>]
+  xenonet start [--on <machine>] [--in <folder>] [--network <id|name>]
                 [--app claude|codex|grok|hermes-agent]
                 [--mode plan|acceptEdits|auto|dontAsk] "<prompt>"
 
@@ -12,6 +12,9 @@ replies.
            out. It must be online, and its XenoNet new enough to take starts
   --in     a project or folder by its id on that machine's map, a path it
            reports, or ~ (the default)
+  --network  which of this machine's networks the start goes through, by
+           its id or name; needed only when --on is in two or more of them,
+           and the answer says so
   --app    claude (the default), codex, grok or hermes-agent
   --mode   a permission mode; left out, the session runs under your own
            settings. Codex takes its config.toml's and Hermes Agent its

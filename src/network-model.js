@@ -39,6 +39,15 @@ export function networksOf(raw) {
     .map((n) => ({ ...n, name: typeof n.name === "string" ? n.name : n.id, host: typeof n.host === "string" ? n.host : null, relays: list(n.relays).filter((r) => typeof r === "string"), mailboxes: list(n.mailboxes).filter((m) => typeof m === "string"), sharing: n.sharing === "all" ? "all" : list(n.sharing).filter((p) => typeof p === "string") }));
 }
 
+// The networks of this machine's that have the machine `host`: what a
+// start there must choose between when it is in more than one (the service
+// refuses to guess). Each as { id, name }.
+export function networksWith(networks, host) {
+  return list(networks)
+    .filter((n) => n && typeof n.id === "string" && list(n.hosts).some((x) => x && x.id === host))
+    .map((n) => ({ id: n.id, name: typeof n.name === "string" ? n.name : n.id }));
+}
+
 // The state as the page uses it: a network/state/v1 answer, or a machine on
 // its own for anything else (no answer, an older service, an error). With
 // `chosen`, a network's id, that network's part of it, as the first's is

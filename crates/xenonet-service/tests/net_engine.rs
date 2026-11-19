@@ -553,6 +553,13 @@ async fn a_body_for_everyone_goes_in_one_named_network_and_never_the_first() {
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
     let t = two_networks(&root).await;
+    // The intents view lists this machine's networks, so a form can ask
+    // which an intent belongs to; a machine in one lists one.
+    let (s, v) = t.desk.window("GET", "/api/intents", Value::Null).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["networks"], json!([{ "id": t.n1, "name": "home" }, { "id": t.n2, "name": "work" }]), "{v}");
+    let (_, v) = t.tower.window("GET", "/api/intents", Value::Null).await;
+    assert_eq!(v["networks"], json!([{ "id": t.n1, "name": "home" }]), "{v}");
     let net = t.desk.svc.net();
     let offer_for_all = |n: u32| {
         let mut h = offer(n);

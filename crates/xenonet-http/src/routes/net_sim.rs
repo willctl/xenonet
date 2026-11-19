@@ -162,7 +162,8 @@ fn served(sim: &Sim) -> Value {
 
 /// A second network this machine is in, for variant "networks": work, a
 /// machine there it alone shares with you, and nothing shared into it yet.
-fn other_network(state: &Value) -> Value {
+/// For "networks-shared", laptop is in work too: a machine in both.
+fn other_network(state: &Value, with_laptop: bool) -> Value {
     let me = state["self"]["id"].as_str().unwrap_or("studio");
     let mut mine = state["hosts"].as_array().and_then(|h| h.iter().find(|x| x["self"] == json!(true)).cloned()).unwrap_or_else(|| json!({ "id": me }));
     mine["founder"] = json!(false);
@@ -178,13 +179,17 @@ fn other_network(state: &Value) -> Value {
     ] {
         lab[k] = v;
     }
+    let mut hosts = vec![mine, lab];
+    if let (true, Some(laptop)) = (with_laptop, state["hosts"].as_array().and_then(|h| h.iter().find(|x| x["id"] == "laptop").cloned())) {
+        hosts.push(laptop);
+    }
     json!({
         "id": "net_7c0ffee000000000000000000000beef",
         "name": "work",
         "host": me,
         "self": { "id": me, "keyId": key_id(me), "window": false, "founder": false, "link2": true },
         "link": { "state": "live", "since": null, "reason": null },
-        "hosts": [mine, lab],
+        "hosts": hosts,
         "invites": { "open": [], "burned": [] },
         "rosterMismatch": [],
         "frozen": [],
@@ -270,7 +275,11 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         Some("ask-env") => vec![made_up_ask(ctx.now(), true)],
         _ => Vec::new(),
     };
-    let others = if variant == Some("networks") && state["network"].is_object() { vec![other_network(&state)] } else { Vec::new() };
+    let others = if matches!(variant, Some("networks" | "networks-shared")) && state["network"].is_object() {
+        vec![other_network(&state, variant == Some("networks-shared"))]
+    } else {
+        Vec::new()
+    };
     let context = made_up_context(variant, ctx.now());
     sims().locked().insert(
         key(ctx),
@@ -1336,6 +1345,20 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
     if !row["can"].as_array().is_some_and(|c| c.iter().any(|x| x == "start")) {
         return Ok(Some(Reply::coded(409, "refused", format!("{machine}'s XenoNet is too old to start sessions: update it there"))));
     }
+    // A machine in several of this machine's networks isn't guessed at: the
+    // request names the one it goes through, as the service asks.
+    let with: Vec<Value> =
+        state["networks"].as_array().into_iter().flatten().filter(|n| n["hosts"].as_array().is_some_and(|l| l.iter().any(|h| h["id"] == machine.as_str()))).cloned().collect();
+    if with.len() > 1 {
+        let named = body.get("network").and_then(Value::as_str).map_or("", str::trim);
+        if named.is_empty() {
+            let names = with.iter().map(|n| format!("{} ({})", n["name"].as_str().unwrap_or(""), n["id"].as_str().unwrap_or(""))).collect::<Vec<_>>().join(", ");
+            return Ok(Some(Reply::coded(409, "refused", format!("{machine} is in several of this machine's networks ({names}): say which with network"))));
+        }
+        if !with.iter().any(|n| n["id"] == named || n["name"] == named) {
+            return Ok(Some(Reply::coded(409, "refused", format!("{machine} isn't in a network of yours called {named}"))));
+        }
+    }
     let app = body.get("app").and_then(Value::as_str).filter(|a| ["claude", "codex", "grok"].contains(a)).unwrap_or("claude").to_string();
     let folder = body.get("folder").and_then(Value::as_str).filter(|f| !f.is_empty()).unwrap_or("~").to_string();
     let request = format!("msg_{}", random_uuid());
@@ -1699,7 +1722,7 @@ mod tests {
     #[test]
     fn a_second_network_is_listed_and_its_sharing_and_relays_are_its_own() {
         let mut s = sim("net-founder");
-        s.others.push(other_network(&s.state));
+        s.others.push(other_network(&s.state, false));
         let st = served(&s);
         let nets = st["networks"].as_array().unwrap();
         assert_eq!((nets.len(), nets[0]["sharing"].clone(), nets[1]["sharing"].clone()), (2, json!("all"), json!([])));

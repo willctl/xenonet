@@ -630,6 +630,10 @@
                     "auto",
                     "dontAsk"
                   ]
+                },
+                "network": {
+                  "description": "Which of this machine's networks to go through, by its id or name; needed only when that machine is in two or more of them, and the answer says so.",
+                  "type": "string"
                 }
               },
               "required": [
@@ -678,6 +682,10 @@
                 },
                 "delegation": {
                   "description": "With actor: the delegation to read on (alone), or to answer the question it asks (with task).",
+                  "type": "string"
+                },
+                "network": {
+                  "description": "With machine: which of this machine's networks to go through, by its id or name; needed only when that machine is in two or more of them, and the answer says so.",
                   "type": "string"
                 }
               }

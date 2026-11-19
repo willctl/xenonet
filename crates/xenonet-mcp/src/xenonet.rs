@@ -583,6 +583,7 @@ fn defs(actor: bool, starts: &[StartApp]) -> Vec<Def> {
             ("app", app_arg(starts)),
             ("prompt", string().describe("What the new session should do: its first prompt.")),
             ("mode", mode_arg(starts)),
+            ("network", string().optional().describe("Which of this machine's networks to go through, by its id or name; needed only when that machine is in two or more of them, and the answer says so.")),
         ]), &write),
         def("delegate", "Delegate a task to another machine", DELEGATE, object(vec![
             ("machine", string().optional().describe("The machine in your XenoNet network to do it, by its id. Or actor instead.")),
@@ -591,6 +592,7 @@ fn defs(actor: bool, starts: &[StartApp]) -> Vec<Def> {
             ("app", app_arg(starts)),
             ("actor", string().optional().describe("An outside agent your user registered in XenoNet (A2A), by its id (actor:…), instead of a machine.")),
             ("delegation", string().optional().describe("With actor: the delegation to read on (alone), or to answer the question it asks (with task).")),
+            ("network", string().optional().describe("With machine: which of this machine's networks to go through, by its id or name; needed only when that machine is in two or more of them, and the answer says so.")),
         ]), &write),
         def("intent_note", "Note how an intent goes", INTENT_NOTE, object(vec![
             ("intent", string().describe("The intent's id (int_…), as your first prompt names it.")),
@@ -754,7 +756,12 @@ impl ServerHandler for Sessions {
                 ctx.call("handoff", &meta, body(&keys)).await
             }
             "start_session" => {
-                ctx.call_route("/api/start", &meta, body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("prompt", "prompt"), ("mode", "mode")])).await
+                ctx.call_route(
+                    "/api/start",
+                    &meta,
+                    body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("prompt", "prompt"), ("mode", "mode"), ("network", "network")]),
+                )
+                .await
             }
             // To an outbound actor, an agent outside XenoNet (A2A): the
             // task's text and the delegation to go on with.
@@ -764,7 +771,7 @@ impl ServerHandler for Sessions {
             }
             "delegate" if a.get("machine").is_none() => Err("say where: machine (another machine in your network) or actor (an outside agent your user registered)".into()),
             "delegate" => {
-                let mut m = body(&[("machine", "machine"), ("folder", "folder"), ("app", "app")]);
+                let mut m = body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("network", "network")]);
                 m.insert("prompt".into(), a.get("task").cloned().unwrap_or(Value::Null));
                 m.insert("delegate".into(), json!(true));
                 ctx.call_route("/api/start", &meta, m).await

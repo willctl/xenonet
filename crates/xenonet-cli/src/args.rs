@@ -83,7 +83,7 @@ const TAKES_VALUE: &[&str] = &[
 // Flags that take a value in one command only, because another command
 // reads the same name as a switch: xenonet net set --start network, but
 // a switch anywhere else.
-const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start", "network", "relay"]), ("identity", &["git", "push"])];
+const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start", "network", "relay"]), ("identity", &["git", "push"]), ("start", &["network"]), ("intent", &["network"])];
 const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
 /// Flags that take the word after them only when it's one of their
 /// choices, and are on alone: `--mdns on|off`, and `--mdns` on its own
@@ -301,6 +301,11 @@ mod tests {
         assert_eq!(parse(&args(&["net", "set", "--on", "desk", "--approve", "p1"])).flags, flags(json!({ "on": "desk", "approve": "p1" })));
         let start = parse(&args(&["start", "--on", "desk", "--in", "~/app", "--app", "codex", "--mode", "plan", "fix", "it"]));
         assert_eq!((start.rest, start.flags), (args(&["start", "fix", "it"]), flags(json!({ "on": "desk", "in": "~/app", "app": "codex", "mode": "plan" }))));
+        // A start and an intent name the network they go through.
+        let start = parse(&args(&["start", "--on", "contractor-vm", "--network", "work", "tidy", "up"]));
+        assert_eq!((start.rest, start.flags), (args(&["start", "tidy", "up"]), flags(json!({ "on": "contractor-vm", "network": "work" }))));
+        let intent = parse(&args(&["intent", "make", "fix it", "--on", "desk", "--network", "net_home"]));
+        assert_eq!((intent.rest, intent.flags), (args(&["intent", "make", "fix it"]), flags(json!({ "on": "desk", "network": "net_home" }))));
         assert_eq!(parse(&args(&["logs", "--component", "service", "--code", "doctor."])).flags, flags(json!({ "component": "service", "code": "doctor." })));
         assert_eq!(parse(&args(&["diagnose", "--model", "m"])).flags, flags(json!({ "model": "m" })));
         assert_eq!(parse(&args(&["refusals", "--provider", "claude"])).flags, flags(json!({ "provider": "claude" })));

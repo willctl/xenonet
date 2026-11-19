@@ -33,7 +33,7 @@ import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
 import { personOf, servicesOf, devicesHtml, servicesHtml, publishHtml, publishBody } from "./network-person.js";
 import { contextOf, contextHtml, approveBody, signBody } from "./network-context.js";
-import { stateOf, networksOf, inNetwork, clock, linkWords, hostLine, hostTags, inviteWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, INVITE_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
+import { stateOf, networksOf, networksWith, inNetwork, clock, linkWords, hostLine, hostTags, inviteWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, INVITE_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 // What a session starts as, in the Start a session box.
@@ -448,6 +448,21 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     return [{ value: "~", label: "home" }, ...list.slice(0, 200)];
   }
 
+  // The networks a start on `host` could go through, when it is in more than
+  // one of this machine's: the person chooses, and nothing is chosen for
+  // them. A start here, or on a machine in one network, has none to choose.
+  function startNetworks(host) {
+    const remote = host && host !== state.self?.id;
+    return remote ? networksWith(state.networks, host) : [];
+  }
+
+  function networkChoiceHtml(host) {
+    const nets = startNetworks(host);
+    if (nets.length < 2) return "";
+    if (!nets.some((n) => n.id === view.network)) view.network = null;
+    return `<span class="net-seg-k">Network</span>${nets.map((n) => choice("data-net-start-network", n.id, n.name, n.id === view.network)).join("")}<span class="pj-note">${h(host)} is in more than one of this machine's networks: pick the one this goes through.</span>`;
+  }
+
   const choice = (attr, value, label, on) => `<button class="act${on ? " on" : ""}" ${attr}="${h(value)}" aria-pressed="${on}">${h(label)}</button>`;
 
   function sessionHtml() {
@@ -459,6 +474,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const folders = foldersOf(host);
     return `<p class="ac-lead">Start a session</p>
       <div class="net-seg" data-net-start-hosts><span class="net-seg-k">Machine</span>${hosts.map((x) => choice("data-net-start-host", x.id ?? "", x.label, x.id === host)).join("")}</div>
+      <div class="net-seg" data-net-start-networks>${networkChoiceHtml(host)}</div>
       <div class="net-seg" data-net-start-apps><span class="net-seg-k">App</span>${START_APPS.map(([id, label]) => choice("data-net-start-app", id, label, id === app)).join("")}</div>
       <div class="net-seg" data-net-start-modes><span class="net-seg-k">Permissions</span>${START_MODES.map(([id, label]) => choice("data-net-start-mode", id, label, id === mode)).join("")}</div>
       <div class="ac-form">
@@ -486,12 +502,16 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
 
   // A pick in the box, changed in place so what's typed stays.
   function pick(attr, value) {
-    const key = { "data-net-start-host": "host", "data-net-start-app": "app", "data-net-start-mode": "mode" }[attr];
+    const key = { "data-net-start-host": "host", "data-net-start-app": "app", "data-net-start-mode": "mode", "data-net-start-network": "network" }[attr];
     view[key] = value;
     for (const b of body()?.querySelectorAll(`[${attr}]`) ?? []) {
       const on = b.getAttribute(attr) === value;
       b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", String(on));
+    }
+    if (key === "host") {
+      view.network = null;
+      body().querySelector("[data-net-start-networks]").innerHTML = networkChoiceHtml(value);
     }
     if (key === "host") body().querySelector("[data-net-start-folders]").innerHTML = foldersOf(value).map((f) => `<option value="${h(f.value)}">${h(f.label)}</option>`).join("");
     // Codex takes its own config's, and Hermes its own settings: no mode.
@@ -512,9 +532,14 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const mode = NO_MODE.has(app) ? "" : (view.mode ?? "");
     const remote = host && host !== state.self?.id;
     Object.assign(view, { folder, prompt });
+    // On a machine that is in several of this machine's networks, the
+    // person says which; the service would refuse to guess.
+    const choices = startNetworks(host);
+    if (choices.length > 1 && !choices.some((n) => n.id === view.network)) return failed({ status: 400, error: `${host} is in more than one of your networks: pick the one this start goes through.` });
+    const network = choices.length > 1 ? view.network : null;
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/start", { ...(remote ? { machine: host } : {}), folder, app, ...(mode ? { mode } : {}), prompt });
-      if (!r.ok) return failed(r, `xenonet start${remote ? ` --on ${host}` : ""} "<prompt>"`);
+      const r = await calls.call("POST", "/api/start", { ...(remote ? { machine: host } : {}), ...(network ? { network } : {}), folder, app, ...(mode ? { mode } : {}), prompt });
+      if (!r.ok) return failed(r, `xenonet start${remote ? ` --on ${host}` : ""}${network ? ` --network ${network}` : ""} "<prompt>"`);
       sfx("success");
       toast(r.data.state === "sent" ? `Sent to ${r.data.host}: whether it started comes to the feed.` : `Started ${r.data.session ?? "a Codex session"} in ${r.data.folder}.`);
       lastStart = { ...r.data, at: Date.now() };
@@ -941,7 +966,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (d.netApprove) return approve(d.netApprove);
     if (d.netUnfreeze) return unfreeze(d.netUnfreeze);
     if (d.netStartSession != null) return startSession({ host: d.netStartSession || null });
-    for (const attr of ["data-net-start-host", "data-net-start-app", "data-net-start-mode"]) {
+    for (const attr of ["data-net-start-host", "data-net-start-network", "data-net-start-app", "data-net-start-mode"]) {
       const b = t.closest(`[${attr}]`);
       if (b) return pick(attr, b.getAttribute(attr));
     }
@@ -1009,8 +1034,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
 
   // Start a session: the box, on a machine (this one when none), with what's
   // given filled in.
-  const startSession = ({ host = null, folder = null, app = null, mode = null, prompt = null } = {}) =>
-    open("session", { host: host ?? state.self?.id ?? null, ...(folder ? { folder } : {}), ...(app ? { app } : {}), ...(mode ? { mode } : {}), ...(prompt ? { prompt } : {}) });
+  const startSession = ({ host = null, folder = null, app = null, mode = null, prompt = null, network = null } = {}) =>
+    open("session", { host: host ?? state.self?.id ?? null, ...(network ? { network } : {}), ...(folder ? { folder } : {}), ...(app ? { app } : {}), ...(mode ? { mode } : {}), ...(prompt ? { prompt } : {}) });
 
   // ---------- for the driver ----------
 
@@ -1100,9 +1125,11 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
               mode: view.mode ?? "",
               folder: body()?.querySelector("[data-net-start-folder]")?.value ?? null,
               folders: foldersOf(view.host).map((f) => f.value),
+              networks: startNetworks(view.host).length > 1 ? startNetworks(view.host).map((n) => n.id) : [],
+              network: view.network ?? null,
               prompt: body()?.querySelector("[data-net-start-prompt]")?.value ?? null,
               armed: armed(),
-              at: { send: centre("[data-net-start-send]"), hosts: centres("data-net-start-host"), apps: centres("data-net-start-app"), modes: centres("data-net-start-mode") },
+              at: { send: centre("[data-net-start-send]"), hosts: centres("data-net-start-host"), networks: centres("data-net-start-network"), apps: centres("data-net-start-app"), modes: centres("data-net-start-mode") },
             }
           : null,
       lastStart,
