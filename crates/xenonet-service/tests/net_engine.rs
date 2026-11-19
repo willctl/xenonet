@@ -36,6 +36,41 @@ const D1: &str = "codex:cccccccc-0001";
 const D2: &str = "claude:cccccccc-0002";
 const L2: &str = "claude:bbbbbbbb-0002";
 
+/// What a run of the fake keeps of its settings file and its environment:
+/// the file's contents and the variables' names, never their values.
+#[test]
+fn the_fake_cli_keeps_its_settings_and_the_names_of_its_environment() {
+    let dir = std::env::temp_dir().join(format!("xenonet-fake-cli-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = fake_cli(&dir);
+    let settings = dir.join("listen.json");
+    std::fs::write(&settings, r#"{"hooks":{}}"#).unwrap();
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(&fake)
+            .args(args)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap())
+            .env("XENONET_TEST_TOKEN", "the-value-stays-out")
+            .env("ANTHROPIC_API_KEY", "so-does-this-one")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    };
+    assert_eq!(fake_files(&dir, 1), None, "nothing before a run");
+    run(&["-p", "--settings", &settings.to_string_lossy()]);
+    run(&["-p"]);
+    let (kept, names) = fake_files(&dir, 1).unwrap();
+    assert_eq!(kept.as_deref(), Some(r#"{"hooks":{}}"#));
+    assert_eq!(names, ["ANTHROPIC_API_KEY", "PATH", "XENONET_TEST_TOKEN"]);
+    let (kept, names) = fake_files(&dir, 2).unwrap();
+    assert_eq!((kept, names.len()), (None, 3), "a run without --settings keeps none");
+    let all = std::fs::read_dir(dir.join("bin")).unwrap().map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap_or_default()).collect::<String>();
+    assert!(!all.contains("the-value-stays-out") && !all.contains("so-does-this-one"), "a value was kept");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_hosts_with_their_engines_work_as_one_network() {
     let root = std::env::temp_dir().join(format!("xenonet-net-engine-{}", std::process::id()));

@@ -107,7 +107,10 @@ impl State for Map {
 /// Build's prompt file) beside itself, says it isn't signed in when the
 /// prompt asks it to, waits 25 seconds when it says hold-on, and
 /// otherwise takes a second and ends well. With
-/// --fork-session it names its copy as Claude Code's stream does.
+/// --fork-session it names its copy as Claude Code's stream does. It also
+/// keeps the file --settings names as `settings-N` and the names (never the
+/// values) of the variables it was given, sorted, as `env-N` (`fake_files`
+/// reads both), without the ones its own shell adds.
 pub fn fake_cli(dir: &Path) -> String {
     let bin = dir.join("bin").join("fake-cli");
     std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
@@ -115,9 +118,11 @@ pub fn fake_cli(dir: &Path) -> String {
 here=$(dirname "$0")
 prompt=$(cat)
 file=""
+settings=""
 prev=""
 for a in "$@"; do
   [ "$prev" = "--prompt-file" ] && file="$a"
+  [ "$prev" = "--settings" ] && settings="$a"
   prev="$a"
 done
 [ -n "$file" ] && prompt=$(cat "$file")
@@ -125,6 +130,8 @@ n=$(ls "$here" | grep -c '^args-')
 printf '%s\n' "$@" > "$here/args-$n"
 printf '%s' "$prompt" > "$here/prompt-$n"
 printf '%s' "$MCP_TOOL_TIMEOUT" > "$here/timeout-$n"
+[ -n "$settings" ] && cat "$settings" > "$here/settings-$n"
+env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | grep -v -x -e PWD -e OLDPWD -e SHLVL -e _ | sort > "$here/env-$n"
 case "$*" in *--fork-session*) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac
 case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
 case "$prompt" in
@@ -164,6 +171,17 @@ pub fn fake_runs(h: &Host) -> Vec<(Vec<String>, String)> {
         out.push((args.lines().map(str::to_string).collect(), prompt));
     }
     out
+}
+
+/// What the `n`th run of the fake (counting from 1, as `ran` does) on the
+/// machine whose folder is `dir` was given: the contents of the file it
+/// got with --settings, if any, and the sorted names of its environment.
+/// None until the run has written them.
+pub fn fake_files(dir: &Path, n: usize) -> Option<(Option<String>, Vec<String>)> {
+    let bin = dir.join("bin");
+    let env = std::fs::read_to_string(bin.join(format!("env-{}", n - 1))).ok()?;
+    let settings = std::fs::read_to_string(bin.join(format!("settings-{}", n - 1))).ok();
+    Some((settings, env.lines().map(str::to_string).collect()))
 }
 
 pub fn git(dir: &Path, args: &[&str]) {
