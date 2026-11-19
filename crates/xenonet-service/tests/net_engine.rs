@@ -2019,7 +2019,7 @@ async fn device(h: &Host) -> String {
 /// A delegation for starts and answers, naming these devices, issued at
 /// `h`'s window (its presence and its signature), once every machine holds
 /// it.
-async fn delegate(h: &Host, id: &str, devices: Vec<String>, all: [&Host; 3]) {
+async fn delegate<'a>(h: &Host, id: &str, devices: Vec<String>, all: impl IntoIterator<Item = &'a Host>) {
     let mut d = xenonet_net::identity::person::Delegation::standard(id.into(), now_ms() as i64 + 3_600_000);
     let mut devices = devices;
     devices.sort();
@@ -2048,6 +2048,11 @@ fn signed_intent(b: &Host, goal: &str, target: &str, project: &str, delegation: 
 
 /// The same, with `arbiter` as its arbiter.
 fn signed_intent_by(b: &Host, goal: &str, target: &str, project: &str, delegation: &str, arbiter: &str) -> (xenonet_store::intents::IntentRow, Value) {
+    signed_intent_at(b, "laptop", goal, target, project, delegation, arbiter)
+}
+
+/// The same, as made at the machine `machine`, which `b` is.
+fn signed_intent_at(b: &Host, machine: &str, goal: &str, target: &str, project: &str, delegation: &str, arbiter: &str) -> (xenonet_store::intents::IntentRow, Value) {
     let identity = b.svc.node().shared().identity().clone();
     let now = now_ms() as i64;
     let mut row = xenonet_store::intents::IntentRow {
@@ -2055,7 +2060,7 @@ fn signed_intent_by(b: &Host, goal: &str, target: &str, project: &str, delegatio
         network: b.svc.node().shared().network().unwrap().id.clone(),
         person: identity.person_id().unwrap(),
         device: identity.device_id().unwrap(),
-        machine: "laptop".into(),
+        machine: machine.into(),
         delegation: delegation.into(),
         project: project.into(),
         app: "claude".into(),

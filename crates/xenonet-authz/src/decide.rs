@@ -446,13 +446,20 @@ fn arrival(request: &Request, ground: &dyn Ground) -> Step<Arrival> {
 
 // Step 2b: a frame from another machine reaches only what the network it
 // came in is shown. A message or wake reaches a session, a claim a project,
-// and a message or handoff whatever the receiver found it to reach
-// (`Request::reaching`). A session in no confirmed project is placed
+// an intent its project, and a message, handoff or report whatever the
+// receiver found it to reach (`Request::reaching`). A session in no confirmed project is placed
 // nowhere, which only a network shown everything sees. This comes before
 // the sender is checked, so the answer can't depend on who is asking.
 fn seen(request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<()> {
     match request.network().filter(|_| !arrival.own) {
-        Some(network) => shown(ground, network, request.action(), request.resource(), request.reaches()),
+        Some(network) => {
+            // An intent reaches the project its act names.
+            let mut reaching = request.reaches().to_vec();
+            if let Act::Intend { project, .. } = request.act() {
+                reaching.push(Reaching::Project(project.clone()));
+            }
+            shown(ground, network, request.action(), request.resource(), &reaching)
+        }
         None => Ok(()),
     }
 }
@@ -471,9 +478,11 @@ pub fn shown(ground: &dyn Ground, network: &NetworkId, action: Action, resource:
         (Action::Claim, Resource::Project(p)) => reached.push(Some(p.clone())),
         _ => {}
     }
-    // A start reaches the folder it runs in, which the receiver says by
-    // what it finds the folder in. One that says nothing is placed nowhere.
-    if action == Action::Start && reaching.is_empty() {
+    // A frame that carries content reaches what the receiver says it
+    // reaches (a start, the folder it runs in, by what it finds the folder
+    // in). One that says nothing, `Reaching::Nothing` included, is placed
+    // nowhere, so a caller that forgot to look fails closed.
+    if reaching.is_empty() && reached.is_empty() && carries_content(action) {
         reached.push(None);
     }
     for r in reaching {
@@ -481,6 +490,7 @@ pub fn shown(ground: &dyn Ground, network: &NetworkId, action: Action, resource:
             Reaching::Session(s) => by_session(s),
             Reaching::Project(p) => Some(p.clone()),
             Reaching::Unplaced => None,
+            Reaching::Nothing => continue,
         });
     }
     if reached.iter().all(|p| ground.sees(network, p.as_ref())) {
@@ -488,6 +498,30 @@ pub fn shown(ground: &dyn Ground, network: &NetworkId, action: Action, resource:
     } else {
         // A start has words of its own: a folder is not a session id.
         Err(Reason::new("shared", if action == Action::Start { NOT_SEEN_FOLDER } else { NOT_SEEN }))
+    }
+}
+
+/// Whether an act from another machine puts a session's, a project's or a
+/// folder's content into a network, so that the network must be shown what
+/// it reaches. The rest are the network's own business: who is in it, what
+/// it publishes, what is read of it, how a prompt is answered. Written out
+/// for every action, so a new one has to be put on one side.
+fn carries_content(action: Action) -> bool {
+    match action {
+        Action::Message | Action::Wake | Action::Start | Action::Claim | Action::Handoff | Action::Intend | Action::Report => true,
+        Action::Answer
+        | Action::Read
+        | Action::Admit
+        | Action::Widen
+        | Action::Publish
+        | Action::RegisterActor
+        | Action::UseGateway
+        | Action::Revoke
+        | Action::Delegate
+        | Action::CtxRead
+        | Action::CtxAppend
+        | Action::CtxWrite
+        | Action::CtxAdmin => false,
     }
 }
 

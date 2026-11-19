@@ -804,7 +804,9 @@ impl Shared {
     fn decide(&self, from: &str, resource: xenonet_authz::Resource, act: xenonet_authz::Act) -> Result<(), String> {
         let facts = self.facts();
         let id = xenonet_authz::MachineId::new(from).map_err(|e| e.message)?;
-        let request = xenonet_authz::Request::new(xenonet_authz::Principal::Machine { id }, resource, act, xenonet_authz::Door::Network, facts.now, facts.network());
+        // A membership check: it reaches nothing that sharing governs.
+        let request = xenonet_authz::Request::new(xenonet_authz::Principal::Machine { id }, resource, act, xenonet_authz::Door::Network, facts.now, facts.network())
+            .reaching(xenonet_authz::Reaching::Nothing);
         match xenonet_authz::decide(None, &request, &facts, None) {
             xenonet_authz::Decision::Allow(_) => Ok(()),
             d => Err(d.reason().map(|r| r.text().to_string()).unwrap_or_default()),

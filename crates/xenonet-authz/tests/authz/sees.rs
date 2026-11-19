@@ -107,8 +107,61 @@ fn a_handoff_reaches_only_the_projects_it_names_that_the_network_is_shown() {
     let mut all = world();
     all.shared = None;
     assert!(handoff(&all, &[Reaching::Unplaced]).is_allow());
-    // A handoff that reaches nothing in particular is still a machine's.
-    assert!(handoff(&w, &[]).is_allow());
+    // A handoff that says what it reaches nothing of is a machine's; one
+    // that says nothing at all is placed nowhere, which is what a caller
+    // that forgot to look gets.
+    assert!(handoff(&w, &[Reaching::Nothing]).is_allow());
+    refused_as_unseen(&handoff(&w, &[]));
+    assert!(handoff(&all, &[]).is_allow());
+}
+
+#[test]
+fn what_a_frame_doesnt_say_it_reaches_is_placed_nowhere_for_every_act_that_carries_content() {
+    let w = world();
+    let n = network();
+    let m1 = Resource::Machine(machine("m1"));
+    let mut carries = Vec::new();
+    for action in Action::ALL {
+        let silent = shown(&w, &n, action, &m1, &[]).is_err();
+        let said = shown(&w, &n, action, &m1, &[Reaching::Nothing]).is_ok();
+        assert!(said, "{action:?}: naming that it reaches nothing is always allowed");
+        if silent {
+            carries.push(action);
+        }
+    }
+    // The acts that put a session's, a project's or a folder's content into
+    // a network; the rest are the network's own business (who is in it,
+    // what it publishes, what is read of it).
+    assert_eq!(carries, [Action::Message, Action::Wake, Action::Start, Action::Claim, Action::Handoff, Action::Intend, Action::Report]);
+    // (A claim or a wake names its project or session in its resource.)
+    let mut all = world();
+    all.shared = None;
+    for action in carries {
+        assert!(shown(&all, &n, action, &m1, &[]).is_ok(), "{action:?}: a network shown everything reaches the unplaced");
+    }
+}
+
+#[test]
+fn an_intent_reaches_its_project_and_only_a_network_shown_it_works_it() {
+    let w = world();
+    let intend = |project: ProjectId| {
+        let act = Act::Intend {
+            goal: [7; 32],
+            project,
+            app: AppId::new("claude").unwrap(),
+            delegation: DelegationId::new("dlg_nova").unwrap(),
+            until: NOW + HOUR,
+            network: network(),
+            nonce: [1; 16],
+            arbiter: machine("m2"),
+        };
+        let resource = Resource::Intent { machine: machine("m1"), id: None };
+        let person = as_person(&w, &weak_device(), &resource, &act);
+        decide(None, &Request::new(person, resource, act, Door::Network, NOW, Some(network())), &w, None)
+    };
+    refused_as_unseen(&intend(ledger()));
+    // Atlas is shown: the same act goes on to be judged on the rest.
+    assert_ne!(intend(atlas()).reason().map(Reason::code), Some("shared"));
 }
 
 #[test]

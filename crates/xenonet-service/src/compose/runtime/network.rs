@@ -1289,7 +1289,9 @@ pub(crate) fn principal_of(
     }
 }
 
-/// `principal_of`, then the request it makes from another machine, judged.
+/// `principal_of`, then the request it makes from another machine, judged:
+/// for an act that reaches nothing sharing governs (a prompt of a run this
+/// machine started).
 pub(crate) fn judge_remote(
     w: &Runtime,
     g: &mut crate::compose::runtime::ground::EngineGround,
@@ -1297,7 +1299,7 @@ pub(crate) fn judge_remote(
     resource: xenonet_authz::Resource,
     act: xenonet_authz::Act,
 ) -> std::result::Result<(), String> {
-    judge_remote_reaching(w, g, from, resource, act, Vec::new())
+    judge_remote_reaching(w, g, from, resource, act, vec![Reaching::Nothing])
 }
 
 /// `judge_remote` for a frame that also reaches something the act it is
@@ -1588,9 +1590,21 @@ fn offered_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
 /// What an accept of a handoff made here reaches: the handoff's own
 /// project and session, as its row keeps them, never what the accepting
 /// machine says it is. A handoff made here that names no project is
-/// placed nowhere.
+/// placed nowhere; one made elsewhere is only passed by.
 fn accepted_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
-    let Some(row) = s(b, "id").and_then(|id| store(w, |st| st.handoff(&id)).ok().flatten()).filter(|r| r.text("host").is_none()) else { return Vec::new() };
+    let Some(row) = s(b, "id").and_then(|id| store(w, |st| st.handoff(&id)).ok().flatten()).filter(|r| r.text("host").is_none()) else { return vec![Reaching::Nothing] };
+    row_reach(w, &row)
+}
+
+/// What the answer to a handoff reaches (taken, lapsed): the handoff's
+/// own project and session, as the row `from` made here keeps them. With
+/// no such row there is nothing here for it to touch.
+fn settled_reach(w: &Runtime, from: &str, b: &Value) -> Vec<Reaching> {
+    let Some(row) = s(b, "id").and_then(|id| store(w, |st| st.handoff(&id)).ok().flatten()).filter(|r| r.text("host") == Some(from)) else { return vec![Reaching::Nothing] };
+    row_reach(w, &row)
+}
+
+fn row_reach(w: &Runtime, row: &Row) -> Vec<Reaching> {
     let mut out = Vec::new();
     if let Some(local) = row.text("to_agent").map(|a| here_id(w, a)) {
         // A session of another machine is no reach of this one's.
@@ -2077,9 +2091,14 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
 
 fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
     let meant_here = s(b, "for").is_none_or(|h| net(w).me().is_some_and(|me| me.host == h));
+    // One meant for another machine is only passed by, so reaches nothing
+    // here; a frame that is none of these says nothing, and is placed
+    // nowhere.
     let reaching = match s(b, "op").as_deref() {
-        Some("offer") if meant_here => offered_reach(w, b),
-        Some("accept") if meant_here => accepted_reach(w, b),
+        _ if !meant_here => vec![Reaching::Nothing],
+        Some("offer") => offered_reach(w, b),
+        Some("accept") => accepted_reach(w, b),
+        Some("taken" | "lapsed") => settled_reach(w, from, b),
         _ => Vec::new(),
     };
     member_act(w, from, xenonet_authz::Act::Handoff, &reaching)?;

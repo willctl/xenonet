@@ -645,6 +645,12 @@ pub enum Reaching {
     Project(ProjectId),
     /// Whatever takes it, no project named: shown only where everything is.
     Unplaced,
+    /// Nothing that sharing governs: a membership check, a frame passed by
+    /// that was meant for another machine, an answer to a prompt this
+    /// machine itself asked in that network. It has to be said, since a
+    /// frame that says nothing is placed nowhere (`Unplaced`) and fails
+    /// closed.
+    Nothing,
 }
 
 impl Request {

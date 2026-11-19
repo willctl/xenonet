@@ -424,6 +424,11 @@ fn changed(w: &Runtime) {
 
 // ---------- from other machines ----------
 
+/// The project an intent is for, as what a frame about it reaches.
+fn project_of(i: &IntentRow) -> Result<xenonet_authz::Reaching, String> {
+    ProjectId::new(&i.project).map(xenonet_authz::Reaching::Project).map_err(|e| e.message)
+}
+
 /// An `intent` entry of `host`'s feed: an intent made there, or the
 /// person's cancel of one.
 pub(crate) fn intent_in(w: &Runtime, host: &str, body: &Value) -> Result<(), String> {
@@ -729,7 +734,7 @@ fn cancel_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     let carried = Carried::parse(b.get("authority").unwrap_or(&Value::Null));
     let p = ground::person(w, &g, Some(host), &carried, &resource, &act)?;
-    ground::judge(&g, &ground::remote(&g, p, resource, act), None)?;
+    ground::judge(&g, &ground::remote(&g, p, resource, act).reaching(project_of(&i)?), None)?;
     db.move_intent(&id, &["made", "assigned", "running"], "cancelled", now_ms() as i64).map_err(|e| e.message)?;
     if me(w).is_some_and(|m| i.worked_on() == Some(m.as_str())) {
         stop_run(w, &id);
@@ -747,7 +752,7 @@ pub(crate) fn report_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String
     let Some(i) = db.intent(&id).map_err(|e| e.message)? else { return Err(format!("a report on {id}, which this machine doesn't hold")) };
     let (resource, act) = report_of(&i, step)?;
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
-    ground::judge(&g, &ground::remote(&g, Principal::Machine { id: ground::machine(host)? }, resource, act), None)?;
+    ground::judge(&g, &ground::remote(&g, Principal::Machine { id: ground::machine(host)? }, resource, act).reaching(project_of(&i)?), None)?;
     took(&db, &i, step, b)?;
     // The run that machine started for the intent is its own, for the
     // prompts it will send: only when this machine made the intent or
