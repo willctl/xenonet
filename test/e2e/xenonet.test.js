@@ -247,6 +247,27 @@ test("identity chips filter the map to one identity's work, and hiding identitie
   await home();
 }));
 
+test("a project whose identity rule doesn't match waits in Needs you and warns in its inspector", { timeout: limit(60000) }, shoot("identity-rule", async () => {
+  await home();
+  // The demo's pathfinder commits as Orbit, as its rule says, but a push
+  // signs in as nova-dev, not orbitworks.
+  const waiting = (await s.driver("needsYou")).items.find((it) => it.kind === "identity");
+  assert.ok(waiting, "the demo's rule that doesn't match waits on Nova");
+  assert.deepEqual([waiting.title, waiting.actions], ["pathfinder", ["show"]]);
+  assert.match(waiting.text, /push from here doesn't sign in as the account this project's rule names/);
+  const project = await findOne("pathfinder", "project");
+  assert.equal(waiting.id, project.id);
+  await s.driver("select", project.id);
+  // The rule's own warnings; the owner check has its own beside them.
+  const warns = async () => (await s.eval(`return [...document.querySelectorAll(".id-warn")].map((e) => e.textContent.trim())`)).filter((t) => t.includes("rule"));
+  assert.deepEqual(await warns(), ["⚠ the project's rule says push as orbitworks on github.com, but a push here signs in as nova-dev/github.com"]);
+  // Masked, the warning names no account.
+  await s.driver("maskIdentities", true);
+  assert.deepEqual(await warns(), ["⚠ pushes as another account than the project's rule names"]);
+  await s.driver("maskIdentities", false);
+  await home();
+}));
+
 test("a session's stats: Mod+I in the palette opens them, with a cost and a table for each chart", { timeout: limit(60000) }, shoot("stats", async () => {
   await home();
   const n = await findOne("partial refunds", "session");
