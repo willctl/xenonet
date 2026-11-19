@@ -10,6 +10,16 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+adytum-driver.workspace = true
+adytum-model.workspace = true
+eidolon-browser.workspace = true
+getrandom.workspace = true
+tokio.workspace = true
+xenonet-os.workspace = true
+
+[dev-dependencies]
+adytum-exec.workspace = true
+async-trait.workspace = true
 
 [lints]
 workspace = true

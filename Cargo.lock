@@ -1389,6 +1389,16 @@ dependencies = [
 [[package]]
 name = "eidolon-view"
 version = "0.1.0"
+dependencies = [
+ "adytum-driver",
+ "adytum-exec",
+ "adytum-model",
+ "async-trait",
+ "eidolon-browser",
+ "getrandom 0.3.4",
+ "tokio",
+ "xenonet-os",
+]
 
 [[package]]
 name = "either"
