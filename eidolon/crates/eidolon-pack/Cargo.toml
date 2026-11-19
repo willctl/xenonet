@@ -1,0 +1,15 @@
+[package]
+name = "eidolon-pack"
+description = "A facet's files turned into chunks and a signed manifest, and back."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

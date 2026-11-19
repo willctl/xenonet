@@ -1,0 +1,15 @@
+[package]
+name = "adytum-exec"
+description = "Commands run as argument lists, never shell strings: streamed output, a deadline, a cancel, the whole process group stopped, and only the variables the caller names."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "eidolon-browser"
+description = "The browser facet: the profile's rules and a browser kept alive in a cell."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

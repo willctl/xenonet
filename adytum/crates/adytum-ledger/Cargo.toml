@@ -1,0 +1,15 @@
+[package]
+name = "adytum-ledger"
+description = "Adytum's record of what it made, written before each create and settled after, so a crash leaves nothing the next start doesn't finish or remove."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

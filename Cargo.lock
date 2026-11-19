@@ -38,6 +38,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "adytum-cli"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-doctor"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-exec"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-ledger"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-lima"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-model"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-oci"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-policy"
+version = "0.1.0"
+
+[[package]]
+name = "adytum-testkit"
+version = "0.1.0"
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1114,6 +1150,54 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "eidolon-bidi"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-browser"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-cli"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-facet"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-mcp"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-model"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-move"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-pack"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-policy"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-testkit"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-vault"
+version = "0.1.0"
+
+[[package]]
+name = "eidolon-view"
+version = "0.1.0"
 
 [[package]]
 name = "either"

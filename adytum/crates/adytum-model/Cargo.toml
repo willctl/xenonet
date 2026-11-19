@@ -1,0 +1,15 @@
+[package]
+name = "adytum-model"
+description = "Adytum's vocabulary: typed ids (cell_, img_, wall_), the cell spec, and their JSON. No IO."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -55,6 +55,15 @@
 // libraries, never its app: its crates, and its workspace's dependency
 // table, name no XenoNet crate but xenonet-id, -log, -authz and -net and the
 // base crates. No crate of XenoNet's depends on a crate of Xenolith's.
+//
+// Adytum (adytum/crates, cells per machine) and Eidolon (eidolon/crates, an
+// entity's portable state) sit beside XenoNet, not inside it
+// (docs/design/cells.md). TOOLS says what each may take of XenoNet's: Adytum
+// the formats, the machine, the store and the key store; Eidolon those,
+// xenonet-id for its signatures, and Adytum's crates. Adytum takes nothing of
+// Eidolon's. No crate of XenoNet's or Xenolith's depends on either, tests
+// included: XenoNet drives them as it drives any tool, through their --json
+// commands and their MCP servers.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -84,6 +93,12 @@ const GENERIC = new Set(["xenonet-acp", "xenonet-a2a", "xenonet-mcp-catalog"]);
 // What Xenolith may take of XenoNet's: the libraries, and the base crates
 // they bring.
 const XENOLITH = { dir: "xenolith/rust", may: new Set(["xenonet-id", "xenonet-log", "xenonet-authz", "xenonet-net", ...BASE]) };
+// What Adytum and Eidolon may take of XenoNet's, and of each other.
+const ADYTUM_MAY = ["xenonet-text", "xenonet-os", "xenonet-store", "xenonet-keys"];
+const TOOLS = [
+  { prefix: "adytum", may: new Set(ADYTUM_MAY), tools: new Set(["adytum"]) },
+  { prefix: "eidolon", may: new Set([...ADYTUM_MAY, "xenonet-id"]), tools: new Set(["adytum", "eidolon"]) },
+];
 
 // Words that are an app's id and also something else: a literal the check
 // would count, kept because there it isn't an app. Each entry is a file, the
@@ -223,6 +238,34 @@ for (const c of crates("adapters")) {
   for (const c of [...crates("crates"), ...crates("adapters")]) {
     const theirs = [...deps(path.join(c.dir, "Cargo.toml"), { prefix: "xenolith", dev: true })];
     if (theirs.length) breaches.push(`${packageName(c.dir)} depends on Xenolith's ${theirs.join(", ")}: Xenolith takes XenoNet's libraries, never the other way`);
+  }
+}
+
+// Adytum and Eidolon: what each takes of XenoNet's and of the other, and
+// nothing of XenoNet's or Xenolith's takes either. Dev-dependencies count:
+// a test that links XenoNet's app links its core.
+{
+  for (const t of TOOLS) {
+    const may = [...t.may].join(", ");
+    for (const c of crates(`${t.prefix}/crates`)) {
+      const name = packageName(c.dir);
+      const file = path.join(c.dir, "Cargo.toml");
+      const theirs = [...deps(file, { dev: true })].filter((d) => !t.may.has(d)).sort();
+      if (theirs.length) breaches.push(`${name} is ${t.prefix === "adytum" ? "Adytum" : "Eidolon"}'s, which takes ${may} alone of XenoNet's, and depends on ${theirs.join(", ")}`);
+      for (const other of ["adytum", "eidolon"]) {
+        if (t.tools.has(other)) continue;
+        const over = [...deps(file, { prefix: other, dev: true })];
+        if (over.length) breaches.push(`${name} is Adytum's, which depends on nothing of Eidolon's, and depends on ${over.join(", ")}`);
+      }
+      counts.push(`${name}: ${[...deps(file)].length} of XenoNet's (${t.prefix}: ${may} only)`);
+    }
+  }
+  const outside = [...crates("crates"), ...crates("adapters"), ...crates(`${XENOLITH.dir}/crates`)];
+  for (const c of outside) {
+    for (const other of ["adytum", "eidolon"]) {
+      const over = [...deps(path.join(c.dir, "Cargo.toml"), { prefix: other, dev: true })];
+      if (over.length) breaches.push(`${packageName(c.dir)} depends on ${over.join(", ")}: XenoNet drives Adytum and Eidolon through their commands, never as crates`);
+    }
   }
 }
 

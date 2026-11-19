@@ -1,0 +1,15 @@
+[package]
+name = "adytum-doctor"
+description = "What is wrong with Adytum's setup on this machine, each problem with its fix."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "eidolon-cli"
+description = "The eidolon command, with --json on every command."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "eidolon"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

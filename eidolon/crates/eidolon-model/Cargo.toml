@@ -1,0 +1,15 @@
+[package]
+name = "eidolon-model"
+description = "Eidolon's vocabulary: typed ids (eid_, fct_), the manifest, facet kinds and the seat. No IO."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

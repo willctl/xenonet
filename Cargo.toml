@@ -2,7 +2,7 @@
 # page are JS; everything else is here, a crate per layer.
 [workspace]
 resolver = "3"
-members = ["crates/*", "adapters/*"]
+members = ["crates/*", "adapters/*", "adytum/crates/*", "eidolon/crates/*"]
 # Xenolith's crates join once its own workspace folds into this one.
 exclude = ["xenolith"]
 
@@ -192,6 +192,31 @@ turmoil = "0.7.2"
 # base64url for the network's keys, signatures and sealed bodies (in the
 # lock already through reqwest).
 base64 = "0.23"
+
+# Adytum (adytum/): cells, per machine. Eidolon (eidolon/): an entity's
+# state, sealed, opened in a cell and moved. Both keep to their own layer
+# rule in scripts/rust-layers.mjs, and no XenoNet crate depends on them.
+adytum-cli = { path = "adytum/crates/adytum-cli" }
+adytum-doctor = { path = "adytum/crates/adytum-doctor" }
+adytum-exec = { path = "adytum/crates/adytum-exec" }
+adytum-ledger = { path = "adytum/crates/adytum-ledger" }
+adytum-lima = { path = "adytum/crates/adytum-lima" }
+adytum-model = { path = "adytum/crates/adytum-model" }
+adytum-oci = { path = "adytum/crates/adytum-oci" }
+adytum-policy = { path = "adytum/crates/adytum-policy" }
+adytum-testkit = { path = "adytum/crates/adytum-testkit" }
+eidolon-bidi = { path = "eidolon/crates/eidolon-bidi" }
+eidolon-browser = { path = "eidolon/crates/eidolon-browser" }
+eidolon-cli = { path = "eidolon/crates/eidolon-cli" }
+eidolon-facet = { path = "eidolon/crates/eidolon-facet" }
+eidolon-mcp = { path = "eidolon/crates/eidolon-mcp" }
+eidolon-model = { path = "eidolon/crates/eidolon-model" }
+eidolon-move = { path = "eidolon/crates/eidolon-move" }
+eidolon-pack = { path = "eidolon/crates/eidolon-pack" }
+eidolon-policy = { path = "eidolon/crates/eidolon-policy" }
+eidolon-testkit = { path = "eidolon/crates/eidolon-testkit" }
+eidolon-vault = { path = "eidolon/crates/eidolon-vault" }
+eidolon-view = { path = "eidolon/crates/eidolon-view" }
 
 [profile.release]
 lto = "thin"
