@@ -9,6 +9,10 @@ use xenonet_id::sign::{Purpose, Signer};
 pub enum State {
     /// Its state is sealed in the vault and open nowhere.
     Sealed,
+    /// An open began in one cell and has not finished: files may be
+    /// placed there that nothing else records. Written before the first
+    /// file is placed; `Open` replaces it once all are.
+    Opening { cell: String },
     /// Open in one cell.
     Open { cell: String },
     /// Done with: it never opens again.
@@ -111,5 +115,6 @@ mod tests {
     fn states_are_snake_case_json() {
         assert_eq!(serde_json::to_string(&State::Sealed).unwrap_or_default(), "\"sealed\"");
         assert_eq!(serde_json::to_string(&State::Open { cell: "adytum-a".into() }).unwrap_or_default(), "{\"open\":{\"cell\":\"adytum-a\"}}");
+        assert_eq!(serde_json::to_string(&State::Opening { cell: "adytum-a".into() }).unwrap_or_default(), "{\"opening\":{\"cell\":\"adytum-a\"}}");
     }
 }
