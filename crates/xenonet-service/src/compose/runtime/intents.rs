@@ -746,6 +746,17 @@ pub(crate) fn report_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     ground::judge(&g, &ground::remote(&g, Principal::Machine { id: ground::machine(host)? }, resource, act), None)?;
     took(&db, &i, step, b)?;
+    // The run that machine started for the intent is its own, for the
+    // prompts it will send: only when this machine made the intent or
+    // arbitrates it (they asked for the run), and only the machine the
+    // intent is worked on, in the network the intent belongs to.
+    if step == IntentStep::Start
+        && me(w).is_some_and(|m| i.machine == m || i.arbiter == m)
+        && i.worked_on() == Some(host)
+        && xenonet_net::ground::current().is_none_or(|n| n == i.network)
+    {
+        w.starts.note_intent_run(host, &i.network, text(b, "agent").as_deref().filter(|a| a.starts_with("agt_")));
+    }
     changed(w);
     Ok(())
 }

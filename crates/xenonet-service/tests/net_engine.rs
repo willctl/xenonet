@@ -363,6 +363,8 @@ async fn a_start_reaches_a_folder_only_in_a_project_the_network_is_shown() {
     }
     assert!(words[0].contains("that folder isn't in a project this network is shown"), "{words:?}");
     assert!(words.iter().all(|w| *w == words[0]), "{words:?}");
+    // (atlas's run has its program running by now, or soon.)
+    let _ = ran(&t.desk, 1).await;
     assert_eq!(fake_runs(&t.desk).len(), 1, "only atlas's run was started");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
@@ -463,6 +465,16 @@ fn guest_ask(t: &TwoNetworks, n: u32, id: &str, sender: &str, session: &str) -> 
         "schema": "network/send/v1", "mid": format!("msg_00000000-0000-4000-8000-{:012}", 200 + n), "sender": sender, "senderKind": "agent", "agent": t.contractor.agt(sender),
         "target": xenonet_service::compose::runtime::asks::TARGET, "body": ask.to_string(), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now_ms() as i64,
     })
+}
+
+/// The same, from a copy `contractor-vm` forked from `root`: it asks under
+/// its own session and agent, and names the run it was forked from.
+fn guest_fork_ask(t: &TwoNetworks, n: u32, id: &str, child: &str, root: &str) -> Value {
+    let mut f = guest_ask(t, n, id, child, child);
+    let mut ask: Value = serde_json::from_str(f["body"].as_str().unwrap()).unwrap();
+    ask["root"] = json!({ "session": root, "agent": t.contractor.agt(root) });
+    f["body"] = json!(ask.to_string());
+    f
 }
 
 async fn asks_shown(h: &Host) -> Vec<String> {
@@ -1512,7 +1524,7 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from_another() {
+async fn a_runs_prompt_shows_on_the_window_host_that_asked_for_the_run_and_is_answered_from_it_alone() {
     let root = std::env::temp_dir().join(format!("xenonet-net-asks-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
@@ -2253,6 +2265,148 @@ async fn an_intents_run_survives_its_machine_restarting_and_a_cancel_stops_it_th
     tokio::time::sleep(Duration::from_millis(3000)).await;
     assert_eq!((intent(&c, &id).await["state"].clone(), fake_runs(&c).len()), (json!("cancelled"), 2));
     assert_eq!(intent(&a, &id).await["state"], "cancelled");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A run desk asked `contractor-vm` for goes on being its run after the
+/// request is over: a later turn resumed for a message asks under the same
+/// session, and a copy forked from it asks under its own and names the run
+/// it came from. Neither is a way in for a machine desk never asked, or for
+/// a copy that names a run another machine started.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_resumed_turn_and_a_fork_of_a_run_desk_asked_for_still_reach_desk() {
+    use xenonet_model::ops::Kind;
+    const CHILD: &str = "claude:0190d3e0-0000-7000-8000-0000000f0f01";
+    let root = std::env::temp_dir().join(format!("xenonet-guest-resumed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows tower and contractor-vm take starts", 20, || async {
+        let nets = t.desk.state().await["networks"].clone();
+        let can = |h: &str| {
+            nets.as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|n| n["hosts"].as_array().cloned().unwrap_or_default())
+                .any(|x| x["id"] == h && x["can"].as_array().is_some_and(|c| c.contains(&json!("start"))))
+        };
+        can("tower") && can("contractor-vm")
+    })
+    .await;
+    std::fs::create_dir_all(root.join("tower/home")).unwrap();
+    let mut starts = Stream::of(&t.desk);
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "tower", "prompt": "hold-on: tidy on tower" })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let tower_run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == "tower").await["session"].as_str().unwrap().to_string();
+    // A run on contractor-vm that ends at once, as most do.
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "contractor-vm", "prompt": "tidy on contractor-vm" })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let vm_run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == "contractor-vm").await["session"].as_str().unwrap().to_string();
+    starts.next("start", 30, |d| d["state"] == "ended" && d["host"] == "contractor-vm").await;
+
+    // The run has ended; a later turn of it (a message resumed it) asks.
+    guest_sends(&t, Kind::Message, guest_ask(&t, 1, "ask_resumed", &vm_run, &vm_run));
+    // A copy forked from it, naming it; one naming a run on tower; one
+    // naming a session desk never asked contractor-vm for; one naming
+    // nothing.
+    guest_sends(&t, Kind::Message, guest_fork_ask(&t, 2, "ask_fork", CHILD, &vm_run));
+    guest_sends(&t, Kind::Message, guest_fork_ask(&t, 3, "ask_fork_tower", CHILD, &tower_run));
+    guest_sends(&t, Kind::Message, guest_fork_ask(&t, 4, "ask_fork_own", CHILD, VM_ATLAS));
+    guest_sends(&t, Kind::Message, guest_ask(&t, 5, "ask_unnamed", CHILD, CHILD));
+    until("the resumed turn's ask and the fork's are shown", 20, || async {
+        let shown = asks_shown(&t.desk).await;
+        shown.contains(&"ask_resumed".to_string()) && shown.contains(&"ask_fork".to_string())
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mut shown = asks_shown(&t.desk).await;
+    shown.sort();
+    assert_eq!(shown, vec!["ask_fork".to_string(), "ask_resumed".to_string()], "only the runs desk asked contractor-vm for");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A copy of a run forked here asks under its own session, so what is sent
+/// with its ask names the run it was forked from, and the machine that
+/// asked for that run takes it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_forks_prompt_names_the_run_it_was_forked_from_and_reaches_the_machine_that_asked() {
+    const CHILD: &str = "claude:0190d3e0-0000-7000-8000-0000000f0f01";
+    let root = std::env::temp_dir().join(format!("xenonet-fork-asks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks_with(&root, true).await;
+    until("tower knows desk takes starts", 20, || async {
+        let hosts = t.tower.state().await["hosts"].clone();
+        hosts.as_array().is_some_and(|h| h.iter().any(|x| x["id"] == "desk" && x["can"].as_array().is_some_and(|c| c.contains(&json!("start")))))
+    })
+    .await;
+    let mut starts = Stream::of(&t.tower);
+    let (s, v) = t.tower.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let run = starts.next("start", 20, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
+    xenonet_service::compose::runtime::starts::note_fork(&t.desk.world, CHILD, &run);
+    let ask = json!({ "op": "ask", "id": "ask_fork_child", "session": CHILD, "run": "run_9", "title": "a copy", "tool": "Bash", "input": "npm test", "at": now_ms(), "until": now_ms() + 60e3 });
+    xenonet_service::compose::runtime::asks::to_windows(&t.desk.world, CHILD, &ask);
+    let shown = |h: &Host| {
+        let h = h.ctx.clone();
+        async move {
+            let req = Req::fake("GET", "/api/runs/asks", &[("x-xenonet-window", h.window_key.reveal())], None);
+            api(&h, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+    let at_tower = until_value("the copy's ask at tower", 15, || async { shown(&t.tower).await.into_iter().find(|x| x["id"] == "ask_fork_child") }).await;
+    assert_eq!(at_tower["session"], CHILD, "{at_tower}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(shown(&t.contractor).await.is_empty(), "contractor-vm, in the other network, is shown nothing");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The prompts of a run started for an intent go to the machine that made
+/// it (and to one that arbitrates it), and to no other window host.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_intent_runs_prompt_outside_the_delegation_reaches_the_machine_that_made_the_intent() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-intent-asks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let (a, b, c, project) = three_in_atlas(&root).await;
+    delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
+    let made = json!({ "goal": "hold-on: make the build green", "target": "desk", "project": project, "delegation": DLG, "hours": 1 });
+    let (s, v) = b.window("POST", "/api/intents", made).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("assigned")), "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (args, _) = ran(&c, 1).await;
+    let run = format!("claude:{}", args[2]);
+    intent_is(&b, &id, "running").await;
+    let held = {
+        let ctx = c.ctx.clone();
+        let run = run.clone();
+        tokio::spawn(async move {
+            let body = json!({ "tool_name": "Bash", "input": { "command": "rm -rf build" }, "tool_use_id": "toolu_1" }).to_string();
+            let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", run.as_str())], Some(&body)))).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let shown = |h: &Host| {
+        let h = h.ctx.clone();
+        async move {
+            let req = Req::fake("GET", "/api/runs/asks", &[("x-xenonet-window", h.window_key.reveal())], None);
+            api(&h, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+    let waiting = until_value("the intent run's ask at laptop, which made the intent", 15, || async { shown(&b).await.into_iter().find(|x| x["host"] == "desk") }).await;
+    // studio neither made the intent nor arbitrates it: it asked for no run.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(shown(&a).await.is_empty(), "studio is shown nothing of a run it didn't ask for");
+    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": waiting["id"], "decision": "deny" })).await;
+    assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+    assert_eq!((s, answer["behavior"].clone()), (200, json!("deny")), "{answer}");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }

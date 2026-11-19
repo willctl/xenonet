@@ -242,12 +242,19 @@ fn window_hosts(w: &Runtime) -> Vec<String> {
 /// run's start came in, and to no other: a window host of another network
 /// is not shown a run it didn't ask for. A run started here for no one
 /// has no such network, and its ask goes to no other machine.
-fn to_windows(w: &Runtime, me: &str, body: &Value) {
+#[doc(hidden)]
+pub fn to_windows(w: &Runtime, me: &str, body: &Value) {
     if net(w).me().is_none() {
         return;
     }
-    let parent = crate::compose::runtime::starts::forks(w).into_iter().find(|(child, _)| child == me).map(|(_, p)| p);
-    let Some(network) = w.starts.network_of(me, parent.as_deref()) else { return };
+    let root = crate::compose::runtime::starts::fork_root(w, me);
+    let Some(network) = w.starts.network_of(me, root.as_deref()) else { return };
+    // A copy forked from a run names it, since the machine that asked for
+    // the run knows that one and not the copy.
+    let mut body = body.clone();
+    if let (Some(root), true) = (&root, body.is_object()) {
+        body["root"] = json!({ "session": root, "agent": crate::compose::runtime::network::wire_id(w, root) });
+    }
     let text = body.to_string();
     for host in window_hosts(w) {
         if !net(w).networks_with(&host).contains(&network) {
@@ -603,7 +610,15 @@ pub fn ask_in(w: &Runtime, from: &str, agent: Option<&str>, body: &xenonet_authz
     if v.get("op").and_then(Value::as_str) == Some("ask") {
         let session = Ask::of(&v, from).map(|a| a.session).unwrap_or_default();
         let network = xenonet_net::ground::current();
-        if !network.as_deref().is_some_and(|n| w.starts.names_run(from, n, &session, agent)) {
+        // A copy forked from a run asks under its own session and agent,
+        // and says which run it was forked from: that run is the one that
+        // must be named, by the machine that sends it.
+        let root = v.get("root").filter(|r| r.is_object());
+        let (session, agent) = match root {
+            Some(r) => (r.get("session").and_then(Value::as_str).unwrap_or(""), r.get("agent").and_then(Value::as_str)),
+            None => (session.as_str(), agent),
+        };
+        if !network.as_deref().is_some_and(|n| w.starts.names_run(from, n, session, agent)) {
             return w.log("info", "net.ask", &format!("an ask from {from} was dropped: it names no run this machine asked {from} to start in this network"));
         }
     }

@@ -53,21 +53,36 @@ struct Asked {
     /// The network it was sent into, and the only one its answers and its
     /// run's prompts are taken from.
     network: String,
-    /// The run it started there, as that machine's own receipts name it:
-    /// its session, and its agent when it had no session yet.
-    runs: Vec<Named>,
     at: f64,
 }
 
-/// A run a receipt names, by its session and its agent.
+/// A run a machine's own word names, by its session and its agent: a
+/// receipt for a start request of ours, or the report of an intent we made
+/// or arbitrate.
 #[derive(Clone, Default, PartialEq)]
 struct Named {
     session: Option<String>,
     agent: Option<String>,
 }
 
-/// The most runs one request is kept as naming.
-const NAMED_MAX: usize = 8;
+/// A run kept as named: whose it is, in which network, and when it was
+/// last named or last asked.
+struct Kept {
+    host: String,
+    network: String,
+    run: Named,
+    at: f64,
+}
+
+/// How long a run stays named after it was last named or last asked from:
+/// a day. A run that ended can be resumed by a later message, and its turn
+/// asks under the same session; a day covers an evening's break and the
+/// next morning, and a machine that was once asked for a run keeps no
+/// longer a claim on this console than that. Every ask taken renews it.
+const NAMED_FOR_MS: f64 = 24.0 * 3600e3;
+
+/// The most runs kept as named.
+const KEPT_MAX: usize = 200;
 
 #[derive(Default)]
 pub struct StartSide {
@@ -81,6 +96,8 @@ pub struct StartSide {
     /// Copies of sessions XenoNet forked to answer a message, each with the
     /// session it came from: the last 200.
     forks: Mutex<Vec<(String, String)>>,
+    /// The runs other machines named, which their prompts are taken for.
+    kept: Mutex<Vec<Kept>>,
     /// The network each run another machine asked for was started through,
     /// by its session: the only network its prompts are sent into.
     run_networks: Mutex<HashMap<String, String>>,
@@ -105,27 +122,55 @@ impl StartSide {
         runs.get(session).or_else(|| parent.and_then(|p| runs.get(p))).cloned()
     }
 
-    /// Whether `host`, in `network`, was asked from here to start a run
-    /// that is still open and that its own receipts name by `session` or
-    /// by `agent`. Nothing else it says about a run is believed.
+    /// Whether `host`, in `network`, has a run named as its own, by
+    /// `session` or by `agent`: one it was asked from here to start (its
+    /// own receipts name it) or one it works for an intent made or
+    /// arbitrated here. Nothing else it says about a run is believed. A
+    /// run named stays named for a day (`NAMED_FOR_MS`), renewed each time
+    /// an ask is taken for it.
     pub fn names_run(&self, host: &str, network: &str, session: &str, agent: Option<&str>) -> bool {
-        self.asked.locked().values().any(|a| {
-            a.host == host
-                && a.network == network
-                && a.runs.iter().any(|r| (!session.is_empty() && r.session.as_deref() == Some(session)) || (agent.is_some() && r.agent.as_deref() == agent))
-        })
+        let now = now_ms();
+        let mut kept = self.kept.locked();
+        kept.retain(|k| now - k.at < NAMED_FOR_MS);
+        let found = kept.iter_mut().find(|k| {
+            k.host == host && k.network == network && ((!session.is_empty() && k.run.session.as_deref() == Some(session)) || (agent.is_some() && k.run.agent.as_deref() == agent))
+        });
+        found.map(|k| k.at = now).is_some()
     }
 
     /// A run `host` started for a request of ours, in `network`, as its
     /// receipt named it: what `answer_in` keeps, and what a test of a
     /// machine that was never asked leaves out.
     pub fn note_run(&self, mid: &str, host: &str, network: &str, session: Option<&str>, agent: Option<&str>) {
-        let mut asked = self.asked.locked();
-        let Some(a) = asked.get_mut(mid).filter(|a| a.host == host && a.network == network) else { return };
-        let run = Named { session: session.map(str::to_string), agent: agent.map(str::to_string) };
-        if run != Named::default() && !a.runs.contains(&run) && a.runs.len() < NAMED_MAX {
-            a.runs.push(run);
+        if !self.asked.locked().get(mid).is_some_and(|a| a.host == host && a.network == network) {
+            return;
         }
+        self.keep(host, network, session, agent);
+    }
+
+    /// The run `host` works for an intent this machine made or arbitrates,
+    /// in the intent's `network`, as the intent's start report names it
+    /// (by its agent).
+    pub fn note_intent_run(&self, host: &str, network: &str, agent: Option<&str>) {
+        self.keep(host, network, None, agent);
+    }
+
+    fn keep(&self, host: &str, network: &str, session: Option<&str>, agent: Option<&str>) {
+        let run = Named { session: session.map(str::to_string), agent: agent.map(str::to_string) };
+        if run == Named::default() {
+            return;
+        }
+        let now = now_ms();
+        let mut kept = self.kept.locked();
+        kept.retain(|k| now - k.at < NAMED_FOR_MS);
+        if let Some(k) = kept.iter_mut().find(|k| k.host == host && k.network == network && k.run == run) {
+            k.at = now;
+            return;
+        }
+        if kept.len() >= KEPT_MAX {
+            kept.remove(0);
+        }
+        kept.push(Kept { host: host.to_string(), network: network.to_string(), run, at: now });
     }
 }
 
@@ -511,6 +556,30 @@ pub fn forks(w: &Runtime) -> Vec<(String, String)> {
     w.starts.forks.locked().clone()
 }
 
+/// A copy XenoNet forked from `parent`, kept with the others (the last
+/// 200).
+#[doc(hidden)]
+pub fn note_fork(w: &Runtime, child: &str, parent: &str) {
+    let mut f = w.starts.forks.locked();
+    f.push((child.to_string(), parent.to_string()));
+    let from = f.len().saturating_sub(200);
+    f.drain(..from);
+}
+
+/// The run a copy was forked from, followed back through copies of copies
+/// to the one that is no copy: None for a session that is not a copy.
+pub fn fork_root(w: &Runtime, session: &str) -> Option<String> {
+    let forks = w.starts.forks.locked();
+    let mut root = None;
+    let mut at = session.to_string();
+    for _ in 0..8 {
+        let Some((_, parent)) = forks.iter().rev().find(|(child, _)| *child == at) else { break };
+        at = parent.clone();
+        root = Some(parent.clone());
+    }
+    root
+}
+
 /// Grok Build's prompt for a turn, in a file only its owner can read, in
 /// the runs folder: its path.
 pub fn prompt_file(w: &Runtime, text: &str) -> Result<String, String> {
@@ -591,12 +660,7 @@ pub fn after_resume(w: &Runtime, runner: &Arc<Runner>, app: &str, key: &str, pid
             if !named {
                 if let (Some(child), Some(parent)) = (starts::session_of(&app, &new), parent.as_deref()) {
                     named = true;
-                    {
-                        let mut f = world.starts.forks.locked();
-                        f.push((child.clone(), parent.to_string()));
-                        let from = f.len().saturating_sub(200);
-                        f.drain(..from);
-                    }
+                    note_fork(&world, &child, parent);
                     world.log("info", "fork", &format!("{child} answers a message for {parent}, which is open elsewhere"));
                     world.emit(From::Engine, "fork", json!({ "child": child, "parent": parent, "at": ms(now_ms()) }));
                 }
@@ -884,7 +948,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         "hops": 0,
         "at": ms(now_ms()),
     });
-    w.starts.asked.locked().insert(mid.clone(), Asked { by: by.clone(), host: host.clone(), network: network.clone(), runs: Vec::new(), at: now_ms() });
+    w.starts.asked.locked().insert(mid.clone(), Asked { by: by.clone(), host: host.clone(), network: network.clone(), at: now_ms() });
     crate::compose::runtime::network::send_in(w, Some(network), To::Host(host.clone()), FrameKind::Message, body, Some(authority));
     Ok(
         json!({ "request": mid, "host": host, "state": "sent", "way": format!("sent to {host}: the answer comes as a message, started or refused, and again when the session ends") }),
@@ -1044,7 +1108,7 @@ pub fn sign_in_hint(w: &Runtime, host: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{now_ms, Asked, StartSide, Tail};
+    use super::{now_ms, Asked, StartSide, Tail, NAMED_FOR_MS};
     use serde_json::json;
     use xenonet_engine::delivery::starts;
     use xenonet_os::sync::Locked;
@@ -1078,7 +1142,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
     fn asked_of(side: &StartSide, mid: &str, host: &str, network: &str) {
-        side.asked.locked().insert(mid.into(), Asked { by: json!({}), host: host.into(), network: network.into(), runs: Vec::new(), at: now_ms() });
+        side.asked.locked().insert(mid.into(), Asked { by: json!({}), host: host.into(), network: network.into(), at: now_ms() });
     }
 
     #[test]
@@ -1101,7 +1165,26 @@ mod tests {
         side.note_run("msg_1", "contractor-vm", "net_home", Some("claude:c"), None);
         assert!(!side.names_run("contractor-vm", "net_work", "claude:c", None) && !side.names_run("tower", "net_work", "claude:c", None));
         // Once its last receipt has come, the request is dropped, and the run is not open.
+        // The request is over, the run is still its own: a later turn of it
+        // asks under the same session.
         side.asked.locked().remove("msg_1");
+        assert!(side.names_run("contractor-vm", "net_work", "claude:a", Some("agt_one")));
+        // A day after it was last named or asked from, it isn't.
+        side.kept.locked().iter_mut().for_each(|k| k.at = now_ms() - NAMED_FOR_MS - 1.0);
         assert!(!side.names_run("contractor-vm", "net_work", "claude:a", Some("agt_one")));
+    }
+
+    #[test]
+    fn a_run_asked_from_stays_named_and_one_not_asked_from_expires() {
+        let side = StartSide::default();
+        side.note_intent_run("tower", "net_home", Some("agt_two"));
+        assert!(side.names_run("tower", "net_home", "", Some("agt_two")), "an intent's run, by its agent");
+        assert!(!side.names_run("contractor-vm", "net_home", "", Some("agt_two")), "not another machine's");
+        assert!(!side.names_run("tower", "net_work", "", Some("agt_two")), "nor in another network");
+        side.note_intent_run("tower", "net_home", None);
+        assert_eq!(side.kept.locked().len(), 1, "a report naming no agent names no run");
+        side.kept.locked()[0].at = now_ms() - NAMED_FOR_MS + 60e3;
+        assert!(side.names_run("tower", "net_home", "", Some("agt_two")));
+        assert!(side.kept.locked()[0].at > now_ms() - 60e3, "an ask taken renews it");
     }
 }
