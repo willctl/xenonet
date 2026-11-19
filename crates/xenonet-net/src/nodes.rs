@@ -98,7 +98,7 @@ pub struct Nodes {
 /// store can't say or write, nothing is written, the safe side.
 fn write_missing_first_row(persist: &dyn crate::persist::Persist, networks: &[crate::files::NetFile]) {
     if let Some(first) = networks.first() {
-        if persist.sharing(&first.id).ok().is_some_and(|row| row.is_none()) {
+        if persist.sharing(&first.id).is_ok_and(|row| row.is_none()) {
             let _ = persist.put_sharing(&first.id, &crate::share::Sharing::All);
         }
     }
