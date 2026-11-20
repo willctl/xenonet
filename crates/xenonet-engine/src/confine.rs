@@ -33,7 +33,7 @@
 //!   whatever the request says. The program run is the image's, never the
 //!   host's path to the app.
 
-use adytum_model::Wall;
+use adytum::Wall;
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};

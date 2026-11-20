@@ -113,5 +113,5 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# Adytum's crates come from its repository.
+# Adytum comes from its repository.
 allow-git = ["https://github.com/willctl/adytum"]

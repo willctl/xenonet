@@ -17,20 +17,16 @@
 //! - In: a staged copy of the project under `<home>/xn-stage/<cell>/in`,
 //!   made on the host first. The copy leaves out what the plan excludes
 //!   (`.env`, `.env.*`, `.git/config`) and every symbolic link and special
-//!   file, so nothing in it points back at the host. It is copied to
-//!   `/tmp/xn-in/<folder name>` in the cell, and the staged copy is removed.
-//!   `limactl copy -r` into a folder that exists puts the source's files in
-//!   it (and into `dest/`, with a trailing slash, the folder inside it), so
-//!   the runner makes the destination itself and never relies on either.
+//!   file, so nothing in it points back at the host. Its contents are copied
+//!   into `/tmp/xn-in/<folder name>` in the cell, written by the cell's own
+//!   user so the program can change them, and the staged copy is removed.
 //! - Out: only into `<home>/xn-stage/<cell>/out`, a folder the runner makes
 //!   fresh (a destination that exists is refused), never into the project or
 //!   anywhere else on the host. The result is walked afterwards and is
 //!   thrown away whole if it holds anything but plain files and folders.
 //!   The caller looks at it and then calls [`CellRunner::discard_result`].
 
-use adytum_driver::{Driver, DriverError, ExecOpts};
-use adytum_ledger::{create_cell, reconcile, remove_cell, Ledger, OpKind, Outcome};
-use adytum_model::{CellId, CellName, CellSpec, DriverKind, ImagePin, Resources};
+use adytum::{CellId, CellName, CellSpec, Cells, Driver, DriverKind, ExecOpts, ImagePin, Resources};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,7 +43,7 @@ pub const PRODUCTION_PREFIX: &str = "adytum-xn-";
 
 /// Runs plans in cells made by `driver`, recorded in the ledger under `home`.
 pub struct CellRunner {
-    driver: Arc<dyn CellDriver>,
+    driver: Arc<dyn Driver>,
     driver_kind: DriverKind,
     home: PathBuf,
     prefix: String,
@@ -55,41 +51,17 @@ pub struct CellRunner {
     apps: Vec<CellApp>,
 }
 
-/// The user Lima's copy logs in as (the template's `user.name`). It owns the
-/// project folder in the cell only while the copy is made.
-const ADMIN_USER: &str = "adytum";
-
-/// The user every command runs as in a cell: no sudo, no password. The
-/// driver makes it, drops commands to it and loads the cell's firewall at
-/// boot (which keeps the host's addresses closed), so the runner does not.
-const EXEC_USER: &str = "cell";
-
-/// What the runner needs of a driver: Adytum's, and a way to run a step as
-/// root, for the folders and ownership the copy needs. Only the runner's
-/// own steps use it, never the program.
-#[async_trait::async_trait]
-pub trait CellDriver: Driver {
-    async fn exec_root(&self, name: &CellName, argv: &[String], opts: ExecOpts) -> Result<adytum_exec::Output, DriverError>;
-}
-
-#[async_trait::async_trait]
-impl CellDriver for adytum_lima::Lima {
-    async fn exec_root(&self, name: &CellName, argv: &[String], opts: ExecOpts) -> Result<adytum_exec::Output, DriverError> {
-        adytum_lima::Lima::exec_root(self, name, argv, opts).await
-    }
-}
-
 impl CellRunner {
     /// Lima cells under `adytum_home` (its ledger and `lima/` folder), from
     /// the pinned default image. `apps` is what that image holds.
     pub fn lima(adytum_home: PathBuf, apps: Vec<CellApp>) -> Result<Self, ConfineError> {
-        let image = adytum_lima::image(adytum_lima::DEFAULT_IMAGE).ok_or_else(|| ConfineError::Host("the default cell image is not pinned".into()))?;
-        let driver = adytum_lima::Lima::system(adytum_lima::lima_home_in(&adytum_home));
+        let image = adytum::lima::image(adytum::lima::DEFAULT_IMAGE).ok_or_else(|| ConfineError::Host("the default cell image is not pinned".into()))?;
+        let driver = adytum::lima::Lima::system(adytum::lima::lima_home_in(&adytum_home)).map_err(host)?;
         Ok(Self::with_driver(Arc::new(driver), DriverKind::Lima, adytum_home, image, apps))
     }
 
     /// Any driver, for another kind of cell or a test's fake.
-    pub fn with_driver(driver: Arc<dyn CellDriver>, driver_kind: DriverKind, home: PathBuf, image: ImagePin, apps: Vec<CellApp>) -> Self {
+    pub fn with_driver(driver: Arc<dyn Driver>, driver_kind: DriverKind, home: PathBuf, image: ImagePin, apps: Vec<CellApp>) -> Self {
         Self { driver, driver_kind, home, prefix: PRODUCTION_PREFIX.to_owned(), image, apps }
     }
 
@@ -101,9 +73,9 @@ impl CellRunner {
     }
 
     fn new_name(&self) -> Result<CellName, ConfineError> {
-        let id = CellId::new_random().map_err(|e| ConfineError::Host(e.to_string()))?.to_string();
+        let id = CellId::new_random().map_err(host)?.to_string();
         let short: String = id.trim_start_matches(CellId::PREFIX).chars().take(8).collect();
-        format!("{}{short}", self.prefix).parse::<CellName>().map_err(|e| ConfineError::Host(e.to_string()))
+        format!("{}{short}", self.prefix).parse::<CellName>().map_err(host)
     }
 
     /// The folder every run's staging folders are made in.
@@ -146,11 +118,14 @@ impl CellRunner {
     /// this once at start. Returns the names it acted on.
     pub fn reconcile_now(&self) -> Result<Vec<String>, ConfineError> {
         on_own_thread(|| async {
-            let host = |e: &dyn std::fmt::Display| ConfineError::Host(e.to_string());
-            let ledger = Ledger::open(&self.home).map_err(|e| host(&e))?;
-            let report = reconcile(&ledger, &*self.driver).await.map_err(|e| host(&e))?;
+            let report = self.cells()?.reconcile().await.map_err(host)?;
             Ok(report.removed.iter().chain(report.finished.iter()).map(ToString::to_string).collect())
         })
+    }
+
+    /// Adytum's cells under `home`: its ledger, with the driver.
+    fn cells(&self) -> Result<Cells, ConfineError> {
+        Cells::open(&self.home, self.driver.clone()).map_err(host)
     }
 
     async fn run_async(&self, plan: &CellPlan) -> Result<CellRun, ConfineError> {
@@ -172,9 +147,8 @@ impl CellRunner {
     /// The cell's whole life, with a guard that removes it however this
     /// function ends: an error, an early return or a panic.
     async fn run_cell(&self, plan: &CellPlan, name: &CellName, stage: &Path) -> Result<CellRun, ConfineError> {
-        let host = |e: &dyn std::fmt::Display| ConfineError::Host(e.to_string());
-        let ledger = Ledger::open(&self.home).map_err(|e| host(&e))?;
-        reconcile(&ledger, &*self.driver).await.map_err(|e| host(&e))?;
+        let cells = self.cells()?;
+        cells.reconcile().await.map_err(host)?;
         let spec = CellSpec {
             name: name.clone(),
             driver: self.driver_kind,
@@ -188,16 +162,15 @@ impl CellRunner {
             sealed: true,
             network: None,
             clone_from: None,
-            secrets: Vec::new(),
         };
-        create_cell(&ledger, &*self.driver, &spec).await.map_err(|e| host(&e))?;
+        cells.create(&spec).await.map_err(host)?;
         let mut guard = Guard { driver: self.driver.clone(), home: self.home.clone(), name: name.clone(), armed: true };
-        let ran = self.run_in(&ledger, name, plan, stage).await;
+        let ran = self.run_in(&cells, name, plan, stage).await;
         if plan.keep && ran.is_ok() {
             guard.armed = false;
             return ran;
         }
-        let removal = guard.remove(&ledger).await;
+        let removal = guard.remove(&cells).await;
         match (ran, removal) {
             (Ok(mut run), Ok(())) => {
                 run.removed = true;
@@ -209,47 +182,29 @@ impl CellRunner {
         }
     }
 
-    async fn run_in(&self, ledger: &Ledger, name: &CellName, plan: &CellPlan, stage: &Path) -> Result<CellRun, ConfineError> {
-        let host = |e: DriverError| ConfineError::Host(e.to_string());
-        let op = ledger.intend(OpKind::Start, name).map_err(|e| ConfineError::Host(e.to_string()))?;
-        let started = self.driver.start(name).await;
-        let outcome = started.as_ref().map_or_else(|e| Outcome::Failed(e.to_string()), |()| Outcome::Done);
-        ledger.settle(op, outcome).map_err(|e| ConfineError::Host(e.to_string()))?;
-        started.map_err(host)?;
-
+    async fn run_in(&self, cells: &Cells, name: &CellName, plan: &CellPlan, stage: &Path) -> Result<CellRun, ConfineError> {
+        cells.start(name).await.map_err(host)?;
         let folder = Self::project_folder_name(&plan.project)?;
         let guest_project = format!("{GUEST_IN}/{folder}");
-        // As root, because the copy logs in as the admin user and the
-        // program runs as the exec user: the folders are made for the admin
-        // user first, and handed to the exec user once the files are in.
-        let root = |argv: &[&str]| {
-            let argv: Vec<String> = argv.iter().map(|a| (*a).to_owned()).collect();
-            async move { self.driver.exec_root(name, &argv, ExecOpts { deadline: Some(Duration::from_mins(2)), ..ExecOpts::default() }).await }
-        };
-        let step = |what: &str, out: adytum_exec::Output| {
-            if out.success() {
-                Ok(())
-            } else {
-                Err(ConfineError::Host(format!("{what}: {}", out.stderr_lossy().trim())))
-            }
-        };
-        step("the cell's folders could not be made", root(&["mkdir", "-p", CELL_HOME, &guest_project]).await.map_err(host)?)?;
-        step("the cell's folders could not be handed over for the copy", root(&["chown", ADMIN_USER, &guest_project]).await.map_err(host)?)?;
+        // Both as the cell's user, so the program owns its home and its copy.
+        let home = ["mkdir", "-p", "--", CELL_HOME].map(String::from);
+        let made = self.driver.exec(name, &home, ExecOpts { deadline: Some(Duration::from_mins(2)), ..ExecOpts::default() }).await.map_err(host)?;
+        if !made.success() {
+            return Err(ConfineError::Host(format!("the cell's home could not be made: {}", made.stderr_lossy().trim())));
+        }
         let staged = stage.join("in");
         std::fs::create_dir(&staged).map_err(|e| ConfineError::Host(format!("the staged copy could not be made: {e}")))?;
         stage_project(&plan.project, &staged, &plan.copy_exclude).map_err(|e| ConfineError::Host(format!("the project could not be staged: {e}")))?;
-        self.driver.copy_in(name, &staged, &guest_project).await.map_err(host)?;
-        let owner = format!("{EXEC_USER}:{EXEC_USER}");
-        step("the project copy could not be handed to the cell's user", root(&["chown", "-R", &owner, CELL_HOME, &guest_project]).await.map_err(host)?)?;
+        self.driver.copy_in(name, &staged, &guest_project, None).await.map_err(host)?;
 
-        // The driver runs it as the exec user. `env -i` empties whatever the
-        // guest's login gave, then names exactly the plan's variables.
+        // The driver runs it as the cell's user. `env -i` empties whatever
+        // the guest's login gave, then names exactly the plan's variables.
         let mut argv: Vec<String> = ["env", "-i", "-C"].map(String::from).to_vec();
         argv.push(guest_project.clone());
         argv.extend(plan.env.iter().map(|(k, v)| format!("{k}={v}")));
         argv.push(plan.program.clone());
         argv.extend(plan.args.iter().cloned());
-        let opts = ExecOpts { env: Vec::new(), stdin: plan.stdin.clone(), deadline: Some(plan.deadline.unwrap_or(DEFAULT_DEADLINE)), root: false };
+        let opts = ExecOpts { stdin: plan.stdin.clone(), deadline: Some(plan.deadline.unwrap_or(DEFAULT_DEADLINE)), ..ExecOpts::default() };
         let out = self.driver.exec(name, &argv, opts).await.map_err(host)?;
 
         let mut result = None;
@@ -280,15 +235,15 @@ impl CellRunner {
 /// an early `?`, a panic. The normal end calls [`Guard::remove`] and the
 /// guard is then disarmed.
 struct Guard {
-    driver: Arc<dyn CellDriver>,
+    driver: Arc<dyn Driver>,
     home: PathBuf,
     name: CellName,
     armed: bool,
 }
 
 impl Guard {
-    async fn remove(&mut self, ledger: &Ledger) -> Result<(), String> {
-        let done = remove_cell(ledger, &*self.driver, &self.name).await.map_err(|e| e.to_string());
+    async fn remove(&mut self, cells: &Cells) -> Result<(), String> {
+        let done = cells.remove(&self.name).await.map_err(|e| e.to_string());
         self.armed = done.is_err();
         done
     }
@@ -305,13 +260,17 @@ impl Drop for Guard {
         let _ = std::thread::spawn(move || {
             let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
             rt.block_on(async {
-                if let Ok(ledger) = Ledger::open(&home) {
-                    let _ = remove_cell(&ledger, &*driver, &name).await;
+                if let Ok(cells) = Cells::open(&home, driver) {
+                    let _ = cells.remove(&name).await;
                 }
             });
         })
         .join();
     }
+}
+
+fn host(e: adytum::Error) -> ConfineError {
+    ConfineError::Host(e.to_string())
 }
 
 fn summary(run: &CellRun) -> String {
@@ -412,31 +371,30 @@ impl CellHost for CellRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use adytum_driver::Listed;
-    use adytum_exec::{Duplex, Output};
-    use adytum_model::{Arch, CellState};
+    use adytum::exec::{Duplex, Output};
+    use adytum::testing::{failed, ok, Exec, FakeDriver, Leaves, Op};
+    use adytum::{Arch, CellState, Listed};
     use std::sync::Mutex;
     use xenonet_engine::confine::{plan, CellRequest, Confinement};
-
-    #[derive(Default)]
-    struct Log(Mutex<Vec<String>>);
 
     #[derive(Clone, Copy, Default)]
     struct Behave {
         fail_exec: bool,
         panic_exec: bool,
         fail_remove: bool,
-        /// What the fake puts in the result folder.
+        /// What the copy out puts in the result folder.
         #[cfg(unix)]
         out_symlink: bool,
     }
 
-    /// A driver that records what it is asked and keeps a list of cells.
-    struct Recording {
-        log: Arc<Log>,
-        cells: Mutex<Vec<CellName>>,
-        specs: Mutex<Vec<CellSpec>>,
-        behave: Mutex<Behave>,
+    /// Adytum's fake driver, and what its own copies don't do: it lists
+    /// what was copied in before the staged copy goes, and writes a file
+    /// (and maybe a link) into the result folder.
+    struct Fake {
+        inner: FakeDriver,
+        copied: Mutex<Vec<String>>,
+        #[cfg(unix)]
+        out_symlink: bool,
     }
 
     fn listing(dir: &Path) -> String {
@@ -456,63 +414,48 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl CellDriver for Recording {
-        async fn exec_root(&self, _: &CellName, argv: &[String], _: ExecOpts) -> Result<Output, DriverError> {
-            self.log.0.lock().expect("lock").push(format!("root {}", argv.join(" ")));
-            Ok(Output { status: Some(0), ..Output::default() })
+    impl Driver for Fake {
+        async fn create(&self, spec: &CellSpec) -> adytum::Result<()> {
+            self.inner.create(spec).await
+        }
+        async fn start(&self, name: &CellName) -> adytum::Result<()> {
+            self.inner.start(name).await
+        }
+        async fn exec(&self, name: &CellName, argv: &[String], opts: ExecOpts) -> adytum::Result<Output> {
+            self.inner.exec(name, argv, opts).await
+        }
+        async fn stream(&self, name: &CellName, argv: &[String]) -> adytum::Result<Duplex> {
+            self.inner.stream(name, argv).await
+        }
+        async fn copy_in(&self, name: &CellName, host: &Path, guest: &str, owner: Option<&adytum::GuestUser>) -> adytum::Result<()> {
+            self.copied.lock().expect("lock").push(listing(host));
+            self.inner.copy_in(name, host, guest, owner).await
+        }
+        async fn copy_out(&self, name: &CellName, guest: &str, host: &Path) -> adytum::Result<()> {
+            std::fs::write(host.join("made.txt"), "hi").expect("a file");
+            #[cfg(unix)]
+            if self.out_symlink {
+                std::os::unix::fs::symlink("/etc/hosts", host.join("link")).expect("a link");
+            }
+            self.inner.copy_out(name, guest, host).await
+        }
+        async fn stop(&self, name: &CellName) -> adytum::Result<()> {
+            self.inner.stop(name).await
+        }
+        async fn remove(&self, name: &CellName) -> adytum::Result<()> {
+            self.inner.remove(name).await
+        }
+        async fn list(&self) -> adytum::Result<Vec<Listed>> {
+            self.inner.list().await
         }
     }
 
-    #[async_trait::async_trait]
-    impl Driver for Recording {
-        async fn create(&self, spec: &CellSpec) -> Result<(), DriverError> {
-            self.log.0.lock().expect("lock").push(format!("create {}", spec.name));
-            self.cells.lock().expect("lock").push(spec.name.clone());
-            self.specs.lock().expect("lock").push(spec.clone());
-            Ok(())
+    impl Fake {
+        fn calls(&self) -> Vec<String> {
+            self.inner.calls().iter().map(ToString::to_string).collect()
         }
-        async fn start(&self, name: &CellName) -> Result<(), DriverError> {
-            self.log.0.lock().expect("lock").push(format!("start {name}"));
-            Ok(())
-        }
-        async fn exec(&self, _: &CellName, argv: &[String], opts: ExecOpts) -> Result<Output, DriverError> {
-            self.log.0.lock().expect("lock").push(format!("exec {} stdin={}", argv.join(" "), opts.stdin.is_some()));
-            let b = *self.behave.lock().expect("lock");
-            assert!(!(b.panic_exec && argv.contains(&"env".to_owned())), "this test's exec panics");
-            if b.fail_exec && argv.contains(&"env".to_owned()) {
-                return Err(DriverError::Unsupported { what: "this test's exec".into() });
-            }
-            Ok(Output { status: Some(0), stdout: b"done\n".to_vec(), ..Output::default() })
-        }
-        async fn stream(&self, _: &CellName, _: &[String]) -> Result<Duplex, DriverError> {
-            Err(DriverError::Unsupported { what: "stream".into() })
-        }
-        async fn copy_in(&self, _: &CellName, host: &Path, guest: &str) -> Result<(), DriverError> {
-            self.log.0.lock().expect("lock").push(format!("copy_in {} {guest} files={}", host.display(), listing(host)));
-            Ok(())
-        }
-        async fn copy_out(&self, _: &CellName, guest: &str, host: &Path) -> Result<(), DriverError> {
-            self.log.0.lock().expect("lock").push(format!("copy_out {guest} {}", host.display()));
-            std::fs::write(host.join("made.txt"), "hi").expect("a file");
-            #[cfg(unix)]
-            if self.behave.lock().expect("lock").out_symlink {
-                std::os::unix::fs::symlink("/etc/hosts", host.join("link")).expect("a link");
-            }
-            Ok(())
-        }
-        async fn stop(&self, _: &CellName) -> Result<(), DriverError> {
-            Ok(())
-        }
-        async fn remove(&self, name: &CellName) -> Result<(), DriverError> {
-            self.log.0.lock().expect("lock").push(format!("remove {name}"));
-            if self.behave.lock().expect("lock").fail_remove {
-                return Err(DriverError::Unsupported { what: "removing in this test".into() });
-            }
-            self.cells.lock().expect("lock").retain(|c| c != name);
-            Ok(())
-        }
-        async fn list(&self) -> Result<Vec<Listed>, DriverError> {
-            Ok(self.cells.lock().expect("lock").iter().map(|name| Listed { name: name.clone(), state: CellState::Running }).collect())
+        fn cells(&self) -> Vec<(CellName, CellState)> {
+            self.inner.cells()
         }
     }
 
@@ -523,13 +466,37 @@ mod tests {
         d
     }
 
-    fn runner(behave: Behave, home: &Path) -> (CellRunner, Arc<Recording>, Arc<Log>) {
-        let log = Arc::new(Log::default());
-        let driver = Arc::new(Recording { log: log.clone(), cells: Mutex::new(Vec::new()), specs: Mutex::new(Vec::new()), behave: Mutex::new(behave) });
+    /// The runner on a fake whose program says `done`, with the calls of
+    /// `exec` kept.
+    fn runner(behave: Behave, home: &Path) -> (CellRunner, Arc<Fake>, Arc<Mutex<Vec<Exec>>>) {
+        let execs = Arc::new(Mutex::new(Vec::new()));
+        let inner = FakeDriver::new();
+        let kept = execs.clone();
+        inner.on_exec(move |call| {
+            kept.lock().expect("lock").push(call.clone());
+            let program = call.argv.first().is_some_and(|a| a == "env");
+            assert!(!(behave.panic_exec && program), "this test's exec panics");
+            match (program, behave.fail_exec) {
+                (true, _) => ok("done\n"),
+                (false, true) => failed(1, "this test's exec fails"),
+                (false, false) => ok(""),
+            }
+        });
+        if behave.fail_remove {
+            // The run's own removal, and the guard's second try.
+            inner.fail_next(Op::Remove, Leaves::Nothing);
+            inner.fail_next(Op::Remove, Leaves::Nothing);
+        }
+        let driver = Arc::new(Fake {
+            inner,
+            copied: Mutex::new(Vec::new()),
+            #[cfg(unix)]
+            out_symlink: behave.out_symlink,
+        });
         let image = ImagePin::new("https://example.test/a.img".into(), format!("sha256:{}", "ab".repeat(32)), Arch::Aarch64).expect("a pin");
         let apps = vec![CellApp { app: "fake-agent".into(), program: "/bin/sh".into() }];
         let r = CellRunner::with_driver(driver.clone(), DriverKind::Lima, home.to_path_buf(), image, apps).with_prefix("adytum-test-").expect("prefix");
-        (r, driver, log)
+        (r, driver, execs)
     }
 
     fn make_plan(r: &CellRunner, project: &Path, keep: bool, copy_out: bool) -> CellPlan {
@@ -562,22 +529,26 @@ mod tests {
     #[test]
     fn a_run_makes_a_sealed_cell_copies_runs_and_removes_it() {
         let (home, project) = (dir("a-home"), dir("a-proj"));
-        let (r, driver, log) = runner(Behave::default(), &home);
+        let (r, driver, execs) = runner(Behave::default(), &home);
         let run = r.run(&make_plan(&r, &project, false, false)).expect("runs");
         assert!(run.removed && run.status == Some(0) && run.stdout == b"done\n" && run.result.is_none());
         assert!(run.cell.starts_with("adytum-test-"));
-        let log = log.0.lock().expect("lock");
-        let verbs: Vec<&str> = log.iter().map(|l| l.split(' ').next().unwrap_or("")).collect();
-        assert_eq!(verbs, ["create", "start", "root", "root", "copy_in", "root", "exec", "remove"], "{log:?}");
-        let spec = driver.specs.lock().expect("lock")[0].clone();
-        assert!(spec.sealed && spec.mounts.is_empty() && spec.ports.is_empty() && spec.secrets.is_empty() && spec.network.is_none());
+        let calls = driver.calls();
+        let verbs: Vec<&str> = calls.iter().map(|l| l.split(' ').next().unwrap_or("")).collect();
+        assert_eq!(verbs, ["create", "start", "exec", "copy_in", "exec", "remove"], "{calls:?}");
+        let name: CellName = run.cell.parse().expect("a name");
+        let spec = driver.inner.spec(&name).expect("the spec");
+        assert!(spec.sealed && spec.mounts.is_empty() && spec.ports.is_empty() && spec.network.is_none());
         assert_eq!(spec.wall, xenonet_engine::confine::wall_for_identity("git:x").expect("wall"));
-        let ran = log.iter().find(|l| l.starts_with("exec env -i")).expect("the program ran");
-        assert!(ran.contains("env -i -C /tmp/xn-in/"), "{ran}");
-        assert!(log.iter().any(|l| l.starts_with("root chown -R cell:cell /tmp/xn-home /tmp/xn-in/")), "{log:?}");
-        assert!(ran.contains("PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/xn-home /bin/sh agent.sh stdin=true"), "{ran}");
+        let execs = execs.lock().expect("lock");
+        assert_eq!(execs[0].argv, ["mkdir", "-p", "--", "/tmp/xn-home"], "the cell's user makes its home");
+        let ran = execs[1].argv.join(" ");
+        assert!(ran.starts_with("env -i -C /tmp/xn-in/"), "{ran}");
+        assert!(ran.ends_with("PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/xn-home /bin/sh agent.sh"), "{ran}");
+        assert_eq!(execs[1].stdin, b"prompt", "the prompt goes in on stdin");
+        assert!(execs[1].env.is_empty(), "no variable reaches the cell but through env -i");
         assert!(!ran.contains("/Users"), "{ran}");
-        assert!(driver.cells.lock().expect("lock").is_empty(), "the cell is gone");
+        assert!(driver.cells().is_empty(), "the cell is gone");
         cleanup(&[&home, &project]);
     }
 
@@ -591,12 +562,11 @@ mod tests {
         }
         #[cfg(unix)]
         std::os::unix::fs::symlink(&home, project.join("to-home")).expect("link");
-        let (r, _, log) = runner(Behave::default(), &home);
+        let (r, driver, _) = runner(Behave::default(), &home);
         r.run(&make_plan(&r, &project, false, false)).expect("runs");
-        let log = log.0.lock().expect("lock");
-        let copied = log.iter().find(|l| l.starts_with("copy_in")).expect("a copy").replace('\\', "/");
+        let copied = driver.calls().into_iter().find(|l| l.starts_with("copy_in")).expect("a copy").replace('\\', "/");
         assert!(copied.contains("xn-stage/adytum-test-") && copied.contains("/in /tmp/xn-in/"), "the copy is from the staged folder: {copied}");
-        let files = copied.split("files=").nth(1).expect("a listing");
+        let files = driver.copied.lock().expect("lock").join(";");
         assert_eq!(files, ".git,.git/HEAD,agent.sh,envfile,src,src/main.rs,sub", "{files}");
         assert!(!std::fs::read_dir(home.join("xn-stage")).expect("stage").flatten().any(|e| e.path().join("in").exists()), "the staged copy is removed");
         cleanup(&[&home, &project]);
@@ -605,13 +575,13 @@ mod tests {
     #[test]
     fn what_a_cell_made_comes_back_only_into_a_fresh_folder_and_never_the_project() {
         let (home, project) = (dir("o-home"), dir("o-proj"));
-        let (r, _, log) = runner(Behave::default(), &home);
+        let (r, driver, _) = runner(Behave::default(), &home);
         let run = r.run(&make_plan(&r, &project, false, true)).expect("runs");
         let out = run.result.clone().expect("a result");
         assert!(out.starts_with(home.join("xn-stage")) && out.ends_with("out"), "{out:?}");
         assert_eq!(std::fs::read_to_string(out.join("made.txt")).expect("made"), "hi");
         assert!(!project.join("made.txt").exists(), "the project folder is never written to");
-        assert!(log.0.lock().expect("lock").iter().any(|l| l.starts_with("copy_out ") && l.ends_with(&format!(" {}", out.display()))));
+        assert!(driver.calls().iter().any(|l| l.starts_with("copy_out ") && l.ends_with(&format!(" {}", out.display()))));
         r.discard_result(&out).expect("discard");
         assert!(!out.exists() && !out.parent().expect("run folder").exists());
         assert!(r.discard_result(&project).is_err(), "only this runner's own results are removed");
@@ -627,7 +597,7 @@ mod tests {
         let err = r.run(&make_plan(&r, &project, false, true)).expect_err("refused");
         assert!(matches!(err, ConfineError::ResultRefused { ref path } if path == "link"), "{err}");
         assert!(std::fs::read_dir(home.join("xn-stage")).expect("stage").next().is_none(), "nothing of the result is kept");
-        assert!(driver.cells.lock().expect("lock").is_empty());
+        assert_eq!(driver.cells().len(), 0, "the cell is gone");
         cleanup(&[&home, &project]);
     }
 
@@ -657,7 +627,7 @@ mod tests {
     #[test]
     fn a_project_swapped_after_the_plan_is_refused_before_a_cell_is_made() {
         let (home, project) = (dir("w-home"), dir("w-proj"));
-        let (r, driver, log) = runner(Behave::default(), &home);
+        let (r, driver, execs) = runner(Behave::default(), &home);
         let planned = make_plan(&r, &project, false, false);
         #[cfg(unix)]
         {
@@ -668,9 +638,9 @@ mod tests {
         {
             let err = r.run(&planned).expect_err("refused");
             assert!(matches!(err, ConfineError::ProjectChanged { .. }), "{err}");
-            assert!(log.0.lock().expect("lock").is_empty() && driver.cells.lock().expect("lock").is_empty());
+            assert!(driver.calls().is_empty() && execs.lock().expect("lock").is_empty());
         }
-        let _ = (planned, driver, log);
+        let _ = (planned, driver, execs);
         cleanup(&[&home]);
         let _ = std::fs::remove_file(&project);
     }
@@ -681,7 +651,7 @@ mod tests {
         let (r, driver, _) = runner(Behave { fail_exec: true, ..Behave::default() }, &home);
         let err = r.run(&make_plan(&r, &project, false, false)).expect_err("fails");
         assert!(matches!(err, ConfineError::Host(_)));
-        assert!(driver.cells.lock().expect("lock").is_empty(), "a failed run leaves no cell");
+        assert!(driver.cells().is_empty(), "a failed run leaves no cell");
         cleanup(&[&home, &project]);
     }
 
@@ -691,7 +661,7 @@ mod tests {
         let (r, driver, _) = runner(Behave { panic_exec: true, ..Behave::default() }, &home);
         let err = r.run(&make_plan(&r, &project, false, false)).expect_err("fails");
         assert!(matches!(err, ConfineError::Host(ref m) if m.contains("stopped unexpectedly")), "{err}");
-        assert!(driver.cells.lock().expect("lock").is_empty(), "the guard removed the cell as the panic unwound");
+        assert!(driver.cells().is_empty(), "the guard removed the cell as the panic unwound");
         cleanup(&[&home, &project]);
     }
 
@@ -703,7 +673,7 @@ mod tests {
         let ConfineError::NotRemoved { cell, result, .. } = &err else { panic!("{err}") };
         assert!(cell.starts_with("adytum-test-") && result.contains("done"), "{err}");
         assert!(err.to_string().contains("adytum rm"), "{err}");
-        assert_eq!(driver.cells.lock().expect("lock").len(), 1, "the cell is still there, and the error says so");
+        assert_eq!(driver.cells().len(), 1, "the cell is still there, and the error says so");
         cleanup(&[&home, &project]);
     }
 
@@ -713,9 +683,9 @@ mod tests {
         let (r, driver, _) = runner(Behave::default(), &home);
         let run = r.run(&make_plan(&r, &project, true, false)).expect("runs");
         assert!(!run.removed);
-        assert_eq!(driver.cells.lock().expect("lock").len(), 1);
+        assert_eq!(driver.cells().len(), 1);
         assert_eq!(r.reconcile_now(), Ok(vec![]), "a cell that is still there is left alone");
-        driver.cells.lock().expect("lock").clear();
+        driver.inner.lose(&run.cell.parse().expect("a name"));
         assert_eq!(r.reconcile_now(), Ok(vec![run.cell.clone()]), "a cell that vanished is forgotten");
         cleanup(&[&home, &project]);
     }

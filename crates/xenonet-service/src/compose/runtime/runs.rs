@@ -3,11 +3,11 @@
 //! quoted how, and whether it may start now are xenonet-engine's
 //! (`delivery::runs`); the processes, their logs in `runs/` and their
 //! records, kept in the store, are here. Each run's processes are one
-//! process group (adytum-exec's): a run counts until they've all ended,
+//! process group (Adytum's exec): a run counts until they've all ended,
 //! and its cap stops them all.
 
 use crate::compose::runtime::platform;
-use adytum_exec::{Command, ExecError, Spawned};
+use adytum::exec::{Command, Spawned};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -119,7 +119,7 @@ fn drain(mut from: impl Read + Send + 'static, log: Option<Arc<Mutex<Log>>>) {
 #[cfg(windows)]
 fn command(how: &runs::Launch) -> Command {
     let cmd = Command::new(&how.program);
-    // adytum-exec's Spawned starts it with no window (CREATE_NO_WINDOW, 0x0800_0000).
+    // Adytum's Spawned starts it with no window (CREATE_NO_WINDOW, 0x0800_0000).
     if how.verbatim {
         how.args.iter().fold(cmd, Command::raw_arg)
     } else {
@@ -311,12 +311,13 @@ impl Runner {
                     drop(log);
                     let _ = std::fs::remove_file(p);
                 }
-                let missing = matches!(&e, ExecError::NotFound { .. }) || matches!(&e, ExecError::Spawn { source, .. } if source.kind() == std::io::ErrorKind::NotFound);
+                let missing =
+                    matches!(&e, adytum::Error::ProgramNotFound { .. }) || matches!(&e, adytum::Error::Spawn { source, .. } if source.kind() == std::io::ErrorKind::NotFound);
                 return Err(if missing { format!("{app} isn't installed here") } else { e.to_string() });
             }
         };
         let pid = child.pid();
-        // A job object: adytum-exec has no process group on Windows.
+        // A job object: Adytum's exec has no process group on Windows.
         #[cfg(windows)]
         let tree = xenonet_os::process::Tree::of(child.child_mut());
         let run = Run { id, key: key.to_string(), app: app.to_string(), pid: Some(f64::from(pid)), at, end: None, exit: None, ms: None, timed_out: false };
@@ -346,7 +347,7 @@ impl Runner {
                 // The turn has ended, and so has everything it started.
                 #[cfg(windows)]
                 let others = {
-                    // adytum-exec's deadline stops only the child here, so
+                    // Adytum's exec deadline stops only the child here, so
                     // the job (the child's whole tree) is stopped by this.
                     if started.elapsed().as_secs_f64() * 1000.0 >= runs::TURN_MS && tree.others() {
                         tree.kill(child.child_mut());

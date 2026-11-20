@@ -7,7 +7,7 @@
 use crate::compose::integrations::b64;
 use crate::compose::integrations::common::{clean, fail, has_credential, sandbox_gone, text, Fail, Tickets};
 use crate::compose::integrations::reviews::{self, ReviewHost};
-use adytum_openshell as shell;
+use adytum::openshell as shell;
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;
@@ -21,11 +21,12 @@ use xenonet_text::text::truthy;
 /// The label every sandbox of this integration carries, and is listed by.
 const JOB_LABEL: &str = "xenonet-job";
 
-/// A refusal from the OpenShell driver, as the HTTP error it has always been.
-fn refused(e: shell::OpenShellError) -> Fail {
-    let (status, code) = match e {
-        shell::OpenShellError::NativeOnWindows => (409, "unavailable"),
-        shell::OpenShellError::PolicyChanged => (409, "changed"),
+/// A refusal from the OpenShell driver, as the HTTP error it has always
+/// been: what the machine can't do (native OpenShell on Windows) is
+/// unavailable, the rest a bad request.
+fn refused(e: adytum::Error) -> Fail {
+    let (status, code) = match &e {
+        adytum::Error::Unsupported { .. } => (409, "unavailable"),
         _ => (400, "bad-request"),
     };
     Fail { status, code: code.into(), message: e.to_string() }
@@ -46,7 +47,7 @@ fn profile_of(profile: &Value, platform: &str) -> Result<shell::Profile, Fail> {
     let backend = profile.get("backend").filter(|v| !v.is_null());
     if backend.and_then(Value::as_str) == Some("wsl") {
         if platform != "win32" {
-            return Err(refused(shell::OpenShellError::WslNeedsWindows));
+            return fail("WSL profiles are available on Windows only.");
         }
         let distro = text(profile.get("distro"), "WSL distribution", 80)?;
         return Ok(shell::Profile::Wsl(shell::Distro::new(&distro).map_err(refused)?));
@@ -99,7 +100,7 @@ fn read_policy(value: Option<&Value>) -> Result<Option<shell::PolicyFile>, Fail>
     let file = files::realpath(&text(value, "Policy file", 1024)?)?;
     match shell::PolicyFile::read(std::path::Path::new(&file)) {
         Ok(p) => Ok(Some(p)),
-        Err(shell::OpenShellError::PolicyIo { op, source }) => Err(files::FsError::of(source, op, &file).into()),
+        Err(adytum::Error::Io { source, .. }) => Err(files::FsError::of(source, "open", &file).into()),
         Err(e) => Err(refused(e)),
     }
 }
@@ -398,7 +399,7 @@ pub async fn launch(host: &dyn ShellHost, s: &Shared, ticket: &Value) -> Result<
         let previewed =
             shell::PolicyFile { path: display(&value["policy"]["file"]).into(), content: display(&value["policy"]["content"]), hash: display(&value["policy"]["hash"]) };
         match now_policy {
-            Some(now) => previewed.unchanged_since(&now).map_err(|e| failure(refused(e)))?,
+            Some(now) => previewed.unchanged_since(&now).map_err(|_| changed("The policy changed. Preview again."))?,
             None => return Err(changed("The policy changed. Preview again.")),
         }
     }
@@ -604,7 +605,11 @@ mod tests {
         assert_eq!(why(command(&json!({ "backend": "docker" }), &args, "linux", None)), "Choose native or WSL execution.");
         assert_eq!(why(command(&json!({ "backend": "wsl", "distro": "Ubuntu" }), &args, "linux", None)), "WSL profiles are available on Windows only.");
         for distro in [json!("Ubuntu; calc"), json!("Ubuntu 24.04"), json!("Ub\u{fc}ntu"), json!("a&b")] {
-            assert_eq!(why(command(&json!({ "backend": "wsl", "distro": distro }), &args, "win32", None)), "Use the installed WSL distribution name.", "{distro}");
+            assert_eq!(
+                why(command(&json!({ "backend": "wsl", "distro": distro }), &args, "win32", None)),
+                "Not a valid WSL distribution: a plain word of at most 80 characters.",
+                "{distro}"
+            );
         }
         assert_eq!(why(command(&json!({ "backend": "wsl", "distro": "x".repeat(81) }), &args, "win32", None)), "WSL distribution must be text, at most 80 characters.");
         let f = command(&json!({ "backend": "native" }), &args, "win32", None).unwrap_err();
@@ -631,7 +636,7 @@ mod tests {
         assert_eq!(policy_file(Some(&at("policy.yaml"))).unwrap()["hash"], json!(b64::sha256_hex(b"version: 1\n")));
         std::fs::write(dir.join("big.yaml"), vec![b'#'; 256 * 1024 + 1]).unwrap();
         for p in ["big.yaml", "project"] {
-            assert_eq!(why(policy_file(Some(&at(p)))), "Choose a policy file under 256 KiB.", "{p}");
+            assert_eq!(why(policy_file(Some(&at(p)))), "Not a valid policy file: a regular file of at most 256 KiB.", "{p}");
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -10,7 +10,7 @@ use crate::schema::{
     McpServerStdio, NewSessionRequest, PromptRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionId, SessionNotification, SessionUpdate, StopReason, TerminalOutputRequest, TextContent, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
-use adytum_exec::{Spawned, StderrTail};
+use adytum::exec::{Spawned, StderrTail};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::{Agent, ErrorCode};
@@ -137,7 +137,7 @@ impl Shared {
 /// The agent's process, until the client closes.
 struct Process {
     spawned: Spawned,
-    /// A job object: adytum-exec has no process group on Windows.
+    /// A job object: Adytum's exec has no process group on Windows.
     #[cfg(windows)]
     tree: xenonet_os::process::Tree,
 }

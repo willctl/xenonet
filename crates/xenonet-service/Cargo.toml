@@ -25,14 +25,11 @@ a2a-lf.workspace = true
 xenonet-a2a.workspace = true
 xenonet-authz.workspace = true
 xenonet-console.workspace = true
-# Starts confined in a cell (cells.rs): Adytum's drivers and ledger run
-# only here, in the composition root; the engine reaches them through its
-# CellHost trait.
-adytum-driver.workspace = true
-adytum-exec.workspace = true
-adytum-ledger.workspace = true
-adytum-lima.workspace = true
-adytum-model.workspace = true
+# Starts confined in a cell (cells.rs) and OpenShell's commands, profiles
+# and pinned policy file (compose/integrations/openshell.rs): Adytum's
+# drivers and ledger run only here, in the composition root; the engine
+# reaches them through its CellHost trait.
+adytum = { workspace = true, features = ["lima", "openshell"] }
 async-trait.workspace = true
 bytes.workspace = true
 getrandom.workspace = true
@@ -95,8 +92,6 @@ xenonet-components.workspace = true
 # The composition's other cores (compose/app.rs): refusals, the doctor,
 # and the MCP catalog, with Grok Build's config.toml, which it reads
 # through Grok Build's adapter.
-# OpenShell's commands, profiles, JSON and pinned policy file (compose/integrations/openshell.rs).
-adytum-openshell.workspace = true
 xenonet-doctor.workspace = true
 xenonet-grok-build.workspace = true
 xenonet-mcp-catalog.workspace = true
@@ -115,6 +110,8 @@ xenonet-acp.workspace = true
 futures.workspace = true
 
 [dev-dependencies]
+# Adytum's fake driver, for the cell runner's tests (cells.rs).
+adytum = { workspace = true, features = ["testing"] }
 # The demo's world, which tests/runtime_actors.rs names its nodes from.
 xenonet-demo.workspace = true
 # Paused time, for the tunnel's waits between restarts.
