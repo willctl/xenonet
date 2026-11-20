@@ -599,11 +599,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     let placed = crate::compose::runtime::accounts::place_start(w, &r.app, &cwd, record.is_some())?;
     // ACP takes none of that (its agent picks its own folder and sign-in and
     // takes no switch to refuse commands), so a placed start is not made over it.
-    let acp = if placed == crate::compose::runtime::accounts::Placed::default() {
-        over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref(), record.is_some())
-    } else {
-        None
-    };
+    let acp = if over_acp_allowed(&placed) { over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref(), record.is_some()) } else { None };
     if let Some(started) = acp {
         if started.is_ok() {
             w.starts.history.locked().push((now, bucket));
@@ -745,6 +741,13 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         first["sandbox"] = json!({ "domains": rec.domains, "words": words });
     }
     Ok(first)
+}
+
+/// Whether a start placed this way may be made over ACP, which takes no
+/// folder, no sign-in and no switch to keep a run from committing: only
+/// one that is placed nowhere and told nothing.
+fn over_acp_allowed(placed: &crate::compose::runtime::accounts::Placed) -> bool {
+    *placed == crate::compose::runtime::accounts::Placed::default()
 }
 
 /// What a sandboxed start does about ACP, which has no sandbox XenoNet
@@ -1583,6 +1586,19 @@ mod tests {
 
     // The token is kept under a name the credential store takes, and read
     // back from it: each store checks the name the same way.
+    #[test]
+    fn a_placed_start_never_goes_over_acp() {
+        use crate::compose::runtime::accounts::Placed;
+        assert!(super::over_acp_allowed(&Placed::default()));
+        for placed in [
+            Placed { root: Some("/h/.claude-work".into()), ..Placed::default() },
+            Placed { ruled: true, ..Placed::default() },
+            Placed { deny: vec!["--disallowedTools".into()], ..Placed::default() },
+        ] {
+            assert!(!super::over_acp_allowed(&placed), "{placed:?}");
+        }
+    }
+
     #[test]
     fn a_sandboxed_start_never_goes_over_acp() {
         assert!(acp_for_sandboxed("Claude Code", true).is_none(), "its headless start takes it, sandboxed");
