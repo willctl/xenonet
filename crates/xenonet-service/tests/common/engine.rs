@@ -68,7 +68,9 @@ pub struct Accounts {
     /// (folder, rule), the deepest folder that holds a path winning.
     pub rules: Arc<std::sync::Mutex<Vec<(String, Value)>>>,
     /// Claude Code's folders: None for its own, then those named.
-    pub roots: Vec<(Option<String>, Option<String>)>,
+    pub roots: Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>,
+    /// Whether the store that keeps the rules can't be read.
+    pub unreadable: Arc<std::sync::atomic::AtomicBool>,
     pub answers: bool,
     /// The live snapshot's `limits`.
     pub limits: Value,
@@ -106,7 +108,7 @@ impl State for Map {
     }
     fn app_account_roots(&self, app: &str) -> Vec<(Option<String>, Option<String>)> {
         if app == "claude" {
-            self.accounts.roots.clone()
+            self.accounts.roots.lock().unwrap().clone()
         } else {
             Vec::new()
         }
@@ -120,6 +122,9 @@ impl State for Map {
     fn identity_project(&self, path: &str) -> R<Value> {
         if !self.accounts.answers {
             return cores::pending("the map");
+        }
+        if self.accounts.unreadable.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(cores::CoreError::new("the store is unreadable"));
         }
         let rules = self.accounts.rules.lock().unwrap();
         let best = rules.iter().filter(|(f, _)| path == f || path.starts_with(&format!("{f}/"))).max_by_key(|(f, _)| f.len());

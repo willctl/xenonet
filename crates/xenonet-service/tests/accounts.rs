@@ -48,6 +48,8 @@ struct Desk {
     ledger: String,
     work: String,
     rules: std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>,
+    roots: std::sync::Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>,
+    unreadable: std::sync::Arc<std::sync::atomic::AtomicBool>,
     root: PathBuf,
 }
 
@@ -67,11 +69,12 @@ async fn desk(name: &str, atlas_rule: Value, sessions: impl FnOnce(&str, &str) -
     let (atlas, ledger, work) = (atlas.to_string_lossy().into_owned(), ledger.to_string_lossy().into_owned(), work.to_string_lossy().into_owned());
     let accounts = Accounts {
         rules: std::sync::Arc::new(std::sync::Mutex::new(vec![(atlas.clone(), atlas_rule), (ledger.clone(), json!({ "claude": "nova-work@example.com" }))])),
-        roots: vec![(None, Some("nova@example.com".into())), (Some(work.clone()), Some("nova-work@example.com".into()))],
+        roots: std::sync::Arc::new(std::sync::Mutex::new(vec![(None, Some("nova@example.com".into())), (Some(work.clone()), Some("nova-work@example.com".into()))])),
+        unreadable: Default::default(),
         answers: true,
         limits: json!({ "claude": { "fiveHour": 40 }, format!("claude@{work}"): { "fiveHour": 92 } }),
     };
-    let rules = accounts.rules.clone();
+    let (rules, roots, unreadable) = (accounts.rules.clone(), accounts.roots.clone(), accounts.unreadable.clone());
     // A folder a start names is one the map knows: here, by a session that ran in it.
     let scratch = home.join("scratch");
     std::fs::create_dir_all(&scratch).unwrap();
@@ -88,7 +91,7 @@ async fn desk(name: &str, atlas_rule: Value, sessions: impl FnOnce(&str, &str) -
     assert_eq!(st, 200, "{v}");
     host.world.starts.set_sign_in(TOKEN);
     host.world.starts.set_environment(service_env());
-    Desk { host, atlas, ledger, work, rules, root }
+    Desk { host, atlas, ledger, work, rules, roots, unreadable, root }
 }
 
 /// The `n`th run's sign-in descriptor and the names of its environment.
@@ -281,4 +284,36 @@ async fn the_wake_budget_reads_the_plan_of_the_sessions_own_folder() {
     let mut host = delivery::RouterHost::of(&d.host.world);
     assert_eq!(host.usage_of(WORK_SESSION), Some(0.92), "the work folder's plan");
     assert_eq!(host.usage_of("claude:0190d3e0-0000-7000-8000-0000000c0003"), Some(0.4), "the default folder's");
+}
+
+/// The folder a placed session ran in is checked as named again at each
+/// turn: one she has since taken away is no folder to run in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_placed_session_whose_folder_is_no_longer_named_is_not_run() {
+    let d = desk("accounts-unnamed", json!({ "claude": "nova@example.com" }), |_, _| Vec::new()).await;
+    let session = start(&d, &d.ledger, 1).await;
+    let w = &d.host.world;
+    assert_eq!(accounts::of(w, &session).unwrap().and_then(|p| p.root), Some(d.work.clone()), "ledger is ruled to the work folder");
+    // The folder goes, and the rule no longer names its account, so only the
+    // record of where the session ran is left to say it ran there.
+    d.roots.lock().unwrap().retain(|(r, _)| r.is_none());
+    d.rules.lock().unwrap()[1].1 = json!({});
+    let why = delivery::resume_turn(w, &session, Some(&d.ledger), "wake up", false).unwrap_err();
+    assert!(why.contains(".claude-work") && why.contains("named"), "{why}");
+    assert_eq!(fake_runs(&d.host).len(), 1, "no second run was made");
+}
+
+/// A store that can't say what the rules are is not a project with none:
+/// neither a start nor a wake is made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_rule_that_cannot_be_read_refuses_a_start_and_a_wake() {
+    let d = desk("accounts-store", json!({ "claude": "nova@example.com" }), |_, _| Vec::new()).await;
+    let session = start(&d, &d.atlas, 1).await;
+    let w = &d.host.world;
+    d.unreadable.store(true, std::sync::atomic::Ordering::SeqCst);
+    let why = delivery::resume_turn(w, &session, Some(&d.atlas), "wake up", false).unwrap_err();
+    assert!(why.contains("can't be read"), "{why}");
+    let (s, v) = d.host.window("POST", "/api/start", json!({ "folder": d.atlas, "prompt": "tidy 2" })).await;
+    assert_ne!(s, 200, "{v}");
+    assert_eq!(fake_runs(&d.host).len(), 1);
 }

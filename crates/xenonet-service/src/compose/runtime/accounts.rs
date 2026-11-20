@@ -172,6 +172,13 @@ pub fn for_turn(w: &Runtime, app: &str, session: &str, cwd: Option<&str>, confin
         Some(r) => r.root.clone(),
         None => found,
     };
+    // The folder it was placed in is a folder she named now, or none: one she
+    // has taken away since is no folder to run in, whatever the record says.
+    if let Some(r) = root.as_deref() {
+        if !w.state().app_account_roots(app).iter().any(|(n, _)| n.as_deref() == Some(r)) {
+            return Err(format!("{session} runs in {r}, which isn't a folder you named for {app} now, so no turn is run for it."));
+        }
+    }
     if confined && root.is_some() {
         return Err(format!(
             "{session} runs in {}, signed in on its own. A run in a sandbox signs in with the token XenoNet's runs share, so it can't be run in that folder that way.",
