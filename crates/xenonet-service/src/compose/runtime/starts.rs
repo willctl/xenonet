@@ -594,6 +594,9 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
             "only the person picks a permission mode, and this start isn't theirs: it asked for {mode}, which would let the run approve its own edits without XenoNet judging them"
         ));
     }
+    // A rule that names the account this app is to run as places the start
+    // in the folder that holds it, or refuses it.
+    let placed = crate::compose::runtime::accounts::place_start(w, &r.app, &cwd, record.is_some())?;
     if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref(), record.is_some()) {
         if started.is_ok() {
             w.starts.history.locked().push((now, bucket));
@@ -637,7 +640,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         None => Ok((app, args)),
     });
     let (app, args) = match sandboxed {
-        Ok(c) => c,
+        Ok((app, mut args)) => {
+            args.extend(placed.deny.iter().cloned());
+            (app, args)
+        }
         Err(why) => {
             if let Some(f) = &prompt_file {
                 let _ = std::fs::remove_file(f);
@@ -648,11 +654,12 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // A sandboxed run gets the scrubbed environment an ACP agent gets, and
     // its sign-in; the service's own, without session marks, otherwise.
     let mut env: Vec<(String, String)> = if record.is_some() { sandbox::env(w) } else { xenonet_engine::delivery::resume::resume_env(w.starts.environment()) };
+    xenonet_engine::delivery::resume::in_root(&mut env, &r.app, placed.root.as_deref());
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);
         env.push((v.into(), mcp_tool_timeout_ms(w).to_string()));
     }
-    let sign_in = ways.sign_in.and_then(|s| signed_env(w, &s, &mut env));
+    let sign_in = crate::compose::runtime::accounts::sign_in(w, ways.sign_in, placed.ruled, &mut env);
     // Kept before the run starts, under its session (Codex names its own
     // later, so it is kept under the run's key until then): a run whose
     // sandbox can't be kept isn't started, since a turn for it later would
