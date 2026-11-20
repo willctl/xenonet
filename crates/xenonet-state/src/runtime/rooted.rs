@@ -29,8 +29,13 @@ impl Lister for Rooted {
                 Ok(list) => {
                     any = true;
                     for mut s in list {
-                        if let (Some(root), Some(o)) = (root, s.as_object_mut()) {
-                            o.insert("root".into(), json!(root));
+                        if let Some(o) = s.as_object_mut() {
+                            // The default folder's sessions carry none, whatever an
+                            // adapter put there.
+                            match root {
+                                Some(root) => o.insert("root".into(), json!(root)),
+                                None => o.remove("root"),
+                            };
                         }
                         out.push(s);
                     }
@@ -128,6 +133,12 @@ mod tests {
         let r = two(Ok(vec![json!({ "id": "claude:a" })]), Ok(vec![json!({ "id": "claude:b" })]));
         let list = r.sessions(&Unchecked).unwrap();
         assert_eq!(list, [json!({ "id": "claude:a" }), json!({ "id": "claude:b", "root": "/h/.claude-work" })]);
+    }
+
+    #[test]
+    fn a_root_an_adapter_put_on_a_default_session_is_taken_off() {
+        let r = two(Ok(vec![json!({ "id": "claude:a", "root": "/h/.claude-work" })]), Ok(Vec::new()));
+        assert_eq!(r.sessions(&Unchecked).unwrap(), [json!({ "id": "claude:a" })]);
     }
 
     #[test]

@@ -1057,9 +1057,11 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
             Value::Null
         }
     };
-    // Which account a root holds: the only one it has had, by its folder;
-    // else the one signed in when the session ran.
-    let by_folder = |spans: &[Value], a: Js<'_>, when: Js<'_>| -> Value {
+    // Which account a root holds: the only one it has had, by its folder, for
+    // a session that started after XenoNet first read the folder's sign-in;
+    // an older one may have run under a sign-in XenoNet never saw, so it is
+    // placed by when it ran, as likely at best.
+    let by_folder = |spans: &[Value], a: Js<'_>, when: Js<'_>, started: Js<'_>| -> Value {
         let mut ids: Vec<&Value> = spans.iter().filter_map(|s| s.get("id")).collect();
         if let Some(id) = a.and_then(|a| a.get("id")) {
             ids.push(id);
@@ -1067,8 +1069,12 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         ids.dedup();
         ids.sort_by_key(|v| key_of(Some(v)));
         ids.dedup();
+        let first_read =
+            spans.iter().filter_map(|s| s.get("from").and_then(Value::as_f64)).chain(a.and_then(|a| a.get("since")).and_then(Value::as_f64)).fold(f64::INFINITY, f64::min);
+        let after = nn(started).and_then(Value::as_f64).is_some_and(|t| t >= first_read);
         match ids.as_slice() {
-            [one] => link((*one).clone(), "exact", "its folder"),
+            [one] if after => link((*one).clone(), "exact", "its folder"),
+            [one] => link((*one).clone(), "likely", "its folder, read after the session ran"),
             _ => account_at(spans, Some(&current(a)), when, &[]),
         }
     };
@@ -1094,7 +1100,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
                 // own sign-in and timeline.
                 let root = n.get("root").and_then(Value::as_str).and_then(|r| rooted.iter().find(|x| x.kind == kind && x.root == r));
                 match root {
-                    Some(r) => by_folder(&signins[&r.key], acc(&r.key), when),
+                    Some(r) => by_folder(&signins[&r.key], acc(&r.key), when, nn(n.get("createdAt")).or(when)),
                     None => account_at(&signins[kind], Some(&current(acc(kind))), when, &known[kind]),
                 }
             } else {
@@ -1630,10 +1636,13 @@ mod tests {
         let nodes = [
             json!({ "id": "claude:s1", "kind": "session", "app": "claude", "updatedAt": 1000 }),
             json!({ "id": "claude:s2", "kind": "session", "app": "claude", "root": root, "updatedAt": 1000 }),
+            // One that ran before XenoNet first read the folder's sign-in (at 500) may have run under another.
+            json!({ "id": "claude:s3", "kind": "session", "app": "claude", "root": root, "createdAt": 100, "updatedAt": 200 }),
         ];
         let accounts = json!({
             "claude": claude_account("claude:a:o", "nova@example.com"), "claudeFile": "/h/.claude.json",
-            "claude@/h/.claude-work": claude_account("claude:b:p", "nova-work@example.com"), "claude@/h/.claude-workFile": "/h/.claude-work/.claude.json",
+            "claude@/h/.claude-work": json!({ "id": "claude:b:p", "kind": "claude", "handle": "nova-work@example.com", "detail": {}, "since": 500 }),
+            "claude@/h/.claude-workFile": "/h/.claude-work/.claude.json",
             "chatgpt": null, "chatgptFile": "/h/.codex/auth.json", "gh": [], "ssh": [],
         });
         let links = ran_as(&nodes, &accounts, &empty_saved(), &rooted);
@@ -1641,6 +1650,7 @@ mod tests {
         assert_eq!((links[0]["id"].as_str(), links[0]["confidence"].as_str()), (Some("claude:a:o"), Some("assumed")));
         // The named root's holds one account, so it is recorded by its folder, above likely.
         assert_eq!((links[1]["id"].as_str(), links[1]["confidence"].as_str(), links[1]["via"].as_str()), (Some("claude:b:p"), Some("exact"), Some("its folder")));
+        assert_eq!((links[2]["id"].as_str(), links[2]["confidence"].as_str()), (Some("claude:b:p"), Some("likely")), "{}", links[2]);
     }
 
     #[test]
