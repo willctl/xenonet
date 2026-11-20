@@ -125,8 +125,7 @@ impl CellRunner {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
-                .map_err(|e| io("this run's staging folder could not be locked to its owner", e))?;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| io("this run's staging folder could not be locked to its owner", e))?;
         }
         Ok(dir)
     }
@@ -595,7 +594,7 @@ mod tests {
         let (r, _, log) = runner(Behave::default(), &home);
         r.run(&make_plan(&r, &project, false, false)).expect("runs");
         let log = log.0.lock().expect("lock");
-        let copied = log.iter().find(|l| l.starts_with("copy_in")).expect("a copy");
+        let copied = log.iter().find(|l| l.starts_with("copy_in")).expect("a copy").replace('\\', "/");
         assert!(copied.contains("xn-stage/adytum-test-") && copied.contains("/in /tmp/xn-in/"), "the copy is from the staged folder: {copied}");
         let files = copied.split("files=").nth(1).expect("a listing");
         assert_eq!(files, ".git,.git/HEAD,agent.sh,envfile,src,src/main.rs,sub", "{files}");
