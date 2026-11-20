@@ -558,7 +558,8 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     });
     let record = match (r.confine.domains(), kind) {
         (Some(domains), _) => Some(sandbox::Record { folder: cwd.clone(), domains: domains.to_vec(), for_others }),
-        (None, Kind::You) => None,
+        // Bare is for the person's own start, not for whatever carries their id.
+        (None, _) if own => None,
         (None, _) => return Err("a run started by anyone but the person runs in its app's sandbox: this start asked for none".into()),
     };
     // An app whose sandbox reads the whole disk is for the person's own runs.

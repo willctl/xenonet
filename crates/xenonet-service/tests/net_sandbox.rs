@@ -736,6 +736,14 @@ async fn an_intents_run_is_checked_as_a_run_that_is_not_the_persons() {
     // The domains a run reaches are the ones the person allowed on this machine.
     let why = run(&intent(2, "claude", vec!["evil.example".into()])).unwrap_err();
     assert!(why.contains("evil.example") && why.contains("xenonet runs domains"), "{why}");
+    // An intent that names no level, or off, carries the person's id and is still not theirs:
+    // it is not run bare.
+    for (n, confine) in [(4, ConfineAsk::Off), (5, ConfineAsk::Unset)] {
+        let mut a = intent(n, "claude", Vec::new());
+        a.request.confine = confine;
+        let why = run(&a).unwrap_err();
+        assert!(why.contains("anyone but the person runs in its app's sandbox"), "{why}");
+    }
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
     // The control: the intent that asks for no domain, in Claude Code, runs.
