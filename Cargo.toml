@@ -17,14 +17,14 @@ publish = false
 
 [workspace.dependencies]
 # Adytum, the cells XenoNet confines work in (github.com/willctl/adytum).
-# A path beside this checkout until that repository is published.
-adytum-model = { path = "../adytum/crates/adytum-model" }
-adytum-exec = { path = "../adytum/crates/adytum-exec" }
-adytum-driver = { path = "../adytum/crates/adytum-driver" }
-adytum-lima = { path = "../adytum/crates/adytum-lima" }
-adytum-openshell = { path = "../adytum/crates/adytum-openshell" }
-adytum-ledger = { path = "../adytum/crates/adytum-ledger" }
-adytum-doctor = { path = "../adytum/crates/adytum-doctor" }
+# Pinned to a commit.
+adytum-model = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-exec = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-driver = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-lima = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-openshell = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-ledger = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-doctor = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
 xenonet-actors = { path = "crates/xenonet-actors" }
 # The formats XenoNet writes: JSON, text, times, units, orderings.
 xenonet-text = { path = "crates/xenonet-text" }
