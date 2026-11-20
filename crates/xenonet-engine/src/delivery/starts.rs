@@ -458,9 +458,15 @@ pub fn sandbox_folder(cwd: &str, home: &str, windows: bool) -> Result<(), String
     let parts = |p: &str| -> Vec<String> {
         p.replace('\\', "/").split('/').filter(|x| !x.is_empty() && *x != ".").map(|x| if windows { x.to_lowercase() } else { x.to_string() }).collect()
     };
-    let (folder, home) = (parts(cwd), parts(home));
-    if folder.len() <= home.len() && home[..folder.len()] == folder[..] {
+    let (folder, home_parts) = (parts(cwd), parts(home));
+    if folder.len() <= home_parts.len() && home_parts[..folder.len()] == folder[..] {
         return Err("a sandboxed run needs a project folder, not your home folder, the root of the disk or a folder that holds your home folder: name the project's folder".into());
+    }
+    // Nor one under a hidden folder of home or its Library (AppData): a run
+    // that writes there changes what outlives it, as the config and startup
+    // files of the machine do.
+    if super::delegation::in_dot_or_library(cwd, cwd, home, windows) {
+        return Err("a sandboxed run needs a project folder, not one inside a hidden folder (.config, .ssh) of your home folder or its Library: name the project's folder".into());
     }
     Ok(())
 }
@@ -712,6 +718,15 @@ mod tests {
         assert!(sandbox_folder("/home/me/atlas", "/home/me", false).is_ok());
         assert!(sandbox_folder("/home/mel", "/home/me", false).is_ok(), "a sibling that starts the same is not home");
         assert!(sandbox_folder("/srv/atlas", "/home/me", false).is_ok());
+        // Under a dot-folder or Library/AppData in home, where a change outlives the run.
+        for folder in ["/home/me/.ssh", "/home/me/.config/atlas", "/home/me/.local/share/x", "/Users/me/Library/LaunchAgents", "/Users/me/Library/atlas"] {
+            let home = if folder.starts_with("/Users") { "/Users/me" } else { "/home/me" };
+            let why = sandbox_folder(folder, home, false).unwrap_err();
+            assert!(why.contains("hidden folder") && why.contains("Library"), "{folder}: {why}");
+        }
+        assert!(sandbox_folder("C:\\Users\\Me\\AppData\\Roaming\\x", "C:\\Users\\Me", true).is_err());
+        assert!(sandbox_folder("/home/me/work/.github", "/home/me", false).is_ok(), "a dot-folder further down a project is fine");
+        assert!(sandbox_folder("/srv/.cache/atlas", "/home/me", false).is_ok(), "and one outside home");
     }
 
     #[test]

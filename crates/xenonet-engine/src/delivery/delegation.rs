@@ -320,7 +320,7 @@ fn within(path: &str, folder: &str, home: &str, windows: bool) -> bool {
 /// file or folder: shell startup files, `.ssh`, `.config`), or is Library
 /// (LaunchAgents, Preferences) or AppData: what a change to outlives the
 /// run, so even a folder that holds it doesn't cover it.
-fn in_dot_or_library(path: &str, folder: &str, home: &str, windows: bool) -> bool {
+pub(crate) fn in_dot_or_library(path: &str, folder: &str, home: &str, windows: bool) -> bool {
     let target = parts_of(path, folder, home, windows);
     let home = parts_of(home, "/", home, windows);
     if home.is_empty() || target.len() <= home.len() || target[..home.len()] != home[..] {
