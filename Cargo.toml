@@ -20,8 +20,7 @@ publish = false
 # one crate. Here with no features, its types and process runner alone; the
 # service and the doctor add lima, openshell and doctor themselves
 # (scripts/rust-layers.mjs).
-# The path becomes a git rev once Adytum's rewrite is pushed.
-adytum = { path = "../adytum-rw/crates/adytum", default-features = false }
+adytum = { git = "https://github.com/willctl/adytum", rev = "a1d58a88439b4654c26552a0beef89dd57a07ee9", default-features = false }
 xenonet-actors = { path = "crates/xenonet-actors" }
 # The formats XenoNet writes: JSON, text, times, units, orderings.
 xenonet-text = { path = "crates/xenonet-text" }
