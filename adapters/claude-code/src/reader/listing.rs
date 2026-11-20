@@ -287,4 +287,26 @@ mod tests {
         assert!(c.rename(&Unchecked, &json!({ "rawId": id, "desktopId": "local_9" }), "Again").expect("renamed").desktop.is_some_and(|d| d.is_err()), "no desktop record");
         std::fs::remove_dir_all(&home).expect("cleaned up");
     }
+
+    // T3 Code runs Claude Code through the Agent SDK and writes its own
+    // entrypoint on the transcript's lines; a CLI session writes another.
+    #[test]
+    fn marks_the_sessions_t3_code_runs() {
+        let home = std::env::temp_dir().join(format!("xenonet-claude-entrypoint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let projects = home.join("projects");
+        let folder = projects.join("-w-atlas");
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let write = |id: &str, entrypoint: &str| {
+            let line = json!({ "type": "user", "uuid": "u1", "parentUuid": null, "sessionId": id, "cwd": "/w/atlas", "entrypoint": entrypoint, "version": "2.0.1", "timestamp": "2026-10-03T12:00:00Z", "message": { "role": "user", "content": "Add a route" } });
+            std::fs::write(folder.join(format!("{id}.jsonl")), js::stringify(&line, 0) + "\n").expect("a transcript");
+        };
+        write("0190d3e0-0000-7000-8000-00000000bbbb", "t3-code");
+        write("0190d3e0-0000-7000-8000-00000000cccc", "cli");
+        let list = Claude::new(&projects.to_string_lossy(), None).sessions(&Unchecked).expect("the sessions");
+        let runs_in = |id: &str| list.iter().find(|s| s["rawId"] == id).map(|s| s["runsIn"].clone());
+        assert_eq!(runs_in("0190d3e0-0000-7000-8000-00000000bbbb"), Some(json!("t3-code")));
+        assert_eq!(runs_in("0190d3e0-0000-7000-8000-00000000cccc"), Some(Value::Null));
+        std::fs::remove_dir_all(&home).expect("cleaned up");
+    }
 }

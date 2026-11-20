@@ -537,4 +537,72 @@ mod tests {
         assert_eq!(node("project:/home/me/projects/atlas")["active"], true);
         assert_eq!(g["stats"]["sessions"], 3);
     }
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.name=XenoNet Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn repo_with_commit(dir: &std::path::Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        git_in(dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+        git_in(dir, &["add", "a.txt"]);
+        git_in(dir, &["commit", "-q", "-m", "first"]);
+    }
+
+    // A session in a linked worktree belongs to the project the worktree is
+    // of, wherever the worktree folder is, when that project is one the map
+    // has. The worktree shows as its worktree and the project's folder as
+    // where it ran, as Claude desktop's worktree sessions do.
+    #[test]
+    fn a_session_in_a_linked_worktree_is_in_its_main_checkouts_project() {
+        xenonet_platforms::install();
+        let base = std::env::temp_dir().join(format!("xenonet-graph-worktree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let base = std::path::PathBuf::from(xenonet_os::fs::realpath_native(&base.to_string_lossy()).unwrap());
+        let projects_dir = base.join("Projects");
+        let (atlas, ledger) = (projects_dir.join("atlas"), base.join("elsewhere/ledger"));
+        repo_with_commit(&atlas);
+        repo_with_commit(&ledger);
+        // Worktrees outside the projects folder, as T3 Code and `git worktree add ../x` make.
+        let (atlas_wt, ledger_wt) = (base.join(".t3/worktrees/atlas/probe"), base.join("elsewhere/ledger-wt"));
+        std::fs::create_dir_all(atlas_wt.parent().unwrap()).unwrap();
+        git_in(&atlas, &["worktree", "add", "-q", "-b", "probe", &atlas_wt.to_string_lossy()]);
+        git_in(&ledger, &["worktree", "add", "-q", "-b", "side", &ledger_wt.to_string_lossy()]);
+        let (atlas_s, atlas_wt_s, ledger_wt_s) = (atlas.to_string_lossy(), atlas_wt.to_string_lossy(), ledger_wt.to_string_lossy());
+        let key = |p: &str| path_key(p).unwrap();
+        let input = json!({
+            "projectsDir": projects_dir.to_string_lossy(),
+            "projects": [{ "key": key(&atlas_s), "name": "atlas", "path": atlas_s }],
+            "sessions": [
+                { "id": "claude:t3", "app": "claude", "cwd": atlas_wt_s, "updatedAt": 10 },
+                { "id": "claude:sub", "app": "claude", "cwd": format!("{atlas_wt_s}/src"), "updatedAt": 10 },
+                { "id": "claude:other", "app": "claude", "cwd": ledger_wt_s, "updatedAt": 10 },
+            ],
+            "now": 1000,
+        });
+        let g = build_graph(&input, &HashMap::new());
+        let node = |id: &str| g["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();
+        let home = |id: &str| g["links"].as_array().unwrap().iter().find(|l| l["target"] == id && l["kind"] == "session").map(|l| l["source"].as_str().unwrap().to_string());
+        let project = format!("project:{}", key(&atlas_s));
+        assert_eq!(home("claude:t3"), Some(project.clone()));
+        assert_eq!((node("claude:t3")["cwd"].as_str(), node("claude:t3")["worktree"].as_str()), (Some(&*atlas_s), Some(&*atlas_wt_s)));
+        assert_eq!(home("claude:sub"), Some(project), "a folder inside the worktree too");
+        assert_eq!(node("claude:sub")["worktree"].as_str(), Some(&*atlas_wt_s));
+        // A worktree of a folder that isn't a project stays where it was.
+        assert!(home("claude:other").is_some_and(|h| h.starts_with("zone:")), "{:?}", home("claude:other"));
+        assert!(node("claude:other")["worktree"].is_null());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }
