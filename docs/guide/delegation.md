@@ -42,8 +42,8 @@ A delegated session is a Claude Code run, and its permission prompts come to Xen
 
 Covered, with no question:
 
-- reading files, searching and listing, except files that look like secrets (`.ssh`, `.aws`, `.env`, anything named for credentials, tokens or passwords);
-- creating and editing files under the folder the session started in;
+- reading files, searching and listing within the folder the session started in, except files that look like secrets (`.ssh`, `.aws`, `.env`, anything named for credentials, tokens or passwords). A link in the folder is judged by where it points;
+- creating and editing files under that folder, except the ones that hook or configure tools that run later (below);
 - routine commands: listing, printing and searching, read-only git, and XenoNet's own `--version`, `doctor`, `status`, `logs`, `update` and `service`, one after another with `;`, `&&`, `||` or `|`;
 - the xenonet tools that report back (`send`, `inbox`, `peers`, `who_has`, `whoami`, `doctor`, `focus`, `claim`, `release`).
 
@@ -54,9 +54,11 @@ Always a question, whatever the task says:
 - running outside the sandbox: a command that asks to leave it;
 - the network: `curl`, `wget`, the web tools, a push;
 - writing through a redirect, and a command inside a command;
-- any file outside the session's folder, and any command or tool not listed above, including starting another session.
+- any read or edit outside the session's folder, and anything under `/proc`, `/dev` or `/sys`: the sandbox holds a run's commands and not its file tools, and what a run reads can go out in its last words or a `send`, so `~/.config/gh/hosts.yml`, `~/.netrc` or `/proc/self/environ` come to you;
+- an edit that outlives the run and runs outside its sandbox, inside the folder too: `.git` (hooks, config, attributes), `.claude` (settings, skills, agents, commands), `.mcp.json`, `.vscode`, `.idea`, `.husky`, `.githooks`, `.devcontainer`, `.cargo`, `.envrc` and tool configuration such as `.npmrc`, `.pre-commit-config.yaml`, `.gitattributes`, `mise.toml`, and `node_modules`;
+- any command or tool not listed above, including starting another session.
 
-A delegated session runs in its app's own sandbox, which the delegation can't take off ([Sandboxed starts](sandbox.md)): it writes only in its folder and reaches no network unless the start named domains. A command that asks to run outside the sandbox is never covered, whatever the task says, and comes to you alone. Sandboxed commands are not allowed unasked: each goes through the delegation's rules like any other, so a delete or a push still comes to you. An edit to a hidden file or folder in your home folder, or to Library, is never covered either.
+A delegated session runs in its app's own sandbox, which the delegation can't take off ([Sandboxed starts](sandbox.md)): it writes only in its folder and reaches no network unless the start named domains. A command that asks to run outside the sandbox is never covered, whatever the task says, and comes to you alone. Sandboxed commands are not allowed unasked: each goes through the delegation's rules like any other, so a delete or a push still comes to you. An edit to a hidden file or folder in your home folder, or to Library, is never covered either, and a sandboxed run isn't started in a folder under one.
 
 The question says why it wasn't covered: "[outside what you delegated: it has rm in it] rm -rf build". Nobody answering in ten minutes is a deny. XenoNet keeps which sessions run under a delegation in its store for a week, so their prompts are judged against it after the service restarts too.
 
