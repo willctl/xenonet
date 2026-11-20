@@ -493,6 +493,11 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         (None, Kind::You) => None,
         (None, _) => return Err("a run started by anyone but the person runs in its app's sandbox: this start asked for none".into()),
     };
+    // A sandbox is a project folder: checked here, on the folder as it
+    // resolved on the machine that runs the start, whoever asked.
+    if record.is_some() {
+        starts::sandbox_folder(&cwd, &w.setup.home, cfg!(windows))?;
+    }
     // The app has a sandbox to drive here, or the start says why not.
     let sandbox_words = match &record {
         Some(rec) => {

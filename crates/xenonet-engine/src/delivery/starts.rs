@@ -374,6 +374,22 @@ pub fn folder(asked: &str, home: &str, known: &[(String, String)], reported: &[S
     Err(format!("{asked} isn't a project or folder on this machine's map: name one by its id or path, or ~"))
 }
 
+/// Whether a sandbox may be made of `cwd`: a sandbox is a project folder, so
+/// never the home folder (the folder `~` and an empty one name), the root of
+/// the disk, or any folder that holds home, since the run may write all of
+/// what the sandbox holds. Checked by the machine that runs the start, on
+/// the folder as it resolved there.
+pub fn sandbox_folder(cwd: &str, home: &str, windows: bool) -> Result<(), String> {
+    let parts = |p: &str| -> Vec<String> {
+        p.replace('\\', "/").split('/').filter(|x| !x.is_empty() && *x != ".").map(|x| if windows { x.to_lowercase() } else { x.to_string() }).collect()
+    };
+    let (folder, home) = (parts(cwd), parts(home));
+    if folder.len() <= home.len() && home[..folder.len()] == folder[..] {
+        return Err("a sandboxed run needs a project folder, not your home folder, the root of the disk or a folder that holds your home folder: name the project's folder".into());
+    }
+    Ok(())
+}
+
 /// Whether a run's output says the app isn't signed in, for an app whose
 /// runs sign in with the token you gave them (Claude Code).
 pub fn signed_out(app: &str, log: &str) -> bool {
@@ -567,6 +583,19 @@ mod tests {
         assert!(codex.contains(&"sandbox_workspace_write.network_access=false".to_string()), "{codex:?}");
         assert_eq!(codex.last().map(String::as_str), Some("-"));
         assert!(sandboxed("grok", &files, vec![]).is_err());
+    }
+
+    #[test]
+    fn a_sandbox_is_a_project_folder_never_the_home_folder_the_root_or_what_holds_them() {
+        for (folder, home) in [("/home/me", "/home/me"), ("/home/me/", "/home/me"), ("/home", "/home/me"), ("/", "/home/me"), ("/Users", "/Users/me")] {
+            let why = sandbox_folder(folder, home, false).unwrap_err();
+            assert!(why.contains("project folder") && why.contains("home folder"), "{folder}: {why}");
+        }
+        assert!(sandbox_folder("C:\\Users\\Me", "c:/users/me/", true).is_err());
+        assert!(sandbox_folder("C:\\", "C:\\Users\\Me", true).is_err());
+        assert!(sandbox_folder("/home/me/atlas", "/home/me", false).is_ok());
+        assert!(sandbox_folder("/home/mel", "/home/me", false).is_ok(), "a sibling that starts the same is not home");
+        assert!(sandbox_folder("/srv/atlas", "/home/me", false).is_ok());
     }
 
     #[test]

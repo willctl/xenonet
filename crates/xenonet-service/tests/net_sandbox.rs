@@ -165,6 +165,33 @@ async fn an_app_with_no_sandbox_refuses_a_sandboxed_start_in_words() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_sandbox_is_never_the_home_folder_whoever_asks_and_wherever_it_is_checked() {
+    let root = root("sandbox-home");
+    let t = two_networks(&root).await;
+    desk_takes_starts(&t).await;
+    let refused = |v: &Value| v["error"].as_str().is_some_and(|e| e.contains("project folder") && e.contains("home folder"));
+    // The person's own sandboxed start at desk, in the default folder and in `~`.
+    for (n, folder) in ["~", ""].into_iter().enumerate() {
+        let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": folder, "prompt": format!("tidy {n}"), "sandbox": true })).await;
+        assert!(s == 409 && refused(&v), "{folder:?}: {s} {v}");
+    }
+    // A session on contractor-vm asking for `~`: desk's home is not a project
+    // it shows, so that is refused at the door before the sandbox's check, and
+    // nothing runs.
+    let (s, v) = as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": "~", "prompt": "tidy", "domains": [] })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let told = told(&t, "home").await;
+    assert!(told.contains("No session was started"), "{told}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
+    // The person's unsandboxed start in home is theirs to make, as before.
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": "~", "prompt": "tidy up" })).await;
+    assert_eq!(s, 200, "{v}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A session that was started sandboxed is resumed sandboxed: the turn a
 /// message wakes it for loads the run's settings and none of the repo's, and
 /// has the scrubbed environment, never the bare turn a session without a
