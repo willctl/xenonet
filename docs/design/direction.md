@@ -773,14 +773,29 @@ Will's step on desk and tower.
 ### Daily use
 
 After phase 6, the work is a person's real week on XenoNet
-([daily-use.md](daily-use.md)). Built on `feat/daily-use`: the shared
-engine test harness with two networks, an identity guard that warns
-(a project's rule, Needs you, the start briefing, an opt-in pre-push
-hook), and networks that reach only what they're shown, decided at the
-receiver before the sender is checked, with what leaves held to the same
-sharing. Next, once scenario 1 has run for real on two machines: work on
-a machine the person doesn't own, sandboxed starts, several accounts per
-app, more apps on the map, and release watch.
+([daily-use.md](daily-use.md)). Built on `feat/daily-use`:
+
+- the shared engine test harness with two networks, and the lab's VMs
+  reaching each other on Lima's `user-v2`;
+- an identity guard: a project's rule names its git identity, push
+  account and app accounts, warns by default or refuses, with an opt-in
+  pre-push hook ([identities](../guide/identities.md));
+- networks that reach only what they're shown, decided at the receiver
+  before the sender is checked, with what leaves held to the same sharing;
+- work on a machine the person doesn't own, which needed no new product
+  code, only tests and the guide;
+- confined starts: one level on the signed start (off, vendor, cell), the
+  app's own sandbox for every start that isn't the person's, the sign-in
+  on a descriptor rather than in an environment, and cell starts refused
+  until they can carry a sign-in ([sandbox](../guide/sandbox.md),
+  [confinement](confinement.md));
+- several accounts per app: folders the person names, each read as its own
+  root, and a start placed in the folder whose account the rule names, for
+  every turn.
+
+Next: T3 Code on the map, from a lab VM, and release watch. Not yet seen
+in a real run: a confined command being blocked, which needs the apps
+signed in on the machine that tests it.
 
 ## Verification plan
 
