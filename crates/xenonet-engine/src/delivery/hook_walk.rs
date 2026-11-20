@@ -106,6 +106,13 @@ impl Walk<'_> {
         )
     }
 
+    fn linked(&self, p: &Path) -> String {
+        format!(
+            "{} is a link, in or as a .claude folder, which a command in the sandbox could write through to what it points at, so a sandboxed run isn't started in this folder: make it a plain folder or file, or take it out",
+            self.shown(p)
+        )
+    }
+
     fn too_much(&self) -> String {
         format!(
             "this folder has too much to check for hooks in its .claude folders (more than {} entries, or folders more than {} deep), so a sandboxed run isn't started in it: use a smaller folder",
@@ -147,6 +154,11 @@ impl Walk<'_> {
         Ok(out)
     }
 
+    /// Whether `f` is a link, dangling or not.
+    fn is_link(&self, f: &Path, shown_f: &Path) -> Result<bool, String> {
+        Ok(self.disk.meta(f).map_err(|e| self.unreadable(shown_f, &e))?.file_type().is_symlink())
+    }
+
     /// What `f` is. A link that leaves the folder is a refusal when it
     /// leads to a folder, or to anything at all if `any` says so.
     fn kind(&self, f: &Path, shown_f: &Path, any: bool) -> Result<Kind, String> {
@@ -180,12 +192,16 @@ impl Walk<'_> {
             }
             let entries = match self.list(&d, &shown_d) {
                 // The folder named for the run isn't there: nothing to check.
-                Err(_) if depth == 0 && self.disk.meta(&d).is_err() => return Ok(()),
+                // Any other error on it (it can't be read) is a refusal.
+                Err(_) if depth == 0 && matches!(self.disk.meta(&d), Err(e) if e.kind() == io::ErrorKind::NotFound) => return Ok(()),
                 other => other?,
             };
             for (f, name, shown_f) in entries {
                 self.entry()?;
                 let lname = name.to_lowercase();
+                if lname == ".claude" && self.is_link(&f, &shown_f)? {
+                    return Err(self.linked(&shown_f));
+                }
                 let kind = self.kind(&f, &shown_f, false)?;
                 if lname == ".claude" {
                     if let Kind::Dir(t, _) = kind {
@@ -230,6 +246,9 @@ impl Walk<'_> {
             for (f, name, shown_f) in self.list(&d, &shown_d)? {
                 self.entry()?;
                 let lname = name.to_lowercase();
+                if self.is_link(&f, &shown_f)? {
+                    return Err(self.linked(&shown_f));
+                }
                 let kind = self.kind(&f, &shown_f, true)?;
                 if matches!(lname.as_str(), "hooks" | "hooks.json" | "plugin.json" | ".claude-plugin") {
                     return Err(self.words(&shown_f));
@@ -297,7 +316,22 @@ fn front_matter(bytes: &[u8]) -> Front {
         return Front::Carries;
     }
     let plain = crate::re!(r#"^['"]?[A-Za-z0-9_.\-]+['"]?[ \t]*:([ \t].*)?$"#);
-    let fine = |l: &&str| l.trim().is_empty() || l.starts_with('#') || l.starts_with([' ', '\t']) || l.starts_with('-') || plain.is_match(l);
+    // An indented line or a list item is read only as part of a plain key
+    // at column 0 before it: YAML also takes a whole mapping indented as
+    // top level, and keys written as `?`, `{…}`, tags, anchors, aliases or
+    // merges, none of which the key check above reads.
+    let mut keyed = false;
+    let fine = |l: &&str| {
+        let t = l.trim();
+        if t.is_empty() || l.starts_with('#') {
+            return true;
+        }
+        if l.starts_with([' ', '\t', '-']) {
+            return keyed && !t.starts_with(['{', '?', '!', '&', '*']) && !t.starts_with("<<");
+        }
+        keyed = plain.is_match(l);
+        keyed
+    };
     if closed && body.iter().all(fine) {
         Front::Plain
     } else {
@@ -379,7 +413,9 @@ mod tests {
             write(&base, "pkg/web/.claude/skills/fmt/SKILL.md", PLAIN);
             assert_eq!(project_hooks(&base), None, "{name}: back to plain");
         }
-        // A `.claude` that is a link: to a folder outside is a refusal, to one inside is read.
+        // A `.claude` that is a link is a refusal wherever it leads: the
+        // sandbox's denyWrite names `.claude` as written, and a command could
+        // write through the link to what it points at.
         let outside = base.with_file_name(format!("xenonet-hooks-outside-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&outside);
         std::fs::create_dir_all(outside.join("skills/ok")).unwrap();
@@ -387,20 +423,24 @@ mod tests {
         std::fs::create_dir_all(base.join("linked")).unwrap();
         std::os::unix::fs::symlink(&outside, base.join("linked/.claude")).unwrap();
         let why = project_hooks(&base).unwrap_or_default();
-        assert!(why.starts_with("linked/.claude") && why.contains("outside the folder"), "{why}");
+        assert!(why.starts_with("linked/.claude") && why.contains("is a link"), "{why}");
         std::fs::remove_file(base.join("linked/.claude")).unwrap();
         write(&base, "shared/skills/ok/SKILL.md", PLAIN);
         std::os::unix::fs::symlink(base.join("shared"), base.join("linked/.claude")).unwrap();
-        assert_eq!(project_hooks(&base), None, "a link to a plain folder inside runs");
-        write(&base, "shared/commands/x.md", HOOKED);
         let why = project_hooks(&base).unwrap_or_default();
-        assert!(why.starts_with("linked/.claude/commands/x.md"), "a link to a hooked folder inside is read: {why}");
-        // A link inside a `.claude` that leaves the folder is a refusal too.
-        std::fs::remove_dir_all(base.join("shared/commands")).unwrap();
-        std::os::unix::fs::symlink(&outside, base.join("shared/skills/away")).unwrap();
+        assert!(why.starts_with("linked/.claude") && why.contains("is a link"), "a link to a plain folder inside: {why}");
+        std::fs::remove_file(base.join("linked/.claude")).unwrap();
+        // A link inside a `.claude`, wherever it leads, is a refusal too.
+        write(&base, "linked/.claude/skills/ok/SKILL.md", PLAIN);
+        assert_eq!(project_hooks(&base), None, "a plain .claude folder runs");
+        std::os::unix::fs::symlink(base.join("shared/skills/ok"), base.join("linked/.claude/skills/here")).unwrap();
         let why = project_hooks(&base).unwrap_or_default();
-        assert!(why.contains("away") && why.contains("outside the folder"), "{why}");
-        std::fs::remove_file(base.join("shared/skills/away")).unwrap();
+        assert!(why.contains("skills/here") && why.contains("is a link"), "{why}");
+        std::fs::remove_file(base.join("linked/.claude/skills/here")).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("linked/.claude/skills/away")).unwrap();
+        let why = project_hooks(&base).unwrap_or_default();
+        assert!(why.contains("away") && why.contains("is a link"), "{why}");
+        std::fs::remove_file(base.join("linked/.claude/skills/away")).unwrap();
         assert_eq!(project_hooks(&base), None);
         // Past what it will look at, it says so and refuses.
         write(&base, "a/b/c/d/e/f/g.txt", "x");
@@ -563,8 +603,46 @@ mod tests {
             let b = base("dangling");
             std::os::unix::fs::symlink(b.join("gone"), b.join("x")).unwrap();
             write(&b, ".claude/skills/x/SKILL.md", PLAIN);
+            assert_eq!(project_hooks(&b), None, "a dangling link outside .claude holds nothing to load");
             std::os::unix::fs::symlink(b.join("gone"), b.join(".claude/skills/y")).unwrap();
-            assert_eq!(project_hooks(&b), None);
+            let why = project_hooks(&b).unwrap_or_default();
+            assert!(why.contains("skills/y") && why.contains("is a link"), "one inside .claude could be made to point at a folder later: {why}");
+            let _ = std::fs::remove_dir_all(&b);
+        }
+    }
+
+    #[test]
+    fn a_folder_that_cant_be_looked_at_is_refused_and_only_a_missing_one_holds_nothing() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let b = base("root-unreadable");
+            assert_eq!(project_hooks(&b.join("missing")), None, "a missing folder holds nothing to load");
+            write(&b, "shut/x/a.txt", "x");
+            std::fs::set_permissions(b.join("shut"), std::fs::Permissions::from_mode(0o000)).unwrap();
+            let why = project_hooks(&b.join("shut/x"));
+            std::fs::set_permissions(b.join("shut"), std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(why.is_some_and(|w| w.contains("couldn't be read")), "a folder under one that can't be read");
+            let _ = std::fs::remove_dir_all(&b);
+        }
+    }
+
+    #[test]
+    fn a_claude_folder_that_is_a_link_is_refused_even_inside_or_dangling() {
+        #[cfg(unix)]
+        {
+            let b = base("claude-link");
+            write(&b, "y/agents/x.md", PLAIN);
+            std::os::unix::fs::symlink(b.join("y"), b.join(".claude")).unwrap();
+            let why = project_hooks(&b).unwrap_or_default();
+            assert!(why.contains(".claude"), "a .claude linked inside the folder: {why}");
+            std::fs::remove_file(b.join(".claude")).unwrap();
+            std::os::unix::fs::symlink(b.join("gone"), b.join(".claude")).unwrap();
+            let why = project_hooks(&b).unwrap_or_default();
+            assert!(why.contains(".claude"), "a dangling .claude: {why}");
+            std::fs::remove_file(b.join(".claude")).unwrap();
+            write(&b, ".claude/agents/x.md", PLAIN);
+            assert_eq!(project_hooks(&b), None, "a plain .claude folder holds nothing to refuse");
             let _ = std::fs::remove_dir_all(&b);
         }
     }
@@ -595,6 +673,12 @@ mod tests {
         raw.clear();
         for t in [
             "---\nname: x\n{hooks: {Stop: []}}\n---\n",
+            // The whole mapping indented, which YAML reads as top level.
+            "---\n  {hooks: {Stop: []}}\n---\n",
+            "---\n  ? hooks\n  : {}\n---\n",
+            "---\n  name: x\n---\n",
+            "---\nname: x\n  ? hooks\n  : {}\n---\n",
+            "---\nname: x\n  !!map {hooks: {}}\n---\n",
             "---\nname: x\n? hooks\n: {}\n---\n",
             "---\nname: x\nno colon here\n---\n",
             "---\nname: x\nhooks-not-closed: 1\n",
