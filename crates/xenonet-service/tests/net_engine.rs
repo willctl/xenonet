@@ -3552,3 +3552,41 @@ async fn a_session_on_the_guest_reads_no_transcript_of_desk_and_desks_window_rea
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A window host's window reads a transcript of a session in a project its
+/// network is shown, and is told fast when a session isn't: `contractor-vm`,
+/// a window host of `work`, asks `desk`, which is in two networks over one
+/// endpoint, for atlas's session (shown to `work`) and for ledger's (not).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn the_window_of_a_window_host_reads_desks_shown_transcript_and_is_told_fast_of_the_rest() {
+    let root = std::env::temp_dir().join(format!("xenonet-guest-window-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks_with(&root, true).await;
+    let desk_reads = Arc::new(Reads::default());
+    let vm_reads = Arc::new(Reads::default());
+    t.desk.svc.nodes().common().set_reads(desk_reads.clone());
+    t.contractor.svc.nodes().common().set_reads(vm_reads.clone());
+    let (desk_atlas, desk_ledger) = (t.desk.agt(DESK_ATLAS), t.desk.agt(DESK_LEDGER));
+    until("contractor-vm knows desk's atlas session", 20, || async { t.contractor.peers(VM_ATLAS).await.contains(&desk_atlas) }).await;
+    let read = |id: String| {
+        let t = &t;
+        async move {
+            tokio::time::timeout(Duration::from_secs(10), t.contractor.window("GET", &format!("/api/session/{id}/transcript?limit=10"), Value::Null))
+                .await
+                .expect("an answer within 10 s")
+        }
+    };
+    let vm_atlas = t.contractor.agt(VM_ATLAS);
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&vm_atlas) }).await;
+    let (s, v) = t.desk.window("GET", &format!("/api/session/{vm_atlas}/transcript?limit=10"), Value::Null).await;
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = read(desk_atlas.clone()).await;
+    assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
+    assert_eq!(desk_reads.0.lock().unwrap().len(), 1);
+    let (s, v) = read(desk_ledger).await;
+    assert!(s == 403 || s == 404, "{s} {v}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
