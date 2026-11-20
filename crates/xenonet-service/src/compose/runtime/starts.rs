@@ -493,6 +493,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         (None, Kind::You) => None,
         (None, _) => return Err("a run started by anyone but the person runs in its app's sandbox: this start asked for none".into()),
     };
+    // An app whose sandbox reads the whole disk is for the person's own runs.
+    if record.is_some() {
+        starts::sandbox_enough(&r.app, kind == Kind::You)?;
+    }
     // Anyone but the person reaches only the domains the person allowed.
     if let (Some(rec), false) = (&record, kind == Kind::You) {
         starts::domains_within(&rec.domains, &sandbox_domains(w))?;

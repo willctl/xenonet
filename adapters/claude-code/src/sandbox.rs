@@ -20,7 +20,7 @@ use xenonet_adapter::apps::app;
 use xenonet_adapter::delivery::{Plan, SandboxFiles, SandboxWays};
 
 pub fn ways() -> SandboxWays {
-    SandboxWays { unavailable, files: Some(files), words, turn }
+    SandboxWays { unavailable, files: Some(files), words, turn, reads_whole_disk: false }
 }
 
 /// Native Windows has no sandbox in Claude Code: it runs commands
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn a_turn_swaps_the_listening_settings_for_the_runs_and_leaves_the_repos_out() {
         let p = plan(&[]);
-        let f = SandboxFiles { plan: p, settings: "/s/a.json", mcp: "/s/m.json" };
+        let f = SandboxFiles { plan: p, settings: "/s/a.json", mcp: "/s/m.json", server: "xenonet" };
         let args = turn(&f, ["-p", "--resume", "x", "--settings", "/s/listen.json", "--permission-prompt-tool", "t"].map(str::to_string).to_vec());
         assert_eq!(
             args,

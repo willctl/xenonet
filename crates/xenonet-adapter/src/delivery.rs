@@ -54,6 +54,8 @@ pub struct SandboxFiles<'a> {
     pub settings: &'a str,
     /// The one MCP configuration the run loads: XenoNet's server.
     pub mcp: &'a str,
+    /// XenoNet's MCP server's name in the app's settings.
+    pub server: &'a str,
 }
 
 /// The files of one sandboxed run: its settings (given the plan, the
@@ -81,6 +83,11 @@ pub struct SandboxWays {
     /// copy), as they are without the sandbox, made to run in it with the
     /// run's files. A resumed turn of a sandboxed session is sandboxed too.
     pub turn: fn(&SandboxFiles<'_>, Vec<String>) -> Vec<String>,
+    /// Whether the app's sandbox lets its commands read the whole disk
+    /// (Codex's can't deny reads). A run's last words can carry any file it
+    /// reads, so such a sandbox isn't enough for a run that isn't the
+    /// person's own: those starts are refused.
+    pub reads_whole_disk: bool,
 }
 
 /// The command that starts a new session with a first prompt: the program

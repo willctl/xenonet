@@ -146,7 +146,8 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
         sweep_runs(&runs, 2.0 * 24.0 * 3600e3);
     }
     let (settings, mcp) = (settings.to_string_lossy().into_owned(), mcp.to_string_lossy().into_owned());
-    let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp }, args)?;
+    let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
+    let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp, server: &server }, args)?;
     Ok((args, (ways.words)(&plan)))
 }
 

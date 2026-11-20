@@ -38,6 +38,18 @@ async fn desk_takes_starts(t: &TwoNetworks) {
     .await;
 }
 
+/// What the `n`th run of the fake on `h` was given, once it has written it.
+async fn files_ready(h: &Host, n: usize) -> (Option<String>, Vec<String>) {
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(f) = fake_files(&h.dir, n) {
+            return f;
+        }
+        assert!(std::time::Instant::now() < end, "waited for run {n}'s files on {}", h.name);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// What contractor-vm's session is told next that is a XenoNet note.
 async fn told(t: &TwoNetworks, what: &str) -> String {
     let end = std::time::Instant::now() + Duration::from_secs(20);
@@ -108,7 +120,7 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
     let (args, prompt) = ran(&t.desk, 1).await;
     assert!(prompt.to_lowercase().contains("sandbox") && prompt.contains("github.com"), "the first prompt says so too: {prompt}");
     assert!(args.iter().any(|a| a == "--strict-mcp-config") && args.iter().any(|a| a == "--setting-sources="), "the repo's own settings and servers aren't loaded: {args:?}");
-    let (settings, names) = fake_files(&t.desk.dir, 1).unwrap();
+    let (settings, names) = files_ready(&t.desk, 1).await;
     let settings: Value = serde_json::from_str(&settings.expect("a settings file")).unwrap();
     let sandbox = &settings["sandbox"];
     assert_eq!((&sandbox["enabled"], &sandbox["failIfUnavailable"], &sandbox["allowUnsandboxedCommands"]), (&json!(true), &json!(true), &json!(false)));
@@ -138,14 +150,14 @@ async fn a_start_with_no_domains_allows_the_network_none_and_a_persons_own_run_s
     assert_eq!(s, 200, "{v}");
     let (_, prompt) = ran(&t.desk, 1).await;
     assert!(!prompt.to_lowercase().contains("sandbox"), "{prompt}");
-    let (settings, names) = fake_files(&t.desk.dir, 1).unwrap();
+    let (settings, names) = files_ready(&t.desk, 1).await;
     assert!(!settings.unwrap_or_default().contains("\"sandbox\""));
     assert!(names.iter().any(|n| n == "SANDBOX_TEST_API_KEY"), "an unsandboxed run keeps the service's environment, as before");
     // The same, sandboxed, with the switch on and no domains.
     let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas again", "sandbox": true })).await;
     assert_eq!(s, 200, "{v}");
     let _ = ran(&t.desk, 2).await;
-    let (settings, names) = fake_files(&t.desk.dir, 2).unwrap();
+    let (settings, names) = files_ready(&t.desk, 2).await;
     let settings: Value = serde_json::from_str(&settings.unwrap()).unwrap();
     assert_eq!(settings["sandbox"]["network"]["allowedDomains"], json!([]));
     assert!(settings["permissions"]["deny"].as_array().unwrap().contains(&json!("WebFetch")), "{settings}");
@@ -218,7 +230,7 @@ async fn a_turn_resumed_for_a_sandboxed_session_is_sandboxed_too() {
     let (args, _) = ran(&t.desk, 1).await;
     assert_eq!(&args[..2], ["-p", "--resume"], "{args:?}");
     assert!(args.iter().any(|a| a == "--strict-mcp-config") && args.iter().any(|a| a == "--setting-sources="), "{args:?}");
-    let (settings, names) = fake_files(&t.desk.dir, 1).unwrap();
+    let (settings, names) = files_ready(&t.desk, 1).await;
     let settings: Value = serde_json::from_str(&settings.expect("a settings file")).unwrap();
     assert_eq!(settings["sandbox"]["filesystem"]["allowWrite"], json!([atlas]));
     assert!(!names.iter().any(|n| n == "SANDBOX_TEST_API_KEY"), "{names:?}");
@@ -359,6 +371,8 @@ async fn a_run_you_didnt_start_reaches_only_the_domains_you_allowed() {
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let said = told(&t, "a domain outside the list").await;
     assert!(said.contains("evil.example") && said.contains("github.com"), "{said}");
+    let _ = ran(&t.desk, 1).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(fake_runs(&t.desk).len(), 1, "only the allowed one ran");
     // The person's own start names any domain.
     let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas 4", "domains": ["evil.example"] })).await;
@@ -366,6 +380,29 @@ async fn a_run_you_didnt_start_reaches_only_the_domains_you_allowed() {
     // And the list can be cleared.
     let (s, v) = t.desk.window("DELETE", "/api/runs/sandbox-domains", Value::Null).await;
     assert_eq!((s, v["domains"].clone()), (200, json!([])), "{v}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_codex_start_is_sandboxed_for_the_person_alone_and_closes_its_own_config() {
+    let root = root("sandbox-codex");
+    let t = two_networks(&root).await;
+    desk_takes_starts(&t).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    // Another machine's session: Codex's sandbox reads the whole disk, so it isn't started.
+    let (s, v) =
+        as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "app": "codex", "prompt": "tidy atlas" })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let said = told(&t, "a codex start").await;
+    assert!(said.contains("Codex") && said.contains("anyone but you"), "{said}");
+    assert_eq!(fake_runs(&t.desk).len(), 0);
+    // The person's own, sandboxed: with the user's config left out.
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "app": "codex", "prompt": "tidy atlas again", "sandbox": true })).await;
+    assert_eq!(s, 200, "{v}");
+    let (args, _) = ran(&t.desk, 1).await;
+    assert_eq!(args[..3], ["exec", "--sandbox", "workspace-write"], "{args:?}");
+    assert!(args.iter().any(|a| a == "--ignore-user-config") && args.iter().any(|a| a == "notify=[]"), "{args:?}");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

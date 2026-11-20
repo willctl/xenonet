@@ -258,6 +258,21 @@ pub fn sandbox_plan(r: &Request, plan: &xenonet_adapter::delivery::Plan<'_>, win
     Ok((ways.words)(plan))
 }
 
+/// Whether `app`'s sandbox is enough for a run started by `by_person` (or
+/// not): an app whose sandbox lets its commands read the whole disk (Codex)
+/// is not enough for a run that isn't the person's own, since its last words
+/// can carry any file it read. Why not, in words.
+pub fn sandbox_enough(app: &str, by_person: bool) -> Result<(), String> {
+    let reads_all = apps::of(app).and_then(|w| w.sandbox).is_some_and(|s| s.reads_whole_disk);
+    if reads_all && !by_person {
+        let name = apps().into_iter().find(|a| a.id == app).map_or(app.to_string(), |a| a.name.clone());
+        return Err(format!(
+            "{name}'s sandbox can't keep what a run reads from the rest of the disk out of what it says, so it isn't started for anyone but you: start it from your own console, or use Claude Code"
+        ));
+    }
+    Ok(())
+}
+
 /// One-line text for a title, without what could break the framing.
 fn title_of(t: &str) -> String {
     let one = super::policy::sanitize(t, true, 120.0);
@@ -604,7 +619,7 @@ mod tests {
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
         let r = |app: &str| Request { folder: "~".into(), app: app.into(), mode: None, prompt: "x".into(), delegate: false, sandbox: SandboxAsk::On(vec![]) };
         let plan = Plan { folder: "/w/atlas", home: "/h", domains: &[], port: "47840", bin: "xenonet" };
-        let files = SandboxFiles { plan, settings: "/s/runs/a.settings.json", mcp: "/s/runs/a.mcp.json" };
+        let files = SandboxFiles { plan, settings: "/s/runs/a.settings.json", mcp: "/s/runs/a.mcp.json", server: "xenonet" };
         let (_, args) = command(&r("claude"), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
         let args = sandboxed("claude", &files, args).unwrap();
         let at = args.iter().position(|a| a == "--settings").unwrap();
@@ -614,7 +629,8 @@ mod tests {
         assert_eq!(args[args.iter().position(|a| a == "--mcp-config").unwrap() + 1], "/s/runs/a.mcp.json");
         let (_, codex) = command(&r("codex"), id, "/w/atlas", None, "xenonet", None).unwrap();
         let codex = sandboxed("codex", &files, codex).unwrap();
-        assert_eq!(codex[..6], ["exec", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\"", "-c"]);
+        assert_eq!(codex[..5], ["exec", "--sandbox", "workspace-write", "--ignore-user-config", "--ignore-rules"]);
+        assert!(codex.contains(&"approval_policy=\"never\"".to_string()), "{codex:?}");
         assert!(codex.contains(&"sandbox_workspace_write.network_access=false".to_string()), "{codex:?}");
         assert_eq!(codex.last().map(String::as_str), Some("-"));
         assert!(sandboxed("grok", &files, vec![]).is_err());
@@ -649,6 +665,16 @@ mod tests {
         assert!(sandbox_folder("/home/me/atlas", "/home/me", false).is_ok());
         assert!(sandbox_folder("/home/mel", "/home/me", false).is_ok(), "a sibling that starts the same is not home");
         assert!(sandbox_folder("/srv/atlas", "/home/me", false).is_ok());
+    }
+
+    #[test]
+    fn a_sandbox_that_reads_the_whole_disk_is_enough_for_the_person_alone() {
+        xenonet_platforms::install();
+        assert!(sandbox_enough("codex", true).is_ok());
+        let why = sandbox_enough("codex", false).unwrap_err();
+        assert!(why.contains("Codex") && why.contains("anyone but you"), "{why}");
+        assert!(sandbox_enough("claude", false).is_ok());
+        assert!(sandbox_enough("claude", true).is_ok());
     }
 
     #[test]
