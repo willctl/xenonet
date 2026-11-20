@@ -87,7 +87,7 @@ export const APPS = [
     limits: "codex",
     team: "2DC432GLL2",
     // The golden world's rollouts are from this version.
-    checked: "0.150.0",
+    checked: "0.171.0",
     connect: {
       format: "codex-hooks",
       events: [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "apply_patch|Edit|Write"], ["PostToolUse"], ["Stop"], ["SessionEnd"]],

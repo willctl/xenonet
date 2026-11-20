@@ -1042,7 +1042,7 @@ mod tests {
         assert!(v["fix"].is_string());
         let v = release("codex.release", says("codex-cli 9.0.0\n"), false);
         assert_eq!(v["status"], json!("warn"));
-        assert!(v["detail"].as_str().unwrap().contains("Codex 0.150.0; 9.0.0 is installed"), "{v}");
+        assert!(v["detail"].as_str().unwrap().contains("Codex 0.171.0; 9.0.0 is installed"), "{v}");
         let v = release("grok.release", says("grok 9.0.0 (50ca579fa996) [stable]\n"), false);
         assert_eq!(v["status"], json!("warn"));
         assert!(v["detail"].as_str().unwrap().contains("Grok Build 1.0.77; 9.0.0 is installed"), "{v}");
