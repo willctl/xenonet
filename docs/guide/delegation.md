@@ -20,7 +20,7 @@ An assistant calls the xenonet MCP server's `delegate` tool with the machine, a 
 delegate machine: tower, task: "Update XenoNet to the latest release, then report the version and what the doctor says."
 ```
 
-When neo-rex is in two or more of this machine's networks, add `network` (its id or name); without it the tool is refused and says which.
+When tower is in two or more of this machine's networks, add `network` (its id or name); without it the tool is refused and says which.
 
 The answer comes at once. When the new session stops, the assistant is told what it came to (finished, stopped to ask something, was denied a tool, failed, or left nothing), with its last words, and is woken if it is idle. The session needn't be told to report: XenoNet does it.
 

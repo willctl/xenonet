@@ -573,8 +573,8 @@ mod tests {
     fn a_sandboxed_run_is_told_so_in_its_first_prompt() {
         let you = json!({ "kind": "you", "id": "actor:you" });
         assert_eq!(
-            framed(&you, Some("inix"), "Go.", None, Some("It reaches nothing.")),
-            "[XenoNet] Started by you, at inix's console.\n\n[XenoNet] This run is sandboxed. It reaches nothing.\n\nGo."
+            framed(&you, Some("desk"), "Go.", None, Some("It reaches nothing.")),
+            "[XenoNet] Started by you, at desk's console.\n\n[XenoNet] This run is sandboxed. It reaches nothing.\n\nGo."
         );
     }
 
