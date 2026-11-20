@@ -534,6 +534,8 @@ pub const DESK_LEDGER: &str = "claude:dddddddd-0002";
 /// What `two_networks_ended` has in atlas in place of `DESK_ATLAS`: an id a
 /// resume takes (a UUID), whose process has gone.
 pub const DESK_ATLAS_ENDED: &str = "claude:0190d3e0-0000-7000-8000-0000000d0001";
+/// The same for ledger, in `two_networks_all_ended`.
+pub const DESK_LEDGER_ENDED: &str = "claude:0190d3e0-0000-7000-8000-0000000d0002";
 pub const VM_ATLAS: &str = "claude:eeeeeeee-0001";
 pub const VM_LEDGER: &str = "claude:eeeeeeee-0002";
 /// The one on `contractor-vm` in `scratch`, a project only it holds.
@@ -566,17 +568,23 @@ pub async fn two_networks(root: &Path) -> TwoNetworks {
 
 /// `two_networks`, with `contractor-vm` a window host of N2 when `guest_window`.
 pub async fn two_networks_with(root: &Path, guest_window: bool) -> TwoNetworks {
-    two_networks_in(root, guest_window, false).await
+    two_networks_in(root, guest_window, false, false).await
 }
 
 /// `two_networks`, with the session of `desk` in atlas (`DESK_ATLAS_ENDED`
 /// in place of `DESK_ATLAS`) ended: its process has gone, so a message it
 /// may be woken for resumes it.
 pub async fn two_networks_ended(root: &Path) -> TwoNetworks {
-    two_networks_in(root, false, true).await
+    two_networks_in(root, false, true, false).await
 }
 
-async fn two_networks_in(root: &Path, guest_window: bool, atlas_ended: bool) -> TwoNetworks {
+/// `two_networks_ended`, with the session in ledger (`DESK_LEDGER_ENDED`)
+/// ended too, so a wake that wrongly reached it would show.
+pub async fn two_networks_all_ended(root: &Path) -> TwoNetworks {
+    two_networks_in(root, false, true, true).await
+}
+
+async fn two_networks_in(root: &Path, guest_window: bool, atlas_ended: bool, ledger_ended: bool) -> TwoNetworks {
     let desk_atlas = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "main");
     let desk_ledger = clone(&root.join("desk/home/ledger"), "git@github.com:acme/ledger.git", "main");
     let vm_atlas = clone(&root.join("contractor-vm/home/atlas"), "https://github.com/acme/atlas", "main");
@@ -586,7 +594,13 @@ async fn two_networks_in(root: &Path, guest_window: bool, atlas_ended: bool) -> 
         atlas_session.id = DESK_ATLAS_ENDED;
         atlas_session.live = json!({ "lastEventAt": t - 200e3, "endedAt": t - 100e3 });
     }
-    let desk = Host::open_with("desk", root.join("desk"), vec![atlas_session, sess(DESK_LEDGER, "Reconcile March", &desk_ledger)], None, true).await;
+    let mut ledger_session = sess(DESK_LEDGER, "Reconcile March", &desk_ledger);
+    if ledger_ended {
+        let t = now_ms();
+        ledger_session.id = DESK_LEDGER_ENDED;
+        ledger_session.live = json!({ "lastEventAt": t - 200e3, "endedAt": t - 100e3 });
+    }
+    let desk = Host::open_with("desk", root.join("desk"), vec![atlas_session, ledger_session], None, true).await;
     let n1 = founded(&desk, "home").await;
     let tower = Host::open("tower", root.join("tower"), Vec::new(), None).await;
     join(&tower, &invite_to(&desk, "tower", true, Some("home")).await).await;

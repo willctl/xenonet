@@ -3371,3 +3371,184 @@ async fn an_accept_names_a_session_only_to_a_network_that_knows_it() {
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+// ---------- working on a machine the person doesn't own ----------
+//
+// The daily-use plan's third scenario: Nova works on `contractor-vm`,
+// which has no identity of hers, and which is a member of `work` only. What
+// protects her is what `desk` decides about `work` (slice 2), so these
+// tests act as `contractor-vm` and look at `desk`.
+
+/// A made-up read of a machine's own API, as a window host's read ends.
+#[derive(Default)]
+struct Reads(std::sync::Mutex<Vec<String>>);
+
+impl xenonet_net::svc2::LocalReads for Reads {
+    fn get(&self, path: &str) -> xenonet_net::dial::Fut<'_, Result<(u16, Value), (String, u16)>> {
+        self.0.lock().unwrap().push(path.to_string());
+        Box::pin(async move { Ok((200, json!({ "entries": [{ "role": "user", "text": "hello" }], "cursor": null }))) })
+    }
+}
+
+/// A start Nova signs at `desk`, for atlas's folder on `contractor-vm`,
+/// runs there; its prompt for a tool is shown at `desk` and answered there. `contractor-vm` has nothing but
+/// the default settings, and no identity of hers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_start_desk_signs_runs_on_the_guest_machine_and_its_prompts_come_back_to_desk() {
+    let root = std::env::temp_dir().join(format!("xenonet-guest-run-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    until("desk knows contractor-vm takes its starts", 20, || async {
+        let st = t.desk.state().await;
+        row_of(&json!({ "hosts": st["networks"][1]["hosts"] }), "contractor-vm")["can"].as_array().is_some_and(|c| c.contains(&json!("start")))
+    })
+    .await;
+    let mut starts = Stream::of(&t.desk);
+    let folder = root.join("contractor-vm/home/atlas").to_string_lossy().into_owned();
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "contractor-vm", "network": "work", "folder": folder, "prompt": "hold-on: tidy atlas" })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let run = starts.next("start", 20, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
+    let (_, prompt) = ran(&t.contractor, 1).await;
+    assert!(prompt.contains("tidy atlas"), "it ran on contractor-vm: {prompt}");
+    assert!(fake_runs(&t.desk).is_empty(), "and not on desk");
+    // The run's Claude Code asks to run a tool, on contractor-vm.
+    let ctx = t.contractor.ctx.clone();
+    let held = {
+        let run = run.clone();
+        tokio::spawn(async move {
+            let body = json!({ "tool_name": "Bash", "input": { "command": "npm test" }, "tool_use_id": "toolu_1" }).to_string();
+            let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", run.as_str())], Some(&body)))).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let asks = |h: &Host| {
+        let h = h.ctx.clone();
+        async move {
+            let req = Req::fake("GET", "/api/runs/asks", &[("x-xenonet-window", h.window_key.reveal())], None);
+            api(&h, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+    let waiting = until_value("the ask at desk", 15, || async { asks(&t.desk).await.into_iter().find(|x| x["host"] == "contractor-vm") }).await;
+    assert_eq!((waiting["tool"].clone(), waiting["input"].clone(), waiting["session"].clone()), (json!("Bash"), json!("npm test"), json!(run)), "{waiting}");
+    let (s, v) = t.desk.window("POST", "/api/runs/answer", json!({ "ask": waiting["id"], "decision": "allow" })).await;
+    assert_eq!((s, v["host"].clone()), (200, json!("contractor-vm")), "{v}");
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.expect("the held call was answered").unwrap();
+    assert_eq!((s, answer["behavior"].clone()), (200, json!("allow")), "{answer}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Under `desk`'s default settings, which let `work` start nothing, a
+/// session on `contractor-vm` can't start one on `desk`, not even in
+/// atlas's folder; once Nova lets `work` start sessions, atlas's folder
+/// works and ledger's still doesn't.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_guest_starts_nothing_on_desk_until_desk_lets_its_network_and_then_only_in_atlas() {
+    let root = std::env::temp_dir().join(format!("xenonet-guest-start-default-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let desk_home = root.join("desk/home");
+    let mut told: Vec<String> = Vec::new();
+    let try_in = |folder: String, prompt: &'static str| {
+        let contractor = &t.contractor;
+        async move {
+            let (s, v) = as_agent(contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": folder, "prompt": prompt })).await;
+            assert_eq!(s, 200, "{v}");
+            v
+        }
+    };
+    let atlas_folder = desk_home.join("atlas").to_string_lossy().into_owned();
+    // Default settings: refused here or there, and nothing runs on desk.
+    let v = try_in(atlas_folder.clone(), "hold-on: tidy atlas").await;
+    if v["state"] == json!("sent") {
+        let got = vm_is_told(&t, &mut told, "a start desk doesn't take").await;
+        assert!(got.contains("No session was started"), "{got}");
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(fake_runs(&t.desk).is_empty(), "a guest started a run on desk under the default settings: {:?}", fake_runs(&t.desk));
+    // Positive control: with `work` let start, atlas's folder starts one and ledger's doesn't.
+    let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "work", "host": "desk", "start": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("contractor-vm knows desk takes starts from the network", 20, || async {
+        let r = row_of(&t.contractor.state().await, "desk");
+        r["reach"]["start"] == "network" && r["can"].as_array().is_some_and(|c| c.contains(&json!("start")))
+    })
+    .await;
+    told.clear();
+    assert_eq!(try_in(atlas_folder, "hold-on: tidy atlas").await["state"], json!("sent"));
+    let got = vm_is_told(&t, &mut told, "atlas").await;
+    assert!(got.contains("Started"), "{got}");
+    let _ = try_in(desk_home.join("ledger").to_string_lossy().into_owned(), "hold-on: tidy ledger").await;
+    let got = vm_is_told(&t, &mut told, "ledger").await;
+    assert!(got.contains("No session was started"), "{got}");
+    let _ = ran(&t.desk, 1).await;
+    assert_eq!(fake_runs(&t.desk).len(), 1, "only atlas's run was started");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A message from `contractor-vm` wakes an ended session of atlas under
+/// `work`'s wake setting and never an ended session of ledger, whatever
+/// that setting is, through the whole path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_message_from_the_guest_wakes_an_ended_atlas_session_and_never_a_ledger_one() {
+    use xenonet_model::ops::Kind;
+    let root = std::env::temp_dir().join(format!("xenonet-guest-wake-ledger-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks_all_ended(&root).await;
+    let (atlas, ledger) = (t.desk.agt(DESK_ATLAS_ENDED), t.desk.agt(DESK_LEDGER_ENDED));
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS_ENDED).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "work", "host": "desk", "wake": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    guest_sends(&t, Kind::Message, guest_message(&t, 81, &ledger, "Wake up, ledger."));
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(fake_runs(&t.desk).is_empty(), "a guest woke a session of ledger: {:?}", fake_runs(&t.desk));
+    // The same into atlas wakes it, so the wait above was not for nothing.
+    guest_sends(&t, Kind::Message, guest_message(&t, 82, &atlas, "The fixtures moved."));
+    let (args, prompt) = ran(&t.desk, 1).await;
+    assert_eq!(&args[..3], ["-p", "--resume", DESK_ATLAS_ENDED.trim_start_matches("claude:")], "{args:?}");
+    assert!(prompt.contains("The fixtures moved.") && !prompt.contains("Wake up, ledger."), "{prompt}");
+    assert_eq!(fake_runs(&t.desk).len(), 1, "{:?}", fake_runs(&t.desk));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A transcript is read only by the window of a window host: `desk`, which
+/// founded both networks, reads a session on `contractor-vm`, and a session
+/// on `contractor-vm` can't ask for one of `desk`'s, atlas's included, nor
+/// find ledger's id. (That `desk` refuses a member that is no window host is
+/// the authz matrix's "role" row, and `net_svc.rs` has it end to end; here a
+/// window read from `contractor-vm` to `desk` gets no answer in 30 s, which
+/// this test doesn't wait for.) No refused read reaches `desk`'s API.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_session_on_the_guest_reads_no_transcript_of_desk_and_desks_window_reads_the_guests() {
+    let root = std::env::temp_dir().join(format!("xenonet-guest-transcript-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let t = two_networks(&root).await;
+    let (desk_reads, vm_reads) = (Arc::new(Reads::default()), Arc::new(Reads::default()));
+    t.desk.svc.nodes().common().set_reads(desk_reads.clone());
+    t.contractor.svc.nodes().common().set_reads(vm_reads.clone());
+    let (desk_atlas, desk_ledger, vm_atlas) = (t.desk.agt(DESK_ATLAS), t.desk.agt(DESK_LEDGER), t.contractor.agt(VM_ATLAS));
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS).await.contains(&vm_atlas) }).await;
+    // The positive control: desk's window reads the guest's session.
+    let (s, v) = t.desk.window("GET", &format!("/api/session/{vm_atlas}/transcript?limit=10"), Value::Null).await;
+    assert_eq!((s, v["host"].clone(), v["entries"][0]["text"].clone()), (200, json!("contractor-vm"), json!("hello")), "{v}");
+    assert_eq!(vm_reads.0.lock().unwrap().len(), 1);
+    // A session on the guest asks for none of desk's, shown or not.
+    for id in [&desk_atlas, &desk_ledger] {
+        let (s, v) = as_agent(&t.contractor, VM_ATLAS, "GET", &format!("/api/session/{id}/transcript?limit=10"), Value::Null).await;
+        assert_eq!((s, v["code"].clone()), (403, json!("window")), "{v}");
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(desk_reads.0.lock().unwrap().is_empty(), "a refused read reached desk's API: {:?}", desk_reads.0.lock().unwrap());
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
