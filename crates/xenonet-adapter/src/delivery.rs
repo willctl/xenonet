@@ -28,9 +28,6 @@ pub struct Start<'a> {
     /// Where the first prompt was written, for an app that reads it from a
     /// file (`Ways::prompt_file`).
     pub prompt_file: Option<&'a str>,
-    /// For a sandboxed run: the files of its settings and servers, which
-    /// XenoNet wrote from the app's `SandboxWays`. None: not sandboxed.
-    pub sandbox: Option<SandboxFiles<'a>>,
 }
 
 /// What a sandboxed run is held to: it writes only in `folder` (its working
@@ -75,6 +72,10 @@ pub struct SandboxWays {
     /// What a sandboxed run's answer and first prompt say it may reach,
     /// beyond its folder: the words for the domains.
     pub words: fn(&Plan<'_>) -> String,
+    /// The arguments of a turn of the app (a start, a resumed turn or a
+    /// copy), as they are without the sandbox, made to run in it with the
+    /// run's files. A resumed turn of a sandboxed session is sandboxed too.
+    pub turn: fn(&SandboxFiles<'_>, Vec<String>) -> Vec<String>,
 }
 
 /// The command that starts a new session with a first prompt: the program

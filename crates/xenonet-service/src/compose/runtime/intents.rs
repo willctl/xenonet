@@ -921,7 +921,7 @@ fn work_now(w: &Runtime, id: &str) -> Result<(), Worked> {
     if !db.move_intent(id, &["assigned"], "running", now_ms() as i64).map_err(|e| Worked::Failed(e.message))? {
         return Ok(());
     }
-    let request = xenonet_engine::delivery::starts::Request { folder, app: i.app.clone(), mode: None, prompt: String::new(), delegate: true };
+    let request = xenonet_engine::delivery::starts::Request { folder, app: i.app.clone(), mode: None, prompt: String::new(), delegate: true, sandbox: xenonet_engine::delivery::starts::SandboxAsk::On(Vec::new()) };
     let start = crate::compose::runtime::starts::Apart {
         request,
         prompt: Information::new(i.goal.clone()),

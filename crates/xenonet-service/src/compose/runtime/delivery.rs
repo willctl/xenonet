@@ -397,7 +397,17 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     // whose process has gone.
     let plan = if fork { resume::plan_fork(&mut plans, agent, settings, cwd) } else { resume::plan(&mut plans, agent, settings, cwd) };
     let (app, args) = plan.map_err(str::to_string)?;
-    let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().collect());
+    // A session started sandboxed is resumed, or copied, sandboxed: if its
+    // sandbox can't be made again, the turn isn't run bare.
+    let sandboxed = crate::compose::runtime::sandbox::of(w, agent);
+    if sandboxed.is_none() && crate::compose::runtime::sandbox::unreadable(w, agent) {
+        return Err("that session was started sandboxed and its sandbox can't be read, so no turn is run for it".into());
+    }
+    let args = match &sandboxed {
+        Some(rec) => crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?.0,
+        None => args,
+    };
+    let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env() } else { resume::resume_env(std::env::vars().collect()) };
     // An app whose runs sign in (Claude Code) does with the token you gave
     // XenoNet's runs, and asks its permission prompts of you through this
     // XenoNet's server, waiting a minute past the hold for your answer, as

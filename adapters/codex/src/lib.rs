@@ -39,31 +39,34 @@ fn resume(id: &str, _: Option<&str>) -> (String, Vec<String>) {
 
 // codex exec --json -C <folder> -: the prompt goes on standard input, and
 // Codex names the new thread in its first event.
-//
-// Sandboxed: codex exec --json -C <folder> --sandbox workspace-write
-//   -c approval_policy="never" -c sandbox_workspace_write.network_access=false
-//   -c sandbox_workspace_write.exclude_slash_tmp=true
-//   -c sandbox_workspace_write.exclude_tmpdir_env_var=true -
+fn start(s: &Start<'_>) -> (String, Vec<String>) {
+    ("codex".into(), ["exec", "--json", "-C", s.cwd, "-"].into_iter().map(str::to_string).collect())
+}
+
+// Sandboxed, a turn (a start or a resume) is
+//   codex exec --sandbox workspace-write -c approval_policy="never"
+//     -c sandbox_workspace_write.network_access=false
+//     -c sandbox_workspace_write.exclude_slash_tmp=true
+//     -c sandbox_workspace_write.exclude_tmpdir_env_var=true ...
 // Commands write only in the folder and have no network, and nothing is
 // asked of anyone. Codex's workspace-write sandbox reads the whole disk.
-fn start(s: &Start<'_>) -> (String, Vec<String>) {
-    let mut args: Vec<&str> = vec!["exec", "--json", "-C", s.cwd];
-    if s.sandbox.is_some() {
-        args.extend([
-            "--sandbox",
-            "workspace-write",
-            "-c",
-            "approval_policy=\"never\"",
-            "-c",
-            "sandbox_workspace_write.network_access=false",
-            "-c",
-            "sandbox_workspace_write.exclude_slash_tmp=true",
-            "-c",
-            "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-        ]);
-    }
-    args.push("-");
-    ("codex".into(), args.into_iter().map(str::to_string).collect())
+fn sandbox_turn(_: &delivery::SandboxFiles<'_>, args: Vec<String>) -> Vec<String> {
+    let flags = [
+        "--sandbox",
+        "workspace-write",
+        "-c",
+        "approval_policy=\"never\"",
+        "-c",
+        "sandbox_workspace_write.network_access=false",
+        "-c",
+        "sandbox_workspace_write.exclude_slash_tmp=true",
+        "-c",
+        "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+    ];
+    let mut out = args;
+    // After `exec`, before its subcommand or the prompt.
+    out.splice(1.min(out.len())..1.min(out.len()), flags.map(str::to_string));
+    out
 }
 
 // Codex's sandbox can't name the domains a command may reach: with some,
@@ -173,7 +176,7 @@ impl Platform for Adapter {
             finish: Some(finish),
             reported: Some(reported),
             plan_used: Some(plan_used),
-            sandbox: Some(delivery::SandboxWays { unavailable: sandbox_unavailable, files: None, words: sandbox_words }),
+            sandbox: Some(delivery::SandboxWays { unavailable: sandbox_unavailable, files: None, words: sandbox_words, turn: sandbox_turn }),
             ..Ways::default()
         })
     }

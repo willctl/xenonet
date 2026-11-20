@@ -103,7 +103,7 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
     assert!(first.to_lowercase().contains("sandbox") && first.contains("github.com"), "the answer says the run is sandboxed and what it reaches: {first}");
     let (args, prompt) = ran(&t.desk, 1).await;
     assert!(prompt.to_lowercase().contains("sandbox") && prompt.contains("github.com"), "the first prompt says so too: {prompt}");
-    assert!(args.iter().any(|a| a == "--strict-mcp-config") && args.iter().any(|a| a == "--setting-sources"), "the repo's own settings and servers aren't loaded: {args:?}");
+    assert!(args.iter().any(|a| a == "--strict-mcp-config") && args.iter().any(|a| a == "--setting-sources="), "the repo's own settings and servers aren't loaded: {args:?}");
     let (settings, names) = fake_files(&t.desk.dir, 1).unwrap();
     let settings: Value = serde_json::from_str(&settings.expect("a settings file")).unwrap();
     let sandbox = &settings["sandbox"];

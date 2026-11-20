@@ -550,7 +550,7 @@ mod tests {
     }
 
     fn start(mode: StartMode) -> Act {
-        Act::Start { app: xenonet_authz::AppId::new("claude").unwrap(), folder: Folder::new("~/atlas").unwrap(), mode }
+        Act::Start { app: xenonet_authz::AppId::new("claude").unwrap(), folder: Folder::new("~/atlas").unwrap(), mode, sandbox: Some(xenonet_authz::Sandbox::default()) }
     }
 
     fn session() -> Resource {

@@ -282,17 +282,16 @@ pub fn prompt_in_file(app: &str) -> bool {
 /// `prompt_file` where the prompt was written for an app that reads it
 /// from a file. Or why there's no such command: the app's adapter has no
 /// start.
-pub fn command(
-    r: &Request,
-    id: &str,
-    cwd: &str,
-    settings: Option<&str>,
-    server: &str,
-    prompt_file: Option<&str>,
-    sandbox: Option<xenonet_adapter::delivery::SandboxFiles<'_>>,
-) -> Result<(String, Vec<String>), String> {
+pub fn command(r: &Request, id: &str, cwd: &str, settings: Option<&str>, server: &str, prompt_file: Option<&str>) -> Result<(String, Vec<String>), String> {
     let start = apps::of(&r.app).and_then(|w| w.start).ok_or_else(|| format!("XenoNet has no way to start a {} session here", r.app))?;
-    Ok(start(&Start { id, cwd, mode: r.mode.as_deref(), settings, server, prompt_file, sandbox }))
+    Ok(start(&Start { id, cwd, mode: r.mode.as_deref(), settings, server, prompt_file }))
+}
+
+/// The arguments of a turn of `app` run in its sandbox, given the files of
+/// the run: a start's, a resumed turn's or a copy's alike.
+pub fn sandboxed(app: &str, files: &xenonet_adapter::delivery::SandboxFiles<'_>, args: Vec<String>) -> Result<Vec<String>, String> {
+    let ways = apps::of(app).and_then(|w| w.sandbox).ok_or_else(|| format!("{app} has no sandbox XenoNet can drive"))?;
+    Ok((ways.turn)(files, args))
 }
 
 /// Who asked a start here, in the starts' history: one asker on this
@@ -543,23 +542,26 @@ mod tests {
     }
 
     #[test]
-    fn a_sandboxed_run_loads_xenonets_settings_and_servers_and_none_of_the_repos() {
+    fn a_sandboxed_turn_runs_in_the_apps_sandbox_and_loads_none_of_the_repos() {
         xenonet_platforms::install();
         use xenonet_adapter::delivery::{Plan, SandboxFiles};
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
         let r = |app: &str| Request { folder: "~".into(), app: app.into(), mode: None, prompt: "x".into(), delegate: false, sandbox: SandboxAsk::On(vec![]) };
         let plan = Plan { folder: "/w/atlas", home: "/h", domains: &[], port: "47840", bin: "xenonet" };
         let files = SandboxFiles { plan, settings: "/s/runs/a.settings.json", mcp: "/s/runs/a.mcp.json" };
-        let (_, args) = command(&r("claude"), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None, Some(files)).unwrap();
+        let (_, args) = command(&r("claude"), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
+        let args = sandboxed("claude", &files, args).unwrap();
         let at = args.iter().position(|a| a == "--settings").unwrap();
         assert_eq!(args[at + 1], "/s/runs/a.settings.json", "the run's own file, not the listening one: {args:?}");
         assert!(!args.iter().any(|a| a == "/s/listen.json"));
         assert!(args.contains(&"--setting-sources=".to_string()) && args.contains(&"--strict-mcp-config".to_string()));
         assert_eq!(args[args.iter().position(|a| a == "--mcp-config").unwrap() + 1], "/s/runs/a.mcp.json");
-        let (_, codex) = command(&r("codex"), id, "/w/atlas", None, "xenonet", None, Some(files)).unwrap();
-        assert_eq!(codex[..6], ["exec", "--json", "-C", "/w/atlas", "--sandbox", "workspace-write"]);
-        assert!(codex.contains(&"approval_policy=\"never\"".to_string()) && codex.contains(&"sandbox_workspace_write.network_access=false".to_string()), "{codex:?}");
+        let (_, codex) = command(&r("codex"), id, "/w/atlas", None, "xenonet", None).unwrap();
+        let codex = sandboxed("codex", &files, codex).unwrap();
+        assert_eq!(codex[..6], ["exec", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\"", "-c"]);
+        assert!(codex.contains(&"sandbox_workspace_write.network_access=false".to_string()), "{codex:?}");
         assert_eq!(codex.last().map(String::as_str), Some("-"));
+        assert!(sandboxed("grok", &files, vec![]).is_err());
     }
 
     #[test]
@@ -599,7 +601,7 @@ mod tests {
         xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
         let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into(), delegate: false, sandbox: SandboxAsk::Unset };
-        let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None, None).unwrap();
+        let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
         assert_eq!(app, "claude");
         assert_eq!(
             args,
@@ -619,19 +621,19 @@ mod tests {
             ]
         );
         assert_eq!(
-            command(&r("claude", None), id, "/w", None, "xenonet-dev", None, None).unwrap().1,
+            command(&r("claude", None), id, "/w", None, "xenonet-dev", None).unwrap().1,
             ["-p", "--session-id", id, "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "mcp__xenonet-dev__permission"]
         );
-        assert_eq!(command(&r("codex", None), id, "/w/atlas", None, "xenonet", None, None).unwrap().1, ["exec", "--json", "-C", "/w/atlas", "-"]);
+        assert_eq!(command(&r("codex", None), id, "/w/atlas", None, "xenonet", None).unwrap().1, ["exec", "--json", "-C", "/w/atlas", "-"]);
         assert_eq!(
-            command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt"), None).unwrap().1,
+            command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt")).unwrap().1,
             ["--prompt-file", "/s/runs/p.txt", "-s", id, "--output-format", "json", "--permission-mode", "default"]
         );
         for app in apps().iter().filter(|a| !acp_only(a)).map(|a| a.id.as_str()) {
-            assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p"), None).unwrap().1.iter().any(|a| a.contains("rm -rf")), "{app}");
+            assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p")).unwrap().1.iter().any(|a| a.contains("rm -rf")), "{app}");
         }
         assert!(prompt_in_file("grok") && !prompt_in_file("claude") && !prompt_in_file("codex"));
-        assert!(command(&r("opencode", None), id, "/w", None, "xenonet", None, None).is_err(), "no start in its adapter");
+        assert!(command(&r("opencode", None), id, "/w", None, "xenonet", None).is_err(), "no start in its adapter");
     }
 
     #[test]

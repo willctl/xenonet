@@ -13,10 +13,10 @@
 
 use serde_json::{json, Map, Value};
 use xenonet_adapter::apps::app;
-use xenonet_adapter::delivery::{Plan, SandboxWays};
+use xenonet_adapter::delivery::{Plan, SandboxFiles, SandboxWays};
 
 pub fn ways() -> SandboxWays {
-    SandboxWays { unavailable, files: Some(files), words }
+    SandboxWays { unavailable, files: Some(files), words, turn }
 }
 
 /// Native Windows has no sandbox in Claude Code: it runs commands
@@ -29,6 +29,25 @@ fn unavailable(_: &Plan<'_>, windows: bool) -> Option<String> {
 fn words(p: &Plan<'_>) -> String {
     let net = if p.domains.is_empty() { "no network".to_string() } else { format!("the network only at {}", p.domains.join(", ")) };
     format!("It runs in Claude Code's sandbox: its commands write only in {}, read none of the home folder but that folder, and reach {net}.", p.folder)
+}
+
+/// A turn of a sandboxed run loads XenoNet's settings and servers and none
+/// of the repo's, which on a guest is someone else's content, and whose
+/// hooks and servers would run outside the sandbox: the settings file the
+/// turn had is replaced by the run's, and the user's, the project's and the
+/// local settings and every other MCP server are left out.
+fn turn(f: &SandboxFiles<'_>, args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--settings" {
+            it.next();
+        } else {
+            out.push(a);
+        }
+    }
+    out.extend(["--settings", f.settings, "--setting-sources=", "--strict-mcp-config", "--mcp-config", f.mcp].map(str::to_string));
+    out
 }
 
 /// The settings file and the MCP configuration of one run.
@@ -59,11 +78,10 @@ fn files(p: &Plan<'_>, listen: Option<&Value>, server: &str) -> (Value, Value) {
     let ours = app("claude").map(|a| crate::connect::hook_entries(a, &format!("http://127.0.0.1:{}/api/hook/claude", p.port), &session_start));
     for source in [ours.as_ref(), listen.and_then(|l| l.get("hooks"))].into_iter().flatten() {
         for (event, groups) in source.as_object().into_iter().flatten() {
-            if let (Some(add), Some(h)) = (groups.as_array(), settings["hooks"].as_object_mut()) {
-                let entry = h.entry(event.clone()).or_insert_with(|| json!([]));
-                if let Some(list) = entry.as_array_mut() {
-                    list.extend(add.iter().cloned());
-                }
+            // An event's groups: a list, or the one group connect's set has.
+            let add: Vec<Value> = groups.as_array().cloned().unwrap_or_else(|| vec![groups.clone()]);
+            if let Some(list) = settings["hooks"].as_object_mut().map(|h| h.entry(event.clone()).or_insert_with(|| json!([]))).and_then(Value::as_array_mut) {
+                list.extend(add);
             }
         }
     }
@@ -95,6 +113,14 @@ mod tests {
         let (none, _) = files(&plan(&[]), None, "xenonet");
         assert_eq!(none["permissions"]["deny"], json!(["WebSearch", "WebFetch"]));
         assert_eq!(none["sandbox"]["network"]["allowedDomains"], json!([]));
+    }
+
+    #[test]
+    fn a_turn_swaps_the_listening_settings_for_the_runs_and_leaves_the_repos_out() {
+        let p = plan(&[]);
+        let f = SandboxFiles { plan: p, settings: "/s/a.json", mcp: "/s/m.json" };
+        let args = turn(&f, ["-p", "--resume", "x", "--settings", "/s/listen.json", "--permission-prompt-tool", "t"].map(str::to_string).to_vec());
+        assert_eq!(args, ["-p", "--resume", "x", "--permission-prompt-tool", "t", "--settings", "/s/a.json", "--setting-sources=", "--strict-mcp-config", "--mcp-config", "/s/m.json"]);
     }
 
     #[test]

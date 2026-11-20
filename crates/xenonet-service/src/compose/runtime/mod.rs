@@ -35,6 +35,7 @@ pub mod procs;
 pub mod registration;
 pub mod reports;
 pub mod runs;
+pub mod sandbox;
 pub mod scrub;
 pub mod spend;
 pub mod starts;

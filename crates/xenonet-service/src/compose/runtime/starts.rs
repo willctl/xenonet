@@ -29,6 +29,7 @@
 
 use crate::compose::runtime::network::{clip, ms, net, quiet_note, sender_kind, start_end_note};
 use crate::compose::runtime::runs::{Runner, Turn};
+use crate::compose::runtime::sandbox;
 use crate::compose::runtime::Runtime;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -409,11 +410,14 @@ fn run_act(machine: &xenonet_authz::MachineId, r: &Request) -> Result<(xenonet_a
     let app = xenonet_authz::AppId::new(&r.app).map_err(|e| e.message)?;
     let folder = xenonet_authz::Folder::new(&r.folder).map_err(|e| e.message)?;
     let mode = if r.delegate { xenonet_authz::StartMode::Delegated } else { xenonet_authz::StartMode::Asks };
-    Ok((xenonet_authz::Resource::Run { machine: machine.clone(), app: app.clone(), folder: folder.clone() }, xenonet_authz::Act::Start { app, folder, mode }))
+    // What the request says: a request that says nothing, or off, asks for
+    // no sandbox, and xenonet-authz refuses that from anyone but the person.
+    let sandbox = r.sandbox.domains().map(|d| xenonet_authz::Sandbox { domains: d.to_vec() });
+    Ok((xenonet_authz::Resource::Run { machine: machine.clone(), app: app.clone(), folder: folder.clone() }, xenonet_authz::Act::Start { app, folder, mode, sandbox }))
 }
 
 /// A plain UUID, for a new session's id.
-fn uuid() -> Result<String, String> {
+pub(crate) fn uuid() -> Result<String, String> {
     let id = xenonet_engine::network::new_id("s").map_err(|t| t.message)?;
     Ok(id.split_once('_').map_or(id.clone(), |(_, u)| u.to_string()))
 }
@@ -482,6 +486,22 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         Err(Held::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
         Err(Held::Refused { why, .. } | Held::Error(why)) => return Err(format!("this machine's limits hold it: {why}")),
     }
+    // Anyone but the person starts a run sandboxed: xenonet-authz decided
+    // that at the door, and this holds it again, for whatever calls here.
+    let record = match (r.sandbox.domains(), kind) {
+        (Some(domains), _) => Some(sandbox::Record { folder: cwd.clone(), domains: domains.to_vec() }),
+        (None, Kind::You) => None,
+        (None, _) => return Err("a run started by anyone but the person runs in its app's sandbox: this start asked for none".into()),
+    };
+    // The app has a sandbox to drive here, or the start says why not.
+    let sandbox_words = match &record {
+        Some(rec) => {
+            let (port, bin) = (w.setup.port.to_string(), crate::compose::connect::bin(&w.setup));
+            let plan = xenonet_adapter::delivery::Plan { folder: &rec.folder, home: &w.setup.home, domains: &rec.domains, port: &port, bin: &bin };
+            Some(starts::sandbox_plan(r, &plan, cfg!(windows))?)
+        }
+        None => None,
+    };
     if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref()) {
         if started.is_ok() {
             w.starts.history.locked().push((now, bucket));
@@ -499,8 +519,14 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     let delegation = (reach.start == "delegate" && kind != Kind::You).then(|| reach.delegated.clone()).flatten();
     let on = delegation.as_ref().map(|(_, at)| xenonet_text::time::iso(*at as f64).chars().take(10).collect::<String>());
     let text = match &start.intent {
-        Some(i) => crate::compose::runtime::intents::framed(i, prompt.read()),
-        None => starts::framed(by, from, prompt.read(), delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref())),
+        Some(i) => {
+            let framed = crate::compose::runtime::intents::framed(i, prompt.read());
+            match &sandbox_words {
+                Some(words) => format!("[XenoNet] This run is sandboxed. {words}\n\n{framed}"),
+                None => framed,
+            }
+        }
+        None => starts::framed(by, from, prompt.read(), delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()), sandbox_words.as_deref()),
     };
     // An app that reads its prompt from a file (Grok Build) gets one only
     // its owner can read, taken away when the run ends.
@@ -513,7 +539,11 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     };
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let command = starts::command(r, &id, &cwd, resumes.settings.as_deref(), &server, prompt_file.as_deref());
-    let (app, args) = match command {
+    let sandboxed = command.and_then(|(app, args)| match &record {
+        Some(rec) => sandbox::turn(w, &r.app, rec, &id, args).map(|(args, _)| (app, args)),
+        None => Ok((app, args)),
+    });
+    let (app, args) = match sandboxed {
         Ok(c) => c,
         Err(why) => {
             if let Some(f) = &prompt_file {
@@ -522,7 +552,9 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
             return Err(why);
         }
     };
-    let mut env: Vec<(String, String)> = xenonet_engine::delivery::resume::resume_env(std::env::vars().collect());
+    // A sandboxed run gets the scrubbed environment an ACP agent gets, and
+    // its sign-in; the service's own, without session marks, otherwise.
+    let mut env: Vec<(String, String)> = if record.is_some() { sandbox::env() } else { xenonet_engine::delivery::resume::resume_env(std::env::vars().collect()) };
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);
         env.push((v.into(), mcp_tool_timeout_ms(w).to_string()));
@@ -543,6 +575,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     w.starts.history.locked().push((now, bucket));
     if from.is_some() {
         w.starts.note_network(&key, xenonet_net::ground::current());
+    }
+    // Kept, so a turn resumed for the session later is sandboxed too.
+    if let (Some(rec), Some(session)) = (&record, &session) {
+        sandbox::keep(w, session, rec);
     }
     // The session's agent, from the start: its own id when the app takes
     // the one XenoNet gave it, else a pending row its process takes over
@@ -579,9 +615,14 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         let runner = resumes.runner.clone();
         let (key, app, logs) = (key.clone(), app.clone(), runs);
         let (session, folder, prompt_file) = (session.clone(), folder.clone(), prompt_file);
-        std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, &answer));
+        let record = record.clone();
+        std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, record, &answer));
     }
-    Ok(json!({ "session": session, "agent": agent, "pid": pid, "folder": folder, "app": app }))
+    let mut first = json!({ "session": session, "agent": agent, "pid": pid, "folder": folder, "app": app });
+    if let (Some(rec), Some(words)) = (&record, &sandbox_words) {
+        first["sandbox"] = json!({ "domains": rec.domains, "words": words });
+    }
+    Ok(first)
 }
 
 /// A start over ACP, for an app the registry gives `acp`, with no mode
@@ -900,6 +941,7 @@ fn watch(
     mut session: Option<String>,
     folder: &str,
     prompt_file: Option<String>,
+    sandboxed: Option<sandbox::Record>,
     answer: &Answer,
 ) {
     let mine = |r: &xenonet_engine::delivery::runs::Run| r.key == key && r.pid == Some(f64::from(pid));
@@ -925,6 +967,11 @@ fn watch(
         if session.is_none() {
             if let Some(found) = starts::session_of(app, &new) {
                 session = Some(found.clone());
+                // An app that names its session once it runs (Codex) is
+                // kept as sandboxed from then on.
+                if let Some(rec) = &sandboxed {
+                    sandbox::keep(w, &found, rec);
+                }
                 answer(w, "started", json!({ "session": found, "pid": pid, "folder": folder, "app": app }));
             }
         }
@@ -1007,12 +1054,19 @@ pub fn tell(w: &Runtime, by: &Value, host: &str, state: &str, a: &Value) {
 /// key, so a start as you may ask for your device's signature. The first
 /// answer, or a status and why.
 pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value, (u16, String)> {
-    let r = starts::request(req).map_err(|why| (400, why))?;
+    let mut r = starts::request(req).map_err(|why| (400, why))?;
     let me = net(w).me();
     // This machine goes by a host id in each network: any of them is this machine.
     let mine = net(w).networks();
     let machine = s(req, "machine").filter(|m| !m.is_empty() && mine.iter().all(|me| me.host != *m));
     let kind = kind_of(by.get("kind").and_then(Value::as_str).unwrap_or(""));
+    // Sandboxed unless the person's own console start on this machine says
+    // otherwise (its switch is off by default): a start for another machine,
+    // under a delegation, or by a session or an actor says nothing of it
+    // only when its asker never thought of it, and runs sandboxed then.
+    if r.sandbox == starts::SandboxAsk::Unset {
+        r.sandbox = if kind != Kind::You || machine.is_some() || r.delegate { starts::SandboxAsk::On(Vec::new()) } else { starts::SandboxAsk::Off };
+    }
     // An actor's own token, as it called with it: decided here, and never
     // kept with the start.
     let mut by = by;
@@ -1060,6 +1114,10 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     }
     if !net(w).host_can(&host, "start") {
         return Err((409, format!("{host}'s XenoNet is too old to start sessions: update it there")));
+    }
+    // An older XenoNet would take a sandboxed request as an unsandboxed one.
+    if r.sandbox.domains().is_some() && !net(w).host_can(&host, "sandbox") {
+        return Err((409, format!("{host}'s XenoNet is too old to start sandboxed sessions, and nothing was started: update it there, or start without the sandbox from your own console")));
     }
     // The network it goes through: the one that has the machine, which
     // the request names when two of this machine's networks do.

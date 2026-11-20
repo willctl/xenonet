@@ -87,7 +87,7 @@ impl Turn {
     /// this one; `delegation` the machine and day of the delegation it
     /// runs under).
     pub fn started(by: &Value, from: Option<&str>, prompt: &Information<String>, delegation: Option<(&str, &str)>) -> Turn {
-        Turn(xenonet_engine::delivery::starts::framed(by, from, prompt.read(), delegation))
+        Turn(xenonet_engine::delivery::starts::framed(by, from, prompt.read(), delegation, None))
     }
 
     /// A delivered message, as hook delivery frames it: who it's from, how

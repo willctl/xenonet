@@ -1346,10 +1346,10 @@ async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_
     // Each host's presence says what it is set to and what it takes.
     until("desk's reach and what it takes at studio", 10, || async {
         let r = row_of(&a.state().await, "desk");
-        r["reach"]["start"] == "you" && r["can"] == json!(["start", "answer"])
+        r["reach"]["start"] == "you" && r["can"] == json!(["start", "answer", "sandbox"])
     })
     .await;
-    assert_eq!(row_of(&a.state().await, "desk")["can"], json!(["start", "answer"]));
+    assert_eq!(row_of(&a.state().await, "desk")["can"], json!(["start", "answer", "sandbox"]));
     let desk = || async { c.state().await };
 
     // laptop, a window host but not the founder, asks to let the network
@@ -1455,8 +1455,8 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "laptop", "wake": "network" })).await;
     assert_eq!(s, 200, "{v}");
     until("laptop's wake is network", 10, || async { b.state().await["wake"] == "network" }).await;
-    until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
-    until("laptop's reach at desk", 10, || async { row_of(&c.state().await, "laptop")["can"] == json!(["start", "answer"]) }).await;
+    until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer", "sandbox"]) }).await;
+    until("laptop's reach at desk", 10, || async { row_of(&c.state().await, "laptop")["can"] == json!(["start", "answer", "sandbox"]) }).await;
     let mut studio = Stream::of(&a);
 
     // You, at studio's console: desk starts Claude Code in its home, with
@@ -1700,7 +1700,7 @@ async fn a_runs_prompt_shows_on_the_window_host_that_asked_for_the_run_and_is_an
     let root = root.canonicalize().unwrap();
     std::fs::create_dir_all(root.join("desk").join("home")).unwrap();
     let (a, b, c) = three(&root, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &root.to_string_lossy())]]).await;
-    until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
+    until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer", "sandbox"]) }).await;
     // You start a session on desk, a server, from studio's console.
     let mut studio = Stream::of(&a);
     a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
@@ -1806,7 +1806,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     }
     let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
     let (a, b, c) = three(&root, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![]]).await;
-    until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
+    until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer", "sandbox"]) }).await;
 
     // The founder puts desk on delegate, from studio's console; desk keeps
     // who and when, and says so in its presence.
@@ -2634,7 +2634,7 @@ async fn a_runs_prompt_is_taken_by_the_window_host_that_asked_for_it_and_not_by_
     until("desk takes starts and sees both window hosts", 10, || async {
         let hosts = c.state().await["hosts"].clone();
         let window = |h: &str| hosts.as_array().is_some_and(|l| l.iter().any(|x| x["id"] == h && x["window"] == true));
-        row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) && window("studio") && window("laptop")
+        row_of(&a.state().await, "desk")["can"] == json!(["start", "answer", "sandbox"]) && window("studio") && window("laptop")
     })
     .await;
     let mut studio = Stream::of(&a);

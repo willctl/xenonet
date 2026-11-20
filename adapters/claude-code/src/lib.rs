@@ -58,12 +58,7 @@ fn resume(id: &str, settings: Option<&str>) -> (String, Vec<String>) {
 // The prompt goes on standard input.
 fn start(s: &Start<'_>) -> (String, Vec<String>) {
     let mut args: Vec<String> = ["-p", "--session-id", s.id, "--output-format", "stream-json", "--verbose"].into_iter().map(str::to_string).collect();
-    // A sandboxed run loads XenoNet's settings and servers and none of the
-    // repo's, which on a guest is someone else's content, and whose hooks and
-    // servers would run outside the sandbox.
-    if let Some(sb) = &s.sandbox {
-        args.extend(["--settings", sb.settings, "--setting-sources=", "--strict-mcp-config", "--mcp-config", sb.mcp].map(str::to_string));
-    } else if let Some(f) = s.settings {
+    if let Some(f) = s.settings {
         args.extend(["--settings".to_string(), f.to_string()]);
     }
     if let Some(m) = s.mode {

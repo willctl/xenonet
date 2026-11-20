@@ -238,9 +238,10 @@ impl Reach {
 
 /// What this build's XenoNet takes from other machines beyond messages,
 /// which presence lists (`can`), so a sender knows before it asks:
-/// `start` (a start request) and `answer` (an answer to a run's
-/// permission prompt).
-pub const CAN: [&str; 2] = ["start", "answer"];
+/// `start` (a start request), `answer` (an answer to a run's permission
+/// prompt) and `sandbox` (a start that says whether it is sandboxed, which
+/// an older XenoNet would take for one that isn't).
+pub const CAN: [&str; 3] = ["start", "answer", "sandbox"];
 
 /// The network as the engine sees it. The service puts xenonet-net's link
 /// behind it; with no network, `networks` is empty and `send` refuses.

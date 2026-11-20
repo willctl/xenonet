@@ -296,6 +296,9 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     };
     let input = body.get("input").cloned().unwrap_or_else(|| json!({}));
     let tool = body.get("tool_name").and_then(Value::as_str).unwrap_or("a tool").to_string();
+    // A call that asks to leave the sandbox is the person's alone to allow:
+    // recorded as unchecked, which no delegation, grant or actor allows.
+    let by = if delegation::leaves_sandbox(&input) { xenonet_authz::Attestation::Unchecked } else { by };
     // A session started under your delegation: what the delegation covers
     // is allowed here and now; the rest comes to you, with why it wasn't
     // covered.

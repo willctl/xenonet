@@ -141,6 +141,11 @@ pub fn prompt_kind(tool: &str) -> &'static str {
 /// the tool call `tool` with `input`, as Claude Code's permission prompt
 /// tool receives it. `home` is where ~ is; `windows` says how paths read.
 pub fn judge(tool: &str, input: &Value, folder: &str, home: &str, windows: bool) -> Verdict {
+    // A command that asks to run outside its app's sandbox is never covered:
+    // the sandbox is what makes the rest of a delegation safe to give.
+    if leaves_sandbox(input) {
+        return ask("it asks to run outside the sandbox");
+    }
     if let Some(name) = tool.strip_prefix("mcp__") {
         let tool_name = name.rsplit("__").next().unwrap_or(name);
         let server = name.split("__").next().unwrap_or("");
@@ -163,6 +168,23 @@ pub fn judge(tool: &str, input: &Value, folder: &str, home: &str, windows: bool)
         return command(input.get("command").and_then(Value::as_str).unwrap_or(""));
     }
     ask(format!("{tool} isn't a tool a delegation covers"))
+}
+
+/// Whether a tool call asks to leave its app's sandbox: Claude Code's
+/// `dangerouslyDisableSandbox`, or any key that names disabling it, or
+/// asking for escalated permissions (Codex's `sandbox_permissions`).
+pub fn leaves_sandbox(input: &Value) -> bool {
+    let Some(o) = input.as_object() else { return false };
+    o.iter().any(|(k, v)| {
+        let key: String = k.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
+        let on = match v {
+            Value::Bool(b) => *b,
+            Value::String(s) => !s.is_empty() && s != "false" && s != "use_default",
+            Value::Null => false,
+            _ => true,
+        };
+        on && ((key.contains("disable") && key.contains("sandbox")) || (key.contains("sandbox") && (key.contains("escalat") || key.contains("permissions"))) || key == "withescalatedpermissions")
+    })
 }
 
 fn path_of(input: &Value) -> Option<String> {
@@ -297,6 +319,23 @@ mod tests {
 
     fn asks(v: Verdict) -> bool {
         matches!(v, Verdict::Ask(_))
+    }
+
+    #[test]
+    fn a_command_that_asks_to_leave_the_sandbox_is_never_covered() {
+        let covered = json!({ "command": "ls" });
+        assert_eq!(judge("Bash", &covered, "/w", "/h", false), Verdict::Allow, "the same command, in the sandbox");
+        for escape in [
+            json!({ "command": "ls", "dangerouslyDisableSandbox": true }),
+            json!({ "command": "ls", "dangerously_disable_sandbox": "true" }),
+            json!({ "command": "ls", "sandbox_permissions": "require_escalated" }),
+        ] {
+            assert_eq!(judge("Bash", &escape, "/w", "/h", false), Verdict::Ask("it asks to run outside the sandbox".into()), "{escape}");
+            assert!(leaves_sandbox(&escape));
+        }
+        // Edits and reads the delegation covers are asked about too, if they say so.
+        assert!(matches!(judge("Read", &json!({ "file_path": "/w/a", "dangerouslyDisableSandbox": true }), "/w", "/h", false), Verdict::Ask(_)));
+        assert!(!leaves_sandbox(&json!({ "command": "ls", "dangerouslyDisableSandbox": false })));
     }
 
     #[test]

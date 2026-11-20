@@ -73,7 +73,7 @@ fn platform() -> &'static str {
 
 /// The xenonet binary the hooks and servers run: XENONET_BIN, installed
 /// XenoNet's launcher, which never moves, else this one.
-fn bin(setup: &Setup) -> String {
+pub(crate) fn bin(setup: &Setup) -> String {
     let env: xenonet_components::runtime::Env = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
     let m = xenonet_components::runtime::Machine { platform: platform().into(), arch: std::env::consts::ARCH.into(), home: setup.home.clone() };
     let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
