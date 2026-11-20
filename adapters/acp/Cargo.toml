@@ -10,6 +10,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The agent's process: an empty environment plus the variables it names,
+# its own process group, killed together.
+adytum-exec.workspace = true
 # ACP v1, the client role. Without its `process` feature: XenoNet starts
 # the agent itself (lib.rs says why).
 agent-client-protocol.workspace = true
@@ -22,7 +25,7 @@ tokio.workspace = true
 xenonet-authz.workspace = true
 # The framing every delivered message and started prompt carries.
 xenonet-engine.workspace = true
-# No window, the process tree, random ids.
+# Random ids.
 xenonet-os.workspace = true
 
 [dev-dependencies]

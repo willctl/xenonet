@@ -16,6 +16,15 @@ repository = "https://github.com/willctl/xenonet"
 publish = false
 
 [workspace.dependencies]
+# Adytum, the cells XenoNet confines work in (github.com/willctl/adytum).
+# Pinned to a commit.
+adytum-model = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-exec = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-driver = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-lima = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-openshell = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-ledger = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
+adytum-doctor = { git = "https://github.com/willctl/adytum", rev = "73926512cab68ad41b44b1eb35fa5baf0912f462" }
 xenonet-actors = { path = "crates/xenonet-actors" }
 # The formats XenoNet writes: JSON, text, times, units, orderings.
 xenonet-text = { path = "crates/xenonet-text" }

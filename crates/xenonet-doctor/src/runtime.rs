@@ -34,8 +34,19 @@ const EVERY_MS: u64 = 30 * 60 * 1000;
 const FIRST_AFTER_MS: u64 = 60 * 1000;
 
 /// The checks the demo runs: itself, never your machine.
-pub const DEMO_ONLY: [&str; 9] =
-    ["xenonet.server", "xenonet.sources", "xenonet.blocks", "contracts.drift", "claude.transcripts", "codex.sessions", "grok.sessions", "system.projects", "system.runtime"];
+pub const DEMO_ONLY: [&str; 11] = [
+    "xenonet.server",
+    "xenonet.sources",
+    "xenonet.blocks",
+    "contracts.drift",
+    "claude.transcripts",
+    "codex.sessions",
+    "grok.sessions",
+    "system.projects",
+    "system.runtime",
+    "cells.adytum",
+    "cells.eidolon",
+];
 
 /// The service's settings the doctor reads.
 #[derive(Clone, Debug)]
@@ -498,6 +509,7 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
         m.extend(
             json!({
                 "byHand": by_hand,
+                "demo": parts.config.demo,
                 "projectsDirSet": fx::env_set("XENONET_PROJECTS_DIR").is_some(),
                 "grokKeySet": fx::env_set("XAI_API_KEY").is_some(),
                 "actors": if c.actors.is_some() { "on" } else { "off" },

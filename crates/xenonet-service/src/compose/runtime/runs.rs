@@ -3,18 +3,17 @@
 //! quoted how, and whether it may start now are xenonet-engine's
 //! (`delivery::runs`); the processes, their logs in `runs/` and their
 //! records, kept in the store, are here. Each run's processes are one
-//! `Tree` (a job object on Windows): a run counts until they've all ended,
+//! process group (adytum-exec's): a run counts until they've all ended,
 //! and its cap stops them all.
 
 use crate::compose::runtime::platform;
+use adytum_exec::{Command, ExecError, Spawned};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use xenonet_adapter::dirs::{self, CliEnv, Look, Unreadable};
 use xenonet_engine::delivery::runs::{self, Run};
-use xenonet_os::process::Tree;
 use xenonet_os::sync::Locked;
 use xenonet_store::delivery::RunRow;
 use xenonet_store::Db;
@@ -99,31 +98,40 @@ impl Log {
 }
 
 /// Reads one of a run's outputs into its log to the end, the part past the
-/// log's limit read and let go, so the run never waits on a full pipe.
-fn drain(mut from: impl Read + Send + 'static, log: Arc<Mutex<Log>>) {
+/// log's limit read and let go, so the run never waits on a full pipe. With
+/// no log it is read and dropped.
+fn drain(mut from: impl Read + Send + 'static, log: Option<Arc<Mutex<Log>>>) {
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         while let Ok(n) = from.read(&mut buf) {
             if n == 0 {
                 break;
             }
-            log.locked().write(&buf[..n]);
+            if let Some(log) = &log {
+                log.locked().write(&buf[..n]);
+            }
         }
     });
 }
 
+/// The command for `how`: its arguments as given, or on Windows (where a
+/// command line is one string) as written.
 #[cfg(windows)]
-fn verbatim(cmd: &mut Command, args: &[String]) {
-    use std::os::windows::process::CommandExt;
-    for a in args {
-        cmd.raw_arg(a);
+fn command(how: &runs::Launch) -> Command {
+    let cmd = Command::new(&how.program);
+    // adytum-exec's Spawned starts it with no window (CREATE_NO_WINDOW, 0x0800_0000).
+    if how.verbatim {
+        how.args.iter().fold(cmd, Command::raw_arg)
+    } else {
+        cmd.args(&how.args)
     }
 }
 
 // Only Windows has a command line to pass as written.
 #[cfg(not(windows))]
-fn verbatim(cmd: &mut Command, args: &[String]) {
-    cmd.args(args);
+fn command(how: &runs::Launch) -> Command {
+    Command::new(&how.program).args(&how.args)
+    // Never built on Windows, where Spawned adds CREATE_NO_WINDOW (no_window).
 }
 
 /// One turn: of `app`'s CLI for `key` (the session it's for), with `args`,
@@ -291,17 +299,11 @@ impl Runner {
         }
         let log_path = logs.as_ref().map(|l| l.join(format!("{id}.log")));
         let log = log_path.as_ref().and_then(|p| Log::open(p)).map(|l| Arc::new(Mutex::new(l)));
-        let out = || if log.is_some() { Stdio::piped() } else { Stdio::null() };
-        let mut cmd = Command::new(&how.program);
-        xenonet_os::process::Background::no_window(&mut cmd);
-        if how.verbatim {
-            verbatim(&mut cmd, &how.args);
-        } else {
-            cmd.args(&how.args);
-        }
-        cmd.current_dir(cwd).env_clear().envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::piped()).stdout(out()).stderr(out());
+        let cmd = command(&how).cwd(cwd).deadline(Duration::from_secs_f64(runs::TURN_MS / 1000.0));
+        let cmd = env.iter().fold(cmd, |c, (k, v)| c.env(k, v));
         let at = now_ms();
-        let mut child = match cmd.spawn() {
+        // Its own group, so stopping the turn stops what it started.
+        let mut child = match Spawned::start(&cmd) {
             Ok(c) => c,
             Err(e) => {
                 // No run, so no log of one.
@@ -309,22 +311,22 @@ impl Runner {
                     drop(log);
                     let _ = std::fs::remove_file(p);
                 }
-                return Err(if e.kind() == std::io::ErrorKind::NotFound { format!("{app} isn't installed here") } else { e.to_string() });
+                let missing = matches!(&e, ExecError::NotFound { .. }) || matches!(&e, ExecError::Spawn { source, .. } if source.kind() == std::io::ErrorKind::NotFound);
+                return Err(if missing { format!("{app} isn't installed here") } else { e.to_string() });
             }
         };
-        // Whatever it starts stops with it (a job object on Windows).
-        let tree = Tree::of(&child);
-        let pid = child.id();
+        let pid = child.pid();
+        // A job object: adytum-exec has no process group on Windows.
+        #[cfg(windows)]
+        let tree = xenonet_os::process::Tree::of(child.child_mut());
         let run = Run { id, key: key.to_string(), app: app.to_string(), pid: Some(f64::from(pid)), at, end: None, exit: None, ms: None, timed_out: false };
         self.state.locked().runs.push(run);
         self.save();
-        if let Some(log) = &log {
-            if let Some(o) = child.stdout.take() {
-                drain(o, log.clone());
-            }
-            if let Some(e) = child.stderr.take() {
-                drain(e, log.clone());
-            }
+        if let Some(o) = child.stdout.take() {
+            drain(o, log.clone());
+        }
+        if let Some(e) = child.stderr.take() {
+            drain(e, log.clone());
         }
         if let Some(mut stdin) = child.stdin.take() {
             std::thread::spawn(move || {
@@ -336,33 +338,38 @@ impl Runner {
         let me = self.clone();
         let key = key.to_string();
         std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs_f64(runs::TURN_MS / 1000.0);
             let mut code = None;
-            let mut exited = false;
             let mut timed_out = false;
+            #[cfg(windows)]
+            let started = std::time::Instant::now();
             loop {
-                if !exited {
-                    match child.try_wait() {
-                        Ok(Some(status)) => {
-                            code = status.code();
-                            exited = true;
-                        }
-                        Err(_) => exited = true,
-                        Ok(None) => {}
+                // The turn has ended, and so has everything it started.
+                #[cfg(windows)]
+                let others = {
+                    // adytum-exec's deadline stops only the child here, so
+                    // the job (the child's whole tree) is stopped by this.
+                    if started.elapsed().as_secs_f64() * 1000.0 >= runs::TURN_MS && tree.others() {
+                        tree.kill(child.child_mut());
+                        timed_out = true;
                     }
-                }
-                if exited && !tree.others() {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    tree.kill(&mut child);
-                    let _ = child.wait();
-                    timed_out = true;
-                    break;
+                    tree.others()
+                };
+                #[cfg(not(windows))]
+                let others = child.group_running();
+                match child.try_wait() {
+                    Ok(Some(exit)) if !others => {
+                        code = exit.code;
+                        timed_out |= exit.timed_out;
+                        break;
+                    }
+                    Err(_) => break,
+                    _ => {}
                 }
                 if me.state.locked().stopping.contains(&key) {
-                    tree.kill(&mut child);
-                    let _ = child.wait();
+                    #[cfg(windows)]
+                    tree.kill(child.child_mut());
+                    #[cfg(not(windows))]
+                    child.kill_group();
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(250));
@@ -390,6 +397,7 @@ impl Runner {
 #[cfg(unix)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn a_run_is_logged_and_its_exit_kept_and_a_restart_reads_it() {

@@ -13,6 +13,7 @@
 
 pub mod a2a;
 pub mod assistant_endpoint;
+pub mod cells;
 pub mod component;
 pub mod compose;
 pub mod gateway;

@@ -31,10 +31,14 @@ impl Background for std::process::Command {
 /// stop together. On Windows that's a job object, which also ends them all
 /// when XenoNet's handle to it closes: a headless turn there can be cmd.exe
 /// running a .cmd that runs node, and stopping cmd.exe alone would leave
-/// node running. Elsewhere it's the program itself.
+/// node running. On unix it's the child's process group, when the child
+/// leads one (started with `process_group(0)`); otherwise the program
+/// itself.
 pub struct Tree {
     #[cfg(windows)]
     job: Option<Job>,
+    #[cfg(unix)]
+    group: Option<libc::pid_t>,
 }
 
 impl Tree {
@@ -45,7 +49,11 @@ impl Tree {
         {
             Tree { job: Job::new().filter(|j| j.assign(child)) }
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
+        {
+            Tree { group: led_group(child.id()) }
+        }
+        #[cfg(not(any(windows, unix)))]
         {
             let _ = child;
             Tree {}
@@ -66,7 +74,8 @@ impl Tree {
     }
 
     /// Stops it all, at once: the job on Windows (or the child, if it has
-    /// none), the child elsewhere (SIGKILL).
+    /// none), the child's whole process group on unix when it leads one
+    /// (SIGKILL), else the child alone.
     pub fn kill(&self, child: &mut std::process::Child) {
         #[cfg(windows)]
         {
@@ -74,7 +83,32 @@ impl Tree {
                 j.kill();
             }
         }
+        #[cfg(unix)]
+        if let Some(g) = self.group {
+            kill_group(g);
+        }
         let _ = child.kill();
+    }
+}
+
+/// `pid`'s process group, if `pid` leads it: what a child started with
+/// `process_group(0)` does. A child that shares its starter's group is
+/// not one to signal as a group, which would reach the starter too.
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "getpgid(2), which std doesn't wrap")]
+fn led_group(pid: u32) -> Option<libc::pid_t> {
+    let pid = libc::pid_t::try_from(pid).ok()?;
+    // SAFETY: getpgid takes a plain pid and reads nothing of ours.
+    (unsafe { libc::getpgid(pid) } == pid).then_some(pid)
+}
+
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "killpg(2), which std doesn't wrap")]
+fn kill_group(group: libc::pid_t) {
+    // SAFETY: killpg takes a plain group id; one with no members left
+    // answers ESRCH, which is ignored.
+    unsafe {
+        libc::killpg(group, libc::SIGKILL);
     }
 }
 
@@ -206,6 +240,8 @@ fn check(_pid: u32, _others: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::running;
+    #[cfg(unix)]
+    use super::Tree;
 
     #[test]
     fn this_process_runs_and_nothing_else_is_made_up() {
@@ -213,5 +249,38 @@ mod tests {
         assert!(running(std::process::id(), true));
         assert!(!running(0, true));
         assert!(!running(u32::MAX - 1, true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn killing_a_group_leader_kills_what_it_started_too() {
+        use std::os::unix::process::CommandExt as _;
+        use std::process::{Command, Stdio};
+        // The shell starts a grandchild that prints its pid, then both wait.
+        let mut child = Command::new("sh").args(["-c", "sleep 300 & echo $!; wait"]).stdout(Stdio::piped()).process_group(0).spawn().expect("sh starts");
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.take().expect("piped")), &mut line).expect("the grandchild's pid");
+        let grandchild: u32 = line.trim().parse().expect("a pid");
+        assert!(running(grandchild, false));
+        let tree = Tree::of(&child);
+        tree.kill(&mut child);
+        let _ = child.wait();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // A killed grandchild is reparented to init, which reaps it; wait for that.
+        while running(grandchild, false) && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!running(grandchild, false), "the grandchild is still running");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_in_the_starters_group_is_killed_alone() {
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("sleep").arg("300").stdout(Stdio::null()).spawn().expect("sleep starts");
+        let tree = Tree::of(&child);
+        assert!(tree.group.is_none(), "the test's own group must never be signalled");
+        tree.kill(&mut child);
+        assert!(child.wait().is_ok());
     }
 }
