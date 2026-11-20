@@ -483,17 +483,23 @@ impl MapState {
     fn identity_project_kept(&self, want: &str) -> R<Value> {
         let none = json!({ "project": null, "rule": null, "check": null });
         let checkouts = self.store.kept_checkouts().map_err(|why| err(format!("the checkouts XenoNet keeps couldn't be read ({why})")))?;
-        let best = checkouts
+        // Outside git the store keeps the folder a session ran in at the
+        // subfolder itself, below the project it is in, so the deepest
+        // checkout is not the project: the deepest one that holds a rule is.
+        let saved =
+            self.store.identities_strict().map_err(|why| err(format!("the rules XenoNet keeps couldn't be read ({why}), so whether a rule covers this folder is unreadable")))?;
+        let ruled = |c: &Value| c.get("id").and_then(Value::as_str).is_some_and(|i| saved.get("rules").and_then(|r| r.get(format!("project:{i}"))).is_some_and(Value::is_object));
+        let above: Vec<(usize, &Value)> = checkouts
             .iter()
             .filter_map(|c| {
                 let key = c.get("pathKey").and_then(Value::as_str)?;
                 xenonet_os::paths::is_under(want, key).then_some((key.len(), c))
             })
-            .max_by_key(|(len, _)| *len)
-            .map(|(_, c)| c);
+            .collect();
+        let best = above.iter().max_by_key(|(len, c)| (ruled(c), *len)).map(|(_, c)| *c);
         let Some(ch) = best else { return Ok(none) };
         let id = format!("project:{}", ch.get("id").and_then(Value::as_str).unwrap_or_default());
-        let rule = self.store.identities().get("rules").and_then(|r| r.get(&id)).cloned().unwrap_or(Value::Null);
+        let rule = saved.get("rules").and_then(|r| r.get(&id)).cloned().unwrap_or(Value::Null);
         let name = ch.get("path").and_then(Value::as_str).map(|p| p.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(p).to_string());
         Ok(json!({ "project": { "id": id, "name": name, "path": ch.get("path").cloned().unwrap_or(Value::Null) }, "rule": rule, "check": null }))
     }
@@ -1733,7 +1739,9 @@ impl State for MapState {
             .map(|(_, n)| n);
         let Some(node) = found else { return self.identity_project_kept(&want) };
         let id = node.get("id").cloned().unwrap_or(Value::Null);
-        let rule = id.as_str().and_then(|i| self.store.identities().get("rules").and_then(|r| r.get(i)).cloned()).unwrap_or(Value::Null);
+        let saved =
+            self.store.identities_strict().map_err(|why| err(format!("the rules XenoNet keeps couldn't be read ({why}), so whether a rule covers this folder is unreadable")))?;
+        let rule = id.as_str().and_then(|i| saved.get("rules").and_then(|r| r.get(i)).cloned()).unwrap_or(Value::Null);
         Ok(json!({
             "project": { "id": id, "name": node.get("name").cloned().unwrap_or(Value::Null), "path": node.get("path").cloned().unwrap_or(Value::Null) },
             "rule": rule,

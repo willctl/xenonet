@@ -197,6 +197,18 @@ impl Saved {
         read("the identities", self.store.identities(), json!({ "names": {}, "hidden": {}, "pins": {}, "known": {}, "signins": {} }))
     }
 
+    /// `identities`, except that a store that can't say is an Err: a rule
+    /// that couldn't be read is not the same as no rule, and what places a
+    /// run by its rule must not take the one for the other. Empty without
+    /// a store.
+    pub fn identities_strict(&self) -> Result<Value, String> {
+        match self.store.identities() {
+            Ok(v) => Ok(v),
+            Err(e) if e.is_pending() => Ok(json!({ "names": {}, "hidden": {}, "pins": {}, "known": {}, "signins": {} })),
+            Err(e) => Err(e.message),
+        }
+    }
+
     pub fn set_identity_name(&self, id: &str, name: Option<String>) {
         wrote("an identity's name", self.store.set_identity_name(id, name.as_deref()));
     }
@@ -227,4 +239,128 @@ impl Saved {
 pub fn in_memory() -> Saved {
     let db = Arc::new(xenonet_store::Db::memory().expect("a store in memory"));
     Saved::new(Arc::new(xenonet_saved::Saved::new(db)))
+}
+
+/// A store whose reading of the identities (the rules among them) fails
+/// while the flag is set, over one in memory: what a test uses to show a
+/// store error is never taken for "no rule".
+#[cfg(test)]
+pub struct Flaky(Arc<dyn Store>, pub Arc<std::sync::atomic::AtomicBool>);
+
+#[cfg(test)]
+pub fn flaky() -> (Saved, Arc<std::sync::atomic::AtomicBool>) {
+    let db = Arc::new(xenonet_store::Db::memory().expect("a store in memory"));
+    let fails = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    (Saved::new(Arc::new(Flaky(Arc::new(xenonet_saved::Saved::new(db)), fails.clone()))), fails)
+}
+
+#[cfg(test)]
+use std::sync::atomic::Ordering;
+#[cfg(test)]
+use xenonet_api::cores::R;
+
+#[cfg(test)]
+impl Store for Flaky {
+    fn ack(&self, session: &str) -> R<()> {
+        self.0.ack(session)
+    }
+    fn acks(&self) -> R<Value> {
+        self.0.acks()
+    }
+    fn marks(&self) -> R<Value> {
+        self.0.marks()
+    }
+    fn layout(&self) -> R<Value> {
+        self.0.layout()
+    }
+    fn set_layout(&self, positions: &Value) -> R<()> {
+        self.0.set_layout(positions)
+    }
+    fn clear_layout(&self) -> R<()> {
+        self.0.clear_layout()
+    }
+    fn theme(&self) -> R<Value> {
+        self.0.theme()
+    }
+    fn set_theme(&self, id: &str) -> R<()> {
+        self.0.set_theme(id)
+    }
+    fn environment(&self) -> R<Value> {
+        self.0.environment()
+    }
+    fn set_environment(&self, id: &str) -> R<()> {
+        self.0.set_environment(id)
+    }
+    fn workspace_root(&self) -> R<Value> {
+        self.0.workspace_root()
+    }
+    fn set_workspace_root(&self, dir: Option<&str>) -> R<()> {
+        self.0.set_workspace_root(dir)
+    }
+    fn roots(&self) -> R<Value> {
+        self.0.roots()
+    }
+    fn set_roots(&self, roots: &[String]) -> R<()> {
+        self.0.set_roots(roots)
+    }
+    fn app_roots(&self) -> R<Value> {
+        self.0.app_roots()
+    }
+    fn set_app_roots(&self, roots: &Value) -> R<()> {
+        self.0.set_app_roots(roots)
+    }
+    fn reconcile_checkouts(&self, found: &Value) -> R<Value> {
+        self.0.reconcile_checkouts(found)
+    }
+    fn agents_of(&self, sessions: &[String]) -> R<Value> {
+        self.0.agents_of(sessions)
+    }
+    fn checkouts(&self) -> R<Value> {
+        self.0.checkouts()
+    }
+    fn space_tie(&self, marker: &Value) -> R<Value> {
+        self.0.space_tie(marker)
+    }
+    fn confirm_checkout(&self, id: &str) -> R<Value> {
+        self.0.confirm_checkout(id)
+    }
+    fn project_rules(&self) -> R<Value> {
+        self.0.project_rules()
+    }
+    fn set_project_rule(&self, key: &str, rule: Option<&Value>) -> R<()> {
+        self.0.set_project_rule(key, rule)
+    }
+    fn clear_project_rules(&self, under_key: Option<&str>) -> R<()> {
+        self.0.clear_project_rules(under_key)
+    }
+    fn app_setting(&self, app: &str, name: &str, scope: &str) -> R<Option<Value>> {
+        self.0.app_setting(app, name, scope)
+    }
+    fn set_app_setting(&self, app: &str, name: &str, scope: &str, value: Option<&Value>) -> R<()> {
+        self.0.set_app_setting(app, name, scope, value)
+    }
+    fn identities(&self) -> R<Value> {
+        if self.1.load(Ordering::SeqCst) {
+            return Err(xenonet_api::cores::CoreError::new("the store is unreadable"));
+        }
+        self.0.identities()
+    }
+    fn set_identity_name(&self, id: &str, name: Option<&str>) -> R<()> {
+        self.0.set_identity_name(id, name)
+    }
+    fn set_identity_hidden(&self, id: &str, hidden: bool) -> R<()> {
+        self.0.set_identity_hidden(id, hidden)
+    }
+    fn set_identity_pin(&self, node: &str, identity: Option<&str>) -> R<()> {
+        self.0.set_identity_pin(node, identity)
+    }
+    fn set_identity_rule(&self, project: &str, rule: Option<&Value>) -> R<()> {
+        self.0.set_identity_rule(project, rule)
+    }
+    fn set_identity_known(&self, id: &str, value: &Value) -> R<()> {
+        self.0.set_identity_known(id, value)
+    }
+    fn set_signins(&self, app: &str, spans: &Value) -> R<()> {
+        self.0.set_signins(app, spans)
+    }
 }

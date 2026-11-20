@@ -25,6 +25,11 @@ impl Drop for World {
 
 // A demo world of its own, on a port no other test uses.
 fn world() -> World {
+    world_with(crate::runtime::saved::in_memory())
+}
+
+// The same, over a store of the test's making.
+fn world_with(store: Saved) -> World {
     let port = 52000 + (std::process::id() % 900) as u16 * 10 + PORTS.fetch_add(1, Ordering::SeqCst);
     let demo = Arc::new(DemoWorld::new(port));
     let w = demo.create().expect("the demo's world");
@@ -38,7 +43,6 @@ fn world() -> World {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     // What the service saves as it starts the demo: Nova's identities.
-    let store = crate::runtime::saved::in_memory();
     crate::runtime::saved::seed(&store, &demo.remembered().expect("the demo's world"));
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
     let live = Live::new(
@@ -723,4 +727,54 @@ async fn one_session_id_in_two_named_folders_is_refused_a_turn_as_the_listers_fi
     assert!(s.session_root(&format!("claude:{id}")).expect("no clash").is_some_and(|r| r.ends_with(".claude-work")));
     s.end();
     std::fs::remove_dir_all(&home).expect("cleaned up");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_that_cannot_say_is_not_a_project_without_a_rule() {
+    let (store, fails) = crate::runtime::saved::flaky();
+    let w = world_with(store);
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    let path = s
+        .all_nodes()
+        .into_iter()
+        .find(|n| s_of(n, "kind") == Some("project") && s_of(n, "name") == Some("atlas-api"))
+        .and_then(|n| s_of(&n, "path").map(str::to_string))
+        .expect("atlas-api");
+    // The map's way: a project it knows.
+    assert!(s.identity_project(&path).is_ok());
+    fails.store(true, Ordering::SeqCst);
+    let why = s.identity_project(&path).expect_err("the rule can't be read").message;
+    assert!(why.contains("rule") && why.contains("unreadable"), "{why}");
+    // The store's way: the map isn't built yet.
+    {
+        let mut g = lock(&s.inner);
+        g.map.graph = None;
+        g.map.index.clear();
+    }
+    let why = s.identity_project(&path).expect_err("the rule can't be read").message;
+    assert!(why.contains("rule") && why.contains("unreadable"), "{why}");
+    fails.store(false, Ordering::SeqCst);
+    assert!(s.identity_project(&path).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_folder_below_a_ruled_project_is_placed_by_the_projects_rule() {
+    let (store, fails) = crate::runtime::saved::flaky();
+    let w = world_with(store);
+    let s = &w.state;
+    let notes = std::path::Path::new(&w.root).join("notes");
+    std::fs::create_dir_all(notes.join("sub")).expect("folders");
+    let (notes_s, sub_s) = (notes.to_string_lossy().into_owned(), notes.join("sub").to_string_lossy().into_owned());
+    // Outside git the store keeps the folder a session ran in at the
+    // subfolder itself, deeper than the project it is in.
+    let by_key = s.store.reconcile_checkouts(vec![json!({ "path": notes_s, "why": "folder" }), json!({ "path": sub_s, "why": "session" })]).expect("kept");
+    let notes_ch = by_key.get(&path_key(&notes_s).expect("a key")).expect("notes").clone();
+    let id = format!("project:{}", notes_ch["id"].as_str().expect("an id"));
+    s.store.set_identity_rule(&id, Some(&json!({ "claude": "nova@example.com", "mode": "refuse" })));
+    let found = s.identity_project(&format!("{sub_s}/deep")).expect("an answer");
+    assert_eq!((found["project"]["id"].as_str(), found["rule"]["claude"].as_str()), (Some(id.as_str()), Some("nova@example.com")), "{found}");
+    // And a store that can't say is no answer, not "no rule".
+    fails.store(true, Ordering::SeqCst);
+    assert!(s.identity_project(&format!("{sub_s}/deep")).is_err());
 }
