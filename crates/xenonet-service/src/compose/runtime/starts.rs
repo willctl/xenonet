@@ -568,6 +568,18 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     if let Some(s) = ways.sign_in {
         signed_env(w, s.variable, &mut env);
     }
+    // Kept before the run starts, under its session (Codex names its own
+    // later, so it is kept under the run's key until then): a run whose
+    // sandbox can't be kept isn't started, since a turn for it later would
+    // have nothing to hold it.
+    if let Some(rec) = &record {
+        if let Err(why) = sandbox::keep(w, session.as_deref().unwrap_or(&key), rec) {
+            if let Some(f) = &prompt_file {
+                let _ = std::fs::remove_file(f);
+            }
+            return Err(why);
+        }
+    }
     let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text } };
     let pid = match run_turn(w, &resumes.runner, turn) {
         Ok(pid) => pid,
@@ -581,10 +593,6 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     w.starts.history.locked().push((now, bucket));
     if from.is_some() {
         w.starts.note_network(&key, xenonet_net::ground::current());
-    }
-    // Kept, so a turn resumed for the session later is sandboxed too.
-    if let (Some(rec), Some(session)) = (&record, &session) {
-        sandbox::keep(w, session, rec);
     }
     // The session's agent, from the start: its own id when the app takes
     // the one XenoNet gave it, else a pending row its process takes over
@@ -771,6 +779,12 @@ pub fn note_fork(w: &Runtime, child: &str, parent: &str) {
     f.drain(..from);
 }
 
+/// Forgets which copies were forked from which, as a restart does.
+#[doc(hidden)]
+pub fn forget_forks(w: &Runtime) {
+    w.starts.forks.locked().clear();
+}
+
 /// The run a copy was forked from, followed back through copies of copies
 /// to the one that is no copy: None for a session that is not a copy.
 pub fn fork_root(w: &Runtime, session: &str) -> Option<String> {
@@ -842,7 +856,8 @@ impl Tail {
 /// names it, linked to the session it came from (the fork event); the
 /// prompt file taken away when the turn ends; and a hint for you when
 /// Claude Code couldn't sign in for it.
-pub fn after_resume(w: &Runtime, runner: &Arc<Runner>, app: &str, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>) {
+#[expect(clippy::too_many_arguments, reason = "the turn's parts, and the sandbox it ran in")]
+pub fn after_resume(w: &Runtime, runner: &Arc<Runner>, app: &str, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>, sandboxed: Option<sandbox::Record>) {
     // Whether the app's runs sign in, so a turn it couldn't sign in for
     // gets you a hint.
     let signs_in = xenonet_engine::delivery::apps::of(app).is_some_and(|w| w.sign_in.is_some());
@@ -866,6 +881,11 @@ pub fn after_resume(w: &Runtime, runner: &Arc<Runner>, app: &str, key: &str, pid
                 if let (Some(child), Some(parent)) = (starts::session_of(&app, &new), parent.as_deref()) {
                     named = true;
                     note_fork(&world, &child, parent);
+                    // A copy of a sandboxed session is sandboxed in its own right.
+                    if let Some(Err(why)) = sandboxed.as_ref().map(|rec| sandbox::fork_named(&world, &child, rec)) {
+                        world.log("warn", "fork", &format!("{child}'s sandbox couldn't be kept, so its run is stopped: {why}"));
+                        runner.stop(&key);
+                    }
                     world.log("info", "fork", &format!("{child} answers a message for {parent}, which is open elsewhere"));
                     world.emit(From::Engine, "fork", json!({ "child": child, "parent": parent, "at": ms(now_ms()) }));
                 }
@@ -976,7 +996,12 @@ fn watch(
                 // An app that names its session once it runs (Codex) is
                 // kept as sandboxed from then on.
                 if let Some(rec) = &sandboxed {
-                    sandbox::keep(w, &found, rec);
+                    if let Err(why) = sandbox::keep(w, &found, rec) {
+                        w.log("warn", "start.sandbox", &format!("{found}'s run is stopped: {why}"));
+                        runner.stop(key);
+                        answer(w, "ended", json!({ "session": found, "minutes": 0, "app": app, "live": false, "outcome": "failed", "reason": why }));
+                        break None;
+                    }
                 }
                 answer(w, "started", json!({ "session": found, "pid": pid, "folder": folder, "app": app }));
             }

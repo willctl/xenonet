@@ -399,10 +399,7 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     let (app, args) = plan.map_err(str::to_string)?;
     // A session started sandboxed is resumed, or copied, sandboxed: if its
     // sandbox can't be made again, the turn isn't run bare.
-    let sandboxed = crate::compose::runtime::sandbox::of(w, agent);
-    if sandboxed.is_none() && crate::compose::runtime::sandbox::unreadable(w, agent) {
-        return Err("that session was started sandboxed and its sandbox can't be read, so no turn is run for it".into());
-    }
+    let sandboxed = crate::compose::runtime::sandbox::for_turn(w, agent)?;
     let args = match &sandboxed {
         Some(rec) => crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?.0,
         None => args,
@@ -437,7 +434,7 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input };
     match crate::compose::runtime::starts::run_turn(w, &r.runner, turn) {
         Ok(pid) => {
-            crate::compose::runtime::starts::after_resume(w, &r.runner, &app, &key, pid, fork.then_some(agent), prompt_file);
+            crate::compose::runtime::starts::after_resume(w, &r.runner, &app, &key, pid, fork.then_some(agent), prompt_file, sandboxed);
             Ok(if fork { format!("pid {pid}, a copy of the session") } else { format!("pid {pid}") })
         }
         Err(why) => {

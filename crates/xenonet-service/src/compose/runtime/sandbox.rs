@@ -2,7 +2,11 @@
 //! Codex's), which XenoNet drives and doesn't replace. What the app can do
 //! is its adapter's (`SandboxWays`); here are the files a run is given, the
 //! environment it runs with, and what is kept of a sandboxed session so a
-//! turn resumed for it later, or a copy forked from it, is sandboxed too.
+//! turn resumed for it later, or a copy forked from it, is sandboxed too:
+//! a record is written before the run starts (no record, no run), renewed
+//! by every turn, written for a copy when its stream names it, and not
+//! swept by age; a session started for anyone but the person that has none
+//! is refused, never run bare.
 //!
 //! A sandboxed run's environment is the one an ACP agent gets
 //! (`xenonet_acp::agent_env`): the service's without XenoNet's own
@@ -15,8 +19,9 @@ use std::path::{Path, PathBuf};
 use xenonet_adapter::delivery::{Plan, SandboxFiles};
 use xenonet_engine::delivery::{apps, starts};
 
-/// How long a session's sandbox is kept: as long as its runs are.
-const KEEP_MS: f64 = xenonet_engine::delivery::runs::KEEP_MS;
+/// The most records kept. A record is kept as long as its session might be
+/// resumed, so none goes by age: past this many, the ones longest unused go.
+const MAX_KEPT: usize = 5000;
 
 /// What a sandboxed session was started with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,15 +39,21 @@ fn name(session: &str) -> String {
     format!("{safe}.json")
 }
 
-/// Keeps `session` as sandboxed, and lets go of the sessions kept longer
-/// than runs last.
-pub fn keep(w: &Runtime, session: &str, r: &Record) {
+/// Keeps `session` as sandboxed, or says why it couldn't: a run whose
+/// record can't be kept isn't made, since a turn for it later would run
+/// without the sandbox. Keeping it again renews it, so a session in use
+/// never ages out.
+pub fn keep(w: &Runtime, session: &str, r: &Record) -> Result<(), String> {
     let d = dir(w);
     let text = json!({ "folder": r.folder, "domains": r.domains }).to_string();
-    if let Err(e) = write_private(&d.join(name(session)), &text) {
-        w.log("warn", "start.sandbox", &format!("{session}'s sandbox couldn't be kept, so a turn resumed for it would run without one and is refused: {e}"));
-    }
-    sweep(&d, KEEP_MS);
+    let file = d.join(name(session));
+    let part = d.join(format!("{}.part", name(session)));
+    write_private(&part, &text).and_then(|()| std::fs::rename(&part, &file)).map_err(|e| {
+        let _ = std::fs::remove_file(&part);
+        format!("the sandbox of {session} couldn't be kept ({e}), and a session that can't be held to its sandbox later isn't started")
+    })?;
+    trim(&d, MAX_KEPT);
+    Ok(())
 }
 
 fn read(w: &Runtime, session: &str) -> Option<Record> {
@@ -56,19 +67,45 @@ pub fn of(w: &Runtime, session: &str) -> Option<Record> {
     read(w, session).or_else(|| crate::compose::runtime::starts::fork_root(w, session).and_then(|root| read(w, &root)))
 }
 
-/// Whether a session is recorded as sandboxed but its record can't be read:
-/// a turn for it is refused, never run bare.
-pub fn unreadable(w: &Runtime, session: &str) -> bool {
-    dir(w).join(name(session)).exists() && read(w, session).is_none()
+/// A copy named by a turn forked from a sandboxed session is kept as
+/// sandboxed in its own right, so it stays so after a restart forgets whose
+/// copy it is.
+pub fn fork_named(w: &Runtime, child: &str, parent: &Record) -> Result<(), String> {
+    keep(w, child, parent)
 }
 
-fn sweep(d: &Path, older_than_ms: f64) {
+/// The sandbox a turn for `session` runs in, with its record renewed; or
+/// why no turn is run for it. None is for a session XenoNet never started
+/// sandboxed. A session XenoNet started for anyone but the person (under a
+/// delegation or for an intent, the store says) with no readable record is
+/// refused, never run bare, and so is one whose record can't be read.
+pub fn for_turn(w: &Runtime, session: &str) -> Result<Option<Record>, String> {
+    let root = crate::compose::runtime::starts::fork_root(w, session);
+    let stored = |s: &str| dir(w).join(name(s)).exists();
+    if let Some(rec) = of(w, session) {
+        keep(w, session, &rec).map_err(|e| format!("that session's sandbox couldn't be renewed, so no turn is run for it: {e}"))?;
+        return Ok(Some(rec));
+    }
+    if stored(session) || root.as_deref().is_some_and(stored) {
+        return Err("that session was started sandboxed and its sandbox can't be read, so no turn is run for it".into());
+    }
+    let for_others = |s: &str| crate::compose::runtime::starts::delegated(w, s).is_some();
+    if for_others(session) || root.as_deref().is_some_and(for_others) {
+        return Err("that session was started for someone else, in a sandbox XenoNet has no record of now, so no turn is run for it".into());
+    }
+    Ok(None)
+}
+
+/// Lets go of the records past `max`, the longest unused first.
+fn trim(d: &Path, max: usize) {
     let Ok(entries) = std::fs::read_dir(d) else { return };
-    for e in entries.flatten() {
-        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_millis() as f64 > older_than_ms);
-        if old {
-            let _ = std::fs::remove_file(e.path());
-        }
+    let mut all: Vec<(std::time::SystemTime, PathBuf)> = entries.flatten().filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path()))).collect();
+    if all.len() <= max {
+        return;
+    }
+    all.sort();
+    for (_, f) in &all[..all.len() - max] {
+        let _ = std::fs::remove_file(f);
     }
 }
 
@@ -106,11 +143,23 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
         let (s, m) = files(&plan, listen.as_ref(), &server);
         let pretty = |v: &Value| format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_default());
         write_private(&settings, &pretty(&s)).and_then(|()| write_private(&mcp, &pretty(&m))).map_err(|e| format!("the sandbox's settings couldn't be written: {e}"))?;
-        sweep(&runs, 2.0 * 24.0 * 3600e3);
+        sweep_runs(&runs, 2.0 * 24.0 * 3600e3);
     }
     let (settings, mcp) = (settings.to_string_lossy().into_owned(), mcp.to_string_lossy().into_owned());
     let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp }, args)?;
     Ok((args, (ways.words)(&plan)))
+}
+
+/// Lets go of the run files older than `older_than_ms`: a run's settings
+/// and MCP configuration, which its turn has long read.
+fn sweep_runs(d: &Path, older_than_ms: f64) {
+    let Ok(entries) = std::fs::read_dir(d) else { return };
+    for e in entries.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_millis() as f64 > older_than_ms);
+        if old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 /// What a sandboxed run's environment holds: the service's, scrubbed as an
@@ -123,11 +172,32 @@ pub fn env() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn a_sessions_name_is_a_safe_file_name() {
         assert_eq!(name("claude:0190d3e0-0000"), "claude_0190d3e0-0000.json");
         assert_eq!(name("../../x"), ".._.._x.json");
+    }
+
+    #[test]
+    fn past_the_most_kept_the_longest_unused_records_go_and_none_goes_by_age() {
+        let d = std::env::temp_dir().join(format!("xenonet-sandbox-trim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let t = std::time::SystemTime::now();
+        for (n, ago) in [(1, 400u64), (2, 300), (3, 200), (4, 100)] {
+            let f = d.join(format!("{n}.json"));
+            std::fs::write(&f, "{}").unwrap();
+            std::fs::File::options().write(true).open(&f).unwrap().set_modified(t - Duration::from_secs(ago * 24 * 3600)).unwrap();
+        }
+        trim(&d, 4);
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 4, "a record a year old is kept while there is room");
+        trim(&d, 2);
+        let mut left: Vec<String> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["3.json", "4.json"]);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
