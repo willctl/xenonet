@@ -100,7 +100,8 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     let runs = Path::new(&w.setup.state_dir).join("runs");
     let (settings, mcp) = (runs.join(format!("{run}.settings.json")), runs.join(format!("{run}.mcp.json")));
     if let Some(files) = ways.files {
-        let listen = w.router.resume.as_ref().and_then(|r| r.settings.as_deref()).and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok());
+        let listen =
+            w.router.resume.as_ref().and_then(|r| r.settings.as_deref()).and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok());
         let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
         let (s, m) = files(&plan, listen.as_ref(), &server);
         let pretty = |v: &Value| format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_default());

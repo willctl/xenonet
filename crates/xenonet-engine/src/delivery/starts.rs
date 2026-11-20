@@ -214,7 +214,9 @@ fn sandbox_of(v: &Value) -> Result<SandboxAsk, String> {
 /// `windows` is whether this machine is native Windows.
 pub fn sandbox_plan(r: &Request, plan: &xenonet_adapter::delivery::Plan<'_>, windows: bool) -> Result<String, String> {
     let name = apps().into_iter().find(|a| a.id == r.app).map_or(r.app.clone(), |a| a.name.clone());
-    let ways = apps::of(&r.app).and_then(|w| w.sandbox).ok_or_else(|| format!("{name} has no sandbox XenoNet can drive, so it isn't started sandboxed: start it without the sandbox from your own console, or use Claude Code or Codex"))?;
+    let ways = apps::of(&r.app).and_then(|w| w.sandbox).ok_or_else(|| {
+        format!("{name} has no sandbox XenoNet can drive, so it isn't started sandboxed: start it without the sandbox from your own console, or use Claude Code or Codex")
+    })?;
     if let Some(why) = (ways.unavailable)(plan, windows) {
         return Err(why);
     }
@@ -510,7 +512,10 @@ mod tests {
         assert_eq!(ask(json!({ "prompt": "x" })), SandboxAsk::Unset);
         assert_eq!(ask(json!({ "prompt": "x", "sandbox": false })), SandboxAsk::Off);
         assert_eq!(ask(json!({ "prompt": "x", "sandbox": true })), SandboxAsk::On(vec![]));
-        assert_eq!(ask(json!({ "prompt": "x", "sandbox": { "domains": ["GitHub.com", "github.com", "*.npmjs.org"] } })), SandboxAsk::On(vec!["*.npmjs.org".into(), "github.com".into()]));
+        assert_eq!(
+            ask(json!({ "prompt": "x", "sandbox": { "domains": ["GitHub.com", "github.com", "*.npmjs.org"] } })),
+            SandboxAsk::On(vec!["*.npmjs.org".into(), "github.com".into()])
+        );
         assert_eq!(ask(json!({ "prompt": "x", "domains": ["github.com"] })), SandboxAsk::On(vec!["github.com".into()]), "domains alone ask for it");
         for bad in ["localhost", "https://github.com", "a b.com", "-x.com", "git hub.com", ""] {
             assert!(request(&json!({ "prompt": "x", "domains": [bad] })).is_err(), "{bad}");
@@ -567,7 +572,10 @@ mod tests {
     #[test]
     fn a_sandboxed_run_is_told_so_in_its_first_prompt() {
         let you = json!({ "kind": "you", "id": "actor:you" });
-        assert_eq!(framed(&you, Some("inix"), "Go.", None, Some("It reaches nothing.")), "[XenoNet] Started by you, at inix's console.\n\n[XenoNet] This run is sandboxed. It reaches nothing.\n\nGo.");
+        assert_eq!(
+            framed(&you, Some("inix"), "Go.", None, Some("It reaches nothing.")),
+            "[XenoNet] Started by you, at inix's console.\n\n[XenoNet] This run is sandboxed. It reaches nothing.\n\nGo."
+        );
     }
 
     #[test]
@@ -600,7 +608,14 @@ mod tests {
     fn each_app_starts_its_own_way_and_the_prompt_never_goes_as_an_argument() {
         xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
-        let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into(), delegate: false, sandbox: SandboxAsk::Unset };
+        let r = |app: &str, mode: Option<&str>| Request {
+            folder: "~".into(),
+            app: app.into(),
+            mode: mode.map(str::to_string),
+            prompt: "-rm -rf".into(),
+            delegate: false,
+            sandbox: SandboxAsk::Unset,
+        };
         let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
         assert_eq!(app, "claude");
         assert_eq!(

@@ -47,15 +47,26 @@ Scenario 1 needs no new code, only both machines on a current release.
   presence on every prompt is too slow in use. Whoever holds root on that
   machine can ignore anything XenoNet does there; what protects her is
   that her own machines decide ([the guide](../guide/network.md#working-on-a-machine-you-dont-own)).
+- **Sandboxed starts.** Each harness's own sandbox, driven by XenoNet, with
+  the setting inside the signed start so nothing between her signature
+  and the run can drop it ([the guide](../guide/sandbox.md)). A start from
+  anyone but her (another machine, a delegation, an intent, an actor) that
+  says no sandbox, or nothing, is refused by `xenonet-authz`; a start she
+  makes herself has a switch, off on her own machine and on for another
+  (decision taken for Nova), and the default allowed domains are none
+  (decision taken). Claude Code gets one settings file per run that
+  replaces the repo's own settings and servers; Codex gets
+  `--sandbox workspace-write`, approvals never and no network, and refuses
+  domains; Grok Build and Hermes have no mapping and refuse. A turn resumed
+  or forked for a sandboxed session is sandboxed, and a call that asks to
+  leave the sandbox is never answered by a delegation or a grant. Left:
+  Codex's sandbox reads the whole disk; Claude Code's sandbox wraps shell
+  commands only, so a fetch of another domain, with domains given, asks.
 
 ## Next
 
 Each waits until scenario 1 has run for real.
 
-- **Sandboxed starts.** Each harness's own sandbox, driven by XenoNet, with
-  the setting inside the signed start so nothing between her signature
-  and the run can drop it. An app with no sandbox refuses a sandboxed
-  start, in words.
 - **Several accounts per app.** Several folders per app, each with its own
   sign-in and timeline; the identity rule gains the account; a start picks
   the folder that holds the right account or refuses.
@@ -69,6 +80,6 @@ Each waits until scenario 1 has run for real.
 - Who sees a run's permission prompt: only the machine that asked for the
   run (today), or every console of the person's own machines.
 - Whether a session that takes a message from a guest may still read other
-  folders. Sandboxed starts are the mitigation.
+  folders. Sandboxed starts are the mitigation, for the runs XenoNet starts.
 - A message already stored is handed over after its project stops being
   shared; closing that needs the message's network in the store.

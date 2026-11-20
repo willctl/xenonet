@@ -176,14 +176,16 @@ pub fn judge(tool: &str, input: &Value, folder: &str, home: &str, windows: bool)
 pub fn leaves_sandbox(input: &Value) -> bool {
     let Some(o) = input.as_object() else { return false };
     o.iter().any(|(k, v)| {
-        let key: String = k.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
+        let key: String = k.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_lowercase();
         let on = match v {
             Value::Bool(b) => *b,
             Value::String(s) => !s.is_empty() && s != "false" && s != "use_default",
             Value::Null => false,
             _ => true,
         };
-        on && ((key.contains("disable") && key.contains("sandbox")) || (key.contains("sandbox") && (key.contains("escalat") || key.contains("permissions"))) || key == "withescalatedpermissions")
+        on && ((key.contains("disable") && key.contains("sandbox"))
+            || (key.contains("sandbox") && (key.contains("escalat") || key.contains("permissions")))
+            || key == "withescalatedpermissions")
     })
 }
 

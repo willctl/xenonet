@@ -521,9 +521,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     let text = match &start.intent {
         Some(i) => {
             let framed = crate::compose::runtime::intents::framed(i, prompt.read());
-            match &sandbox_words {
-                Some(words) => format!("[XenoNet] This run is sandboxed. {words}\n\n{framed}"),
-                None => framed,
+            // After the line that says who asked, as any run's is.
+            match (&sandbox_words, framed.split_once("\n\n")) {
+                (Some(words), Some((head, rest))) => format!("{head}\n\n[XenoNet] This run is sandboxed. {words}\n\n{rest}"),
+                _ => framed,
             }
         }
         None => starts::framed(by, from, prompt.read(), delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()), sandbox_words.as_deref()),
@@ -1117,7 +1118,10 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     }
     // An older XenoNet would take a sandboxed request as an unsandboxed one.
     if r.sandbox.domains().is_some() && !net(w).host_can(&host, "sandbox") {
-        return Err((409, format!("{host}'s XenoNet is too old to start sandboxed sessions, and nothing was started: update it there, or start without the sandbox from your own console")));
+        return Err((
+            409,
+            format!("{host}'s XenoNet is too old to start sandboxed sessions, and nothing was started: update it there, or start without the sandbox from your own console"),
+        ));
     }
     // The network it goes through: the one that has the machine, which
     // the request names when two of this machine's networks do.

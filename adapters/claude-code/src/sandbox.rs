@@ -93,7 +93,7 @@ fn files(p: &Plan<'_>, listen: Option<&Value>, server: &str) -> (Value, Value) {
 mod tests {
     use super::*;
 
-    fn plan<'a>(domains: &'a [String]) -> Plan<'a> {
+    fn plan(domains: &[String]) -> Plan<'_> {
         Plan { folder: "/home/me/atlas", home: "/home/me", domains, port: "47840", bin: "/usr/bin/xenonet" }
     }
 
@@ -120,7 +120,10 @@ mod tests {
         let p = plan(&[]);
         let f = SandboxFiles { plan: p, settings: "/s/a.json", mcp: "/s/m.json" };
         let args = turn(&f, ["-p", "--resume", "x", "--settings", "/s/listen.json", "--permission-prompt-tool", "t"].map(str::to_string).to_vec());
-        assert_eq!(args, ["-p", "--resume", "x", "--permission-prompt-tool", "t", "--settings", "/s/a.json", "--setting-sources=", "--strict-mcp-config", "--mcp-config", "/s/m.json"]);
+        assert_eq!(
+            args,
+            ["-p", "--resume", "x", "--permission-prompt-tool", "t", "--settings", "/s/a.json", "--setting-sources=", "--strict-mcp-config", "--mcp-config", "/s/m.json"]
+        );
     }
 
     #[test]

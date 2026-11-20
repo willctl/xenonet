@@ -12,8 +12,8 @@ fn start(mode: StartMode, sandbox: Option<Sandbox>) -> (Resource, Act) {
     (Resource::Run { machine: machine("m1"), app: app.clone(), folder: folder.clone() }, Act::Start { app, folder, mode, sandbox })
 }
 
-fn on() -> Option<Sandbox> {
-    Some(Sandbox { domains: vec!["github.com".into()] })
+fn on() -> Sandbox {
+    Sandbox { domains: vec!["github.com".into()] }
 }
 
 /// This machine takes starts from the network and, under a delegation of
@@ -39,7 +39,7 @@ fn an_agent_from_another_machine_starts_only_sandboxed() {
             decide(None, &Request::new(agent.clone(), resource, act, Door::Network, NOW, Some(network())), &f.world, None)
         };
         assert_eq!(why(&ask(None)), "sandbox", "{mode:?}: the field missing or off is refused");
-        assert!(ask(on()).is_allow(), "{mode:?}: sandboxed it runs");
+        assert!(ask(Some(on())).is_allow(), "{mode:?}: sandboxed it runs");
         assert!(ask(Some(Sandbox::default())).is_allow(), "{mode:?}: with no domains too");
     }
 }
@@ -51,7 +51,7 @@ fn an_agent_on_this_machine_starts_only_sandboxed_too() {
     let (resource, act) = start(StartMode::Asks, None);
     let r = Request::new(agent.clone(), resource, act, Door::Local, NOW, None);
     assert_eq!(why(&decide(None, &r, &f.world, None)), "sandbox");
-    let (resource, act) = start(StartMode::Asks, on());
+    let (resource, act) = start(StartMode::Asks, Some(on()));
     assert!(decide(None, &Request::new(agent, resource, act, Door::Local, NOW, None), &f.world, None).is_allow());
 }
 
@@ -61,7 +61,7 @@ fn an_actor_starts_only_sandboxed() {
     let token = f.m1_root.mint_actor(&actor_grant("muse", &[Action::Start])).unwrap();
     let bearer = token.bearer().clone();
     let principal = Principal::Actor { slug: bearer.slug.clone(), machine: bearer.machine.clone() };
-    for (sandbox, allowed) in [(None, false), (on(), true)] {
+    for (sandbox, allowed) in [(None, false), (Some(on()), true)] {
         let (resource, act) = start(StartMode::Asks, sandbox);
         let d = decide(Some(&token), &Request::new(principal.clone(), resource, act, Door::Local, NOW, None), &f.world, None);
         assert_eq!((d.is_allow(), if allowed { "allowed" } else { "sandbox" }), (allowed, why(&d)));
@@ -72,7 +72,7 @@ fn an_actor_starts_only_sandboxed() {
 fn the_persons_own_start_may_be_either() {
     let f = world();
     for mode in [StartMode::Asks, StartMode::Delegated] {
-        for sandbox in [None, on()] {
+        for sandbox in [None, Some(on())] {
             let (resource, act) = start(mode, sandbox.clone());
             let principal = as_person(&f.world, &bio_device(), &resource, &act);
             let r = Request::new(principal, resource, act, Door::Local, NOW, None);
@@ -85,7 +85,7 @@ fn the_persons_own_start_may_be_either() {
 #[test]
 fn what_the_person_signs_includes_the_sandbox() {
     let f = world();
-    let (resource, signed) = start(StartMode::Asks, on());
+    let (resource, signed) = start(StartMode::Asks, Some(on()));
     let sig = PersonSigned::sign(&bio_device(), &resource, &signed).unwrap();
     for other in [None, Some(Sandbox::default()), Some(Sandbox { domains: vec!["example.org".into()] })] {
         let (_, act) = start(StartMode::Asks, other);

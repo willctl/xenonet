@@ -56,6 +56,11 @@ pub struct SandboxFiles<'a> {
     pub mcp: &'a str,
 }
 
+/// The files of one sandboxed run: its settings (given the plan, the
+/// settings a session listens with, and XenoNet's server's name) and its MCP
+/// configuration.
+pub type SandboxMake = fn(&Plan<'_>, Option<&Value>, &str) -> (Value, Value);
+
 /// How an app's own sandbox is driven. An app without one has no
 /// `Ways::sandbox`, and a sandboxed start of it is refused.
 #[derive(Clone, Copy, Debug)]
@@ -68,7 +73,7 @@ pub struct SandboxWays {
     /// doesn't cover, and XenoNet's hooks), with `listen` the settings a
     /// session listens with, merged in; and the MCP configuration that
     /// holds XenoNet's server only, named `server`.
-    pub files: Option<fn(&Plan<'_>, Option<&Value>, &str) -> (Value, Value)>,
+    pub files: Option<SandboxMake>,
     /// What a sandboxed run's answer and first prompt say it may reach,
     /// beyond its folder: the words for the domains.
     pub words: fn(&Plan<'_>) -> String,
