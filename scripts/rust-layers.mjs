@@ -227,20 +227,46 @@ for (const c of crates("adapters")) {
 }
 
 // Adytum (github.com/willctl/adytum) makes the cells XenoNet confines work
-// in. Its types, wall rules and process runner are a library any crate may
-// use; the drivers that make VMs and containers, the ledger and the doctor
-// run only in the composition root and the doctor, so the engine reaches a
-// cell through a trait. Eidolon only in the root. Adytum takes nothing of
-// XenoNet's, which its own repository checks.
+// in. It is one crate, `adytum`. With no features (its types, wall rules
+// and process runner) it is a library any crate may use; its features
+// (lima and openshell, the drivers that make VMs and sandboxes; doctor;
+// testing, the fakes) run only in the composition root and the doctor, so
+// the engine reaches a cell through a trait. So the workspace lists it with
+// `default-features = false` and no features, a crate takes it from there,
+// and only those crates add features, `testing` in dev-dependencies alone.
+// Eidolon only in the root. Adytum takes nothing of XenoNet's, which its own
+// repository checks.
 {
-  const LIB = new Set(["adytum-model", "adytum-policy", "adytum-exec"]);
   const RUNTIME_USERS = new Set([...ROOT, "xenonet-doctor"]);
+  // Each line of a manifest that names the adytum crate, with its section.
+  const adytumLines = (file) => {
+    const out = [];
+    let section = "";
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      const t = line.trim();
+      const head = /^\[(.+)\]$/.exec(t);
+      if (head) section = head[1];
+      if (/(^|\.)dependencies\.adytum$/.test(section) && head) out.push({ section, text: t, table: true });
+      else if (/(^|\.)dependencies$/.test(section) && /^adytum\s*(\.workspace|=)/.test(t)) out.push({ section, text: t });
+    }
+    return out;
+  };
+  const listed = adytumLines(path.join(root, "Cargo.toml")).find((l) => l.section === "workspace.dependencies");
+  if (listed && !(/default-features\s*=\s*false/.test(listed.text) && !/\bfeatures\s*=/.test(listed.text.replace(/default-features/, "")))) {
+    breaches.push(`the workspace lists adytum with features (${listed.text}): list it with default-features = false and no features, and let the crates that may add them do so`);
+  }
   for (const c of [...crates("crates"), ...crates("adapters")]) {
     const name = packageName(c.dir);
-    for (const d of deps(path.join(c.dir, "Cargo.toml"), { prefix: "adytum" })) {
-      if (!LIB.has(d) && !RUNTIME_USERS.has(name)) breaches.push(`${name} depends on ${d}: of Adytum, only ${[...LIB].join(", ")} are a library; the rest is for ${[...RUNTIME_USERS].join(", ")}`);
+    const file = path.join(c.dir, "Cargo.toml");
+    for (const d of deps(file, { prefix: "adytum", dev: true })) breaches.push(`${name} depends on ${d}: Adytum is one crate, adytum, now`);
+    for (const l of adytumLines(file)) {
+      const dev = /dev-dependencies$/.test(l.section);
+      const features = /\bfeatures\s*=/.test(l.text.replace(/default-features/, ""));
+      if (l.table || !/workspace\s*=\s*true|^adytum\.workspace/.test(l.text)) breaches.push(`${name} takes adytum other than from the workspace, as adytum.workspace = true or { workspace = true, features = [...] } (${l.text})`);
+      else if (features && !RUNTIME_USERS.has(name)) breaches.push(`${name} turns on Adytum's features (${l.text}): only ${[...RUNTIME_USERS].join(", ")} may; the others take adytum with none`);
+      else if (!dev && /"testing"/.test(l.text)) breaches.push(`${name} turns on Adytum's testing feature outside its dev-dependencies (${l.text})`);
     }
-    for (const d of deps(path.join(c.dir, "Cargo.toml"), { prefix: "eidolon" })) {
+    for (const d of deps(file, { prefix: "eidolon" })) {
       if (!ROOT.has(name)) breaches.push(`${name} depends on Eidolon's ${d}, which only ${[...ROOT].join(", ")} may use`);
     }
   }

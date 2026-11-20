@@ -11,7 +11,7 @@ publish.workspace = true
 
 [dependencies]
 # A cell start's wall is an Adytum wall (confine.rs): the type, no driver.
-adytum-model.workspace = true
+adytum.workspace = true
 getrandom.workspace = true
 regex.workspace = true
 serde_json.workspace = true

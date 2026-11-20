@@ -3,7 +3,7 @@
 //! that holds no credential of XenoNet's and no token; and its standard
 //! input and output as the lines ACP's connection runs over.
 
-use adytum_exec::{Command, Spawned, StderrTail};
+use adytum::exec::{Command, Spawned, StderrTail};
 use agent_client_protocol::Lines;
 use futures::{Sink, Stream};
 use std::path::{Path, PathBuf};
@@ -76,7 +76,7 @@ impl Launch {
         &self.env
     }
 
-    /// Starts it through adytum-exec: no window on Windows, its own process
+    /// Starts it through Adytum's exec: no window on Windows, its own process
     /// group (so a signal to the service's terminal doesn't reach it, and
     /// stopping it stops what it started), and `env` as its whole
     /// environment. Its standard error is kept, the last of it, for errors.

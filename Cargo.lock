@@ -38,98 +38,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "adytum-doctor"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
-dependencies = [
- "adytum-exec",
- "adytum-ledger",
- "adytum-lima",
- "async-trait",
- "serde",
- "serde_json",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "adytum-driver"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
-dependencies = [
- "adytum-exec",
- "adytum-model",
- "adytum-policy",
- "async-trait",
- "serde_json",
-]
-
-[[package]]
-name = "adytum-exec"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
+name = "adytum"
+version = "0.2.0"
 dependencies = [
  "async-trait",
+ "getrandom 0.3.4",
  "nix",
- "tokio",
-]
-
-[[package]]
-name = "adytum-ledger"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
-dependencies = [
- "adytum-driver",
- "adytum-model",
- "adytum-policy",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
-]
-
-[[package]]
-name = "adytum-lima"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
-dependencies = [
- "adytum-driver",
- "adytum-exec",
- "adytum-model",
- "adytum-policy",
- "async-trait",
- "serde_json",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "adytum-model"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
-dependencies = [
- "getrandom 0.3.4",
- "serde",
-]
-
-[[package]]
-name = "adytum-openshell"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
-dependencies = [
- "adytum-driver",
- "adytum-exec",
- "adytum-model",
- "adytum-policy",
- "async-trait",
- "serde_json",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "adytum-policy"
-version = "0.1.0"
-source = "git+https://github.com/willctl/adytum?rev=73926512cab68ad41b44b1eb35fa5baf0912f462#73926512cab68ad41b44b1eb35fa5baf0912f462"
-dependencies = [
- "adytum-model",
+ "tokio",
 ]
 
 [[package]]
@@ -5730,7 +5649,7 @@ dependencies = [
 name = "xenonet-acp"
 version = "0.2.0"
 dependencies = [
- "adytum-exec",
+ "adytum",
  "agent-client-protocol",
  "futures",
  "serde_json",
@@ -5946,7 +5865,7 @@ dependencies = [
 name = "xenonet-doctor"
 version = "0.2.0"
 dependencies = [
- "adytum-doctor",
+ "adytum",
  "async-trait",
  "libc",
  "regex",
@@ -5977,7 +5896,7 @@ dependencies = [
 name = "xenonet-engine"
 version = "0.2.0"
 dependencies = [
- "adytum-model",
+ "adytum",
  "getrandom 0.3.4",
  "regex",
  "serde_json",
@@ -6271,12 +6190,7 @@ name = "xenonet-service"
 version = "0.2.0"
 dependencies = [
  "a2a-lf",
- "adytum-driver",
- "adytum-exec",
- "adytum-ledger",
- "adytum-lima",
- "adytum-model",
- "adytum-openshell",
+ "adytum",
  "async-trait",
  "bytes",
  "futures",
