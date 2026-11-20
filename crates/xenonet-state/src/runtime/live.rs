@@ -112,6 +112,9 @@ pub struct Live {
     vendor: Arc<Vendor>,
     pub anthropic: Option<Arc<Gather>>,
     pub desktop: Option<(Arc<Gather>, String)>,
+    /// Plan usage of each Claude folder she named, by folder: asked for with
+    /// that folder's own sign-in, never the default's.
+    usage_roots: Mutex<Vec<(String, Arc<Gather>)>>,
     /// What Claude desktop calls its connectors (desktop_connectors.rs).
     connectors: Mutex<Connectors>,
     listener: OnceLock<Listener>,
@@ -186,12 +189,27 @@ impl Live {
             vendor,
             anthropic,
             desktop,
+            usage_roots: Mutex::new(Vec::new()),
             listener: OnceLock::new(),
             sessions: Mutex::new(None),
             wanted: Mutex::new(std::collections::BTreeMap::new()),
             tasks: Mutex::new(Vec::new()),
             clock,
         })
+    }
+
+    /// The Claude folders she named, whose plan usage is asked for each with
+    /// its own sign-in (its `.credentials.json`; the keychain entry of a
+    /// folder is not read). Nothing when usage is off.
+    pub fn usage_roots(&self, dirs: &[String]) {
+        if self.anthropic.is_none() {
+            return;
+        }
+        let gathers = dirs
+            .iter()
+            .map(|d| (d.clone(), Arc::new(Gather::new("claude-usage", Options { every_ms: Some(claude_usage::USAGE_EVERY_MS), next_in: true, fallback: Value::Null, clock: self.clock.clone(), ..Default::default() }))))
+            .collect();
+        *lock(&self.usage_roots) = gathers;
     }
 
     /// Who hears what the lines say.
@@ -728,6 +746,16 @@ impl Live {
                 let _ = lock(&self.telemetry).usage_reading(crate::apps::anthropic_usage_app(), Some(&r), now);
             }
         }
+        let roots = lock(&self.usage_roots).clone();
+        for (dir, a) in roots {
+            let at = self.clock.now();
+            if a.begin(false, at, None).is_ok() {
+                let t0 = self.clock.now();
+                let r = fetch_claude_usage_in(&self.vendor, now, Some(&dir)).await;
+                let wait = claude_usage::next_in(Some(&r)).and_then(|w| w.as_f64());
+                a.done(r, at, self.clock.now() - t0, None, wait);
+            }
+        }
         if let Some((d, dir)) = &self.desktop {
             let file = Path::new(dir).join("plan-usage-history.json");
             let vendor = self.vendor.clone();
@@ -749,6 +777,20 @@ impl Live {
         // What Claude desktop calls its connectors beats what the lines suggest.
         let declared = lock(&self.connectors).get(self.clock.now()).to_vec();
         with_declared(&mut snap["resources"], &declared);
+        // Each folder she named for Claude Code has its own plan usage,
+        // under `claude@<folder>`.
+        let name = crate::apps::anthropic_usage_app();
+        let limits_name = xenonet_adapter::apps::app(name).and_then(|a| a.limits.clone()).unwrap_or_default();
+        for (dir, a) in lock(&self.usage_roots).iter() {
+            let r = a.value();
+            let one = match r.get("usage").filter(|u| xenonet_text::text::truthy(Some(u))) {
+                Some(u) => json!({ "fiveHour": u.get("fiveHour"), "sevenDay": u.get("sevenDay"), "resets": u.get("resets"), "observedAt": u.get("observedAt"), "source": "anthropic" }),
+                None => json!({ "reason": r.get("reason").cloned().unwrap_or(Value::Null) }),
+            };
+            if let Some(l) = snap.get_mut("limits").and_then(Value::as_object_mut) {
+                l.insert(format!("{limits_name}@{dir}"), one);
+            }
+        }
         snap
     }
 
@@ -866,9 +908,11 @@ impl Block for TailBlock {
 
 /// Claude Code's sign-in, { token, expiresAt }: the keychain's on a Mac,
 /// else its credentials file. Read for each request, and never kept.
-async fn claude_token() -> Option<Value> {
+async fn claude_token(root: Option<&str>) -> Option<Value> {
     let mut texts: Vec<Option<String>> = Vec::new();
-    if cfg!(target_os = "macos") {
+    // The keychain entry is the default folder's; a folder she named has
+    // its own, which is not read, so a token there is its file's alone.
+    if cfg!(target_os = "macos") && root.is_none() {
         let out = tokio::time::timeout(
             Duration::from_secs(5),
             tokio::process::Command::new("security")
@@ -883,7 +927,7 @@ async fn claude_token() -> Option<Value> {
             _ => None,
         });
     }
-    let dir = std::env::var("CLAUDE_CONFIG_DIR").ok().unwrap_or_else(|| Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").to_string_lossy().into_owned());
+    let dir = root.map(str::to_string).or_else(|| std::env::var("CLAUDE_CONFIG_DIR").ok()).unwrap_or_else(|| Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").to_string_lossy().into_owned());
     texts.push(std::fs::read_to_string(Path::new(&dir).join(".credentials.json")).ok());
     for t in texts.into_iter().flatten() {
         if let Some((token, expires)) = claude_usage::token_of(Some(&t)) {
@@ -895,7 +939,12 @@ async fn claude_token() -> Option<Value> {
 
 /// One reading of Anthropic's: { usage } or { reason, retryAfterMs? }.
 async fn fetch_claude_usage(vendor: &Vendor, now: f64) -> Value {
-    let cred = claude_token().await;
+    fetch_claude_usage_in(vendor, now, None).await
+}
+
+/// The same for a folder she named (`root`), with that folder's sign-in.
+async fn fetch_claude_usage_in(vendor: &Vendor, now: f64, root: Option<&str>) -> Value {
+    let cred = claude_token(root).await;
     if let Some(problem) = claude_usage::sign_in_problem(cred.as_ref(), now) {
         return problem;
     }

@@ -94,6 +94,7 @@ pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoW
         .collect();
     let live = live::Live::with_clock(&roots, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone(), cfg.clock.clone());
     live.context_server(cfg.wiki_server.as_str());
+    live.usage_roots(&cfg.named_roots.iter().filter(|r| r.app == crate::apps::anthropic_usage_app()).filter_map(|r| r.root.clone()).collect::<Vec<_>>());
     let readers = match &demo {
         Some(d) => state::Readers::Demo(d.clone()),
         None => state::Readers::Real,
