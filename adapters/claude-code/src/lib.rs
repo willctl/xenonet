@@ -242,6 +242,14 @@ impl Platform for Adapter {
         vec![folder.to_string()]
     }
 
+    fn root_paths(&self, root: &str) -> Option<xenonet_adapter::platform::RootPaths> {
+        Some(xenonet_adapter::platform::RootPaths { folder: xenonet_os::paths::join(root, "projects"), signin: xenonet_os::paths::join(root, ".claude.json") })
+    }
+
+    fn root_candidates(&self, home: &str, look: &mut dyn xenonet_adapter::dirs::Look) -> Vec<String> {
+        xenonet_adapter::platform::sibling_roots(home, ".claude", &["projects", ".claude.json", ".credentials.json"], look)
+    }
+
     fn session_files(&self) -> Option<Box<dyn xenonet_adapter::platform::SessionFiles>> {
         Some(Box::new(map::Files))
     }

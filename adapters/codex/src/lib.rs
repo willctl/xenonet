@@ -261,6 +261,14 @@ impl Platform for Adapter {
         ["sessions", "archived_sessions"].map(|d| std::path::Path::new(folder).join(d).to_string_lossy().into_owned()).to_vec()
     }
 
+    fn root_paths(&self, root: &str) -> Option<xenonet_adapter::platform::RootPaths> {
+        Some(xenonet_adapter::platform::RootPaths { folder: root.to_string(), signin: xenonet_os::paths::join(root, "auth.json") })
+    }
+
+    fn root_candidates(&self, home: &str, look: &mut dyn xenonet_adapter::dirs::Look) -> Vec<String> {
+        xenonet_adapter::platform::sibling_roots(home, ".codex", &["sessions", "auth.json", "config.toml"], look)
+    }
+
     fn session_files(&self) -> Option<Box<dyn xenonet_adapter::platform::SessionFiles>> {
         Some(Box::<map::Files>::default())
     }

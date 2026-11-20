@@ -82,24 +82,26 @@ pub struct Files;
 
 impl SessionFiles for Files {
     fn files(&mut self, dirs: &[String], raw: &str, _now: f64) -> Vec<(String, Option<String>)> {
-        let root = dirs.first().map_or("", String::as_str);
-        for (name, is_dir) in dir_names(root).unwrap_or_default() {
-            if !is_dir {
-                continue;
-            }
-            let main = paths::join_all(&[root, &name, &format!("{raw}.jsonl")]);
-            if !Path::new(&main).exists() {
-                continue;
-            }
-            let sub_dir = paths::join_all(&[root, &name, raw, "subagents"]);
-            let mut out = vec![(main, None)];
-            for (f, _) in dir_names(&sub_dir).unwrap_or_default() {
-                if let Some(stem) = f.strip_suffix(".jsonl") {
-                    let agent = stem.strip_prefix("agent-").unwrap_or(stem).to_string();
-                    out.push((paths::join(&sub_dir, &f), Some(agent)));
+        // Under each root's projects folder, the first that has it.
+        for root in dirs {
+            for (name, is_dir) in dir_names(root).unwrap_or_default() {
+                if !is_dir {
+                    continue;
                 }
+                let main = paths::join_all(&[root, &name, &format!("{raw}.jsonl")]);
+                if !Path::new(&main).exists() {
+                    continue;
+                }
+                let sub_dir = paths::join_all(&[root, &name, raw, "subagents"]);
+                let mut out = vec![(main, None)];
+                for (f, _) in dir_names(&sub_dir).unwrap_or_default() {
+                    if let Some(stem) = f.strip_suffix(".jsonl") {
+                        let agent = stem.strip_prefix("agent-").unwrap_or(stem).to_string();
+                        out.push((paths::join(&sub_dir, &f), Some(agent)));
+                    }
+                }
+                return out;
             }
-            return out;
         }
         Vec::new()
     }
@@ -116,5 +118,21 @@ mod tests {
         ));
         assert_eq!(a, json!({ "id": "claude:a:o", "kind": "claude", "handle": "n@x", "detail": { "plan": "Team", "org": "Atlas" } }));
         assert_eq!(claude_account(Some(&json!({}))), Value::Null);
+    }
+
+    #[test]
+    fn finds_a_session_in_any_root() {
+        let base = std::env::temp_dir().join(format!("xenonet-claude-files-{}", std::process::id()));
+        let (a, b) = (base.join("a/projects"), base.join("b/projects"));
+        std::fs::create_dir_all(a.join("-w-atlas")).unwrap();
+        std::fs::create_dir_all(b.join("-w-ledger/s2/subagents")).unwrap();
+        std::fs::write(b.join("-w-ledger/s2.jsonl"), "").unwrap();
+        std::fs::write(b.join("-w-ledger/s2/subagents/agent-x.jsonl"), "").unwrap();
+        let dirs = vec![a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned()];
+        let found = Files.files(&dirs, "s2", 0.0);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found[0].0.starts_with(&dirs[1]) && found[1].1.as_deref() == Some("x"));
+        assert!(Files.files(&dirs, "nope", 0.0).is_empty());
+        let _ = std::fs::remove_dir_all(base);
     }
 }
