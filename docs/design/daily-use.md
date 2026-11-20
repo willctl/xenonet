@@ -38,17 +38,20 @@ Scenario 1 needs no new code, only both machines on a current release.
   same sharing; a network with no sharing row is shown nothing; the first
   network no longer stands in for every network
   ([authorization](authorization.md), [network](network.md)).
+- **A machine she doesn't own.** Nothing new was needed: a start she signs
+  at `desk` runs on a machine that holds no identity of hers, in a shared
+  project's folder, and its prompts come back to `desk`. From
+  `contractor-vm` a start or wake on `desk` outside `atlas`, a transcript
+  read and anything in `ledger` are refused (tests in `net_engine.rs`). A
+  guest grant in the network's own chain is built only if asking for
+  presence on every prompt is too slow in use. Whoever holds root on that
+  machine can ignore anything XenoNet does there; what protects her is
+  that her own machines decide ([the guide](../guide/network.md#working-on-a-machine-you-dont-own)).
 
 ## Next
 
 Each waits until scenario 1 has run for real.
 
-- **A machine she doesn't own.** Try what exists first: a start she signs
-  at `desk` already runs on a machine that holds no identity of hers, and
-  its prompts come back to `desk`. A guest grant in the network's own
-  chain is built only if asking for presence on every prompt is too slow
-  in use. Whoever holds root on that machine can ignore anything XenoNet
-  does there; what protects her is that her own machines decide.
 - **Sandboxed starts.** Each harness's own sandbox, driven by XenoNet, with
   the setting inside the signed start so nothing between her signature
   and the run can drop it. An app with no sandbox refuses a sandboxed

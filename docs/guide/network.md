@@ -187,6 +187,22 @@ The prompt shows in Needs you on that machine and on the window host that asked 
 
 Answers come only from XenoNet's window, never from a terminal or a session. An actor you gave `answer-prompts` may Deny, and Allow only the sessions and kinds of prompt you let it in the Actors panel, which asks you when you set or widen it. A run you delegated is answered by its machine within the delegation (see [Delegating work](delegation.md)). Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
 
+## Working on a machine you don't own
+
+A contractor's laptop or a rented VM can join its own network, with no identity of yours on it. Found a network for it (`work`, say), share into that network only the projects it needs (`atlas`), and leave the machine's own settings at their defaults.
+
+What you can do there: start a session on it from your own machine, in the folder of a project on it. The session runs on the guest machine, and its permission prompts come back to the window host that asked for the run, where you answer them. The guest machine never answers them.
+
+What the guest machine can reach on yours:
+
+- Sessions, claims, handoffs and intents in the projects shared into `work`, and nothing in the others. An id it knows or guesses for a session outside them gets the answer for an id that doesn't exist.
+- Starts only if you let `work` start sessions on your machine (`start: network`, set in the window), and then only in the folders of shared projects. Under the default (`start: you`) it starts nothing.
+- Wakes only of sessions in shared projects, and only under `work`'s wake setting.
+- No transcripts or stats: another machine's transcript opens only in a window host's window, and the guest isn't one.
+- No Xenolith spaces, unless you allow Xenolith's grant for `work` in **Network settings › Shared context**.
+
+Whoever holds root on the guest machine can ignore anything XenoNet does there: read the folders it works in, the sign-in of its runs and whatever it has been sent. What protects you is on your machines, which decide every act from another machine against what its network is shown. Share only what you'd hand that machine's owner.
+
 ## A2A agents
 
 When a machine runs its actor gateway with A2A on (see [Agents that speak A2A](actors.md#agents-that-speak-a2a)), an A2A agent reaches the network there. It's an actor on that machine, with its own token and scopes. A scope can name another machine: a grant of `machine:laptop` lets it reach the sessions on laptop, which it names by their `agt_…` ids in its message's `target`. Its message crosses to laptop like any other, and the session's reply there completes the agent's task. The actor gateway is that machine's alone: the other machines don't go through it.
