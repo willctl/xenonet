@@ -116,6 +116,16 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # Quint fetches its evaluator through GitHub's API without a token, and
+      # the anonymous rate limit fails the job. Fetched here with the job's
+      # token, it is already in ~/.quint and Quint asks for nothing. The
+      # version is the evaluator Quint 0.33.1 (scripts/formal.mjs) runs.
+      - run: |
+          dir=~/.quint/rust-evaluator-v0.7.1
+          mkdir -p "$dir"
+          gh release download evaluator/v0.7.1 --repo quint-co/quint --pattern quint_evaluator-x86_64-unknown-linux-gnu.tar.gz --output - | tar -xz -C "$dir"
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: npm run formal
   updates:
     runs-on: windows-latest
