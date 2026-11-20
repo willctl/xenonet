@@ -29,7 +29,9 @@ export const MODELS = {
     // mixes two sides of a fork and breaks the chain of applied entries,
     // so either may fire first.
     bugs: {
-      bugSkipGap: ["gapDetected"],
+      // Taking an entry past a hole leaves the skipped entry to arrive later
+      // as evidence of a fork, so the fork check can fire before the gap one.
+      bugSkipGap: ["gapDetected", "forkDetected"],
       bugNoPrevCheck: ["forkDetected", "gapDetected"],
       bugNoCompactEnd: ["compactEnds"],
       bugTimeRevocation: ["revokedRefused"],
