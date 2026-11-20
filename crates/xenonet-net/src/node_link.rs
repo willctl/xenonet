@@ -1112,9 +1112,11 @@ pub async fn run(c: Weak<Common>, relays: Vec<String>, lan: crate::endpoint::Lan
         links.hand_others(Arc::new(move |link| f.incoming(link)));
     }
     let served: Arc<dyn crate::svc2::Served> = Arc::new(super::svc2n::NodeServed(c.clone()));
-    links.hand_services(Arc::new(move |link| {
+    let serve_svc: crate::link2::Others = Arc::new(move |link| {
         tokio::spawn(crate::svc2::serve(link, served.clone()));
-    }));
+    });
+    links.hand_services(serve_svc.clone());
+    mesh.serve_dialled(serve_svc);
     let t = Arc::new(Transport2 {
         records: std::sync::Mutex::default(),
         waiting: std::sync::Mutex::default(),
