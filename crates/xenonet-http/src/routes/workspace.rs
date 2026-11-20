@@ -46,6 +46,18 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
             return Ok(Reply::json(200, state.set_roots(roots.clone()).await?));
         }
     }
+    if req.path == "/api/workspace/app-roots" {
+        if req.method == "GET" {
+            return Ok(Reply::json(200, state.app_roots()?));
+        }
+        if req.method == "PUT" {
+            let body = req.json_body().await?;
+            let (Some(app), Some(roots)) = (body.get("app").filter(|a| a.is_string()), body.get("roots").filter(|r| r.is_array())) else {
+                return Ok(Reply::error(400, "say which app and its folders: { app, roots: [path] }"));
+            };
+            return Ok(Reply::json(200, state.set_app_roots(app.clone(), roots.clone()).await?));
+        }
+    }
     if req.method == "POST" && req.path == "/api/workspace/check" {
         let path = req.json_body().await?.get("path").cloned().unwrap_or(Value::Null);
         return Ok(Reply::json(200, state.check_root(path).await?));

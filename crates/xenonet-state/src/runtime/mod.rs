@@ -20,6 +20,7 @@ pub mod live;
 pub mod narrate;
 pub mod observed;
 pub mod projects;
+pub mod rooted;
 pub mod saved;
 pub mod schemas;
 pub mod search;
@@ -71,13 +72,15 @@ pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoW
             d.open(&std::path::Path::new(&settings.cache_dir).join(xenonet_schema::drift::DRIFT_FILE).to_string_lossy());
         }
     }
-    let cfg = config::MapConfig::new(settings.demo, settings.dev, config::process_env(), &settings.home, settings.world.as_ref());
+    let mut cfg = config::MapConfig::new(settings.demo, settings.dev, config::process_env(), &settings.home, settings.world.as_ref());
     let dir = vendor::schemas_dir(&settings.root);
     // The service's one set of vendor readers, which the actors' observers
     // check their records through too.
     let readers = env.readers.get_or_make(|| xenonet_schema::vendor::Readers::new(dir.clone(), env.drift.clone()));
     let vendor = vendor::Vendor::with_readers(readers);
     let store = saved::Saved::new(cores.store.clone());
+    // The folders she named for each app, beside its default one.
+    cfg.name_roots(&store.app_roots());
     // What the demo's made-up person would have saved: the names Nova
     // gave, and the accounts XenoNet saw.
     if let Some(remembered) = demo.as_ref().and_then(|d| d.remembered()) {
@@ -85,8 +88,10 @@ pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoW
     }
     // The folder each app writes its transcripts in now, which the tailer
     // follows.
-    let roots: Vec<(String, String)> =
-        xenonet_adapter::platforms().iter().filter_map(|p| Some((state::transcript_dirs(&cfg, p.id()).into_iter().next()?, p.id().to_string()))).collect();
+    let roots: Vec<(String, String)> = xenonet_adapter::platforms()
+        .iter()
+        .flat_map(|p| cfg.roots(p.id()).into_iter().filter_map(|r| Some((p.transcript_dirs(&r.folder).into_iter().next()?, p.id().to_string()))).collect::<Vec<_>>())
+        .collect();
     let live = live::Live::with_clock(&roots, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone(), cfg.clock.clone());
     live.context_server(cfg.wiki_server.as_str());
     let readers = match &demo {

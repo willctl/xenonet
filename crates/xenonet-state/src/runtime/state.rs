@@ -209,15 +209,31 @@ pub fn transcript_dirs(cfg: &MapConfig, app: &str) -> Vec<String> {
     xenonet_adapter::platforms().get(app).map(|p| p.transcript_dirs(cfg.folder(app))).unwrap_or_default()
 }
 
+/// The folders an app's transcripts are in under every root it is read from,
+/// its default one's first.
+pub fn all_transcript_dirs(cfg: &MapConfig, app: &str) -> Vec<String> {
+    let Some(p) = xenonet_adapter::platforms().get(app) else { return Vec::new() };
+    cfg.roots(app).iter().flat_map(|r| p.transcript_dirs(&r.folder)).collect()
+}
+
 /// The apps' sign-ins, one for each kind of account (the registry's
 /// `identity`), in its order: each in the file its adapter names.
 fn signin_files(cfg: &MapConfig) -> Vec<crate::runtime::identities::SigninFile> {
     xenonet_adapter::apps::identities()
-        .filter_map(|(kind, a)| {
-            let s = xenonet_adapter::platforms().get(&a.id)?.signin()?;
+        .flat_map(|(kind, a)| {
+            let Some(p) = xenonet_adapter::platforms().get(&a.id) else { return Vec::new() };
+            let Some(s) = p.signin() else { return Vec::new() };
             let at = cfg.setting(Some(s.setting));
             let file = s.file.map_or_else(|| at.to_string(), |f| std::path::Path::new(at).join(f).to_string_lossy().into_owned());
-            Some(crate::runtime::identities::SigninFile { kind, file, read: s.read })
+            let mut out = vec![crate::runtime::identities::SigninFile { kind, root: None, file, read: s.read }];
+            // Each root she named has a sign-in file of its own.
+            out.extend(
+                cfg.named_roots
+                    .iter()
+                    .filter(|r| r.app == a.id)
+                    .filter_map(|r| Some(crate::runtime::identities::SigninFile { kind, root: r.root.clone(), file: r.signin.clone()?, read: s.read })),
+            );
+            out
         })
         .collect()
 }
@@ -235,7 +251,7 @@ impl MapState {
         let (emitter, decider, version) = (env.emitter.clone(), env.decider.clone(), env.version.as_str());
         // Each app's transcript folders, in the registry's order.
         let dirs: Vec<(String, Vec<String>)> =
-            xenonet_adapter::platforms().iter().map(|p| (p.id().to_string(), transcript_dirs(&cfg, p.id()))).filter(|(_, d)| !d.is_empty()).collect();
+            xenonet_adapter::platforms().iter().map(|p| (p.id().to_string(), all_transcript_dirs(&cfg, p.id()))).filter(|(_, d)| !d.is_empty()).collect();
         let roots: Vec<(String, String)> = dirs.iter().flat_map(|(app, ds)| ds.iter().map(move |d| (d.clone(), app.clone()))).collect();
         let search = TranscriptSearch::new(&std::path::Path::new(&cfg.cache_dir).join("search.sqlite").to_string_lossy(), &roots, vendor.clone());
         let stats = Stats::new(dirs, vendor.clone());
@@ -245,7 +261,10 @@ impl MapState {
                     home: cfg.home_dir.clone(),
                     signins: signin_files(&cfg),
                     gh_config_dir: cfg.gh_config_dir.clone(),
-                    owners: xenonet_adapter::platforms().iter().find(|p| p.signin().is_some_and(|s| s.owners)).map(|p| (p.id().to_string(), cfg.folder(p.id()).to_string())),
+                    owners: xenonet_adapter::platforms()
+                        .iter()
+                        .find(|p| p.signin().is_some_and(|s| s.owners))
+                        .map(|p| (p.id().to_string(), cfg.roots(p.id()).into_iter().map(|r| r.folder).collect())),
                 },
                 vendor.clone(),
                 &cfg.env,
@@ -259,20 +278,34 @@ impl MapState {
         let root = workspace::root(cfg.env_projects_dir.as_deref(), Some(&saved), &cfg.home_dir);
         let projects_dir = root["path"].as_str().unwrap_or(&cfg.projects_dir).to_string();
         let handle = tokio::runtime::Handle::current();
+        // An app read from several folders has a lister for each, answering
+        // as one; its default folder's comes first.
         let listers: Vec<(&'static App, Arc<dyn Lister>)> = xenonet_adapter::platforms()
-            .listers(|app| ListerEnv {
-                home_dir: &cfg.home_dir,
-                root: cfg.folder(&app.id),
-                desktop_dir: cfg.claude_desktop_dir.as_deref(),
-                state_dir: &cfg.state_dir,
-                env: &cfg.env,
-                version,
-                handle: handle.clone(),
+            .iter()
+            .filter_map(|p| {
+                let app = p.app();
+                let roots = cfg.roots(&app.id);
+                fn at<'a>(cfg: &'a MapConfig, folder: &'a str, default: bool, version: &'a str, handle: &tokio::runtime::Handle) -> ListerEnv<'a> {
+                    ListerEnv {
+                        home_dir: &cfg.home_dir,
+                        root: folder,
+                        desktop_dir: if default { cfg.claude_desktop_dir.as_deref() } else { None },
+                        state_dir: &cfg.state_dir,
+                        env: &cfg.env,
+                        version,
+                        handle: handle.clone(),
+                    }
+                }
+                if roots.len() <= 1 {
+                    let l = p.lister(&at(&cfg, cfg.folder(&app.id), true, version, &handle))?;
+                    return Some((app, Arc::from(l)));
+                }
+                let parts: Vec<(Option<String>, Arc<dyn Lister>)> =
+                    roots.iter().filter_map(|r| Some((r.root.clone(), Arc::from(p.lister(&at(&cfg, &r.folder, r.root.is_none(), version, &handle))?)))).collect();
+                (!parts.is_empty()).then(|| (app, Arc::new(crate::runtime::rooted::Rooted::new(parts)) as Arc<dyn Lister>))
             })
-            .into_iter()
-            .map(|(app, l)| (app, Arc::from(l)))
             .collect();
-        let watches = xenonet_adapter::platforms().watches(|app| ListerEnv {
+        let mut watches = xenonet_adapter::platforms().watches(|app| ListerEnv {
             home_dir: &cfg.home_dir,
             root: cfg.folder(&app.id),
             desktop_dir: cfg.claude_desktop_dir.as_deref(),
@@ -281,6 +314,17 @@ impl MapState {
             version,
             handle: handle.clone(),
         });
+        // What the other roots write is watched too, under the same app.
+        for r in &cfg.named_roots {
+            let Some(p) = xenonet_adapter::platforms().get(&r.app) else { continue };
+            let specs =
+                p.watch(&ListerEnv { home_dir: &cfg.home_dir, root: &r.folder, desktop_dir: None, state_dir: &cfg.state_dir, env: &cfg.env, version, handle: handle.clone() });
+            match watches.iter_mut().find(|(q, _)| q.id() == r.app) {
+                Some((_, have)) => have.extend(specs),
+                None if !specs.is_empty() => watches.push((p.clone(), specs)),
+                None => {}
+            }
+        }
         let gathers = listers
             .iter()
             .filter_map(|(app, _)| {
@@ -1733,6 +1777,51 @@ impl State for MapState {
         self.store.set_roots(&out).map_err(err)?;
         self.after_change().await?;
         self.roots()
+    }
+    fn app_roots(&self) -> R<Value> {
+        let saved = self.store.app_roots();
+        let apps: Vec<Value> = xenonet_adapter::platforms()
+            .iter()
+            .filter(|p| p.root_paths("/").is_some())
+            .map(|p| {
+                let roots: Vec<Value> =
+                    self.cfg.roots(p.id()).into_iter().map(|r| json!({ "root": r.root, "folder": r.folder, "signin": r.signin, "named": r.root.is_some() })).collect();
+                json!({ "app": p.id(), "name": p.app().name, "roots": roots, "candidates": self.cfg.root_candidates(p.id()) })
+            })
+            .collect();
+        let running: std::collections::BTreeMap<String, Vec<String>> = self.cfg.named_roots.iter().fold(Default::default(), |mut m, r| {
+            m.entry(r.app.clone()).or_default().extend(r.root.clone());
+            m
+        });
+        Ok(json!({ "apps": apps, "restart": running != saved }))
+    }
+    async fn set_app_roots(&self, app: Value, roots: Value) -> R<Value> {
+        let app = app.as_str().unwrap_or_default().to_string();
+        let Some(p) = xenonet_adapter::platforms().get(&app).filter(|p| p.root_paths("/").is_some()) else {
+            return Err(status(400, format!("{app} keeps one folder, so there is nothing to name")));
+        };
+        let mut out: Vec<String> = Vec::new();
+        for r in roots.as_array().into_iter().flatten() {
+            let v = workspace::validate(Some(r), &self.cfg.home_dir, &self.cfg.platform);
+            if v["ok"] != true {
+                return Err(status(400, v["error"].as_str().unwrap_or("That folder can't be read").to_string()));
+            }
+            let path = v["path"].as_str().unwrap_or_default().to_string();
+            if p.root_paths(&path).is_some_and(|l| l.folder == self.cfg.folder(&app)) {
+                return Err(status(400, format!("That is {}'s own folder, which is always read", p.app().name)));
+            }
+            if !out.contains(&path) {
+                out.push(path);
+            }
+        }
+        let mut all = self.store.app_roots();
+        if out.is_empty() {
+            all.remove(&app);
+        } else {
+            all.insert(app, out);
+        }
+        self.store.set_app_roots(&all).map_err(err)?;
+        self.app_roots()
     }
     async fn set_root(&self, path: Value) -> R<Value> {
         if let Some(why) = workspace::locked(self.cfg.env_projects_dir.as_deref(), &self.cfg.home_dir) {

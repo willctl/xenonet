@@ -164,6 +164,19 @@ pub trait State: Send + Sync {
     async fn set_roots(&self, _roots: Value) -> R<Value> {
         pending(M)
     }
+    /// The folders each app is read from: its default one, those you named
+    /// (`xenonet apps folders`), and the ones its adapter proposes, which
+    /// nothing reads until you name them. `restart` says the saved folders
+    /// are not the ones this service started with.
+    fn app_roots(&self) -> R<Value> {
+        pending(M)
+    }
+    /// The folders you name for one app, in place of those before; each a
+    /// folder that can be read, laid out as that app lays one out. The
+    /// service reads them when it starts.
+    async fn set_app_roots(&self, _app: Value, _roots: Value) -> R<Value> {
+        pending(M)
+    }
     async fn check_root(&self, _path: Value) -> R<Value> {
         pending(M)
     }

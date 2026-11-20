@@ -70,6 +70,14 @@ pub trait Store: Send + Sync {
     fn set_roots(&self, _roots: &[String]) -> R<()> {
         pending(STORE)
     }
+    /// The other folders you named for an app's sessions and sign-in, beside
+    /// the one it keeps by default: `{ app: [path] }`.
+    fn app_roots(&self) -> R<Value> {
+        pending(STORE)
+    }
+    fn set_app_roots(&self, _roots: &Value) -> R<()> {
+        pending(STORE)
+    }
     /// What the map found on this machine (`[{ path, why }]`, why `repo`,
     /// `folder` or `session`) diffed into the checkouts the store keeps:
     /// `{ checkouts: [checkout], fixes: [words] }`, every checkout of this

@@ -114,6 +114,22 @@ impl Saved {
         self.store.set_roots(roots).map_err(|e| e.message)
     }
 
+    /// The folders you named for each app beside its default one:
+    /// app to paths, in the order you named them.
+    pub fn app_roots(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        read("the app folders you named", self.store.app_roots(), json!({}))
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(app, v)| (app.clone(), v.as_array().into_iter().flatten().filter_map(|p| p.as_str().map(String::from)).collect()))
+            .collect()
+    }
+
+    pub fn set_app_roots(&self, roots: &std::collections::BTreeMap<String, Vec<String>>) -> Result<(), String> {
+        let v: serde_json::Map<String, Value> = roots.iter().filter(|(_, l)| !l.is_empty()).map(|(a, l)| (a.clone(), json!(l))).collect();
+        self.store.set_app_roots(&Value::Object(v)).map_err(|e| e.message)
+    }
+
     /// The agents of this machine's sessions, made the first time each is
     /// seen: session to `agt_…`. Nothing without a store.
     pub fn agents_of(&self, sessions: &[String]) -> std::collections::HashMap<String, String> {

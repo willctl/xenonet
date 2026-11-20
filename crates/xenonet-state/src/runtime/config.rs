@@ -48,10 +48,26 @@ pub struct MapConfig {
     /// The settings the adapters name (an app's folder, its sign-in's
     /// file), by name.
     pub named: HashMap<String, String>,
+    /// The folders the person named for an app, beside its default one
+    /// (`name_roots`); nothing else is read.
+    pub named_roots: Vec<AppRoot>,
     /// The clock the map's runtime reads (the system's).
     pub clock: crate::runtime::util::Clock,
     /// Where it runs git (this machine's).
     pub git: crate::runtime::git::Git,
+}
+
+/// One folder an app's sessions and sign-in are read from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppRoot {
+    pub app: String,
+    /// The folder the app's variable names (`CLAUDE_CONFIG_DIR`,
+    /// `CODEX_HOME`); None for the app's default one.
+    pub root: Option<String>,
+    /// What the map's setting for the app's folder holds for this root.
+    pub folder: String,
+    /// The file the root's sign-in is in.
+    pub signin: Option<String>,
 }
 
 struct Found<'a> {
@@ -194,6 +210,7 @@ impl MapConfig {
             env_projects_dir,
             env,
             named,
+            named_roots: Vec::new(),
             clock: crate::runtime::util::Clock::system(),
             git: crate::runtime::git::Git::default(),
         }
@@ -212,6 +229,46 @@ impl MapConfig {
     /// (its adapter's `folder_setting`); "" for an app without one.
     pub fn folder(&self, app: &str) -> &str {
         self.setting(xenonet_adapter::platforms().get(app).and_then(|p| p.folder_setting()))
+    }
+
+    /// Takes the folders the person named (app to paths): each a root its
+    /// adapter lays out, except one that is the app's default folder, a
+    /// repeat, or for an app with one folder only.
+    pub fn name_roots(&mut self, named: &std::collections::BTreeMap<String, Vec<String>>) {
+        let mut out: Vec<AppRoot> = Vec::new();
+        for (app, paths) in named {
+            let Some(p) = xenonet_adapter::platforms().get(app) else { continue };
+            for path in paths {
+                let Some(laid) = p.root_paths(path) else { continue };
+                if laid.folder == self.folder(app) || out.iter().any(|r| r.app == *app && r.root.as_deref() == Some(path.as_str())) {
+                    continue;
+                }
+                out.push(AppRoot { app: app.clone(), root: Some(path.clone()), folder: laid.folder, signin: Some(laid.signin) });
+            }
+        }
+        self.named_roots = out;
+    }
+
+    /// Every folder an app is read from: its default one, then those the
+    /// person named. An app that keeps no folder has none.
+    pub fn roots(&self, app: &str) -> Vec<AppRoot> {
+        let Some(p) = xenonet_adapter::platforms().get(app) else { return Vec::new() };
+        let Some(setting) = p.folder_setting() else { return Vec::new() };
+        let signin = p.signin().map(|s| {
+            let at = self.setting(Some(s.setting));
+            s.file.map_or_else(|| at.to_string(), |f| std::path::Path::new(at).join(f).to_string_lossy().into_owned())
+        });
+        let mut out = vec![AppRoot { app: app.to_string(), root: None, folder: self.setting(Some(setting)).to_string(), signin }];
+        out.extend(self.named_roots.iter().filter(|r| r.app == app).cloned());
+        out
+    }
+
+    /// The folders an app's adapter proposes as another root of its own,
+    /// that aren't read now. Nothing is read from them.
+    pub fn root_candidates(&self, app: &str) -> Vec<String> {
+        let Some(p) = xenonet_adapter::platforms().get(app) else { return Vec::new() };
+        let have: Vec<String> = self.roots(app).into_iter().filter_map(|r| r.root).collect();
+        p.root_candidates(&self.home_dir, &mut Disk).into_iter().filter(|c| !have.contains(c) && p.root_paths(c).is_some_and(|l| l.folder != self.folder(app))).collect()
     }
 
     /// The program XenoNet runs its own turns with (the registry's
@@ -249,5 +306,38 @@ mod tests {
         let c = MapConfig::new(false, false, env, "/home/nova", None);
         assert!(c.readers.contains("opencode") && c.readers.contains("cursor"));
         assert_eq!(c.projects_dir, "/home/nova/Projects");
+    }
+
+    #[test]
+    fn only_the_folders_that_were_named_are_read() {
+        xenonet_platforms::install();
+        let home = std::env::temp_dir().join(format!("xenonet-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        for d in [".claude/projects", ".claude-work/projects", ".claude-other/projects", ".codex/sessions", ".codex-work/sessions"] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        let h = home.to_string_lossy().into_owned();
+        let mut env = Map::new();
+        env.insert("HOME".into(), json!(h));
+        let mut c = MapConfig::new(false, false, env, &h, None);
+        let work = home.join(".claude-work").to_string_lossy().into_owned();
+        // Nothing is named yet: the default folder only, and the others are proposed.
+        assert_eq!(c.roots("claude").len(), 1);
+        assert_eq!(c.root_candidates("claude"), [home.join(".claude-other").to_string_lossy().into_owned(), work.clone()]);
+        assert_eq!(c.root_candidates("codex"), [home.join(".codex-work").to_string_lossy().into_owned()]);
+        let mut named = std::collections::BTreeMap::new();
+        named.insert("claude".to_string(), vec![work.clone(), work.clone(), c.folder("claude").trim_end_matches("/projects").to_string()]);
+        c.name_roots(&named);
+        // The one named is read beside the default (once, and the default's own folder is no second root); the other is not.
+        let roots = c.roots("claude");
+        assert_eq!(roots.iter().map(|r| r.root.clone()).collect::<Vec<_>>(), [None, Some(work.clone())]);
+        assert_eq!(roots[1].folder, format!("{work}/projects"));
+        assert_eq!(roots[1].signin.as_deref(), Some(format!("{work}/.claude.json").as_str()));
+        let read = crate::runtime::state::all_transcript_dirs(&c, "claude");
+        assert_eq!(read.len(), 2);
+        assert!(read.iter().all(|d| !d.contains(".claude-other")), "{read:?}");
+        assert_eq!(c.roots("codex").len(), 1, "an app nothing was named for keeps its one");
+        assert!(!c.root_candidates("claude").contains(&work));
+        let _ = std::fs::remove_dir_all(home);
     }
 }

@@ -686,12 +686,31 @@ pub fn claude_id(account: &str, org: &str) -> String {
     format!("claude:{account}:{org}")
 }
 
+/// A named root's sign-in: the key its account and file have in the
+/// accounts (`<kind>@<root>`), the root, and the kind of account (the
+/// registry's `identity`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootedSignin {
+    pub key: String,
+    pub root: String,
+    pub kind: &'static str,
+}
+
+impl RootedSignin {
+    pub fn new(kind: &'static str, root: &str) -> RootedSignin {
+        RootedSignin { key: format!("{kind}@{root}"), root: root.to_string(), kind }
+    }
+}
+
 /// What linkIdentities works from: the map's nodes (each with id, kind,
 /// app, claudeAccount, provider, updatedAt, createdAt, origin, key, group
 /// and name), its links (source, target, kind), the accounts signed in now,
 /// ssh aliases, each repo's git identity and each session's transcript
 /// owner (by key, as Maps keep them), the saved state, home, and now.
 pub struct LinkInput<'a> {
+    /// The roots the person named, each with its own sign-in: its key in
+    /// `accounts` (and the timelines), the root and the kind of account.
+    pub rooted: &'a [RootedSignin],
     pub nodes: &'a [Value],
     pub links: &'a [(Value, Value, Value)],
     pub accounts: &'a Value,
@@ -713,7 +732,7 @@ pub struct LinkOutput {
     pub ran_as: Vec<(usize, Value)>,
     pub identities: Vec<(usize, Value)>,
     pub list: Vec<Value>,
-    pub signins: Vec<(&'static str, Signin)>,
+    pub signins: Vec<(String, Signin)>,
     pub known: Vec<(String, bool, Value)>,
     pub dirty: bool,
 }
@@ -803,7 +822,7 @@ fn owner_of(links: &[Value]) -> Option<&Value> {
 /// Puts identity links on the map (linkIdentities): which account each
 /// session ran as, and each project's owner, who pushes and who commits.
 pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
-    let LinkInput { nodes, links, accounts, ssh, repos, owners, saved, home, now } = input;
+    let LinkInput { rooted, nodes, links, accounts, ssh, repos, owners, saved, home, now } = input;
     let mut out = LinkOutput::default();
     let mut recs = Records { order: Vec::new(), recs: HashMap::new() };
     let acc = |k: &str| opt_prop(Some(accounts), k);
@@ -824,6 +843,12 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     for (kind, _) in &kinds {
         if let Some(a) = acc(kind).filter(|v| truthy(Some(v))) {
             let file = nn(acc(&format!("{kind}File"))).map(|f| source(display(f)));
+            recs.record(a, file.as_deref(), &[("signedIn", Value::Bool(true))]);
+        }
+    }
+    for r in rooted {
+        if let Some(a) = acc(&r.key).filter(|v| truthy(Some(v))) {
+            let file = nn(acc(&format!("{}File", r.key))).map(|f| source(display(f)));
             recs.record(a, file.as_deref(), &[("signedIn", Value::Bool(true))]);
         }
     }
@@ -858,27 +883,28 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     // The sign-in timelines.
     let empty = Value::Object(Map::new());
     let saved_signins = nn(opt_prop(Some(saved), "signins")).unwrap_or(&empty);
-    let mut signins: HashMap<&'static str, Vec<Value>> = HashMap::new();
-    for &(app, _) in &kinds {
-        let spans = match nn(opt_prop(Some(saved_signins), app)) {
+    let mut signins: HashMap<String, Vec<Value>> = HashMap::new();
+    let timeline_keys: Vec<(String, &'static str)> = kinds.iter().map(|&(k, _)| (k.to_string(), k)).chain(rooted.iter().map(|r| (r.key.clone(), r.kind))).collect();
+    for (key, _) in &timeline_keys {
+        let spans = match nn(opt_prop(Some(saved_signins), key)) {
             None => Vec::new(),
             Some(Value::Array(a)) => a.clone(),
             Some(_) => return Err(TypeError("spans.push is not a function".into())),
         };
-        signins.insert(app, spans);
+        signins.insert(key.clone(), spans);
     }
-    for &(app, _) in &kinds {
-        let a = acc(app);
+    for (key, _) in &timeline_keys {
+        let a = acc(key);
         if !truthy(a) {
             continue;
         }
-        let spans = signins.get_mut(app).expect("every kind's timeline is read above");
+        let spans = signins.get_mut(key).expect("every kind's timeline is read above");
         let op = note_signin(spans, a.and_then(|x| x.get("id")).unwrap_or(&Value::Null), now, opt_prop(a, "since"));
         if op != Signin::Same {
             out.dirty = true;
         }
         apply_signin(spans, &op);
-        out.signins.push((app, op));
+        out.signins.push((key.clone(), op));
     }
 
     // Sessions: the account each ran as.
@@ -937,6 +963,21 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
             Value::Null
         }
     };
+    // Which account a root holds: the only one it has had, by its folder;
+    // else the one signed in when the session ran.
+    let by_folder = |spans: &[Value], a: Js<'_>, when: Js<'_>| -> Value {
+        let mut ids: Vec<&Value> = spans.iter().filter_map(|s| s.get("id")).collect();
+        if let Some(id) = a.and_then(|a| a.get("id")) {
+            ids.push(id);
+        }
+        ids.dedup();
+        ids.sort_by_key(|v| key_of(Some(v)));
+        ids.dedup();
+        match ids.as_slice() {
+            [one] => link((*one).clone(), "exact", "its folder"),
+            _ => account_at(spans, Some(&current(a)), when, &[]),
+        }
+    };
     let mut ran: HashMap<usize, Value> = HashMap::new();
     for (i, n) in nodes.iter().enumerate() {
         if !is(n, "kind", "session") {
@@ -955,7 +996,13 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
             } else if let Some(o) = owners_by.get(&key_of(n.get("id"))).filter(|o| truthy(Some(o))) {
                 link(Value::String(claude_of(o)?), "exact", "its transcript")
             } else if provider.is_none_or(|p| !truthy(n.get("provider")) || is(n, "provider", p)) {
-                account_at(&signins[kind], Some(&current(acc(kind))), when, &known[kind])
+                // A session of a root she named is placed by that root's
+                // own sign-in and timeline.
+                let root = n.get("root").and_then(Value::as_str).and_then(|r| rooted.iter().find(|x| x.kind == kind && x.root == r));
+                match root {
+                    Some(r) => by_folder(&signins[&r.key], acc(&r.key), when),
+                    None => account_at(&signins[kind], Some(&current(acc(kind))), when, &known[kind]),
+                }
             } else {
                 Value::Null
             }
@@ -1341,7 +1388,7 @@ pub fn git_env(env: &Map<String, Value>, home: &str, your_home: &str) -> Option<
 /// Remote Control session names in its transcript's first lines.
 #[derive(Default)]
 pub struct TranscriptOwners {
-    dir: String,
+    dirs: Vec<String>,
     index: Option<HashMap<String, String>>,
     at: f64,
     owners: HashMap<String, (Value, f64)>,
@@ -1349,7 +1396,12 @@ pub struct TranscriptOwners {
 
 impl TranscriptOwners {
     pub fn new(dir: &str) -> Self {
-        TranscriptOwners { dir: dir.to_string(), ..Default::default() }
+        TranscriptOwners::over(&[dir.to_string()])
+    }
+
+    /// Over the projects folders of every root the app is read from.
+    pub fn over(dirs: &[String]) -> Self {
+        TranscriptOwners { dirs: dirs.to_vec(), ..Default::default() }
     }
 
     // Where a session's transcript is: the folder is listed again when
@@ -1358,14 +1410,16 @@ impl TranscriptOwners {
         if !self.index.as_ref().is_some_and(|ix| ix.contains_key(id)) && now - self.at > 60e3 {
             let mut ix = HashMap::new();
             self.at = now;
-            if let Ok(dirs) = paths::read_dir_sorted(std::path::Path::new(&self.dir)) {
-                for d in dirs {
-                    let sub = paths::join(&self.dir, &d.file_name().to_string_lossy());
-                    let Ok(files) = paths::read_dir_sorted(std::path::Path::new(&sub)) else { continue };
-                    for f in files {
-                        let name = f.file_name().to_string_lossy().into_owned();
-                        if let Some(stem) = name.strip_suffix(".jsonl") {
-                            ix.insert(format!("claude:{stem}"), paths::join(&sub, &name));
+            for dir in &self.dirs {
+                if let Ok(dirs) = paths::read_dir_sorted(std::path::Path::new(dir)) {
+                    for d in dirs {
+                        let sub = paths::join(dir, &d.file_name().to_string_lossy());
+                        let Ok(files) = paths::read_dir_sorted(std::path::Path::new(&sub)) else { continue };
+                        for f in files {
+                            let name = f.file_name().to_string_lossy().into_owned();
+                            if let Some(stem) = name.strip_suffix(".jsonl") {
+                                ix.insert(format!("claude:{stem}"), paths::join(&sub, &name));
+                            }
                         }
                     }
                 }
@@ -1461,6 +1515,50 @@ mod tests {
         assert_eq!(parse_remote("ssh://git@github.com:22/nova-dev/ledger.git", &[]).unwrap().owner, "nova-dev");
         assert_eq!(parse_remote("C:/repos/local", &[]), None);
         assert_eq!(parse_remote("../elsewhere", &[]), None);
+    }
+
+    fn claude_account(id: &str, email: &str) -> Value {
+        json!({ "id": id, "kind": "claude", "handle": email, "detail": {} })
+    }
+
+    fn ran_as(nodes: &[Value], accounts: &Value, saved: &Value, rooted: &[RootedSignin]) -> Vec<Value> {
+        xenonet_platforms::install();
+        let out = link_identities(LinkInput { rooted, nodes, links: &[], accounts, ssh: &[], repos: &[], owners: &[], saved, home: None, now: 5000.0 }).unwrap();
+        let mut by: Vec<(usize, Value)> = out.ran_as;
+        by.sort_by_key(|(i, _)| *i);
+        by.into_iter().map(|(_, l)| l).collect()
+    }
+
+    #[test]
+    fn a_session_in_a_named_root_is_linked_by_its_folder() {
+        let root = "/h/.claude-work";
+        let rooted = [RootedSignin::new("claude", root)];
+        let nodes = [
+            json!({ "id": "claude:s1", "kind": "session", "app": "claude", "updatedAt": 1000 }),
+            json!({ "id": "claude:s2", "kind": "session", "app": "claude", "root": root, "updatedAt": 1000 }),
+        ];
+        let accounts = json!({
+            "claude": claude_account("claude:a:o", "nova@example.com"), "claudeFile": "/h/.claude.json",
+            "claude@/h/.claude-work": claude_account("claude:b:p", "nova-work@example.com"), "claude@/h/.claude-workFile": "/h/.claude-work/.claude.json",
+            "chatgpt": null, "chatgptFile": "/h/.codex/auth.json", "gh": [], "ssh": [],
+        });
+        let links = ran_as(&nodes, &accounts, &empty_saved(), &rooted);
+        // The default root's session is placed by the timeline, as before: the only account seen.
+        assert_eq!((links[0]["id"].as_str(), links[0]["confidence"].as_str()), (Some("claude:a:o"), Some("assumed")));
+        // The named root's holds one account, so it is recorded by its folder, above likely.
+        assert_eq!((links[1]["id"].as_str(), links[1]["confidence"].as_str(), links[1]["via"].as_str()), (Some("claude:b:p"), Some("exact"), Some("its folder")));
+    }
+
+    #[test]
+    fn a_root_that_held_two_accounts_falls_back_to_when_it_ran() {
+        let root = "/h/.claude-work";
+        let rooted = [RootedSignin::new("claude", root)];
+        let nodes = [json!({ "id": "claude:s2", "kind": "session", "app": "claude", "root": root, "updatedAt": 1500 })];
+        let accounts = json!({ "claude@/h/.claude-work": claude_account("claude:c:q", "nova-b@example.com"), "gh": [], "ssh": [] });
+        let mut saved = empty_saved();
+        saved["signins"] = json!({ "claude@/h/.claude-work": [{ "id": "claude:b:p", "from": 0, "to": 2000 }] });
+        let links = ran_as(&nodes, &accounts, &saved, &rooted);
+        assert_eq!((links[0]["id"].as_str(), links[0]["confidence"].as_str()), (Some("claude:b:p"), Some("likely")));
     }
 
     #[test]

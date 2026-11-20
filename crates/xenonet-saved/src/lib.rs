@@ -107,6 +107,14 @@ impl Store for Saved {
         let v = (!roots.is_empty()).then(|| Value::Array(roots.iter().cloned().map(Value::String).collect()));
         self.db.set_setting("workspace.roots", v.as_ref()).map_err(failed)
     }
+    fn app_roots(&self) -> R<Value> {
+        let v = self.db.setting("apps.roots").map_err(failed)?;
+        Ok(if v.is_object() { v } else { Value::Object(Default::default()) })
+    }
+    fn set_app_roots(&self, roots: &Value) -> R<()> {
+        let v = roots.as_object().is_some_and(|m| !m.is_empty()).then_some(roots);
+        self.db.set_setting("apps.roots", v).map_err(failed)
+    }
     fn reconcile_checkouts(&self, found: &Value) -> R<Value> {
         let rows: Vec<_> =
             found.as_array().into_iter().flatten().filter_map(|f| checkouts::found_of(f.get("path")?.as_str()?, checkouts::Why::parse(f.get("why")?.as_str()?)?)).collect();
@@ -207,6 +215,11 @@ mod tests {
         assert_eq!(s.theme().unwrap(), "rime");
         s.ack("claude:a").unwrap();
         assert_eq!(s.acks().unwrap(), json!({ "claude:a": 1000 }));
+        assert_eq!(s.app_roots().unwrap(), json!({}));
+        s.set_app_roots(&json!({ "claude": ["/h/.claude-work"] })).unwrap();
+        assert_eq!(s.app_roots().unwrap(), json!({ "claude": ["/h/.claude-work"] }));
+        s.set_app_roots(&json!({})).unwrap();
+        assert_eq!(s.app_roots().unwrap(), json!({}));
         s.set_workspace_root(Some("/p")).unwrap();
         assert_eq!(s.workspace_root().unwrap(), "/p");
         s.set_workspace_root(None).unwrap();

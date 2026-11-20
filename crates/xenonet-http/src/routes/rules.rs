@@ -220,6 +220,8 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/workspace/check", LOCAL, Nothing),
     r("GET",    "/api/workspace/roots", LOCAL, Nothing),
     r("PUT",    "/api/workspace/roots", YOU, Nothing),
+    r("GET",    "/api/workspace/app-roots", LOCAL, Nothing),
+    r("PUT",    "/api/workspace/app-roots", YOU, Nothing),
     // This machine's checkouts; a candidate joins its project only by your
     // word, at the window (a folder that copies a repo's remote mustn't
     // take its project's claims, grants or intents).

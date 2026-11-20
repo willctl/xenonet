@@ -18,6 +18,7 @@ pub mod disconnect;
 pub mod doctor;
 pub mod drift;
 pub mod film;
+pub mod folders;
 pub mod gateway;
 pub mod hook;
 pub mod identity;
@@ -95,6 +96,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("messages", "What sessions and actors said to each other today", None),
     cmd("identity", "The git email and push account a project should use, and a hook that stops a push under the wrong one", Some("<rule|check|hook> [<folder>]")),
     cmd("root", "The projects folder XenoNet reads, or read another", Some("[folder]")),
+    cmd("folders", "The folders each app is read from: list, add one of another account, remove", Some("[list|add|remove] [<app> <folder>]")),
     cmd(
         "net",
         "One network across your machines: create or join one, add a machine, see the hosts",
@@ -156,6 +158,7 @@ fn text(name: &str) -> &'static str {
         "doctor" => doctor::HELP,
         "drift" => drift::HELP,
         "film" => film::HELP,
+        "folders" => folders::HELP,
         "gateway" => gateway::HELP,
         "hook" => hook::HELP,
         "identity" => identity::HELP,
@@ -202,6 +205,7 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "doctor" => doctor::run(args, flags),
         "drift" => drift::run(args, flags),
         "film" => film::run(args, flags),
+        "folders" => folders::run(args, flags),
         "gateway" => gateway::run(args, flags),
         "hook" => hook::run(args, flags),
         "identity" => identity::run(args, flags),

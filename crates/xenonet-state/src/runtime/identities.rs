@@ -28,7 +28,7 @@ pub struct Files {
     pub gh_config_dir: String,
     /// The app whose transcripts name the account each of its sessions ran
     /// as, and the folder they're in.
-    pub owners: Option<(String, String)>,
+    pub owners: Option<(String, Vec<String>)>,
 }
 
 /// A kind of account (identity/v1's), the file an app keeps its sign-in
@@ -36,8 +36,22 @@ pub struct Files {
 #[derive(Clone, Debug)]
 pub struct SigninFile {
     pub kind: &'static str,
+    /// The root it is the sign-in of, for one the person named; None for
+    /// the app's default one.
+    pub root: Option<String>,
     pub file: String,
     pub read: fn(&Value, &dyn xenonet_adapter::reader::VendorCheck) -> Value,
+}
+
+impl SigninFile {
+    /// What its account and file are called among the accounts, and its
+    /// timeline in the store: the kind, and for a named root `<kind>@<root>`.
+    pub fn key(&self) -> String {
+        match &self.root {
+            Some(r) => format!("{}@{r}", self.kind),
+            None => self.kind.to_string(),
+        }
+    }
 }
 
 struct Repo {
@@ -87,7 +101,7 @@ impl IdentityWatch {
     pub fn new(at: Files, vendor: Arc<Vendor>, env: &Map<String, Value>, clock: Clock, git: Git) -> Arc<IdentityWatch> {
         let yours = std::env::var("HOME").unwrap_or_default();
         let git_env = ids::git_env(env, &at.home, &yours);
-        let owners = TranscriptOwners::new(at.owners.as_ref().map_or("", |(_, d)| d.as_str()));
+        let owners = TranscriptOwners::over(at.owners.as_ref().map_or(&[][..], |(_, d)| d.as_slice()));
         Arc::new(IdentityWatch {
             at,
             vendor,
@@ -104,7 +118,7 @@ impl IdentityWatch {
         let mut g = lock(&self.inner);
         g.files.clear();
         g.repos.clear();
-        g.owners = TranscriptOwners::new(self.at.owners.as_ref().map_or("", |(_, d)| d.as_str()));
+        g.owners = TranscriptOwners::over(self.at.owners.as_ref().map_or(&[][..], |(_, d)| d.as_slice()));
     }
 
     // What a file says, parsed again only when its mtime changes. A file
@@ -146,7 +160,7 @@ impl IdentityWatch {
                 let data = parse_json(t)?;
                 Ok(read(&data, &**v))
             });
-            out.insert(f.kind.into(), account);
+            out.insert(f.key(), account);
         }
         let gh = self.file(&Path::new(&self.at.gh_config_dir).join("hosts.yml").to_string_lossy(), |t| {
             v.check("github/gh/hosts", ids::gh_hosts_shape(t), None, None);
@@ -156,7 +170,7 @@ impl IdentityWatch {
         out.insert("gh".into(), if gh.is_null() { json!([]) } else { gh });
         out.insert("ssh".into(), if ssh.is_null() { json!([]) } else { ssh });
         for f in &self.at.signins {
-            out.insert(format!("{}File", f.kind), json!(f.file));
+            out.insert(format!("{}File", f.key()), json!(f.file));
         }
         Value::Object(out)
     }
@@ -282,7 +296,7 @@ impl IdentityWatch {
             .iter()
             .map(|n| {
                 let mut m = Map::new();
-                for k in ["id", "kind", "app", "claudeAccount", "provider", "updatedAt", "createdAt"] {
+                for k in ["id", "kind", "app", "claudeAccount", "provider", "updatedAt", "createdAt", "root"] {
                     if let Some(v) = n.get(k) {
                         m.insert(k.into(), v.clone());
                     }
@@ -304,18 +318,29 @@ impl IdentityWatch {
             .collect();
         let mut account_input = Map::new();
         for f in &self.at.signins {
-            account_input.insert(f.kind.into(), accounts[f.kind].clone());
+            account_input.insert(f.key(), accounts[f.key().as_str()].clone());
         }
         account_input.insert("gh".into(), accounts["gh"].clone());
         for f in &self.at.signins {
-            let k = format!("{}File", f.kind);
+            let k = format!("{}File", f.key());
             account_input.insert(k.clone(), accounts[k.as_str()].clone());
         }
         let account_input = Value::Object(account_input);
+        let rooted: Vec<ids::RootedSignin> = self.at.signins.iter().filter_map(|f| Some(ids::RootedSignin::new(f.kind, f.root.as_deref()?))).collect();
         let home = Some(self.at.home.as_str()).filter(|h| !h.is_empty());
-        let out =
-            ids::link_identities(LinkInput { nodes: &node_input, links: &links, accounts: &account_input, ssh: &ssh, repos: &repos, owners: &owners, saved: &saved, home, now })
-                .map_err(|e| e.0)?;
+        let out = ids::link_identities(LinkInput {
+            rooted: &rooted,
+            nodes: &node_input,
+            links: &links,
+            accounts: &account_input,
+            ssh: &ssh,
+            repos: &repos,
+            owners: &owners,
+            saved: &saved,
+            home,
+            now,
+        })
+        .map_err(|e| e.0)?;
         if let Some(Value::Array(list)) = graph.get_mut("nodes") {
             for (i, link) in out.ran_as {
                 if let Some(n) = list.get_mut(i).and_then(Value::as_object_mut) {
@@ -335,7 +360,7 @@ impl IdentityWatch {
         // What linking changed of the saved state: the sign-in timelines
         // and what's remembered of each identity, each kept as it changes.
         for (app, op) in &out.signins {
-            let had = saved.get("signins").and_then(|s| s.get(*app));
+            let had = saved.get("signins").and_then(|s| s.get(app.as_str()));
             let mut list = had.and_then(Value::as_array).cloned().unwrap_or_default();
             match op {
                 Signin::Same if had.is_some_and(Value::is_array) => continue,
