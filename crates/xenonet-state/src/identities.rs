@@ -587,10 +587,11 @@ pub fn clean_rule(body: &Value) -> Result<Option<Value>, &'static str> {
         Some(_) => return Err("A rule's push account is a login and a host"),
     }
     // The accounts the project's sessions are to run as.
-    for key in ["claude", "chatgpt"] {
+    // Each kind of account the apps run under (the registry's `identity`).
+    for (key, _) in xenonet_adapter::apps::identities() {
         if let Some(email) = text(body.get(key))? {
             if !one_line(&email) || !email.contains('@') {
-                return Err(if key == "claude" { "A rule's Claude account is an email address" } else { "A rule's ChatGPT account is an email address" });
+                return Err("A rule's Claude Code or ChatGPT account is an email address");
             }
             rule.insert(key.into(), Value::String(email));
         }
@@ -651,7 +652,7 @@ pub fn check_rule_with(rule: &Value, links: &[Value], list: &[Value], ran: &[Ran
         };
         out.insert("push".into(), part(github_id(host, login), of("pushes-as"), &uses));
     }
-    for kind in ["claude", "chatgpt"] {
+    for (kind, _) in xenonet_adapter::apps::identities() {
         let Some(wanted) = rule.get(kind).and_then(Value::as_str) else { continue };
         let newest = ran.iter().filter(|r| r.id.split(':').next() == Some(kind)).max_by(|a, b| a.at.total_cmp(&b.at));
         let handle = newest.and_then(|r| rec(&r.id)).and_then(|r| r.get("handle")).and_then(Value::as_str);
@@ -665,9 +666,10 @@ pub fn check_rule_with(rule: &Value, links: &[Value], list: &[Value], ran: &[Ran
     }
     let state = |k: &str| out.get(k).and_then(|p| p.get("state")).and_then(Value::as_str);
     let differs = |k: &str| state(k) == Some("differs");
-    let accounts_differ = differs("claude") || differs("chatgpt");
+    let kinds: Vec<&str> = xenonet_adapter::apps::identities().map(|(k, _)| k).collect();
+    let accounts_differ = kinds.iter().any(|k| differs(k));
     let mismatch = differs("git") || differs("push") || accounts_differ;
-    let unknown = ["git", "push", "claude", "chatgpt"].iter().any(|k| state(k) == Some("unknown"));
+    let unknown = ["git", "push"].iter().chain(kinds.iter()).any(|k| state(k) == Some("unknown"));
     if mismatch {
         // In words that name no account, so the Needs you queue can show
         // them with identities masked.

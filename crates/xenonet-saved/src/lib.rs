@@ -109,7 +109,7 @@ impl Store for Saved {
     }
     fn app_roots(&self) -> R<Value> {
         let v = self.db.setting("apps.roots").map_err(failed)?;
-        Ok(if v.is_object() { v } else { Value::Object(Default::default()) })
+        Ok(if v.is_object() { v } else { Value::Object(serde_json::Map::default()) })
     }
     fn set_app_roots(&self, roots: &Value) -> R<()> {
         let v = roots.as_object().is_some_and(|m| !m.is_empty()).then_some(roots);

@@ -132,7 +132,7 @@ mod tests {
         let found = Files.files(&dirs, "s2", 0.0);
         assert_eq!(found.len(), 2, "{found:?}");
         assert!(found[0].0.starts_with(&dirs[1]) && found[1].1.as_deref() == Some("x"));
-        assert!(Files.files(&dirs, "nope", 0.0).is_empty());
+        assert_eq!(Files.files(&dirs, "nope", 0.0), Vec::<(String, Option<String>)>::new());
         let _ = std::fs::remove_dir_all(base);
     }
 }

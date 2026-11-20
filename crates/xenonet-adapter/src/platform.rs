@@ -317,7 +317,7 @@ pub fn sibling_roots(home: &str, prefix: &str, markers: &[&str], look: &mut dyn 
     let Ok(names) = look.readdir(home) else { return Vec::new() };
     let mut out: Vec<String> = names
         .into_iter()
-        .filter(|n| n.starts_with(prefix) && n != prefix && !n.ends_with(".json") && !n.contains(".json."))
+        .filter(|n| n.starts_with(prefix) && n != prefix && !n.to_ascii_lowercase().contains(".json"))
         .map(|n| xenonet_os::paths::join(home, &n))
         .filter(|dir| markers.iter().any(|m| look.exists(&xenonet_os::paths::join(dir, m))))
         .collect();

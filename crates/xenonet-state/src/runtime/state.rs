@@ -1806,7 +1806,7 @@ impl State for MapState {
                 json!({ "app": p.id(), "name": p.app().name, "roots": roots, "candidates": self.cfg.root_candidates(p.id()) })
             })
             .collect();
-        let running: std::collections::BTreeMap<String, Vec<String>> = self.cfg.named_roots.iter().fold(Default::default(), |mut m, r| {
+        let running: std::collections::BTreeMap<String, Vec<String>> = self.cfg.named_roots.iter().fold(std::collections::BTreeMap::default(), |mut m, r| {
             m.entry(r.app.clone()).or_default().extend(r.root.clone());
             m
         });

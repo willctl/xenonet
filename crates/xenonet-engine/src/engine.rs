@@ -2046,9 +2046,9 @@ impl Engine {
             let (login, host) = (as_str(get(rule, "login")).unwrap_or(""), as_str(get(rule, "host")).unwrap_or("github.com"));
             said.push(format!("pushes should sign in as {login} on {host}, but a push from here would sign in as {}", uses(p, "another account")));
         }
-        for (key, what) in [("claude", "Claude Code"), ("chatgpt", "Codex")] {
+        for (key, app) in xenonet_adapter::apps::identities() {
             if let (Some(p), Some(want)) = (part(key), as_str(get(get(check, "rule").unwrap_or(&Value::Null), key))) {
-                said.push(format!("{what} should run as {want}, but the last session here ran as {}", uses(p, "another account")));
+                said.push(format!("{} should run as {want}, but the last session here ran as {}", app.name, uses(p, "another account")));
             }
         }
         Ok(format!(
