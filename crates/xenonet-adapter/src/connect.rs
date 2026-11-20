@@ -102,6 +102,7 @@ pub struct Instance {
 
 /// How a connect was made: this XenoNet's port and binary, the machine's
 /// folders, and the XenoNets that run on it.
+#[derive(Clone)]
 pub struct Options {
     pub port: f64,
     pub demo: bool,
