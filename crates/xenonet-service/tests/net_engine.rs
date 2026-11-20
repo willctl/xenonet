@@ -419,15 +419,15 @@ async fn a_local_start_in_no_frame_reads_the_narrowest_settings_of_the_networks(
     let (s, v) = t.desk.window("POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
     assert_eq!(s, 409, "{v}");
     assert!(v["error"].as_str().is_some_and(|e| e.contains("start setting is off")), "{v}");
-    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk", "folder": root.join("desk/home/atlas").to_string_lossy() })).await;
     assert_eq!(s, 409, "{v}");
     // One network off and one letting the network start: the narrower rules.
     set("network", &["home"]).await;
-    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk", "folder": root.join("desk/home/atlas").to_string_lossy() })).await;
     assert_eq!(s, 409, "{v}");
     // Every network lets the network start: a session of this machine's does.
     set("network", &["work"]).await;
-    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk" })).await;
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "prompt": "hold-on: tidy desk", "folder": root.join("desk/home/atlas").to_string_lossy() })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("started")), "{v}");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
@@ -682,7 +682,7 @@ async fn an_ask_from_another_machine_is_taken_only_for_a_run_it_was_asked_to_sta
     let run_on = |host: &'static str| {
         let desk = &t.desk;
         async move {
-            let (s, v) = desk.window("POST", "/api/start", json!({ "machine": host, "prompt": format!("hold-on: tidy on {host}") })).await;
+            let (s, v) = desk.window("POST", "/api/start", json!({ "machine": host, "prompt": format!("hold-on: tidy on {host}"), "sandbox": false })).await;
             assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
             host
         }
@@ -871,7 +871,7 @@ async fn a_runs_prompt_goes_only_to_the_window_hosts_of_the_network_its_start_ca
     })
     .await;
     let mut starts = Stream::of(&t.tower);
-    let (s, v) = t.tower.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    let (s, v) = t.tower.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger", "sandbox": false })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let run = starts.next("start", 20, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
     let ctx = t.desk.ctx.clone();
@@ -1476,13 +1476,13 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
 
     // You, at studio's console: desk starts Claude Code in its home, with
     // the first prompt framed and on standard input.
-    let (s, v) = a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "Look at the ledger." })).await;
+    let (s, v) = a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "Look at the ledger.", "folder": at("desk") })).await;
     assert_eq!((s, v["state"].clone(), v["host"].clone()), (200, json!("sent"), json!("desk")), "{v}");
     let started = studio.next("start", 15, |d| d["state"] == "started").await;
     assert_eq!(started["host"], "desk", "{started}");
     let session = started["session"].as_str().unwrap().to_string();
     assert!(session.starts_with("claude:"), "{started}");
-    assert_eq!(started["folder"], "~", "{started}");
+    assert_eq!(started["folder"], "~/work", "{started}");
     let (args, prompt) = ran(&c, 1).await;
     assert_eq!(&args[..3], ["-p", "--session-id", session.trim_start_matches("claude:")], "{args:?}");
     assert!(args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1].ends_with("__permission")), "{args:?}");
@@ -1550,7 +1550,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
             told.iter().cloned().chain(woken).collect::<Vec<String>>()
         }
     };
-    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures." })).await;
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "Run the fixtures." })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let got =
         until_value("laptop's session hears desk refused", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("No session was started")).map(Value::String) })
@@ -1561,7 +1561,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     until("desk's start is network", 10, || async { c.state().await["start"] == "network" }).await;
     // A session's start of Grok Build, which has no sandbox to drive, is
     // refused in words: a start that isn't yours is sandboxed.
-    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
     let got = until_value("laptop's session hears grok can't be sandboxed", 15, || async {
         inbox(&b, ASKER).await.into_iter().find(|t| t.contains("Grok Build has no sandbox")).map(Value::String)
     })
@@ -1590,7 +1590,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
 
     // A run Claude Code can't sign in for ends saying so, with a hint.
     let mut hints = Stream::of(&b);
-    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "signed-out, please" })).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "signed-out, please" })).await;
     let got = until_value("the sign-in answer", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("needs a sign-in")).map(Value::String) }).await;
     assert!(
         got.as_str().unwrap().contains("on desk failed after")
@@ -1602,7 +1602,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     assert_eq!(hint["words"], "Claude Code on desk needs a sign-in for XenoNet's runs", "{hint}");
     // A session that stops to ask something is told so, with its question,
     // and woken for it.
-    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "ask-first, please" })).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "ask-first, please" })).await;
     let got =
         until_value("laptop's session hears the question", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("stopped to ask something")).map(Value::String) })
             .await;
@@ -1620,7 +1620,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
 
     // An older XenoNet refuses the target as an id it doesn't have: that
     // reads as too old.
-    let (_, v) = a.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hello" })).await;
+    let (_, v) = a.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hello", "sandbox": false })).await;
     let mid = v["request"].as_str().unwrap().to_string();
     let _ = studio.next("start", 15, |d| d["state"] == "started").await;
     let refusal = json!({ "schema": "network/receipt/v1", "mid": mid, "agent": "xenonet:start", "state": "refused", "reason": "no session or actor here has that id", "at": now_ms() as i64 });
@@ -1720,7 +1720,7 @@ async fn a_runs_prompt_shows_on_the_window_host_that_asked_for_the_run_and_is_an
     until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer", "sandbox"]) }).await;
     // You start a session on desk, a server, from studio's console.
     let mut studio = Stream::of(&a);
-    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger", "sandbox": false })).await;
     let started = studio.next("start", 15, |d| d["state"] == "started").await;
     let run = started["session"].as_str().unwrap().to_string();
     // Its Claude Code asks to run a tool, through the permission tool: held
@@ -1822,7 +1822,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
         std::fs::create_dir_all(root.join(h).join("home").join("work")).unwrap();
     }
     let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
-    let (a, b, c) = three(&root, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![]]).await;
+    let (a, b, c) = three(&root, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
     until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer", "sandbox"]) }).await;
 
     // The founder puts desk on delegate, from studio's console; desk keeps
@@ -1836,7 +1836,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
 
     // A session on laptop asks desk to do something: its first prompt says
     // whose delegation it runs on, which desk checked.
-    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: update XenoNet", "delegate": true })).await;
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "hold-on: update XenoNet", "delegate": true })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let (args, prompt) = ran(&c, 1).await;
     let day = xenonet_text::time::iso(now_ms()).chars().take(10).collect::<String>();
@@ -1873,7 +1873,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     for (tool, input) in [
         ("Bash", json!({ "command": "xenonet --version" })),
         ("Bash", json!({ "command": "xenonet update tools; xenonet update service" })),
-        ("Write", json!({ "file_path": format!("{home}/notes.md"), "content": "x" })),
+        ("Write", json!({ "file_path": format!("{home}/work/notes.md"), "content": "x" })),
         ("Read", json!({ "file_path": format!("{home}/work/a.txt") })),
         ("mcp__xenonet__send", json!({ "to": "x", "text": "done" })),
     ] {
@@ -1895,6 +1895,18 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
     let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
     assert_eq!((s, answer["behavior"].clone()), (200, json!("deny")), "{answer}");
+    // A push is a question too, whatever the run's sandbox: the sandbox only
+    // lets a command ask, it doesn't answer for it.
+    let held = ask(json!({ "command": "git push origin main" }), "Bash");
+    let waiting = until_value("the push at laptop", 10, || async {
+        shown(&b).await.into_iter().find(|x| x["host"] == "desk" && x["input"].as_str().is_some_and(|i| i.contains("git push")))
+    })
+    .await;
+    assert!(waiting["input"].as_str().unwrap().starts_with("[outside what you delegated:"), "{waiting}");
+    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": waiting["id"], "decision": "deny" })).await;
+    assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+    assert_eq!((s, answer["behavior"].clone()), (200, json!("deny")), "{answer}");
     // A file outside the folder it started in is a question too.
     let outside = ask(json!({ "file_path": format!("{}/other.md", root.join("desk").to_string_lossy()), "content": "x" }), "Write");
     let waiting = until_value("the outside write at laptop", 10, || async { shown(&b).await.into_iter().find(|x| x["tool"] == "Write") }).await;
@@ -1907,12 +1919,12 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
     until("desk is back on network", 10, || async { c.state().await["start"] == "network" }).await;
     assert_eq!(c.state().await["delegated"], Value::Null);
-    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: once more" })).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "hold-on: once more" })).await;
     let (_, prompt) = ran(&c, 2).await;
     assert!(prompt.contains("It came from an agent, not from your user.") && !prompt.contains("Your user delegated it"), "{prompt}");
     // Delegated work asked of a machine that isn't on delegate isn't started
     // as a plain start: the asker is told how it's set.
-    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: delegated, but not set", "delegate": true })).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "hold-on: delegated, but not set", "delegate": true })).await;
     let engine = b.ctx.cores.engine.clone();
     let told = until_value("laptop's session hears desk won't take delegated work", 15, || async {
         texts(&engine.inbox(ASKER, Duration::ZERO).await.unwrap()).into_iter().find(|t| t.contains("isn't set to take delegated work")).map(Value::String)
@@ -2490,11 +2502,11 @@ async fn a_resumed_turn_and_a_fork_of_a_run_desk_asked_for_still_reach_desk() {
     .await;
     std::fs::create_dir_all(root.join("tower/home")).unwrap();
     let mut starts = Stream::of(&t.desk);
-    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "tower", "prompt": "hold-on: tidy on tower" })).await;
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "tower", "prompt": "hold-on: tidy on tower", "sandbox": false })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let tower_run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == "tower").await["session"].as_str().unwrap().to_string();
     // A run on contractor-vm that ends at once, as most do.
-    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "contractor-vm", "prompt": "tidy on contractor-vm" })).await;
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "contractor-vm", "prompt": "tidy on contractor-vm", "sandbox": false })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let vm_run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == "contractor-vm").await["session"].as_str().unwrap().to_string();
     starts.next("start", 30, |d| d["state"] == "ended" && d["host"] == "contractor-vm").await;
@@ -2544,7 +2556,7 @@ async fn the_runs_a_machine_named_are_still_named_after_it_restarts() {
     })
     .await;
     let mut starts = Stream::of(&t.desk);
-    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "contractor-vm", "prompt": "hold-on: tidy on contractor-vm" })).await;
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "contractor-vm", "prompt": "hold-on: tidy on contractor-vm", "sandbox": false })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let vm_run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == "contractor-vm").await["session"].as_str().unwrap().to_string();
     drop(starts);
@@ -2583,7 +2595,7 @@ async fn a_run_started_for_another_machine_still_asks_it_after_its_own_machine_r
     .await;
     std::fs::create_dir_all(root.join("tower/home")).unwrap();
     let mut starts = Stream::of(&t.desk);
-    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "tower", "prompt": "hold-on: tidy on tower" })).await;
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "machine": "tower", "prompt": "hold-on: tidy on tower", "sandbox": false })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let run = starts.next("start", 20, |d| d["state"] == "started" && d["host"] == "tower").await["session"].as_str().unwrap().to_string();
     drop(starts);
@@ -2657,7 +2669,7 @@ async fn a_runs_prompt_is_taken_by_the_window_host_that_asked_for_it_and_not_by_
     })
     .await;
     let mut studio = Stream::of(&a);
-    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger", "sandbox": false })).await;
     let run = studio.next("start", 15, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
     let ask = json!({ "op": "ask", "id": "ask_two_windows", "session": run, "run": "run_1", "title": "a run", "tool": "Bash", "input": "npm test", "at": now_ms(), "until": now_ms() + 60e3 });
     xenonet_service::compose::runtime::asks::to_windows(&c.world, &run, &ask);
@@ -2715,7 +2727,7 @@ async fn a_forks_prompt_names_the_run_it_was_forked_from_and_reaches_the_machine
     })
     .await;
     let mut starts = Stream::of(&t.tower);
-    let (s, v) = t.tower.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    let (s, v) = t.tower.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger", "sandbox": false })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let run = starts.next("start", 20, |d| d["state"] == "started").await["session"].as_str().unwrap().to_string();
     xenonet_service::compose::runtime::starts::note_fork(&t.desk.world, CHILD, &run);
