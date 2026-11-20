@@ -628,7 +628,7 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
             if setting == StartSetting::Off {
                 return Err(Reason::new("settings", "this machine starts no runs: its start setting is off"));
             }
-            let Act::Start { mode, .. } = request.act() else {
+            let Act::Start { mode, sandbox, .. } = request.act() else {
                 return Err(Reason::new("act", "a start's act is a start"));
             };
             let attestation = match principal {
@@ -643,6 +643,11 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
                     return Err(no_grant());
                 }
                 return Ok((authority, None));
+            }
+            // Anyone but the person runs sandboxed. A start that leaves the
+            // field out (an older sender) is refused, not defaulted.
+            if sandbox.is_none() {
+                return Err(Reason::new("sandbox", "a run started by anyone but the person runs in its app's sandbox: this start asked for none"));
             }
             if attestation == Some(Attestation::Unchecked) {
                 return Err(Reason::new("attestation", "an unchecked agent never starts runs"));

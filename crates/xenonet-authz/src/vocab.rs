@@ -335,6 +335,14 @@ pub enum Resource {
     },
 }
 
+/// A run held to its app's own sandbox, and the domains it may reach
+/// besides its folder (none by default). Part of what the person signs, so
+/// nothing between the signature and the run can take it off.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct Sandbox {
+    pub domains: Vec<String>,
+}
+
 /// How a started run's permission prompts are answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StartMode {
@@ -460,6 +468,9 @@ pub enum Act {
         app: AppId,
         folder: Folder,
         mode: StartMode,
+        /// None: the run is not sandboxed. Anyone but the person starts a
+        /// run only with one.
+        sandbox: Option<Sandbox>,
     },
     Answer {
         ask: AskId,
@@ -743,10 +754,25 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
     match act {
         Act::Message | Act::Wake | Act::Handoff | Act::UseGateway => &mut c,
         Act::Claim { project } => c.field(project.as_str()),
-        Act::Start { app, folder, mode } => c.field(app.as_str()).field(folder.as_str()).field(match mode {
-            StartMode::Asks => "asks",
-            StartMode::Delegated => "delegated",
-        }),
+        Act::Start { app, folder, mode, sandbox } => {
+            c.field(app.as_str()).field(folder.as_str()).field(match mode {
+                StartMode::Asks => "asks",
+                StartMode::Delegated => "delegated",
+            });
+            // Nothing for a start that isn't sandboxed, so what an older
+            // sender signs still verifies (and is refused, unless it is the
+            // person's own).
+            if let Some(s) = sandbox {
+                c.field("sandbox");
+                let mut domains = s.domains.clone();
+                domains.sort();
+                domains.dedup();
+                for d in &domains {
+                    c.field(d);
+                }
+            }
+            &mut c
+        }
         Act::Answer { ask, decision } => c.field(ask.as_str()).field(match decision {
             AnswerDecision::Allow => "allow",
             AnswerDecision::Deny => "deny",
