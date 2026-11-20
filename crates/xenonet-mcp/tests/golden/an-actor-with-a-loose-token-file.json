@@ -716,12 +716,21 @@
                   "description": "Which of this machine's networks to go through, by its id or name; needed only when that machine is in two or more of them, and the answer says so.",
                   "type": "string"
                 },
+                "confine": {
+                  "description": "How confined the run is. A session's start is always vendor, the app's own sandbox: leave it out or say vendor; off and cell are your user's alone and refused. Claude Code's sandbox writes only in the folder; Codex's writes only there and has no network.",
+                  "type": "string",
+                  "enum": [
+                    "off",
+                    "vendor",
+                    "cell"
+                  ]
+                },
                 "sandbox": {
-                  "description": "Whether the run is held to its app's own sandbox. A session's start is always sandboxed: leave it out or say true; false is refused. Claude Code's sandbox writes only in the folder; Codex's writes only there and has no network.",
+                  "description": "The older way to say confine: true is vendor, and false is refused.",
                   "type": "boolean"
                 },
                 "domains": {
-                  "description": "With the sandbox: the domains the run may reach besides its folder, such as github.com or *.npmjs.org; none by default. Codex can't take any.",
+                  "description": "With vendor: the domains the run may reach besides its folder, such as github.com or *.npmjs.org; none by default. Codex can't take any.",
                   "maxItems": 50,
                   "type": "array",
                   "items": {

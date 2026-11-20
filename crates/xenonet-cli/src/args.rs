@@ -83,7 +83,8 @@ const TAKES_VALUE: &[&str] = &[
 // Flags that take a value in one command only, because another command
 // reads the same name as a switch: xenonet net set --start network, but
 // a switch anywhere else.
-const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start", "network", "relay"]), ("identity", &["git", "push"]), ("start", &["network", "allow"]), ("intent", &["network"])];
+const TAKES_VALUE_IN: &[(&str, &[&str])] =
+    &[("net", &["start", "network", "relay"]), ("identity", &["git", "push"]), ("start", &["network", "allow", "confine"]), ("intent", &["network"])];
 const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
 /// Flags that take the word after them only when it's one of their
 /// choices, and are on alone: `--mdns on|off`, and `--mdns` on its own
