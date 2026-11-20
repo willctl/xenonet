@@ -798,8 +798,9 @@ After phase 6, the work is a person's real week on XenoNet
   any linked git worktree is in its main checkout's project
   ([daily use](daily-use.md)).
 
-Not yet seen in a real run: a confined command being blocked, which needs
-the apps signed in on the machine that tests it, and Codex under T3 Code.
+A confined Codex run has been seen blocked in a real run. Not yet seen: a
+confined Claude Code run, which needs Claude Code signed in on the machine
+that tests it, and Codex under T3 Code.
 
 ## Verification plan
 

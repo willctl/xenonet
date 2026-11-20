@@ -148,7 +148,9 @@ Scenario 1 needs no new code, only both machines on a current release.
   folders. Sandboxed starts are the mitigation, for the runs XenoNet starts.
 - A message already stored is handed over after its project stops being
   shared; closing that needs the message's network in the store.
-- No confined command has been seen blocked in a real run yet: that needs
-  Claude Code and Codex signed in on the machine that tests it.
+- A confined Codex run has been seen blocked in a real run (Codex 0.171.0
+  on macOS, a new run and a resumed turn; see [the sandbox](../guide/sandbox.md#codex)).
+  A confined Claude Code run hasn't yet: that needs Claude Code signed in
+  on the machine that tests it.
 - Cell starts are refused until a cell can carry the app's sign-in and
   bring its session back to the map.

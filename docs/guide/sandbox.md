@@ -65,7 +65,7 @@ Shell commands can't read the rest of the home folder, so a toolchain installed 
 
 The run is `codex exec --sandbox workspace-write` with approvals off (`approval_policy="never"`), network off, `/tmp` left out of what it may write, and no extra writable folders. Codex's sandbox can't name domains, so a start with domains is refused.
 
-XenoNet also runs it with `--ignore-user-config` and `--ignore-rules`, so your `config.toml` (its `notify` command, its MCP servers, the projects it trusts, and with them a repository's own `.codex/config.toml`, hooks and rules) isn't loaded, and gives it XenoNet's MCP server alone. `codex exec resume` takes no `--sandbox`, so a resumed turn carries `sandbox_mode` and the limits through `-c` as well. The arguments parse with Codex 0.162.1; a sandboxed Codex run itself has not been run on a signed-in machine.
+XenoNet also runs it with `--ignore-user-config` and `--ignore-rules`, so your `config.toml` (its `notify` command, its MCP servers, the projects it trusts, and with them a repository's own `.codex/config.toml`, hooks and rules) isn't loaded, and gives it XenoNet's MCP server alone. `codex exec resume` takes no `--sandbox`, so a resumed turn carries `sandbox_mode` and the limits through `-c` as well. Seen with Codex 0.171.0 signed in on macOS, for a new run and a resumed turn: a command could write in the folder and nowhere else, not in `.git/hooks` or a new `.codex` folder inside it, not in the home folder, `/tmp` or `$TMPDIR`, and couldn't resolve a host. It could read a file outside the folder. Codex still reads your own instructions in `~/.codex/AGENTS.md`, which `--ignore-user-config` doesn't cover.
 
 ## After the start
 
