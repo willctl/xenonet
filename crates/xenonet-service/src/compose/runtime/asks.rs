@@ -391,11 +391,24 @@ fn resolved_with(tool: &str, input: &Value, folder: &str, home: &str, canon: &mu
             _ => base.join(p),
         }
     };
-    // Whether the path as written lies inside the folder, by its parts and
-    // up to a `..` (what follows one can't be told without following links).
+    // Whether the path as written lies inside the folder, its `.` and `..`
+    // taken out as written first: one that climbs out is outside, and is
+    // never resolved. (Where a `..` follows a link, the resolved path is what
+    // the judge reads, so a path inside is still judged by where it leads.)
     let inside = |full: &Path| -> bool {
-        let before: PathBuf = full.components().take_while(|c| !matches!(c, Component::ParentDir)).filter(|c| !matches!(c, Component::CurDir)).collect();
-        before.starts_with(base) || before.starts_with(&real_folder)
+        let mut flat = PathBuf::new();
+        for c in full.components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !flat.pop() {
+                        return false;
+                    }
+                }
+                c => flat.push(c.as_os_str()),
+            }
+        }
+        flat.starts_with(base) || flat.starts_with(&real_folder)
     };
     let mut out = input.clone();
     if let Some(o) = out.as_object_mut() {
@@ -911,6 +924,26 @@ mod tests {
         // A path inside is the one it asks about.
         let _ = resolved_with("Read", &json!({ "file_path": "/home/jo/work/a.rs" }), "/home/jo/work", "/home/jo", &mut canon);
         assert!(seen.borrow().iter().any(|p| p == "/home/jo/work/a.rs"), "{:?}", seen.borrow());
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_with_dots_is_outside_and_never_resolved() {
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let mut canon = |p: &std::path::Path| {
+            seen.borrow_mut().push(p.to_string_lossy().into_owned());
+            None
+        };
+        for path in ["/home/jo/work/../../net/x.example/y", "/home/jo/work/sub/../../../etc/hosts", "../../net/x", "~/work/../../../etc/hosts"] {
+            let input = json!({ "file_path": path });
+            let (judged, _) = resolved_with("Read", &input, "/home/jo/work", "/home/jo", &mut canon);
+            assert_eq!(judged, input, "{path}: left as asked");
+        }
+        let globbed = json!({ "pattern": "/home/jo/work/../../net/x.example/**" });
+        let _ = resolved_with("Glob", &globbed, "/home/jo/work", "/home/jo", &mut canon);
+        assert!(!seen.borrow().iter().any(|p| p.contains("/net") || p.contains("/etc")), "never touched: {:?}", seen.borrow());
+        // A `..` that stays inside is read as written, up to where it leads.
+        let _ = resolved_with("Read", &json!({ "file_path": "/home/jo/work/sub/../a.rs" }), "/home/jo/work", "/home/jo", &mut canon);
+        assert!(seen.borrow().iter().any(|p| p == "/home/jo/work/sub/../a.rs"), "{:?}", seen.borrow());
     }
 
     #[test]
