@@ -66,14 +66,30 @@ Scenario 1 needs no new code, only both machines on a current release.
   default); a sandboxed Codex start from anyone but her is refused, since
   its sandbox reads the whole disk. Left: Claude Code's sandbox wraps shell
   commands only, so a fetch of another domain, with domains given, asks.
+- **Several accounts per app.** An app is read from its own folder and from
+  those she names (`xenonet folders`, yours to change, read when the service
+  starts); an adapter proposes candidates and nothing is read from one she
+  hasn't named. Each folder has its own lister, watcher, transcripts,
+  sign-in file and timeline, so a session in a named folder is linked to its
+  account by its folder, and hooks, plan usage, resume, copy and wake take
+  the session's own folder. The identity rule gains `--claude`, `--chatgpt`
+  and a mode ([identities](../guide/identities.md#several-folders-for-an-app)).
+  Decisions taken: the app's own folder is always read, the others only when
+  named; a rule's mode is `warn` unless she says `refuse`; a start into a
+  project whose rule names an account no folder holds is refused in either
+  mode, never run under another; a rule-bound or named-folder run signs in
+  with its folder's own sign-in and gets no shared runs token, so a sandboxed
+  start into such a project is refused; refuse mode passes Claude Code
+  `--disallowedTools` for `git commit`, `git push` and `gh`, which joins the
+  deny rules of the run's settings, so it holds for every confinement level;
+  a folder's keychain entry is not read for plan usage. Left: the page has
+  no place to name folders yet, and the saved folders take effect only after
+  the service starts again.
 
 ## Next
 
 Each waits until scenario 1 has run for real.
 
-- **Several accounts per app.** Several folders per app, each with its own
-  sign-in and timeline; the identity rule gains the account; a start picks
-  the folder that holds the right account or refuses.
 - **More apps on the map**, through their own documented interfaces.
 - **Release watch.** The app registry records which version each reader
   was last checked against, and `xenonet doctor` compares it with what is
