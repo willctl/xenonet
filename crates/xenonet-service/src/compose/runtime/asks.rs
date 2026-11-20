@@ -306,7 +306,7 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     let id = xenonet_engine::network::new_id("ask").map_err(|t| (500, t.message))?;
     let kind = prompt_kind(&tool);
     if let Some((folder, from)) = crate::compose::runtime::starts::delegated(w, me) {
-        let (judged, judged_folder) = resolved(&input, &folder);
+        let (judged, judged_folder) = resolved(&tool, &input, &folder, &w.setup.home);
         match delegation::judge(&tool, &judged, &judged_folder, &w.setup.home, cfg!(windows)) {
             Verdict::Allow if !reads_env(&input) => {
                 match granted(
@@ -353,35 +353,80 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
 /// as far as they exist, and the folder the same way: a link in the folder
 /// that points out of it is judged by where it points, not by its name. The
 /// answer to the call still carries the input as it was asked.
-fn resolved(input: &Value, folder: &str) -> (Value, String) {
+fn resolved(tool: &str, input: &Value, folder: &str, home: &str) -> (Value, String) {
+    resolved_with(tool, input, folder, home, &mut |p| p.canonicalize().ok())
+}
+
+/// `resolved` with the way a path is resolved (`canon`: the real path, or
+/// None when it isn't there) given. A path is judged lexically first and
+/// only one that lies inside the folder is resolved: the service never
+/// touches a path an agent names outside it (`/net/...` is an automounter's
+/// and a FIFO blocks), and a path inside whose target is outside is judged
+/// by the target. `~` is the home folder. A Glob pattern's root (the
+/// folders before its first wildcard) is resolved the same way.
+fn resolved_with(tool: &str, input: &Value, folder: &str, home: &str, canon: &mut dyn FnMut(&std::path::Path) -> Option<std::path::PathBuf>) -> (Value, String) {
+    use std::path::{Component, Path, PathBuf};
     // Windows paths resolve to `\\?\` names the judge doesn't read.
     if cfg!(windows) {
         return (input.clone(), folder.to_string());
     }
-    let real = |p: &str, base: &std::path::Path| -> Option<String> {
-        let full = if let Some(rest) = p.strip_prefix('~') { std::path::PathBuf::from(format!("{}{rest}", base.display())) } else { base.join(p) };
-        // The nearest ancestor that exists is resolved, and the rest kept as written.
+    // The nearest ancestor that exists is resolved, and the rest kept as written.
+    let mut real = |full: &Path| -> Option<PathBuf> {
         let mut tail = Vec::new();
-        let mut at = full.as_path();
+        let mut at = full;
         loop {
-            if let Ok(done) = at.canonicalize() {
-                return Some(tail.iter().rev().fold(done, |acc, x: &std::ffi::OsString| acc.join(x)).to_string_lossy().into_owned());
+            if let Some(done) = canon(at) {
+                return Some(tail.iter().rev().fold(done, |acc, x: &std::ffi::OsString| acc.join(x)));
             }
             tail.push(at.file_name()?.to_os_string());
             at = at.parent()?;
         }
     };
-    let base = std::path::Path::new(folder);
+    let base = Path::new(folder);
+    let real_folder = real(base).unwrap_or_else(|| base.to_path_buf());
+    // The path as written, absolute: `~` is home, a relative path is under the folder.
+    let absolute = |p: &str| -> PathBuf {
+        match p.strip_prefix('~') {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') => PathBuf::from(format!("{home}{rest}")),
+            _ => base.join(p),
+        }
+    };
+    // Whether the path as written lies inside the folder, by its parts and
+    // up to a `..` (what follows one can't be told without following links).
+    let inside = |full: &Path| -> bool {
+        let before: PathBuf = full.components().take_while(|c| !matches!(c, Component::ParentDir)).filter(|c| !matches!(c, Component::CurDir)).collect();
+        before.starts_with(base) || before.starts_with(&real_folder)
+    };
     let mut out = input.clone();
     if let Some(o) = out.as_object_mut() {
         for k in ["file_path", "notebook_path", "path"] {
-            let Some(p) = o.get(k).and_then(Value::as_str).filter(|p| !p.starts_with('~')) else { continue };
-            if let Some(r) = real(p, base) {
-                o.insert(k.to_string(), Value::String(r));
+            let Some(p) = o.get(k).and_then(Value::as_str) else { continue };
+            let full = absolute(p);
+            if !inside(&full) {
+                continue;
+            }
+            if let Some(r) = real(&full) {
+                o.insert(k.to_string(), Value::String(r.to_string_lossy().into_owned()));
+            }
+        }
+        if tool == "Glob" {
+            if let Some(pattern) = o.get("pattern").and_then(Value::as_str) {
+                // The root: the parts before the first one with a wildcard.
+                let parts: Vec<&str> = pattern.split('/').collect();
+                let wild = parts.iter().position(|x| x.contains(['*', '?', '[', '{'])).unwrap_or(parts.len());
+                let root = parts[..wild].join("/");
+                let full = absolute(&root);
+                if !root.is_empty() && inside(&full) {
+                    if let Some(r) = real(&full).filter(|r| *r != full) {
+                        let rest = parts[wild..].join("/");
+                        let pattern = if rest.is_empty() { r.to_string_lossy().into_owned() } else { format!("{}/{rest}", r.to_string_lossy()) };
+                        o.insert("pattern".to_string(), Value::String(pattern));
+                    }
+                }
             }
         }
     }
-    (out, real(".", base).unwrap_or_else(|| folder.to_string()))
+    (out, real_folder.to_string_lossy().into_owned())
 }
 
 /// An answer as the asker hears it: allow or deny, and why a deny.
@@ -787,6 +832,86 @@ pub fn list(w: &Runtime) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A home folder with a project in it, a link in the project that leads
+    /// out to home, and the files a delegation must not reach through it.
+    #[cfg(unix)]
+    fn linked_home(name: &str) -> (std::path::PathBuf, String, String) {
+        let base = std::env::temp_dir().join(format!("xenonet-resolve-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("home/work")).unwrap();
+        let home = base.join("home").canonicalize().unwrap();
+        std::fs::create_dir_all(home.join(".config/gh")).unwrap();
+        std::fs::write(home.join(".config/gh/hosts.yml"), "x").unwrap();
+        std::fs::write(home.join(".zshrc"), "x").unwrap();
+        std::fs::write(home.join("work/notes.md"), "x").unwrap();
+        std::os::unix::fs::symlink(&home, home.join("work/up")).unwrap();
+        let (folder, home_s) = (home.join("work").to_string_lossy().into_owned(), home.to_string_lossy().into_owned());
+        (base, folder, home_s)
+    }
+
+    /// Whether the judge covers the call without asking you, after the
+    /// paths are resolved.
+    #[cfg(unix)]
+    fn covered(tool: &str, input: &Value, folder: &str, home: &str) -> bool {
+        let (judged, judged_folder) = resolved(tool, input, folder, home);
+        matches!(delegation::judge(tool, &judged, &judged_folder, home, false), Verdict::Allow)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_path_through_a_link_that_leaves_the_folder_is_judged_by_its_target() {
+        let (base, folder, home) = linked_home("tilde");
+        // Controls: inside the folder, by its name and by `~`, and through the link to a file in the folder.
+        assert!(covered("Read", &json!({ "file_path": format!("{folder}/notes.md") }), &folder, &home));
+        assert!(covered("Read", &json!({ "file_path": "~/work/notes.md" }), &folder, &home));
+        assert!(covered("Read", &json!({ "file_path": "~/work/up/work/notes.md" }), &folder, &home));
+        // Through `up`, which leads to home, with `~` and without it.
+        for path in ["~/work/up/.config/gh/hosts.yml", &format!("{folder}/up/.config/gh/hosts.yml"), "up/.config/gh/hosts.yml"] {
+            assert!(!covered("Read", &json!({ "file_path": path }), &folder, &home), "a read of {path}");
+        }
+        for path in ["~/work/up/.zshrc", &format!("{folder}/up/.zshrc")] {
+            for tool in ["Write", "Edit"] {
+                assert!(!covered(tool, &json!({ "file_path": path, "content": "x" }), &folder, &home), "{tool} of {path}");
+            }
+        }
+        // The input the run asked with is not changed by judging it.
+        let asked = json!({ "file_path": "~/work/up/.zshrc" });
+        let _ = resolved("Write", &asked, &folder, &home);
+        assert_eq!(asked["file_path"], "~/work/up/.zshrc");
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_glob_whose_root_leads_out_through_a_link_is_judged_by_where_it_leads() {
+        let (base, folder, home) = linked_home("glob");
+        assert!(covered("Glob", &json!({ "pattern": format!("{folder}/**/*.md") }), &folder, &home), "a pattern in the folder is covered");
+        assert!(covered("Glob", &json!({ "pattern": "*.md" }), &folder, &home));
+        for pattern in [format!("{folder}/up/**"), format!("{folder}/up/.config/**/*.yml"), "~/work/up/**".to_string(), "up/**".to_string()] {
+            assert!(!covered("Glob", &json!({ "pattern": pattern }), &folder, &home), "{pattern}");
+        }
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_path_outside_the_folder_is_never_resolved() {
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let mut canon = |p: &std::path::Path| {
+            seen.borrow_mut().push(p.to_string_lossy().into_owned());
+            None
+        };
+        let input = json!({ "file_path": "/net/x.example/y", "path": "/etc/hosts" });
+        let (judged, _) = resolved_with("Read", &input, "/home/jo/work", "/home/jo", &mut canon);
+        assert_eq!(judged, input, "left as asked");
+        assert!(!seen.borrow().iter().any(|p| p.starts_with("/net") || p.starts_with("/etc")), "never touched: {:?}", seen.borrow());
+        let globbed = json!({ "pattern": "/net/x.example/**" });
+        let _ = resolved_with("Glob", &globbed, "/home/jo/work", "/home/jo", &mut canon);
+        assert!(!seen.borrow().iter().any(|p| p.starts_with("/net")), "a pattern's root outside is never touched either");
+        // A path inside is the one it asks about.
+        let _ = resolved_with("Read", &json!({ "file_path": "/home/jo/work/a.rs" }), "/home/jo/work", "/home/jo", &mut canon);
+        assert!(seen.borrow().iter().any(|p| p == "/home/jo/work/a.rs"), "{:?}", seen.borrow());
+    }
 
     #[test]
     fn what_a_call_asks_in_a_line_and_the_answers_claude_code_takes() {
