@@ -453,10 +453,36 @@ pub fn folder(asked: &str, home: &str, known: &[(String, String)], reported: &[S
 /// never the home folder (the folder `~` and an empty one name), the root of
 /// the disk, or any folder that holds home, since the run may write all of
 /// what the sandbox holds. Checked by the machine that runs the start, on
-/// the folder as it resolved there.
-pub fn sandbox_folder(cwd: &str, home: &str, windows: bool) -> Result<(), String> {
+/// the folder as it resolves there (links followed), and with case ignored
+/// where the disk does (`case_blind`: macOS and Windows).
+pub fn sandbox_folder(cwd: &str, home: &str, case_blind: bool) -> Result<(), String> {
+    // A link to home, or to a hidden folder of it, is the folder it leads to.
+    // The nearest ancestor that is there is resolved and the rest kept, so a
+    // folder and a home that isn't there compare as they would if it were.
+    let real = |p: &str| -> String {
+        if !cfg!(unix) {
+            return p.to_string();
+        }
+        let mut tail = Vec::new();
+        let mut at = std::path::Path::new(p);
+        loop {
+            if let Ok(done) = std::fs::canonicalize(at) {
+                return tail.iter().rev().fold(done, |acc, x: &std::ffi::OsString| acc.join(x)).to_string_lossy().into_owned();
+            }
+            match (at.file_name(), at.parent()) {
+                (Some(name), Some(parent)) => {
+                    tail.push(name.to_os_string());
+                    at = parent;
+                }
+                _ => return p.to_string(),
+            }
+        }
+    };
+    let (cwd, home) = (real(cwd), real(home));
+    let (cwd, home) = (cwd.as_str(), home.as_str());
+    let windows = case_blind;
     let parts = |p: &str| -> Vec<String> {
-        p.replace('\\', "/").split('/').filter(|x| !x.is_empty() && *x != ".").map(|x| if windows { x.to_lowercase() } else { x.to_string() }).collect()
+        p.replace('\\', "/").split('/').filter(|x| !x.is_empty() && *x != ".").map(|x| if case_blind { x.to_lowercase() } else { x.to_string() }).collect()
     };
     let (folder, home_parts) = (parts(cwd), parts(home));
     if folder.len() <= home_parts.len() && home_parts[..folder.len()] == folder[..] {
@@ -850,6 +876,27 @@ mod tests {
             assert!(why.contains("hidden folder") && why.contains("Library"), "{folder}: {why}");
         }
         assert!(sandbox_folder("C:\\Users\\Me\\AppData\\Roaming\\x", "C:\\Users\\Me", true).is_err());
+        // The case the disk ignores (macOS, Windows) is ignored, and a folder is taken as it resolves.
+        assert!(sandbox_folder("/USERS/ME", "/Users/me", true).is_err());
+        assert!(sandbox_folder("/Users/ME/.Config/atlas", "/Users/me", true).is_err());
+        assert!(sandbox_folder("/USERS/ME", "/Users/me", false).is_ok(), "where case counts, another case is another folder");
+        #[cfg(unix)]
+        {
+            let base = std::env::temp_dir().join(format!("xenonet-sandbox-folder-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(base.join("home/.config/x")).unwrap();
+            std::fs::create_dir_all(base.join("home/work")).unwrap();
+            std::os::unix::fs::symlink(base.join("home"), base.join("alias-of-home")).unwrap();
+            std::os::unix::fs::symlink(base.join("home/.config/x"), base.join("alias-of-hidden")).unwrap();
+            std::os::unix::fs::symlink(base.join("home"), base.join("alias-home")).unwrap();
+            let home = base.join("alias-home").to_string_lossy().into_owned();
+            for link in ["alias-of-home", "alias-of-hidden"] {
+                let why = sandbox_folder(&base.join(link).to_string_lossy(), &home, false).unwrap_err();
+                assert!(why.contains("project folder"), "{link}: {why}");
+            }
+            assert!(sandbox_folder(&base.join("home/work").to_string_lossy(), &home, false).is_ok(), "a project in a home that is itself a link");
+            let _ = std::fs::remove_dir_all(&base);
+        }
         assert!(sandbox_folder("/home/me/work/.github", "/home/me", false).is_ok(), "a dot-folder further down a project is fine");
         assert!(sandbox_folder("/srv/.cache/atlas", "/home/me", false).is_ok(), "and one outside home");
     }

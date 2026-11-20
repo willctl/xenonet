@@ -572,7 +572,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // A sandbox is a project folder: checked here, on the folder as it
     // resolved on the machine that runs the start, whoever asked.
     if record.is_some() {
-        starts::sandbox_folder(&cwd, &w.setup.home, cfg!(windows))?;
+        starts::sandbox_folder(&cwd, &w.setup.home, cfg!(any(windows, target_os = "macos")))?;
         // The folder's hooks are looked for when the run's sandbox is made
         // (`sandbox::turn`), as for every later turn.
     }
