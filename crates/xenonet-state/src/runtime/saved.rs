@@ -45,6 +45,16 @@ pub fn seed(store: &Saved, remembered: &Value) {
     for (id, known) in remembered.get("known").and_then(Value::as_object).into_iter().flatten() {
         store.set_identity_known(id, known);
     }
+    let roots: std::collections::BTreeMap<String, Vec<String>> = remembered
+        .get("appRoots")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(app, l)| (app.clone(), l.as_array().into_iter().flatten().filter_map(|p| p.as_str().map(String::from)).collect()))
+        .collect();
+    if !roots.is_empty() {
+        let _ = store.set_app_roots(&roots);
+    }
     for (app, spans) in remembered.get("signins").and_then(Value::as_object).into_iter().flatten() {
         store.set_signins(app, spans);
     }

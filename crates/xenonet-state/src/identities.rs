@@ -1733,15 +1733,16 @@ mod tests {
         assert!(clean_rule(&json!({ "claude": "not an email" })).is_err());
         assert!(clean_rule(&json!({ "claude": "a@b.example", "mode": "stop" })).is_err());
         // Checked against the accounts the project's sessions ran as, the newest first.
-        let list = [
-            json!({ "id": "claude:a:o", "kind": "claude", "handle": "nova@example.com" }),
-            json!({ "id": "claude:b:p", "kind": "claude", "handle": "nova-work@example.com" }),
-        ];
+        let list =
+            [json!({ "id": "claude:a:o", "kind": "claude", "handle": "nova@example.com" }), json!({ "id": "claude:b:p", "kind": "claude", "handle": "nova-work@example.com" })];
         let ran = |id: &str, at: f64| RanAs { id: id.into(), at };
         let ok = check_rule_with(&rule, &[], &list, &[ran("claude:a:o", 1.0), ran("claude:b:p", 2.0)]);
         assert_eq!((ok["claude"]["state"].as_str(), ok["mismatch"].as_bool()), (Some("ok"), Some(false)));
         let differs = check_rule_with(&rule, &[], &list, &[ran("claude:b:p", 1.0), ran("claude:a:o", 2.0)]);
-        assert_eq!((differs["claude"]["state"].as_str(), differs["claude"]["uses"].as_str(), differs["mismatch"].as_bool()), (Some("differs"), Some("nova@example.com"), Some(true)));
+        assert_eq!(
+            (differs["claude"]["state"].as_str(), differs["claude"]["uses"].as_str(), differs["mismatch"].as_bool()),
+            (Some("differs"), Some("nova@example.com"), Some(true))
+        );
         assert!(!differs["words"].as_str().unwrap().contains("example.com"), "the words name no account");
         let unknown = check_rule_with(&rule, &[], &list, &[]);
         assert_eq!((unknown["claude"]["state"].as_str(), unknown["mismatch"].as_bool()), (Some("unknown"), Some(false)));

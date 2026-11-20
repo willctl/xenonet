@@ -79,13 +79,14 @@ pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoW
     let readers = env.readers.get_or_make(|| xenonet_schema::vendor::Readers::new(dir.clone(), env.drift.clone()));
     let vendor = vendor::Vendor::with_readers(readers);
     let store = saved::Saved::new(cores.store.clone());
-    // The folders she named for each app, beside its default one.
-    cfg.name_roots(&store.app_roots());
     // What the demo's made-up person would have saved: the names Nova
     // gave, and the accounts XenoNet saw.
     if let Some(remembered) = demo.as_ref().and_then(|d| d.remembered()) {
         saved::seed(&store, &remembered);
     }
+    // The folders she named for each app, beside its default one (the
+    // demo's, once its Nova has named hers).
+    cfg.name_roots(&store.app_roots());
     // The folder each app writes its transcripts in now, which the tailer
     // follows.
     let roots: Vec<(String, String)> = xenonet_adapter::platforms()

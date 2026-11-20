@@ -231,7 +231,7 @@ fn sessions(today: &str) -> Vec<Value> {
         ] }),
         json!({ "app": "claude", "project": "infra", "title": "Move staging to the new cluster", "ago": 190, "desktop": true, "turns": [{ "prompt": "Move staging to the new cluster.", "steps": [["run", "terraform plan -var-file=staging.tfvars", true]], "reply": "Staging runs on the new cluster. The old one can go after a week." }] }),
         json!({ "app": "codex", "project": "atlas-web", "title": "Add product image zoom", "ago": 300, "native": true, "turns": [{ "prompt": "Add zoom on product images.", "steps": [["edit", "app/product/zoom.tsx", "", "export function Zoom() {}"]], "reply": "Product images zoom on hover and pinch." }] }),
-        json!({ "app": "claude", "project": "ledger", "title": "Draft the Q4 close checklist", "ago": 420, "turns": [{ "prompt": "Draft a checklist for the Q4 close.", "steps": [["read", "ledger/reconcile.py"]], "reply": "The checklist has 14 steps, grouped by team." }] }),
+        json!({ "app": "claude", "project": "ledger", "title": "Draft the Q4 close checklist", "ago": 420, "workRoot": true, "turns": [{ "prompt": "Draft a checklist for the Q4 close.", "steps": [["read", "ledger/reconcile.py"]], "reply": "The checklist has 14 steps, grouped by team." }] }),
         json!({ "app": "codex", "cwd": ["Documents", "Codex", today, "regex-help"], "title": "Explain this regex", "ago": 140, "turns": [{ "prompt": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?", "steps": [], "reply": "It matches strings of eight or more characters with at least one digit and one lowercase letter." }] }),
         json!({ "app": "claude", "project": "atlas-api", "title": "Review the partial refunds change", "ago": 25, "desktop": true, "parent": 0, "turns": [{ "prompt": "Review the partial refunds change before I open a PR.", "steps": [["read", "src/orders/refunds.ts"]], "reply": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund." }] }),
         json!({ "app": "codex", "project": "pathfinder", "title": "Benchmark solver variants", "ago": 60, "parent": 4, "subagent": true, "turns": [{ "prompt": "Benchmark the cached solver against the old one.", "steps": [["run", "cargo bench", true]], "reply": "The cached solver is 10.5 times faster on 500 stops." }] }),
@@ -281,6 +281,9 @@ pub struct World {
     pub projects_dir: String,
     pub clients_dir: String,
     pub claude_root: String,
+    /// A second Claude Code folder, for the work account: Nova keeps her
+    /// accounts apart with CLAUDE_CONFIG_DIR.
+    pub claude_work: String,
     pub claude_desktop_dir: String,
     pub codex_home: String,
     pub grok_home: String,
@@ -297,6 +300,7 @@ impl World {
             projects_dir: NATIVE.join(&[&home, "Projects"]),
             clients_dir: NATIVE.join(&[&home, "Clients"]),
             claude_root: NATIVE.join(&[&home, ".claude", "projects"]),
+            claude_work: NATIVE.join(&[&home, ".claude-work"]),
             claude_desktop_dir: NATIVE.join(&[&home, "claude-desktop"]),
             codex_home: NATIVE.join(&[&home, ".codex"]),
             grok_home: NATIVE.join(&[&home, ".grok"]),
@@ -911,6 +915,15 @@ impl Demo {
                 0,
             ),
         )?;
+        // The work account's own Claude folder, with its sign-in.
+        files::mkdir_p(&NATIVE.join(&[&self.world.claude_work, "projects"]), None)?;
+        home_file(
+            &NATIVE.join(&[".claude-work", ".claude.json"]),
+            &stringify(
+                &json!({ "oauthAccount": { "accountUuid": CLAUDE_WORK.0, "organizationUuid": CLAUDE_WORK.1, "emailAddress": "nova@atlas.example", "organizationName": "Atlas", "organizationType": "claude_team" } }),
+                0,
+            ),
+        )?;
         // An ID token in the shape Codex keeps, unsigned, and no real tokens.
         let jwt = |claims: &Value| format!("e30.{}.demo", xenonet_text::utf16::base64url(stringify(claims, 0).as_bytes()));
         let signed_in = ((now - 20.0 * 86400e3) / 1000.0).floor();
@@ -960,8 +973,16 @@ impl Demo {
         // the rule doesn't match and XenoNet warns.
         // A project's id is made when it is first scanned, so the rule is
         // kept by folder until the service has one.
-        let rules = json!({ self.p("pathfinder"): { "git": "hello@orbitworks.example", "push": { "login": "orbitworks", "host": "github.com" } } });
-        Ok(json!({ "names": names, "known": known, "signins": signins, "rulesByPath": rules }))
+        // And for ledger: Claude Code runs as the personal account, but its
+        // newest session ran in the work folder, so that one doesn't match
+        // either.
+        let rules = json!({
+            self.p("pathfinder"): { "git": "hello@orbitworks.example", "push": { "login": "orbitworks", "host": "github.com" } },
+            self.p("ledger"): { "claude": "nova@example.com" },
+        });
+        // The folders Nova named, which the service saves as it starts.
+        let app_roots = json!({ "claude": [self.world.claude_work] });
+        Ok(json!({ "names": names, "known": known, "signins": signins, "rulesByPath": rules, "appRoots": app_roots }))
     }
 
     /// What XenoNet would remember of the made-up identities, once the
@@ -1007,6 +1028,10 @@ impl Demo {
                 "parentKind": parent.as_ref().map(|_| if subagent { "subagent" } else { "spawn" }),
                 "claudeAccount": if app == "claude" && desktop { demo_claude_account(s.get("project").and_then(Value::as_str)) } else { Value::Null },
             });
+            // A session of the second Claude folder carries it.
+            if flag(s, "workRoot") {
+                session["root"] = json!(self.world.claude_work);
+            }
             // A Grok Build subagent's type, as its parent's folder says it.
             if app == "grok" && subagent {
                 session["agentKind"] = json!("explore");

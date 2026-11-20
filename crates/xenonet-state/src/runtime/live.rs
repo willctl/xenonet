@@ -207,7 +207,15 @@ impl Live {
         }
         let gathers = dirs
             .iter()
-            .map(|d| (d.clone(), Arc::new(Gather::new("claude-usage", Options { every_ms: Some(claude_usage::USAGE_EVERY_MS), next_in: true, fallback: Value::Null, clock: self.clock.clone(), ..Default::default() }))))
+            .map(|d| {
+                (
+                    d.clone(),
+                    Arc::new(Gather::new(
+                        "claude-usage",
+                        Options { every_ms: Some(claude_usage::USAGE_EVERY_MS), next_in: true, fallback: Value::Null, clock: self.clock.clone(), ..Default::default() },
+                    )),
+                )
+            })
             .collect();
         *lock(&self.usage_roots) = gathers;
     }
@@ -784,7 +792,9 @@ impl Live {
         for (dir, a) in lock(&self.usage_roots).iter() {
             let r = a.value();
             let one = match r.get("usage").filter(|u| xenonet_text::text::truthy(Some(u))) {
-                Some(u) => json!({ "fiveHour": u.get("fiveHour"), "sevenDay": u.get("sevenDay"), "resets": u.get("resets"), "observedAt": u.get("observedAt"), "source": "anthropic" }),
+                Some(u) => {
+                    json!({ "fiveHour": u.get("fiveHour"), "sevenDay": u.get("sevenDay"), "resets": u.get("resets"), "observedAt": u.get("observedAt"), "source": "anthropic" })
+                }
                 None => json!({ "reason": r.get("reason").cloned().unwrap_or(Value::Null) }),
             };
             if let Some(l) = snap.get_mut("limits").and_then(Value::as_object_mut) {
@@ -927,7 +937,10 @@ async fn claude_token(root: Option<&str>) -> Option<Value> {
             _ => None,
         });
     }
-    let dir = root.map(str::to_string).or_else(|| std::env::var("CLAUDE_CONFIG_DIR").ok()).unwrap_or_else(|| Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").to_string_lossy().into_owned());
+    let dir = root
+        .map(str::to_string)
+        .or_else(|| std::env::var("CLAUDE_CONFIG_DIR").ok())
+        .unwrap_or_else(|| Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").to_string_lossy().into_owned());
     texts.push(std::fs::read_to_string(Path::new(&dir).join(".credentials.json")).ok());
     for t in texts.into_iter().flatten() {
         if let Some((token, expires)) = claude_usage::token_of(Some(&t)) {

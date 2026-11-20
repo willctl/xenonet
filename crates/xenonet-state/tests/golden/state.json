@@ -1489,6 +1489,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
+    "root": "<world>/home/.claude-work",
     "agent": "agt_s4wiyhrdegrwv2fgqdaumfpmmzjhzjzd",
     "kind": "session",
     "activity": "recent",
@@ -1522,9 +1523,9 @@
      }
     ],
     "ranAs": {
-     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
-     "confidence": "likely",
-     "via": "signed in when it ran"
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "confidence": "exact",
+     "via": "its folder"
     }
    },
    {
@@ -2360,6 +2361,27 @@
     "projects": 4
    },
    {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+    "kind": "claude",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "plan": "Team",
+     "org": "Atlas"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.claude-work/.claude.json",
+     "Claude desktop"
+    ],
+    "firstSeen": 1788436800000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 5,
+    "projects": 0
+   },
+   {
     "id": "git:8bed4c8b3ce0bd80",
     "kind": "git",
     "handle": "hello@orbitworks.example",
@@ -2379,24 +2401,23 @@
     "projects": 3
    },
    {
-    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
-    "kind": "claude",
-    "handle": "nova@atlas.example",
+    "id": "git:eb61c4d6d94bb5d1",
+    "kind": "git",
+    "handle": "nova@example.com",
     "detail": {
-     "plan": "Team",
-     "org": "Atlas"
+     "name": "Nova"
     },
     "signedIn": false,
     "active": false,
     "sources": [
-     "Claude desktop"
+     "git config"
     ],
-    "firstSeen": 1788436800000,
+    "firstSeen": 1791028830000,
     "seenAt": 1791028830000,
-    "name": "work",
+    "name": null,
     "hidden": false,
-    "sessions": 4,
-    "projects": 0
+    "sessions": 2,
+    "projects": 1
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
@@ -2416,27 +2437,8 @@
     "seenAt": 1791028830000,
     "name": null,
     "hidden": false,
-    "sessions": 3,
-    "projects": 0
-   },
-   {
-    "id": "git:eb61c4d6d94bb5d1",
-    "kind": "git",
-    "handle": "nova@example.com",
-    "detail": {
-     "name": "Nova"
-    },
-    "signedIn": false,
-    "active": false,
-    "sources": [
-     "git config"
-    ],
-    "firstSeen": 1791028830000,
-    "seenAt": 1791028830000,
-    "name": null,
-    "hidden": false,
     "sessions": 2,
-    "projects": 1
+    "projects": 0
    }
   ],
   "hideIdentities": false,
@@ -2601,6 +2603,27 @@
     "projects": 4
    },
    {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+    "kind": "claude",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "plan": "Team",
+     "org": "Atlas"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.claude-work/.claude.json",
+     "Claude desktop"
+    ],
+    "firstSeen": 1788436800000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 5,
+    "projects": 0
+   },
+   {
     "id": "git:8bed4c8b3ce0bd80",
     "kind": "git",
     "handle": "hello@orbitworks.example",
@@ -2620,24 +2643,23 @@
     "projects": 3
    },
    {
-    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
-    "kind": "claude",
-    "handle": "nova@atlas.example",
+    "id": "git:eb61c4d6d94bb5d1",
+    "kind": "git",
+    "handle": "nova@example.com",
     "detail": {
-     "plan": "Team",
-     "org": "Atlas"
+     "name": "Nova"
     },
     "signedIn": false,
     "active": false,
     "sources": [
-     "Claude desktop"
+     "git config"
     ],
-    "firstSeen": 1788436800000,
+    "firstSeen": 1791028830000,
     "seenAt": 1791028830000,
-    "name": "work",
+    "name": null,
     "hidden": false,
-    "sessions": 4,
-    "projects": 0
+    "sessions": 2,
+    "projects": 1
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
@@ -2657,27 +2679,8 @@
     "seenAt": 1791028830000,
     "name": null,
     "hidden": false,
-    "sessions": 3,
-    "projects": 0
-   },
-   {
-    "id": "git:eb61c4d6d94bb5d1",
-    "kind": "git",
-    "handle": "nova@example.com",
-    "detail": {
-     "name": "Nova"
-    },
-    "signedIn": false,
-    "active": false,
-    "sources": [
-     "git config"
-    ],
-    "firstSeen": 1791028830000,
-    "seenAt": 1791028830000,
-    "name": null,
-    "hidden": false,
     "sessions": 2,
-    "projects": 1
+    "projects": 0
    }
   ],
   "pins": [],
@@ -2698,6 +2701,13 @@
     {
      "id": "chatgpt:demo-workspace",
      "from": 1789300800000,
+     "to": 1791028830000
+    }
+   ],
+   "claude@<world>/home/.claude-work": [
+    {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "from": 1791028830000,
      "to": 1791028830000
     }
    ]
@@ -2917,6 +2927,13 @@
      {
       "id": "chatgpt:demo-workspace",
       "from": 1789300800000,
+      "to": 1791028830000
+     }
+    ],
+    "claude@<world>/home/.claude-work": [
+     {
+      "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+      "from": 1791028830000,
       "to": 1791028830000
      }
     ]
