@@ -465,14 +465,16 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
 
   const choice = (attr, value, label, on) => `<button class="act${on ? " on" : ""}" ${attr}="${h(value)}" aria-pressed="${on}">${h(label)}</button>`;
 
-  // The sandbox switch: off by default for a start on this machine, which is
-  // yours, and on for one on another machine. A start from here that isn't
-  // sandboxed on another machine is yours to ask for.
-  const sandboxOn = (host) => view.sandbox ?? !!(host && host !== state.self?.id);
-  function sandboxHtml(host) {
-    const on = sandboxOn(host);
-    return `<label class="net-check"><input type="checkbox" data-net-start-sandbox ${on ? "checked" : ""}> Run it in its app's sandbox</label>
-      <div class="ac-form" data-net-start-domains-row${on ? "" : " hidden"}><label class="ac-field"><span class="ac-k">Domains it may reach</span><input class="ac-input" data-net-start-domains value="${h(view.domains ?? "")}" placeholder="none: github.com, *.npmjs.org" spellcheck="false" autocomplete="off"></label></div>`;
+  // How confined the run is: off by default for a start on this machine,
+  // which is yours, and the app's own sandbox (vendor) for one on another
+  // machine. A start from here that isn't confined on another machine is
+  // yours to ask for. Cell is left out: no start runs in one yet.
+  const LEVELS = [["off", "Off"], ["vendor", "Its app's sandbox"]];
+  const confineOf = (host) => view.confine ?? (host && host !== state.self?.id ? "vendor" : "off");
+  function confineHtml(host) {
+    const level = confineOf(host);
+    return `<span class="net-seg-k">Confinement</span>${LEVELS.map(([id, label]) => choice("data-net-start-confine", id, label, id === level)).join("")}
+      <div class="ac-form" data-net-start-domains-row${level === "vendor" ? "" : " hidden"}><label class="ac-field"><span class="ac-k">Domains it may reach</span><input class="ac-input" data-net-start-domains value="${h(view.domains ?? "")}" placeholder="none: github.com, *.npmjs.org" spellcheck="false" autocomplete="off"></label></div>`;
   }
 
   function sessionHtml() {
@@ -487,13 +489,13 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <div class="net-seg" data-net-start-networks>${networkChoiceHtml(host)}</div>
       <div class="net-seg" data-net-start-apps><span class="net-seg-k">App</span>${START_APPS.map(([id, label]) => choice("data-net-start-app", id, label, id === app)).join("")}</div>
       <div class="net-seg" data-net-start-modes><span class="net-seg-k">Permissions</span>${START_MODES.map(([id, label]) => choice("data-net-start-mode", id, label, id === mode)).join("")}</div>
-      ${sandboxHtml(host)}
+      ${confineHtml(host)}
       <div class="ac-form">
         <label class="ac-field"><span class="ac-k">Folder</span><input class="ac-input" data-net-start-folder list="net-start-folders" value="${h(view.folder ?? "~")}" spellcheck="false" autocomplete="off"></label>
         <datalist id="net-start-folders" data-net-start-folders>${folders.map((f) => `<option value="${h(f.value)}">${h(f.label)}</option>`).join("")}</datalist>
         <label class="ac-field"><span class="ac-k">Prompt</span><textarea class="ac-input net-start-prompt" data-net-start-prompt rows="5" placeholder="What the new session should do" spellcheck="true">${h(view.prompt ?? "")}</textarea></label>
       </div>
-      <p class="pj-note">Claude Code and Codex run headless through XenoNet, Grok Build and Hermes over ACP, and each shows on the map like any other session. Its first prompt says you started it from this console. Permission prompts it can't settle by its settings come to Needs you, here and on every window host. Codex runs with its own config's sandbox and approvals. With the sandbox on, the run is held to its app's own: it writes only in its folder, reads none of your home folder (Codex's sandbox reads the disk) and reaches only the domains you name; Grok Build and Hermes have none to drive, so they refuse it, and so does Codex with domains. In a terminal: <code>xenonet start --on &lt;machine&gt; "&lt;prompt&gt;"</code></p>
+      <p class="pj-note">Claude Code and Codex run headless through XenoNet, Grok Build and Hermes over ACP, and each shows on the map like any other session. Its first prompt says you started it from this console. Permission prompts it can't settle by its settings come to Needs you, here and on every window host. Codex runs with its own config's sandbox and approvals. With its app's sandbox chosen, the run is held to its app's own: it writes only in its folder, reads none of your home folder (Codex's sandbox reads the disk) and reaches only the domains you name; Grok Build and Hermes have none to drive, so they refuse it, and so does Codex with domains. In a terminal: <code>xenonet start --on &lt;machine&gt; "&lt;prompt&gt;"</code></p>
       ${errorHtml(view.error)}
       <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-start-send data-yours disabled title="Starts the session">Start</button></div>`;
   }
@@ -512,21 +514,22 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   const armed = () => view.name === "session" && view.armedAt != null && Date.now() >= view.armedAt;
 
   // A pick in the box, changed in place so what's typed stays.
-  function pick(attr, value) {
-    const key = { "data-net-start-host": "host", "data-net-start-app": "app", "data-net-start-mode": "mode", "data-net-start-network": "network" }[attr];
-    view[key] = value;
+  function pick(attr, value, touched = true) {
+    const key = { "data-net-start-host": "host", "data-net-start-app": "app", "data-net-start-mode": "mode", "data-net-start-network": "network", "data-net-start-confine": "confine" }[attr];
+    // Only a touch fixes the level: until then it follows the machine.
+    if (key !== "confine" || touched) view[key] = value;
     for (const b of body()?.querySelectorAll(`[${attr}]`) ?? []) {
       const on = b.getAttribute(attr) === value;
       b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", String(on));
     }
+    if (key === "confine") {
+      const row = body()?.querySelector("[data-net-start-domains-row]");
+      if (row) row.hidden = value !== "vendor";
+    }
     if (key === "host") {
-      // The switch follows the machine until it's been touched.
-      const sandbox = body().querySelector("[data-net-start-sandbox]");
-      if (sandbox && view.sandbox == null) {
-        sandbox.checked = sandboxOn(value);
-        body().querySelector("[data-net-start-domains-row]").hidden = !sandbox.checked;
-      }
+      // The level follows the machine until it's been touched.
+      if (view.confine == null) pick("data-net-start-confine", confineOf(value), false);
       view.network = null;
       body().querySelector("[data-net-start-networks]").innerHTML = networkChoiceHtml(value);
     }
@@ -539,14 +542,6 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     sfx("toggle");
   }
 
-  // The switch, touched: the domains show only while it's on.
-  function sandboxed(on) {
-    view.sandbox = on;
-    const row = body()?.querySelector("[data-net-start-domains-row]");
-    if (row) row.hidden = !on;
-    sfx("toggle");
-  }
-
   async function sendStart() {
     if (!armed()) return { ok: false, error: "not armed yet" };
     const b = body();
@@ -556,7 +551,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const app = view.app ?? "claude";
     const mode = NO_MODE.has(app) ? "" : (view.mode ?? "");
     const remote = host && host !== state.self?.id;
-    const sandbox = b.querySelector("[data-net-start-sandbox]")?.checked ?? sandboxOn(host);
+    const confine = view.confine ?? confineOf(host);
     const domains = (b.querySelector("[data-net-start-domains]")?.value ?? "").split(/[\s,]+/).filter(Boolean);
     Object.assign(view, { folder, prompt, domains: domains.join(", ") });
     // On a machine that is in several of this machine's networks, the
@@ -565,8 +560,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (choices.length > 1 && !choices.some((n) => n.id === view.network)) return failed({ status: 400, error: `${host} is in more than one of your networks: pick the one this start goes through.` });
     const network = choices.length > 1 ? view.network : null;
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/start", { ...(remote ? { machine: host } : {}), ...(network ? { network } : {}), folder, app, ...(mode ? { mode } : {}), sandbox, ...(sandbox && domains.length ? { domains } : {}), prompt });
-      if (!r.ok) return failed(r, `xenonet start${remote ? ` --on ${host}` : ""}${network ? ` --network ${network}` : ""}${sandbox ? " --sandbox" : " --no-sandbox"}${sandbox && domains.length ? ` --allow ${domains.join(",")}` : ""} "<prompt>"`);
+      const r = await calls.call("POST", "/api/start", { ...(remote ? { machine: host } : {}), ...(network ? { network } : {}), folder, app, ...(mode ? { mode } : {}), confine, ...(confine === "vendor" && domains.length ? { domains } : {}), prompt });
+      if (!r.ok) return failed(r, `xenonet start${remote ? ` --on ${host}` : ""}${network ? ` --network ${network}` : ""} --confine ${confine}${confine === "vendor" && domains.length ? ` --allow ${domains.join(",")}` : ""} "<prompt>"`);
       sfx("success");
       toast(r.data.state === "sent" ? `Sent to ${r.data.host}: whether it started comes to the feed.` : `Started ${r.data.session ?? "a Codex session"} in ${r.data.folder}.`);
       lastStart = { ...r.data, at: Date.now() };
@@ -993,12 +988,11 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (d.netApprove) return approve(d.netApprove);
     if (d.netUnfreeze) return unfreeze(d.netUnfreeze);
     if (d.netStartSession != null) return startSession({ host: d.netStartSession || null });
-    for (const attr of ["data-net-start-host", "data-net-start-network", "data-net-start-app", "data-net-start-mode"]) {
+    for (const attr of ["data-net-start-host", "data-net-start-network", "data-net-start-app", "data-net-start-mode", "data-net-start-confine"]) {
       const b = t.closest(`[${attr}]`);
       if (b) return pick(attr, b.getAttribute(attr));
     }
     if (t.closest("[data-net-start-send]")) return sendStart();
-    if (t.closest("[data-net-start-sandbox]")) return sandboxed(t.closest("[data-net-start-sandbox]").checked);
     if (d.netSet) return setReach(null, d.netSet);
     if (d.netSetOn) return setReach(...d.netSetOn.split("|"));
     if (d.netWidenApprove) return approveWiden(...d.netWidenApprove.split("|"));
@@ -1156,10 +1150,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
               networks: startNetworks(view.host).length > 1 ? startNetworks(view.host).map((n) => n.id) : [],
               network: view.network ?? null,
               prompt: body()?.querySelector("[data-net-start-prompt]")?.value ?? null,
-              sandbox: body()?.querySelector("[data-net-start-sandbox]")?.checked ?? null,
+              confine: body()?.querySelector("[data-net-start-confine].on")?.dataset.netStartConfine ?? null,
               domains: body()?.querySelector("[data-net-start-domains]")?.value ?? "",
               armed: armed(),
-              at: { send: centre("[data-net-start-send]"), hosts: centres("data-net-start-host"), networks: centres("data-net-start-network"), apps: centres("data-net-start-app"), modes: centres("data-net-start-mode"), sandbox: centre("[data-net-start-sandbox]") },
+              at: { send: centre("[data-net-start-send]"), hosts: centres("data-net-start-host"), networks: centres("data-net-start-network"), apps: centres("data-net-start-app"), modes: centres("data-net-start-mode"), confine: centres("data-net-start-confine") },
             }
           : null,
       lastStart,
