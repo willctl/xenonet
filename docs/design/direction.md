@@ -791,9 +791,11 @@ After phase 6, the work is a person's real week on XenoNet
   [confinement](confinement.md));
 - several accounts per app: folders the person names, each read as its own
   root, and a start placed in the folder whose account the rule names, for
-  every turn.
+  every turn;
+- release watch: the registry records the version each reader was last
+  checked against, and the doctor warns when a newer one is installed.
 
-Next: T3 Code on the map, from a lab VM, and release watch. Not yet seen
+Next: T3 Code on the map, from a lab VM. Not yet seen
 in a real run: a confined command being blocked, which needs the apps
 signed in on the machine that tests it.
 
