@@ -1632,6 +1632,44 @@ mod tests {
     }
 
     #[test]
+    fn a_rule_names_the_claude_and_chatgpt_account_and_what_to_do_about_a_mismatch() {
+        let rule = clean_rule(&json!({ "claude": " Nova-Work@Example.com ", "chatgpt": "nova@example.com", "mode": "refuse" })).unwrap().unwrap();
+        assert_eq!(rule, json!({ "claude": "Nova-Work@Example.com", "chatgpt": "nova@example.com", "mode": "refuse" }));
+        // A mode is warn unless it says refuse, and says nothing alone.
+        assert_eq!(clean_rule(&json!({ "claude": "a@b.example", "mode": "warn" })).unwrap().unwrap(), json!({ "claude": "a@b.example" }));
+        assert_eq!(clean_rule(&json!({ "mode": "refuse" })).unwrap(), None);
+        assert!(clean_rule(&json!({ "claude": "not an email" })).is_err());
+        assert!(clean_rule(&json!({ "claude": "a@b.example", "mode": "stop" })).is_err());
+        // Checked against the accounts the project's sessions ran as, the newest first.
+        let list = [
+            json!({ "id": "claude:a:o", "kind": "claude", "handle": "nova@example.com" }),
+            json!({ "id": "claude:b:p", "kind": "claude", "handle": "nova-work@example.com" }),
+        ];
+        let ran = |id: &str, at: f64| RanAs { id: id.into(), at };
+        let ok = check_rule_with(&rule, &[], &list, &[ran("claude:a:o", 1.0), ran("claude:b:p", 2.0)]);
+        assert_eq!((ok["claude"]["state"].as_str(), ok["mismatch"].as_bool()), (Some("ok"), Some(false)));
+        let differs = check_rule_with(&rule, &[], &list, &[ran("claude:b:p", 1.0), ran("claude:a:o", 2.0)]);
+        assert_eq!((differs["claude"]["state"].as_str(), differs["claude"]["uses"].as_str(), differs["mismatch"].as_bool()), (Some("differs"), Some("nova@example.com"), Some(true)));
+        assert!(!differs["words"].as_str().unwrap().contains("example.com"), "the words name no account");
+        let unknown = check_rule_with(&rule, &[], &list, &[]);
+        assert_eq!((unknown["claude"]["state"].as_str(), unknown["mismatch"].as_bool()), (Some("unknown"), Some(false)));
+        assert_eq!(unknown["mode"], "refuse");
+    }
+
+    #[test]
+    fn a_start_picks_the_root_that_holds_the_account_or_is_refused() {
+        // The default root and one she named, each signed in to one account.
+        let roots = [(None, Some("nova@example.com".to_string())), (Some("/h/.claude-work".to_string()), Some("nova-work@example.com".to_string()))];
+        assert_eq!(pick_root("Claude Code", &roots, "nova-work@example.com").unwrap(), Some("/h/.claude-work".to_string()));
+        assert_eq!(pick_root("Claude Code", &roots, "Nova@Example.com").unwrap(), None, "the default root, in any case");
+        // No root holds it: refused, in words, and never run under another.
+        let why = pick_root("Claude Code", &roots, "ada@acme.example").unwrap_err();
+        assert!(why.contains("no folder") && why.contains("ada@acme.example") && why.contains("xenonet folders"), "{why}");
+        // A root nobody is signed in to holds nothing.
+        assert!(pick_root("Claude Code", &[(None, None)], "nova@example.com").is_err());
+    }
+
+    #[test]
     fn puts_a_rules_check_only_on_its_project() {
         let (links, list) = read_as(Some("ada@acme.example"), None);
         let mut nodes = vec![

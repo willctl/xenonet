@@ -153,6 +153,22 @@ mod tests {
     }
 
     #[test]
+    fn a_session_found_in_a_named_root_resumes_in_that_root() {
+        xenonet_platforms::install();
+        // The service's own folder is the first root's, and was always kept: a session from a second root ran under it.
+        let own = vec![("PATH".to_string(), "/bin".to_string()), ("CLAUDE_CONFIG_DIR".to_string(), "/h/.claude".to_string())];
+        let named = resume_env_in(own.clone(), "claude", Some("/h/.claude-work"));
+        assert_eq!(named, [("PATH".into(), "/bin".into()), ("CLAUDE_CONFIG_DIR".into(), "/h/.claude-work".into())]);
+        // A session of the default root, or of an app with one folder, is as it was.
+        assert_eq!(resume_env_in(own.clone(), "claude", None), resume_env(own.clone()));
+        let codex = resume_env_in(own.clone(), "codex", Some("/h/.codex-work"));
+        assert!(codex.contains(&("CODEX_HOME".into(), "/h/.codex-work".into())) && codex.contains(&("CLAUDE_CONFIG_DIR".into(), "/h/.claude".into())), "{codex:?}");
+        // Without a variable of its own in the environment, the root is still set.
+        assert!(resume_env_in(vec![("PATH".into(), "/bin".into())], "claude", Some("/r")).contains(&("CLAUDE_CONFIG_DIR".into(), "/r".into())));
+        assert!(!resume_env_in(own, "grok", Some("/g")).iter().any(|(k, _)| k == "GROK_HOME"), "an app that keeps one folder takes none");
+    }
+
+    #[test]
     fn a_copy_forks_only_from_a_claude_code_session() {
         xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
