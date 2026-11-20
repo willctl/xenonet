@@ -123,7 +123,7 @@ Scenario 1 needs no new code, only both machines on a current release.
   the main checkout, wherever the worktree is (T3 Code's `~/.t3/worktrees`,
   `git worktree add ../x`, any tool's), when that checkout is a project the
   map has and shares its git folder; its folder is the main checkout's and
-  its worktree the worktree's. The demo has one such session in atlas-web
+  its worktree the folder it ran in, where a resumed turn runs. The demo has one such session in atlas-web
   ([the guide](../guide/agents.md#t3-code)). Seen on a real install (T3 Code
   0.1.11, Claude Code 2.1.288): the hook environment has
   `CLAUDE_CODE_ENTRYPOINT=t3-code` and `T3CODE_THREAD_ID`, kept for starting
