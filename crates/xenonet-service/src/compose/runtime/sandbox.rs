@@ -6,7 +6,10 @@
 //! a record is written before the run starts (no record, no run), renewed
 //! by every turn, written for a copy when its stream names it, and not
 //! swept by age; a session started for anyone but the person that has none
-//! is refused, never run bare.
+//! is refused, never run bare. That session is also marked in the store
+//! ("confined: vendor, for <who>") before its run, for as long as it exists,
+//! so deleting its record file, or a store that can't be read, refuses its
+//! turns rather than running them bare.
 //!
 //! A sandboxed run's environment is the one an ACP agent gets
 //! (`xenonet_acp::agent_env`): the service's without XenoNet's own
@@ -28,6 +31,30 @@ const MAX_KEPT: usize = 5000;
 pub struct Record {
     pub folder: String,
     pub domains: Vec<String>,
+    /// Who the run was started for when it isn't the person's own ("a
+    /// session on contractor-vm", "an intent"): the store keeps it as a
+    /// mark that outlives the record's file.
+    pub for_others: Option<String>,
+}
+
+/// The store's key for a confined session's mark, in its settings.
+fn mark_key(session: &str) -> String {
+    format!("confined:{session}")
+}
+
+/// Marks `session` in the store as confined at the vendor level, for `who`.
+/// A mark is never taken back: the session may be resumed as long as it
+/// exists.
+fn mark(w: &Runtime, session: &str, who: &str) -> Result<(), String> {
+    let v = json!({ "level": "vendor", "for": who, "at": xenonet_net::node::now_ms() });
+    w.store.0.db().set_setting(&mark_key(session), Some(&v)).map_err(|e| format!("the sandbox of {session} couldn't be kept in the store ({}), and a session that can't be held to its sandbox later isn't started", e.message))
+}
+
+/// Who `session` was started for, if the store marks it as confined for
+/// anyone but the person; Err when the store can't say.
+pub fn confined_for(w: &Runtime, session: &str) -> Result<Option<String>, String> {
+    let v = w.store.0.db().setting(&mark_key(session)).map_err(|e| e.message)?;
+    Ok((!v.is_null()).then(|| v["for"].as_str().unwrap_or("someone else").to_string()))
 }
 
 fn dir(w: &Runtime) -> PathBuf {
@@ -44,8 +71,12 @@ fn name(session: &str) -> String {
 /// without the sandbox. Keeping it again renews it, so a session in use
 /// never ages out.
 pub fn keep(w: &Runtime, session: &str, r: &Record) -> Result<(), String> {
+    // The store's mark first: no mark, no record, no run.
+    if let Some(who) = &r.for_others {
+        mark(w, session, who)?;
+    }
     let d = dir(w);
-    let text = json!({ "folder": r.folder, "domains": r.domains }).to_string();
+    let text = json!({ "folder": r.folder, "domains": r.domains, "for": r.for_others }).to_string();
     let file = d.join(name(session));
     let part = d.join(format!("{}.part", name(session)));
     write_private(&part, &text).and_then(|()| std::fs::rename(&part, &file)).map_err(|e| {
@@ -58,7 +89,11 @@ pub fn keep(w: &Runtime, session: &str, r: &Record) -> Result<(), String> {
 
 fn read(w: &Runtime, session: &str) -> Option<Record> {
     let v: Value = serde_json::from_str(&std::fs::read_to_string(dir(w).join(name(session))).ok()?).ok()?;
-    Some(Record { folder: v["folder"].as_str()?.to_string(), domains: v["domains"].as_array()?.iter().filter_map(|d| d.as_str().map(str::to_string)).collect() })
+    Some(Record {
+        folder: v["folder"].as_str()?.to_string(),
+        domains: v["domains"].as_array()?.iter().filter_map(|d| d.as_str().map(str::to_string)).collect(),
+        for_others: v["for"].as_str().map(str::to_string),
+    })
 }
 
 /// The sandbox `session` was started with, or the one of the session it is
@@ -76,21 +111,43 @@ pub fn fork_named(w: &Runtime, child: &str, parent: &Record) -> Result<(), Strin
 
 /// The sandbox a turn for `session` runs in, with its record renewed; or
 /// why no turn is run for it. None is for a session XenoNet never started
-/// sandboxed. A session XenoNet started for anyone but the person (under a
-/// delegation or for an intent, the store says) with no readable record is
-/// refused, never run bare, and so is one whose record can't be read.
+/// confined. A session XenoNet started for anyone but the person (the store
+/// marks it, and keeps the mark as long as the session exists) with no
+/// readable record is refused, never run bare, and so is one whose record
+/// or mark can't be read.
 pub fn for_turn(w: &Runtime, session: &str) -> Result<Option<Record>, String> {
     let root = crate::compose::runtime::starts::fork_root(w, session);
     let stored = |s: &str| dir(w).join(name(s)).exists();
-    if let Some(rec) = of(w, session) {
-        keep(w, session, &rec).map_err(|e| format!("that session's sandbox couldn't be renewed, so no turn is run for it: {e}"))?;
+    let rec = of(w, session);
+    // The sessions whose marks count: this one, and the one it is a copy of.
+    let marks: Vec<Result<Option<String>, String>> = std::iter::once(session).chain(root.as_deref()).map(|s| confined_for(w, s)).collect();
+    let delegated = std::iter::once(session).chain(root.as_deref()).any(|s| crate::compose::runtime::starts::delegated(w, s).is_some());
+    let record_file = stored(session) || root.as_deref().is_some_and(stored);
+    let rec = verdict(rec, record_file, &marks, delegated)?;
+    if let Some(rec) = &rec {
+        keep(w, session, rec).map_err(|e| format!("that session's sandbox couldn't be renewed, so no turn is run for it: {e}"))?;
+    }
+    Ok(rec)
+}
+
+/// What a turn may do given what is known of its session: its record (if
+/// one reads), whether a record file is there at all, the store's marks
+/// (this session's and its original's) and whether it was started under a
+/// delegation. A read that failed is a refusal, never "not confined".
+fn verdict(rec: Option<Record>, record_file: bool, marks: &[Result<Option<String>, String>], delegated: bool) -> Result<Option<Record>, String> {
+    if let Some(e) = marks.iter().find_map(|m| m.as_ref().err()) {
+        return Err(format!("whether that session was started confined can't be read ({e}), so no turn is run for it"));
+    }
+    if let Some(rec) = rec {
         return Ok(Some(rec));
     }
-    if stored(session) || root.as_deref().is_some_and(stored) {
+    if record_file {
         return Err("that session was started sandboxed and its sandbox can't be read, so no turn is run for it".into());
     }
-    let for_others = |s: &str| crate::compose::runtime::starts::delegated(w, s).is_some();
-    if for_others(session) || root.as_deref().is_some_and(for_others) {
+    if let Some(who) = marks.iter().flatten().flatten().next() {
+        return Err(format!("that session was started for {who}, in a sandbox XenoNet has no record of now, so no turn is run for it"));
+    }
+    if delegated {
         return Err("that session was started for someone else, in a sandbox XenoNet has no record of now, so no turn is run for it".into());
     }
     Ok(None)
@@ -213,6 +270,30 @@ mod tests {
         left.sort();
         assert_eq!(left, ["3.json", "4.json"]);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_session_marked_confined_is_refused_without_its_record_and_when_the_store_cant_say() {
+        let rec = Record { folder: "/w".into(), domains: Vec::new(), for_others: Some("a session on contractor-vm".into()) };
+        let marked = Ok(Some("a session on contractor-vm".to_string()));
+        let unmarked: Result<Option<String>, String> = Ok(None);
+        // Positive control: with its record, it runs confined.
+        assert_eq!(verdict(Some(rec.clone()), true, &[marked.clone()], false), Ok(Some(rec.clone())));
+        // Without its record, the mark refuses it, for the session or the one it is a copy of.
+        let why = verdict(None, false, &[marked.clone()], false).unwrap_err();
+        assert!(why.contains("started for a session on contractor-vm"), "{why}");
+        assert!(verdict(None, false, &[unmarked.clone(), marked], false).is_err());
+        // A store that can't be read refuses, with or without a record, never "not confined".
+        let broken: Result<Option<String>, String> = Err("the database is locked".into());
+        for have in [Some(rec), None] {
+            let why = verdict(have, false, &[broken.clone()], false).unwrap_err();
+            assert!(why.contains("can't be read") && why.contains("the database is locked"), "{why}");
+        }
+        // A record file that doesn't read, and an old delegation row, still refuse.
+        assert!(verdict(None, true, &[unmarked.clone()], false).is_err());
+        assert!(verdict(None, false, &[unmarked.clone()], true).is_err());
+        // Nothing known of it: not confined, as before.
+        assert_eq!(verdict(None, false, &[unmarked], false), Ok(None));
     }
 
     #[test]

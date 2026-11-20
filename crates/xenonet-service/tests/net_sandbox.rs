@@ -109,7 +109,7 @@ async fn a_start_from_another_machine_without_the_sandbox_is_refused() {
     t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: older_start(&t, 1, &atlas, None) }).unwrap();
     until("desk logs the refusal", 20, || async { t.desk.logged("start").iter().any(|l| l.contains("was refused")) }).await;
     let refused = t.desk.logged("start").join("\n");
-    assert!(refused.contains("sandbox"), "the refusal says why: {refused}");
+    assert!(refused.contains("a start from contractor-vm was refused: a run started by anyone but the person runs in its app's sandbox: this start asked for none"), "the refusal says why: {refused}");
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
     // The control: the same frame with the sandbox in it runs.
@@ -253,7 +253,7 @@ async fn a_turn_resumed_for_a_sandboxed_session_is_sandboxed_too() {
     let t = two_networks_ended(&root).await;
     t.desk.world.starts.set_environment(service_env());
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
-    let record = xenonet_service::compose::runtime::sandbox::Record { folder: atlas.clone(), domains: Vec::new() };
+    let record = xenonet_service::compose::runtime::sandbox::Record { folder: atlas.clone(), domains: Vec::new(), for_others: None };
     xenonet_service::compose::runtime::sandbox::keep(&t.desk.world, DESK_ATLAS_ENDED, &record).unwrap();
     until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS_ENDED).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
     let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "work", "host": "desk", "wake": "network" })).await;
@@ -301,7 +301,7 @@ async fn a_record_that_is_old_still_holds_its_session_sandboxed_and_a_turn_renew
     let root = root("sandbox-old");
     let t = two_networks_ended(&root).await;
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
-    let record = xenonet_service::compose::runtime::sandbox::Record { folder: atlas.clone(), domains: Vec::new() };
+    let record = xenonet_service::compose::runtime::sandbox::Record { folder: atlas.clone(), domains: Vec::new(), for_others: None };
     let w = &t.desk.world;
     xenonet_service::compose::runtime::sandbox::keep(w, DESK_ATLAS_ENDED, &record).unwrap();
     long_ago(&record_file(&t, DESK_ATLAS_ENDED));
@@ -325,14 +325,52 @@ async fn a_session_started_for_a_delegation_with_no_record_is_not_resumed_bare()
     let root = root("sandbox-lost");
     let t = two_networks_ended(&root).await;
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    // The control: the same session with its record resumes, sandboxed.
+    let record = xenonet_service::compose::runtime::sandbox::Record { folder: atlas.clone(), domains: Vec::new(), for_others: None };
+    xenonet_service::compose::runtime::sandbox::keep(&t.desk.world, DESK_ATLAS_ENDED, &record).unwrap();
+    wake_atlas(&t, 2).await;
+    let (args, _) = ran(&t.desk, 1).await;
+    assert!(args.iter().any(|a| a == "--strict-mcp-config"), "{args:?}");
     // The store says desk started it for contractor-vm under a delegation;
     // its sandbox record is gone.
     let d = xenonet_store::delivery::Delegated { cwd: atlas, from: Some("contractor-vm".into()), at: now_ms(), intent: None };
     t.desk.world.store.0.db().put_delegated(DESK_ATLAS_ENDED, &d, 7.0 * 24.0 * 3600e3).unwrap();
-    assert!(!record_file(&t, DESK_ATLAS_ENDED).exists());
-    wake_atlas(&t, 2).await;
+    std::fs::remove_file(record_file(&t, DESK_ATLAS_ENDED)).unwrap();
+    wake_atlas(&t, 3).await;
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(fake_runs(&t.desk).len(), 0, "no turn ran, bare or otherwise");
+    assert_eq!(fake_runs(&t.desk).len(), 1, "no second turn ran, bare or otherwise");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A start from another machine that is no delegation (the start setting is
+/// `network`) is marked in the store, for as long as the session exists:
+/// with its record file gone its next turn is refused, and with the store
+/// unreadable it is too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_session_started_for_another_machine_is_never_resumed_bare_even_with_its_record_gone() {
+    use xenonet_service::compose::runtime::sandbox;
+    let root = root("sandbox-marked");
+    let t = two_networks(&root).await;
+    desk_takes_starts(&t).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    let (s, v) = as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": "tidy atlas", "domains": [] })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let (args, _) = ran(&t.desk, 1).await;
+    let session = format!("claude:{}", args[2]);
+    assert!(t.desk.world.store.0.db().delegated(&session).unwrap().is_none(), "no delegation: the start setting is network");
+    let w = &t.desk.world;
+    // The control: with its record, a turn for it is sandboxed as it was.
+    let rec = sandbox::for_turn(w, &session).unwrap().expect("a record");
+    assert_eq!((rec.folder.as_str(), rec.for_others.is_some()), (atlas.as_str(), true));
+    assert!(sandbox::confined_for(w, &session).unwrap().is_some_and(|who| who.contains("contractor-vm")), "marked in the store, for whom");
+    // Its record file is gone: the mark holds it.
+    std::fs::remove_file(record_file(&t, &session)).unwrap();
+    assert_eq!(sandbox::of(w, &session), None);
+    let why = sandbox::for_turn(w, &session).unwrap_err();
+    assert!(why.contains("started for a session on contractor-vm") && why.contains("no turn is run for it"), "{why}");
+    // A session XenoNet never started confined has no mark and is as before.
+    assert_eq!(sandbox::for_turn(w, "claude:0190d3e0-0000-7000-8000-0000000d0099"), Ok(None));
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -347,7 +385,7 @@ async fn a_sandboxed_start_whose_record_cannot_be_written_does_not_run() {
     std::fs::write(std::path::Path::new(&t.desk.world.setup.state_dir).join("sandboxed"), "in the way").unwrap();
     let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas", "sandbox": true })).await;
     assert_eq!(s, 409, "{v}");
-    assert!(v["error"].as_str().is_some_and(|e| e.contains("sandbox")), "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("couldn't be kept") && e.contains("a session that can't be held to its sandbox later isn't started")), "{v}");
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
     drop(t);
@@ -358,15 +396,26 @@ async fn a_sandboxed_start_whose_record_cannot_be_written_does_not_run() {
 async fn a_copy_forked_from_a_sandboxed_session_stays_sandboxed_across_a_restart() {
     use xenonet_service::compose::runtime::{sandbox, starts};
     let root = root("sandbox-fork");
-    let t = two_networks_ended(&root).await;
+    let t = two_networks_in(&root, false, false, false, true).await;
     let w = &t.desk.world;
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
-    let (parent, child) = (DESK_ATLAS_ENDED, "claude:0190d3e0-0000-7000-8000-0000000f0f01");
-    let record = sandbox::Record { folder: atlas, domains: vec!["github.com".into()] };
-    sandbox::keep(w, parent, &record).unwrap();
-    // The copy is named by its stream: kept as sandboxed in its own right.
-    starts::note_fork(w, child, parent);
-    sandbox::fork_named(w, child, &record).unwrap();
+    let child = "claude:0190d3e0-0000-7000-8000-0000000f0f01";
+    let record = sandbox::Record { folder: atlas, domains: vec!["github.com".into()], for_others: Some("a session on contractor-vm".into()) };
+    sandbox::keep(w, DESK_ATLAS_ENDED, &record).unwrap();
+    // A message for the session wakes it, and it is open, so XenoNet runs a copy.
+    let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "work", "host": "desk", "wake": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS_ENDED).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let frame = json!({
+        "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-000000000091", "sender": VM_ATLAS, "senderKind": "agent", "agent": t.contractor.agt(VM_ATLAS),
+        "target": t.desk.agt(DESK_ATLAS_ENDED), "body": "The fixtures moved.", "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now_ms() as i64,
+    });
+    t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: frame }).unwrap();
+    let (args, _) = ran(&t.desk, 1).await;
+    assert!(args.iter().any(|a| a == "--fork-session") && args.iter().any(|a| a == "--strict-mcp-config"), "a sandboxed copy: {args:?}");
+    // Its stream names the copy: XenoNet links it and keeps it as sandboxed in its own right.
+    until("the copy is named and sandboxed", 20, || async { sandbox::of(w, child) == Some(record.clone()) && starts::forks(w).iter().any(|(c, p)| c == child && p == DESK_ATLAS_ENDED) }).await;
+    assert_eq!(sandbox::confined_for(w, child), Ok(Some("a session on contractor-vm".to_string())), "and marked in the store");
     // A restart forgets whose copy it is; it is still sandboxed, and a turn for it is too.
     starts::forget_forks(w);
     assert_eq!(sandbox::of(w, child), Some(record.clone()));

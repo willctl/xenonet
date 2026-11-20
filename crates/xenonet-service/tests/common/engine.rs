@@ -568,27 +568,34 @@ pub async fn two_networks(root: &Path) -> TwoNetworks {
 
 /// `two_networks`, with `contractor-vm` a window host of N2 when `guest_window`.
 pub async fn two_networks_with(root: &Path, guest_window: bool) -> TwoNetworks {
-    two_networks_in(root, guest_window, false, false).await
+    two_networks_in(root, guest_window, false, false, false).await
 }
 
 /// `two_networks`, with the session of `desk` in atlas (`DESK_ATLAS_ENDED`
 /// in place of `DESK_ATLAS`) ended: its process has gone, so a message it
 /// may be woken for resumes it.
 pub async fn two_networks_ended(root: &Path) -> TwoNetworks {
-    two_networks_in(root, false, true, false).await
+    two_networks_in(root, false, true, false, false).await
 }
 
 /// `two_networks_ended`, with the session in ledger (`DESK_LEDGER_ENDED`)
 /// ended too, so a wake that wrongly reached it would show.
 pub async fn two_networks_all_ended(root: &Path) -> TwoNetworks {
-    two_networks_in(root, false, true, true).await
+    two_networks_in(root, false, true, true, false).await
 }
 
-async fn two_networks_in(root: &Path, guest_window: bool, atlas_ended: bool, ledger_ended: bool) -> TwoNetworks {
+/// The general form: `atlas_idle` leaves the session in atlas open and idle
+/// (its app holds it) with `DESK_ATLAS_ENDED`'s id, a UUID a resume takes, so a
+/// wake runs a copy of it, not the session.
+pub async fn two_networks_in(root: &Path, guest_window: bool, atlas_ended: bool, ledger_ended: bool, atlas_idle: bool) -> TwoNetworks {
     let desk_atlas = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "main");
     let desk_ledger = clone(&root.join("desk/home/ledger"), "git@github.com:acme/ledger.git", "main");
     let vm_atlas = clone(&root.join("contractor-vm/home/atlas"), "https://github.com/acme/atlas", "main");
     let mut atlas_session = sess(DESK_ATLAS, "Add partial refunds", &desk_atlas);
+    if atlas_idle {
+        atlas_session.id = DESK_ATLAS_ENDED;
+        atlas_session.live = json!({ "status": "idle", "lastEventAt": now_ms() - 200e3 });
+    }
     if atlas_ended {
         let t = now_ms();
         atlas_session.id = DESK_ATLAS_ENDED;

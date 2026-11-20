@@ -535,8 +535,15 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // unattended, and its last words go out as the outcome: for what is
     // allowed it is not the person's own run.
     let own = kind == Kind::You && start.intent.is_none();
+    // Who a run that isn't the person's own is for: the store marks its
+    // session as confined for them, so it is never resumed bare.
+    let for_others = (!own).then(|| match (&start.intent, from) {
+        (Some(_), _) => "an intent".to_string(),
+        (None, Some(machine)) => format!("a {} on {machine}", kind.as_str()),
+        (None, None) => format!("a {} here", kind.as_str()),
+    });
     let record = match (r.confine.domains(), kind) {
-        (Some(domains), _) => Some(sandbox::Record { folder: cwd.clone(), domains: domains.to_vec() }),
+        (Some(domains), _) => Some(sandbox::Record { folder: cwd.clone(), domains: domains.to_vec(), for_others }),
         (None, Kind::You) => None,
         (None, _) => return Err("a run started by anyone but the person runs in its app's sandbox: this start asked for none".into()),
     };
