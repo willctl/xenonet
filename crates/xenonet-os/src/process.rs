@@ -175,9 +175,10 @@ impl Held {
         let mut ends: Option<(OwnedFd, OwnedFd)> = None;
         if let Some(g) = &give {
             let strays = left_open();
+            let ceiling = fd_ceiling();
             let (read, write) = std::io::pipe()?;
             let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
-            give_fd(&mut cmd, read.as_raw_fd(), g.at, strays);
+            give_fd(&mut cmd, read.as_raw_fd(), g.at, strays, ceiling);
             ends = Some((read, write));
         }
         let mut child = cmd.spawn()?;
@@ -250,15 +251,15 @@ impl Drop for Held {
 
 #[cfg(unix)]
 #[expect(unsafe_code, reason = "pre_exec, which std marks unsafe")]
-fn give_fd(cmd: &mut std::process::Command, from: libc::c_int, at: libc::c_int, strays: Vec<libc::c_int>) {
+fn give_fd(cmd: &mut std::process::Command, from: libc::c_int, at: libc::c_int, strays: Vec<libc::c_int>, ceiling: libc::c_int) {
     use std::os::unix::process::CommandExt;
-    // SAFETY: the closure makes only dup2, fcntl, close and syscall calls,
+    // SAFETY: the closure makes only dup2, fcntl and syscall calls,
     // which are async-signal-safe, and touches no memory of the parent's but
     // the list it owns.
     unsafe {
         cmd.pre_exec(move || {
             place(from, at)?;
-            shut(&strays, at);
+            shut(&strays, at, ceiling);
             Ok(())
         });
     }
@@ -280,14 +281,32 @@ fn left_open() -> Vec<libc::c_int> {
         .collect()
 }
 
-/// In the child, after `place`: no descriptor but 0 to `at` goes through the
-/// exec. On Linux every one from `at` + 1 up is marked close-on-exec, the
-/// ones made after `left_open` looked too (the pipe std reports a failed
-/// exec on is close-on-exec already, so it keeps working); elsewhere (or on a
-/// Linux without close_range) the ones `left_open` found are closed.
+/// How far up the child looks for descriptors to keep from the exec: the
+/// soft limit on open files, read in the parent, capped so a huge limit
+/// doesn't make every start slow.
 #[cfg(unix)]
-#[expect(unsafe_code, reason = "close_range(2) and close(2), which std doesn't wrap")]
-fn shut(strays: &[libc::c_int], at: libc::c_int) {
+#[expect(unsafe_code, reason = "getrlimit(2), which std doesn't wrap")]
+fn fd_ceiling() -> libc::c_int {
+    const CAP: libc::c_int = 65_536;
+    let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit writes only the struct it's given.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut lim) } != 0 {
+        return CAP;
+    }
+    libc::c_int::try_from(lim.rlim_cur).map_or(CAP, |n| n.min(CAP))
+}
+
+/// In the child, after `place`: no descriptor but 0 to `at` goes through the
+/// exec. On Linux every one from `at` + 1 up is marked close-on-exec with
+/// close_range. Elsewhere (or on a Linux without it) each one from `at` + 1
+/// up to `ceiling`, and any `left_open` found above that, is marked
+/// close-on-exec where it isn't already. Marking rather than closing never
+/// touches the pipe std reports a failed exec on (it is close-on-exec
+/// already), even when another thread closed a listed number and std's pipe
+/// took it, and it covers descriptors opened after `left_open` looked.
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "close_range(2) and fcntl(2), which std doesn't wrap")]
+fn shut(strays: &[libc::c_int], at: libc::c_int, ceiling: libc::c_int) {
     #[cfg(target_os = "linux")]
     {
         const CLOSE_RANGE_CLOEXEC: libc::c_uint = 1 << 2;
@@ -297,12 +316,22 @@ fn shut(strays: &[libc::c_int], at: libc::c_int) {
             return;
         }
     }
-    for &fd in strays {
-        if fd > at {
-            // SAFETY: close on a number; one already closed answers EBADF, which is ignored.
-            unsafe {
-                libc::close(fd);
+    let keep = |fd: libc::c_int| {
+        // SAFETY: F_GETFD and F_SETFD on a number read and set only its
+        // flags; one that isn't open answers -1, which is skipped.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags >= 0 && flags & libc::FD_CLOEXEC == 0 {
+                libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
             }
+        }
+    };
+    for fd in (at + 1)..ceiling {
+        keep(fd);
+    }
+    for &fd in strays {
+        if fd >= ceiling {
+            keep(fd);
         }
     }
 }
