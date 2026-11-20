@@ -48,12 +48,13 @@ Scenario 1 needs no new code, only both machines on a current release.
   machine can ignore anything XenoNet does there; what protects her is
   that her own machines decide ([the guide](../guide/network.md#working-on-a-machine-you-dont-own)).
 - **Sandboxed starts.** Each harness's own sandbox, driven by XenoNet, with
-  the setting inside the signed start so nothing between her signature
+  the confinement level inside the signed start (`off`, `vendor` or
+  `cell`, [confinement](confinement.md)) so nothing between her signature
   and the run can drop it ([the guide](../guide/sandbox.md)). A start from
   anyone but her (another machine, a delegation, an intent, an actor) that
-  says no sandbox, or nothing, is refused by `xenonet-authz`; a start she
-  makes herself has a switch, off on her own machine and on for another
-  (decision taken for Nova), and the default allowed domains are none
+  says `off`, `cell` or nothing is refused by `xenonet-authz`; a start she
+  makes herself has a level, `off` on her own machine and `vendor` for
+  another (decision taken for Nova), and the default allowed domains are none
   (decision taken). Claude Code gets one settings file per run that
   replaces the repo's own settings and servers; Codex gets
   `--sandbox workspace-write`, approvals never and no network, and refuses

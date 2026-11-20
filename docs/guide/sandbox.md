@@ -2,11 +2,23 @@
 
 A session that isn't yours to watch should run where it can't do much harm. XenoNet uses each app's own sandbox for that: it turns the app's sandbox on for a run, with limits you can read below, and refuses the start if the app has none to turn on. XenoNet has no sandbox of its own.
 
+## Levels
+
+A start names how confined it is, one of three levels. The level is part of the start you sign, with the domains for `vendor` and the wall for `cell`, so nothing between your signature and the run can change it.
+
+| Level | What it is |
+| --- | --- |
+| `off` | The app's own settings. Only you can start at this level. |
+| `vendor` | The app's own sandbox, which the rest of this page describes. The only level a start from anyone but you may have. |
+| `cell` | A sealed Adytum cell behind the wall of the identity that signs the start ([confinement](../design/confinement.md)). It is yours alone, and cell starts aren't wired yet: asking for one is refused in words and nothing runs. |
+
+The wall of a `cell` start is worked out from your identity on the machine that runs the start. A request never names one: a request that does is refused. A start without a level is refused, never defaulted, so an older XenoNet that doesn't know the field is refused too, unless the start is yours.
+
 ## What starts sandboxed
 
-- **Always sandboxed:** a start from another machine that isn't yours, a delegated start, the run of an intent, and a start from a session or an actor. This is checked by the machine that runs it, on the signed start itself: a start that says nothing about the sandbox, or that it is off, is refused, so an older XenoNet that doesn't know the field is refused too, never run bare. A machine whose XenoNet is too old to say it takes a sandboxed start is never given one.
-- **Yours to choose:** a start you make yourself at a console. On this machine the switch is off by default; on another machine it is on. In the console, tick **Run it in its app's sandbox** in Start a session. In a terminal it is `--sandbox` or `--no-sandbox`. The `start_session` tool takes `sandbox` and `domains`, but a session can only say true: a session or an actor that sends false is refused before anything goes out.
-- **Older machines:** a machine whose XenoNet is too old to take a sandboxed start is never given one. So your own start on another machine, and a delegation to it, fail with a 409 until it is updated, unless you start your own with `--no-sandbox`; a delegation has no such way. An intent for Grok Build or Hermes Agent always fails, because the intent's run is always sandboxed and those two have no sandbox to drive.
+- **Always `vendor`:** a start from another machine that isn't yours, a delegated start, the run of an intent, and a start from a session or an actor. This is checked by the machine that runs it, on the signed start itself: a start that says nothing about its level, or says `off` or `cell`, is refused, so an older XenoNet that doesn't know the field is refused too, never run bare. A machine whose XenoNet is too old to say it takes a sandboxed start is never given one.
+- **Yours to choose:** a start you make yourself at a console. On this machine the level is `off` by default; on another machine it is `vendor`. In the console, pick **Off** or **Its app's sandbox** under Confinement in Start a session. In a terminal it is `--confine off|vendor|cell`, with `--sandbox` and `--no-sandbox` as older ways to say `vendor` and `off`. The `start_session` tool takes `confine` (or the older `sandbox`) and `domains`, but a session can only say `vendor`: a session or an actor that asks for `off` or `cell` is refused before anything goes out.
+- **Older machines:** a machine whose XenoNet is too old to take a sandboxed start is never given one. So your own start on another machine, and a delegation to it, fail with a 409 until it is updated, unless you start your own with `--confine off`; a delegation has no such way. An intent for Grok Build or Hermes Agent always fails, because the intent's run is always `vendor` and those two have no sandbox to drive.
 - **Folder:** a sandbox is a project folder. A sandboxed start whose folder is your home folder (`~`, which is the default when none is named), the root of the disk or a folder that holds your home folder is refused, by the machine that runs it. Otherwise the run could write all of home.
 - **Domains:** a sandboxed run reaches none by default. Name the ones it may reach with `--allow github.com,*.npmjs.org`, the page's domains box, or `domains`. Your own start may name any. A start from anyone else (a session, an actor, another machine, a delegation) may name only domains you allowed on the machine that runs it: `xenonet runs domains set github.com '*.npmjs.org'`, `xenonet runs domains` to read them and `xenonet runs domains clear` to take them away. A name is allowed by the same name, or by a `*.` entry that holds it as a subdomain. Only you set the list.
 
