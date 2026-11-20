@@ -2,7 +2,7 @@
 //! sign-in, the sessions folder, and whether its threads are connected.
 
 use async_trait::async_trait;
-use xenonet_adapter::check::{connected, folder, release, privacy_fix, s, Facts, Folder};
+use xenonet_adapter::check::{connected, folder, privacy_fix, release, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 use xenonet_os::nodepath::{style_of, NATIVE};
 use xenonet_text::text::{display, truthy};

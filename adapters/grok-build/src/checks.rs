@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use xenonet_adapter::check::{connected, folder, list, release, privacy_fix, s, Facts, Folder};
+use xenonet_adapter::check::{connected, folder, list, privacy_fix, release, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 use xenonet_os::nodepath::style_of;
 use xenonet_text::text::{display, truthy};
@@ -194,7 +194,17 @@ mod tests {
     #[test]
     fn the_rows_are_the_apps_then_its_sessions() {
         let rows: Vec<(&str, Slot)> = all().iter().map(|c| (c.row().id, c.row().slot)).collect();
-        assert_eq!(rows, [("grok.cli", Slot::App), ("grok.release", Slot::App), ("grok.auth", Slot::App), ("grok.sessions", Slot::App), ("grok.hooks", Slot::App), ("agents.grok", Slot::Sessions)]);
+        assert_eq!(
+            rows,
+            [
+                ("grok.cli", Slot::App),
+                ("grok.release", Slot::App),
+                ("grok.auth", Slot::App),
+                ("grok.sessions", Slot::App),
+                ("grok.hooks", Slot::App),
+                ("agents.grok", Slot::Sessions)
+            ]
+        );
     }
 
     #[test]

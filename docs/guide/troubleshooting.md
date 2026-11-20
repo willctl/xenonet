@@ -57,6 +57,8 @@ This prints the same summary as Markdown, ready to paste into an issue (`--json`
 
 **The doctor says Codex or Grok Build is "not installed".** That's a note, not a problem: XenoNet shows the app's sessions once it's installed, and the checks that need it are skipped until then. A Codex that isn't installed doesn't count against "XenoNet can read what it shows" or "XenoNet's parts are working" either.
 
+**The doctor says XenoNet's reader was last checked against an older version than the one installed.** Nothing is broken yet. Watch the map for that app's sessions; if one looks wrong, run `xenonet drift` to see what changed in the data and which version it was first seen with. The reader is checked against a new version when XenoNet's maintainers update it.
+
 **The doctor says "connected, but … is gone".** XenoNet's hooks run files that aren't there any more, often from a checkout that was moved or deleted. Run `xenonet connect`. Each XenoNet on the computer (the installed one, XenoNet Dev) keeps its own hooks and MCP server, so connecting one never removes the other's.
 
 **The doctor says `xenonet.sqlite` "was made by another XenoNet", or that `engine.sqlite` "is from an earlier XenoNet".** XenoNet never migrates its store. It leaves the old file as it is and doesn't use it. Set the machine up again: move the state folder aside (or delete it once you're sure), start XenoNet, and join your network again. Networks, identities and actor grants made by another build are made again too.

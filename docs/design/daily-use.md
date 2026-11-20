@@ -97,13 +97,26 @@ Scenario 1 needs no new code, only both machines on a current release.
   refused; taking a folder away takes XenoNet's hooks out of it. Left: the page has
   no place to name folders yet, and the saved folders take effect only after
   the service starts again.
+- **Release watch.** The app registry records, per app, the version its
+  readers were last checked against (`checked`: Claude Code 2.1.327 and
+  Codex 0.150.0, which the repo's own code and golden world pin, and Grok
+  Build 1.0.77, the version installed when it was set because nothing
+  pins one). `claude.release`, `codex.release` and `grok.release` in the
+  doctor run the app's own `--version` (4 second timeout, no network) and
+  compare: a newer version warns with both versions, an older one is a
+  note, an app that isn't installed is skipped, and a probe that hangs or
+  prints no version is said plainly. The drift warning names the version a
+  change was first seen with. Decisions taken: the check is one row per
+  app beside its `.cli` row, since the doctor stays read-only and offline;
+  only apps with a version probe and a native reader have a checked
+  version (Hermes and Claude desktop have neither); prerelease tags are
+  ignored in the comparison. Left: asking vendors for their latest
+  version, and the weekly routine that moves `checked` after a manual
+  check; both are outside the doctor.
 
 ## Next
 
 - **More apps on the map**, through their own documented interfaces.
-- **Release watch.** The app registry records which version each reader
-  was last checked against, and `xenonet doctor` compares it with what is
-  installed.
 
 ## Open
 

@@ -33,7 +33,13 @@ pub struct Fake {
 
 impl Default for Fake {
     fn default() -> Self {
-        Fake { run: Box::new(|file, args| json!({ "stdout": format!("ran {file} {}", args.first().unwrap_or(&"")), "code": 0 })), login: None, network: None, drift: None, missing: Vec::new() }
+        Fake {
+            run: Box::new(|file, args| json!({ "stdout": format!("ran {file} {}", args.first().unwrap_or(&"")), "code": 0 })),
+            login: None,
+            network: None,
+            drift: None,
+            missing: Vec::new(),
+        }
     }
 }
 

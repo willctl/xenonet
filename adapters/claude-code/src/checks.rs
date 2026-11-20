@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use xenonet_adapter::check::{connected, folder, release, privacy_fix, s, Facts, Folder};
+use xenonet_adapter::check::{connected, folder, privacy_fix, release, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 use xenonet_text::text::{display, truthy};
 use xenonet_text::units::plural;

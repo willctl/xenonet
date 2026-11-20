@@ -189,7 +189,10 @@ pub async fn release(c: &dyn CheckCtx, app: &str, bin: Option<String>) -> Result
         ));
     }
     let Some((have, got)) = version_in(&s(r.get("stdout"))) else {
-        return Ok(Verdict::info(format!("couldn't read a version from {} --version, so XenoNet can't say whether its reader has been checked against this {name}", c.tilde(&bin)), None));
+        return Ok(Verdict::info(
+            format!("couldn't read a version from {} --version, so XenoNet can't say whether its reader has been checked against this {name}", c.tilde(&bin)),
+            None,
+        ));
     };
     Ok(match got.cmp(&want) {
         std::cmp::Ordering::Equal => Verdict::ok(format!("{name} {have} is the version XenoNet's reader was last checked against")),

@@ -469,8 +469,11 @@ pub async fn run_with(host: &dyn DoctorHost, id: String, facts: Facts, adapters:
             let addition = |r: &Value| r.get("kind").and_then(Value::as_str).is_some_and(|k| xenonet_schema::drift::ADDITIONS.contains(&k));
             let changes: Vec<&Value> = fresh.iter().copied().filter(|r| !addition(r)).collect();
             let shown: Vec<&Value> = changes.iter().copied().chain(fresh.iter().copied().filter(|r| addition(r))).collect();
-            let named: Vec<String> =
-                shown.iter().take(2).map(|r| format!("{}: {}{}", xenonet_schema::drift::source_name(&s(r.get("source"))), xenonet_schema::drift::describe(r), first_seen_with(r))).collect();
+            let named: Vec<String> = shown
+                .iter()
+                .take(2)
+                .map(|r| format!("{}: {}{}", xenonet_schema::drift::source_name(&s(r.get("source"))), xenonet_schema::drift::describe(r), first_seen_with(r)))
+                .collect();
             let more = if shown.len() > 2 { format!("; and {} more", shown.len() - 2) } else { String::new() };
             let say = format!("{}{more}", named.join("; "));
             let file = d.get("file").filter(|v| !v.is_null()).map_or_else(|| xenonet_schema::drift::DRIFT_FILE.to_string(), display);
@@ -1070,9 +1073,7 @@ mod tests {
 
     #[test]
     fn a_change_in_what_an_app_writes_names_the_version_it_came_with() {
-        let record = |version: Value, path: &str| {
-            json!({ "source": "anthropic/claude-code/transcript-line", "vendorVersion": version, "kind": "type-change", "path": path, "shape": "string", "firstSeen": 5.0, "lastSeen": 6.0, "count": 2 })
-        };
+        let record = |version: Value, path: &str| json!({ "source": "anthropic/claude-code/transcript-line", "vendorVersion": version, "kind": "type-change", "path": path, "shape": "string", "firstSeen": 5.0, "lastSeen": 6.0, "count": 2 });
         let host = Fake { drift: Some(json!({ "lookedAt": 1.0, "records": [record(json!("2.1.340"), "message.id"), record(Value::Null, "uuid")] })), ..Fake::default() };
         let v = ready(run(&host, "contracts.drift".into(), Facts { data: json!({ "home": "/Users/ada" }) })).unwrap();
         assert_eq!(v["status"], json!("warn"));

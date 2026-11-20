@@ -70,6 +70,7 @@ A command exits 0 when it did what you asked, 1 when it failed or found a proble
 `xenonet doctor` checks these:
 
 - that Claude Code and Codex are installed and signed in, and Grok Build if you use it
+- that the installed Claude Code, Codex and Grok Build are the version XenoNet's readers were last checked against, or newer or older, which it says
 - that XenoNet can read their sessions and your projects folder
 - git, the runtime, XenoNet itself and the command
 - whether Claude Code, Codex and Grok Build are connected, and whether Grok Build runs XenoNet's hooks
