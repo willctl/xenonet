@@ -83,12 +83,15 @@ async fn told(t: &TwoNetworks, what: &str) -> String {
 
 /// The frame an older XenoNet on `contractor-vm` sends for a start in
 /// `folder`: the request as it wrote it, which has no `sandbox` in it.
-fn older_start(t: &TwoNetworks, n: u32, folder: &str) -> Value {
+fn older_start(t: &TwoNetworks, n: u32, folder: &str, sandbox: Option<Value>) -> Value {
     let mid = format!("msg_00000000-0000-4000-8000-{n:012}");
-    let request = json!({
+    let mut request = json!({
         "folder": folder, "app": "claude", "mode": null, "prompt": "Tidy atlas", "request": mid,
         "by": { "kind": "agent", "id": VM_ATLAS, "title": "Fix the login form" },
     });
+    if let Some(sandbox) = sandbox {
+        request["sandbox"] = sandbox;
+    }
     json!({
         "schema": "network/send/v1", "mid": mid, "sender": VM_ATLAS, "senderKind": "agent", "agent": t.contractor.agt(VM_ATLAS),
         "target": "xenonet:start", "body": request.to_string(), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now_ms() as i64,
@@ -101,12 +104,20 @@ async fn a_start_from_another_machine_without_the_sandbox_is_refused() {
     let t = two_networks(&root).await;
     desk_takes_starts(&t).await;
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
-    t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: older_start(&t, 1, &atlas) }).unwrap();
+    t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: older_start(&t, 1, &atlas, None) }).unwrap();
     until("desk logs the refusal", 20, || async { t.desk.logged("start").iter().any(|l| l.contains("was refused")) }).await;
     let refused = t.desk.logged("start").join("\n");
     assert!(refused.contains("sandbox"), "the refusal says why: {refused}");
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
+    // The control: the same frame with the sandbox in it runs.
+    t.contractor
+        .svc
+        .net()
+        .send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: older_start(&t, 2, &atlas, Some(json!({ "domains": [] }))) })
+        .unwrap();
+    let (args, _) = ran(&t.desk, 1).await;
+    assert!(args.iter().any(|a| a == "--strict-mcp-config"), "it ran, sandboxed: {args:?}");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

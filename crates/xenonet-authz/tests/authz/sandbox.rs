@@ -87,6 +87,8 @@ fn what_the_person_signs_includes_the_sandbox() {
     let f = world();
     let (resource, signed) = start(StartMode::Asks, Some(on()));
     let sig = PersonSigned::sign(&bio_device(), &resource, &signed).unwrap();
+    // The control: the act as it was signed, sandbox and all, verifies.
+    assert!(PersonSigned::verify(&f.world, &person(), &device_id(&bio_device()), &resource, &signed, &sig).is_ok(), "the signed act, with its sandbox, is the one that verifies");
     for other in [None, Some(Sandbox::default()), Some(Sandbox { domains: vec!["example.org".into()] })] {
         let (_, act) = start(StartMode::Asks, other);
         assert!(PersonSigned::verify(&f.world, &person(), &device_id(&bio_device()), &resource, &act, &sig).is_err(), "a signature for one sandbox isn't for another");
