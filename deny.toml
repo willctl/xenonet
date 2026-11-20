@@ -39,6 +39,10 @@ ignore = [
   # glib-macros.
   { id = "RUSTSEC-2024-0429", reason = "Xenolith's tray: glib 0.18 under gtk, and the tray never uses VariantStrIter" },
   { id = "RUSTSEC-2024-0370", reason = "Xenolith's tray: a build-time macro under glib-macros 0.18" },
+  # chrono is unmaintained (no known bug). rmcp, schemars and a2a-lf, the
+  # MCP and A2A libraries, depend on it for timestamps; none has a release
+  # without it yet.
+  { id = "RUSTSEC-2026-0543", reason = "chrono under rmcp, schemars and a2a-lf, unmaintained with no known bug" },
 ]
 
 [licenses]
