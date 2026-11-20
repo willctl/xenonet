@@ -1778,6 +1778,23 @@ impl State for MapState {
         self.after_change().await?;
         self.roots()
     }
+    fn session_root(&self, session: &str) -> Option<String> {
+        self.node_of(session)?.get("root")?.as_str().map(str::to_string)
+    }
+    fn app_account_roots(&self, app: &str) -> Vec<(Option<String>, Option<String>)> {
+        let Some(w) = &self.identities else { return Vec::new() };
+        let Some(kind) = xenonet_adapter::apps::app(app).and_then(|a| a.identity.clone()) else { return Vec::new() };
+        let accounts = w.accounts();
+        self.cfg
+            .roots(app)
+            .into_iter()
+            .map(|r| {
+                let key = r.root.as_ref().map_or_else(|| kind.clone(), |x| format!("{kind}@{x}"));
+                let email = accounts.get(&key).and_then(|a| a.get("handle")).and_then(Value::as_str).map(str::to_string);
+                (r.root, email)
+            })
+            .collect()
+    }
     fn app_roots(&self) -> R<Value> {
         let saved = self.store.app_roots();
         let apps: Vec<Value> = xenonet_adapter::platforms()

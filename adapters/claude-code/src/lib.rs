@@ -242,6 +242,12 @@ impl Platform for Adapter {
         vec![folder.to_string()]
     }
 
+    fn refuse_args(&self) -> Vec<String> {
+        // Claude Code's own switch for permission deny rules, which join
+        // those of its settings.
+        ["--disallowedTools", "Bash(git commit:*)", "Bash(git push:*)", "Bash(gh:*)"].map(String::from).to_vec()
+    }
+
     fn root_paths(&self, root: &str) -> Option<xenonet_adapter::platform::RootPaths> {
         Some(xenonet_adapter::platform::RootPaths { folder: xenonet_os::paths::join(root, "projects"), signin: xenonet_os::paths::join(root, ".claude.json") })
     }

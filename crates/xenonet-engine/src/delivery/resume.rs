@@ -57,11 +57,18 @@ pub fn resume_env<V>(env: Vec<(String, V)>) -> Vec<(String, V)> {
 /// or of an app that keeps one folder only, runs as it did.
 pub fn resume_env_in(env: Vec<(String, String)>, app: &str, root: Option<&str>) -> Vec<(String, String)> {
     let mut env = resume_env(env);
-    let Some(root) = root.filter(|r| xenonet_adapter::platforms().get(app).is_some_and(|p| p.root_paths(r).is_some())) else { return env };
-    let Some(var) = xenonet_adapter::apps::app(app).and_then(|a| a.roots.as_ref()).map(|r| r.env.clone()) else { return env };
+    in_root(&mut env, app, root);
+    env
+}
+
+/// `env` with the app's folder variable set to `root`, a folder she named,
+/// in place of any it had; nothing for no root, or an app that keeps one
+/// folder only.
+pub fn in_root(env: &mut Vec<(String, String)>, app: &str, root: Option<&str>) {
+    let Some(root) = root.filter(|r| xenonet_adapter::platforms().get(app).is_some_and(|p| p.root_paths(r).is_some())) else { return };
+    let Some(var) = xenonet_adapter::apps::app(app).and_then(|a| a.roots.as_ref()).map(|r| r.env.clone()) else { return };
     env.retain(|(k, _)| *k != var);
     env.push((var, root.to_string()));
-    env
 }
 
 /// The command for one resumed turn, or None for an app or id it can't

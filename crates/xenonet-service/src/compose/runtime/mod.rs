@@ -17,6 +17,7 @@
 // failed with what it wrote (exec::Failed): both are passed on whole.
 #![expect(clippy::result_large_err, reason = "the service's traits return its CoreError, and a failed command keeps its output")]
 
+pub mod accounts;
 pub mod acp;
 pub mod actors;
 pub mod asks;

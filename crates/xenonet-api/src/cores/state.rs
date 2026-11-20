@@ -164,6 +164,16 @@ pub trait State: Send + Sync {
     async fn set_roots(&self, _roots: Value) -> R<Value> {
         pending(M)
     }
+    /// The folder she named that a session was found in (`claude:<id>`), or
+    /// None for the app's default folder or a session XenoNet doesn't know.
+    fn session_root(&self, _session: &str) -> Option<String> {
+        None
+    }
+    /// Each folder an app is read from, its default one first (None), with
+    /// the email its sign-in holds now, when it holds one.
+    fn app_account_roots(&self, _app: &str) -> Vec<(Option<String>, Option<String>)> {
+        Vec::new()
+    }
     /// The folders each app is read from: its default one, those you named
     /// (`xenonet apps folders`), and the ones its adapter proposes, which
     /// nothing reads until you name them. `restart` says the saved folders

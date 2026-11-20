@@ -14,11 +14,9 @@ project; a rule says which they should be, and warns when they aren't.
                                          account its sessions are to run as
   xenonet identity rule [<folder>] --mode warn|refuse
                                          warn (the default) only says. refuse
-                                         makes XenoNet refuse a start here
-                                         that no folder it reads can place
-                                         under the rule's accounts, and keep
-                                         a Claude Code run it starts from
-                                         committing, pushing or running gh
+                                         also keeps a Claude Code run XenoNet
+                                         starts here from committing, pushing
+                                         or running gh
   xenonet identity rule [<folder>] --clear
                                          take the rule away
   xenonet identity check [<folder>]      the check; exits 1 when the project
@@ -34,8 +32,11 @@ project; a rule says which they should be, and warns when they aren't.
   --json                                 the answer as JSON
 
 A rule's accounts are matched against the folders XenoNet reads for each app
-(xenonet folders). A start picks the folder that is signed in to the account,
-or, under refuse, is refused. What XenoNet can't see stays a warning: your
+(xenonet folders). A start XenoNet makes in the project runs in the folder
+that is signed in to the account, with that folder's own sign-in, and is
+refused when none is, in either mode. A start in a sandbox is refused too,
+since a sandboxed run signs in with a token whose account XenoNet can't
+tell. What XenoNet can't see stays a warning: your
 own terminals, Claude desktop, a /login inside a running session, pushes over
 SSH, and Codex threads.
 

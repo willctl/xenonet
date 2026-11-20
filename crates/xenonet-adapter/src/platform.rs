@@ -205,6 +205,15 @@ pub trait Platform: Send + Sync {
         Vec::new()
     }
 
+    /// The arguments that keep a run it starts from committing, pushing or
+    /// running gh, for a project whose rule refuses (empty for an app with
+    /// no such switch). A prefix rule, so a command written another way
+    /// (`git -C x commit`, a script) isn't caught: the guard is a warning
+    /// beyond it.
+    fn refuse_args(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// The folders its transcripts are in, under its folder (`folder`):
     /// where it writes them now first, which the live tailer follows, then
     /// where it archives them, which search and stats read too.
