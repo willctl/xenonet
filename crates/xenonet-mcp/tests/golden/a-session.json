@@ -609,7 +609,7 @@
           {
             "name": "start_session",
             "title": "Start a session",
-            "description": "Starts a new Claude Code, Codex, Grok Build or Hermes Agent session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once. Whether the session started, and what it came to when it stopped (finished, stopped to ask something, was denied a tool, failed or left nothing), come to you as messages that quote its last words, and the end wakes you if you are idle. XenoNet reports it; the new session needn't be told to. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.",
+            "description": "Starts a new Claude Code, Codex, Grok Build or Hermes Agent session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once. Whether the session started, and what it came to when it stopped (finished, stopped to ask something, was denied a tool, failed or left nothing), come to you as messages that quote its last words, and the end wakes you if you are idle. XenoNet reports it; the new session needn't be told to. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks. The new session runs sandboxed, in its app's own sandbox (it writes only in its folder, reads none of the home folder, and reaches no network beyond the domains you give), and its first prompt says so; an app with no sandbox to drive refuses the start.",
             "inputSchema": {
               "type": "object",
               "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -650,6 +650,18 @@
                 "network": {
                   "description": "Which of this machine's networks to go through, by its id or name; needed only when that machine is in two or more of them, and the answer says so.",
                   "type": "string"
+                },
+                "sandbox": {
+                  "description": "Whether the run is held to its app's own sandbox. A session's start is always sandboxed: leave it out or say true; false is refused. Claude Code's sandbox writes only in the folder; Codex's writes only there and has no network.",
+                  "type": "boolean"
+                },
+                "domains": {
+                  "description": "With the sandbox: the domains the run may reach besides its folder, such as github.com or *.npmjs.org; none by default. Codex can't take any.",
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
@@ -703,6 +715,14 @@
                 "network": {
                   "description": "With machine: which of this machine's networks to go through, by its id or name; needed only when that machine is in two or more of them, and the answer says so.",
                   "type": "string"
+                },
+                "domains": {
+                  "description": "With machine: the domains the task's run may reach, besides its folder; none by default. A delegated run is always sandboxed.",
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             },

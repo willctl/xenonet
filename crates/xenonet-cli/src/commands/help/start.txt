@@ -6,7 +6,8 @@ replies.
 
   xenonet start [--on <machine>] [--in <folder>] [--network <id|name>]
                 [--app claude|codex|grok|hermes-agent]
-                [--mode plan|acceptEdits|auto|dontAsk] "<prompt>"
+                [--mode plan|acceptEdits|auto|dontAsk]
+                [--sandbox | --no-sandbox] [--allow <domains>] "<prompt>"
 
   --on     another machine in your network, by its id; this one when left
            out. It must be online, and its XenoNet new enough to take starts
@@ -16,6 +17,15 @@ replies.
            its id or name; needed only when --on is in two or more of them,
            and the answer says so
   --app    claude (the default), codex, grok or hermes-agent
+  --sandbox  hold the run to its app's own sandbox: Claude Code's or
+           Codex's. It writes only in its folder and reaches no network
+           beyond --allow's domains. Left out, a start on this machine is
+           yours and unsandboxed (--no-sandbox says so), and one on another
+           machine is sandboxed. An app with no sandbox to drive (Grok
+           Build, Hermes Agent) refuses a sandboxed start; Codex refuses
+           one with domains, since its sandbox can't name them
+  --allow  with --sandbox: the domains the run may reach, separated by
+           commas (github.com,*.npmjs.org); none by default
   --mode   a permission mode; left out, the session runs under your own
            settings. Codex takes its config.toml's and Hermes Agent its
            own, so no mode; Grok Build with a mode runs headless. A

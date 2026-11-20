@@ -24,6 +24,19 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             body.insert(key.into(), json!(v));
         }
     }
+    // The sandbox: --sandbox for it, --no-sandbox for none, and --allow for
+    // the domains it may reach (comma-separated; none by default). Left out,
+    // a start on this machine is yours and unsandboxed, and any other is
+    // sandboxed.
+    if flags.is_true("sandbox") {
+        body.insert("sandbox".into(), json!(true));
+    } else if flags.is_false("sandbox") {
+        body.insert("sandbox".into(), json!(false));
+    }
+    if let Some(d) = flags.text("allow") {
+        let domains: Vec<&str> = d.split(',').map(str::trim).filter(|x| !x.is_empty()).collect();
+        body.insert("domains".into(), json!(domains));
+    }
     let s = need(flags)?;
     let v: Value = s.request("POST", "/api/start", Some(&Value::Object(body)), &[]).map_err(|r| Fail::new(r.message, 1))?;
     if flags.on("json") {
@@ -34,7 +47,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         print(format!("{} sent to {}: XenoNet says here when it starts, or why it didn't, and again when it ends", c::green("✓"), t(&v, "host")));
         return Ok(0);
     }
+    let sandboxed = v.get("sandbox").and_then(|s| s.get("words")).and_then(Value::as_str).map(|w| format!(". {w}")).unwrap_or_default();
     let session = str(&v, "session").map_or_else(|| "a Codex session (its id comes when Codex names it)".to_string(), str::to_string);
-    print(format!("{} started {session} in {}, pid {}", c::green("✓"), t(&v, "folder"), t(&v, "pid")));
+    print(format!("{} started {session} in {}, pid {}{sandboxed}", c::green("✓"), t(&v, "folder"), t(&v, "pid")));
     Ok(0)
 }
