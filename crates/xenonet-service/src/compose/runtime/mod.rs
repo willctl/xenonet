@@ -209,6 +209,12 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         acp: OnceLock::new(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
+    if !demo {
+        let marked = sandbox::backfill_marks(&w);
+        if marked > 0 {
+            w.log("info", "sandbox.backfill", &format!("{marked} sandboxed sessions kept before marks existed are marked as not yours, so none is resumed bare"));
+        }
+    }
     if let Some(db) = &w.setup.db {
         checkouts::own(db, Arc::downgrade(&w));
     }

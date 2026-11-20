@@ -830,3 +830,34 @@ async fn a_start_that_is_not_the_persons_may_not_pick_a_permission_mode() {
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A record kept before the store marked who a session was for has no `for`
+/// field: read as a start that wasn't the person's, the narrowest reading, so
+/// it can never be resumed bare. The person's own records say `for: null`
+/// and stay theirs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_record_from_before_the_marks_is_marked_once_as_not_the_persons() {
+    use xenonet_service::compose::runtime::sandbox;
+    let root = root("sandbox-backfill");
+    let t = two_networks_ended(&root).await;
+    let w = &t.desk.world;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    let (old, own) = ("claude:0190d3e0-0000-7000-8000-0000000d0101", "claude:0190d3e0-0000-7000-8000-0000000d0102");
+    sandbox::keep(w, own, &sandbox::Record { folder: atlas.clone(), domains: Vec::new(), for_others: None }).unwrap();
+    let dir = std::path::Path::new(&w.setup.state_dir).join("sandboxed");
+    let legacy = dir.join(format!("{}.json", old.replace(':', "_")));
+    std::fs::write(&legacy, json!({ "folder": atlas, "domains": ["github.com"] }).to_string()).unwrap();
+    assert_eq!(sandbox::confined_for(w, old), Ok(None), "no mark yet");
+    assert_eq!(sandbox::backfill_marks(w), 1, "one record was marked");
+    let who = sandbox::confined_for(w, old).unwrap().expect("marked");
+    assert!(who.contains("before"), "it says why it is marked: {who}");
+    assert_eq!(sandbox::of(w, old).map(|r| r.for_others.is_some()), Some(true), "and its record says so too");
+    assert_eq!(sandbox::confined_for(w, own), Ok(None), "the person's own record stays theirs");
+    // Once: a second start of the service changes nothing.
+    assert_eq!(sandbox::backfill_marks(w), 0);
+    // And a turn for the marked session with its record gone is refused, never run bare.
+    std::fs::remove_file(&legacy).unwrap();
+    assert!(sandbox::for_turn(w, old).is_err());
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

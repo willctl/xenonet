@@ -91,6 +91,38 @@ pub fn keep(w: &Runtime, session: &str, r: &Record) -> Result<(), String> {
     Ok(())
 }
 
+/// Marks, once, each record kept before the store marked who a session was
+/// for: such a record has no `for` field at all (a person's own says `null`).
+/// It is read as a start that wasn't the person's, the narrowest reading, so
+/// a session that has one can never be resumed bare; the record is then
+/// rewritten with the field, so this is done once. How many were marked.
+pub fn backfill_marks(w: &Runtime) -> usize {
+    let d = dir(w);
+    let Ok(entries) = std::fs::read_dir(&d) else { return 0 };
+    let mut done = 0;
+    for e in entries.flatten() {
+        let file = e.path();
+        let Some(stem) = file.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".json")).map(str::to_string) else { continue };
+        let Some(v) = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
+        if v.get("for").is_some() {
+            continue;
+        }
+        // A file is named for its session with ':' made '_' (`name`).
+        let Some(session) = stem.split_once('_').map(|(app, id)| format!("{app}:{id}")).filter(|s| name(s) == format!("{stem}.json")) else { continue };
+        let who = "someone else (the sandbox was kept before XenoNet marked who a session was for)";
+        let record = Record {
+            folder: v["folder"].as_str().unwrap_or_default().to_string(),
+            domains: v["domains"].as_array().map(|a| a.iter().filter_map(|d| d.as_str().map(str::to_string)).collect()).unwrap_or_default(),
+            for_others: Some(who.to_string()),
+        };
+        match keep(w, &session, &record) {
+            Ok(()) => done += 1,
+            Err(why) => w.log("warn", "sandbox.backfill", &format!("{session}'s sandbox couldn't be marked yet: {why}")),
+        }
+    }
+    done
+}
+
 fn read(w: &Runtime, session: &str) -> Option<Record> {
     let v: Value = serde_json::from_str(&std::fs::read_to_string(dir(w).join(name(session))).ok()?).ok()?;
     Some(Record {
