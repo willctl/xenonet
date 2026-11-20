@@ -3523,9 +3523,9 @@ async fn a_message_from_the_guest_wakes_an_ended_atlas_session_and_never_a_ledge
 /// founded both networks, reads a session on `contractor-vm`, and a session
 /// on `contractor-vm` can't ask for one of `desk`'s, atlas's included, nor
 /// find ledger's id. (That `desk` refuses a member that is no window host is
-/// the authz matrix's "role" row, and `net_svc.rs` has it end to end; here a
-/// window read from `contractor-vm` to `desk` gets no answer in 30 s, which
-/// this test doesn't wait for.) No refused read reaches `desk`'s API.
+/// the authz matrix's "role" row, and `net_svc.rs` has it end to end.)
+/// `contractor-vm`'s own window does read `desk`'s shown transcripts: the
+/// next test has it. No refused read reaches `desk`'s API.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_session_on_the_guest_reads_no_transcript_of_desk_and_desks_window_reads_the_guests() {
     let root = std::env::temp_dir().join(format!("xenonet-guest-transcript-{}", std::process::id()));
