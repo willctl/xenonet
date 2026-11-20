@@ -341,6 +341,8 @@ pub struct Mesh {
     // One dial at a time to each peer and protocol, so two callers share a
     // connection rather than replacing each other's.
     dialling: Mutex<BTreeMap<Key, Arc<tokio::sync::Mutex<()>>>>,
+    // Answers the streams of the svc/2 connections this machine dialled.
+    serve_dialled: RwLock<Option<crate::link2::Others>>,
 }
 
 impl Mesh {
@@ -348,11 +350,19 @@ impl Mesh {
     /// early checks read (the iroh endpoint's hooks and handlers), if any.
     pub fn new(dial: Arc<dyn Dial>, admission: Arc<Admission>) -> Mesh {
         dial.offer(&admission.offered());
-        Mesh { dial, admission, links: Mutex::new(BTreeMap::new()), dialling: Mutex::new(BTreeMap::new()) }
+        Mesh { dial, admission, links: Mutex::new(BTreeMap::new()), dialling: Mutex::new(BTreeMap::new()), serve_dialled: RwLock::new(None) }
     }
 
     pub fn me(&self) -> PeerId {
         self.dial.me()
+    }
+
+    /// Hands each new svc/2 connection this machine dials to `serve`. There
+    /// is one connection per peer, so a peer that calls this machine reuses
+    /// the one this machine dialled, and its streams need answering there
+    /// as on one the peer dialled.
+    pub fn serve_dialled(&self, serve: crate::link2::Others) {
+        *self.serve_dialled.writing() = Some(serve);
     }
 
     pub fn admission(&self) -> &Admission {
@@ -432,7 +442,15 @@ impl Mesh {
             }
         };
         match self.adopt(wire, Side::Dialled, networks) {
-            Adopted::New(l) | Adopted::Kept(l) => Ok(l),
+            Adopted::New(l) => {
+                if alpn == Alpn::Svc {
+                    if let Some(serve) = self.serve_dialled.reading().clone() {
+                        serve(l.clone());
+                    }
+                }
+                Ok(l)
+            }
+            Adopted::Kept(l) => Ok(l),
         }
     }
 

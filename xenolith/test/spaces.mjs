@@ -320,15 +320,15 @@ function snapshot(dir, skip = []) {
 }
 
 /** A 1.x satellite as 1.x leaves it: its sync and pairing files, a 1.x token in access.json, a
- * space it curates (project:mine), two it follows from inix (project:atlas, with a note it never
+ * space it curates (project:mine), two it follows from desk (project:atlas, with a note it never
  * sent, and project:shared), and 1.x's sync state in a space. */
 function satellite() {
   const E = makeEnv();
-  fs.writeFileSync(path.join(E.home, 'sync.json'), JSON.stringify({ machine: 'neo', home: 'inix', peers: { inix: 'https://inix.example' }, follow: { 'project:atlas': { peer: 'inix', curator: '0123456789abcdef0123456789abcdef' }, 'project:shared': { peer: 'inix', auto: true } } }));
+  fs.writeFileSync(path.join(E.home, 'sync.json'), JSON.stringify({ machine: 'tower', home: 'desk', peers: { desk: 'https://desk.example' }, follow: { 'project:atlas': { peer: 'desk', curator: '0123456789abcdef0123456789abcdef' }, 'project:shared': { peer: 'desk', auto: true } } }));
   fs.writeFileSync(path.join(E.home, 'pair.json'), JSON.stringify({ offers: [] }));
   fs.mkdirSync(path.join(E.home, 'peers'));
-  fs.writeFileSync(path.join(E.home, 'peers', 'inix.token'), `xenolith_${'0'.repeat(64)}\n`);
-  fs.writeFileSync(path.join(E.home, 'access.json'), JSON.stringify({ local: 'admin', grants: [], tokens: [{ hash: 'a'.repeat(64), subject: 'machine:inix', scopes: ['ctx:read:all'], label: 'inix', createdAt: 1, expiresAt: 4_102_444_800_000 }] }));
+  fs.writeFileSync(path.join(E.home, 'peers', 'desk.token'), `xenolith_${'0'.repeat(64)}\n`);
+  fs.writeFileSync(path.join(E.home, 'access.json'), JSON.stringify({ local: 'admin', grants: [], tokens: [{ hash: 'a'.repeat(64), subject: 'machine:desk', scopes: ['ctx:read:all'], label: 'desk', createdAt: 1, expiresAt: 4_102_444_800_000 }] }));
   assert.equal(cli(E.env, 'serve', '--init').code, 0);
   for (const s of ['mine', 'atlas', 'shared']) {
     assert.equal(cli(E.env, 'spaces', 'add', `project:${s}`).code, 0);

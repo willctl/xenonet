@@ -2387,8 +2387,8 @@ mod tests {
 
     #[test]
     fn a_message_to_another_host_waits_only_while_the_host_is_away() {
-        assert_eq!(remote_way("neo-rex", true), "through your XenoNet network, as soon as neo-rex has it; then as a session there gets messages");
-        assert_eq!(remote_way("neo-rex", false), "when neo-rex is back online: it waits in this machine's outbox");
+        assert_eq!(remote_way("tower", true), "through your XenoNet network, as soon as tower has it; then as a session there gets messages");
+        assert_eq!(remote_way("tower", false), "when tower is back online: it waits in this machine's outbox");
     }
 
     #[test]

@@ -448,7 +448,7 @@ There is no backwards compatibility in the rewrite (Will, 2026-11-10):
 no migration or compatibility path for networks, chain entries, tokens or
 state files made by an earlier build. Old data is refused or ignored.
 Machines are set up again from scratch after a phase lands, which is
-Will's step on inix and NEO-REX.
+Will's step on desk and tower.
 
 1. **The JS world goes. Done (2026-11-08).** The JS core and its napi
    twins are gone: `core/`, `server/`, the JS `cli/` and `mcp/`,
@@ -670,7 +670,7 @@ Will's step on inix and NEO-REX.
    - join/1 and the endpoint: a list to confirm before following, and the
      relay and mDNS questions at `xenolith invite`; invites and joins in
      a window; open invites kept across a restart.
-   - Shared mode: the Windows named pipe (so NEO-REX syncs by invite for
+   - Shared mode: the Windows named pipe (so tower syncs by invite for
      now); per-remote limits on forwarded connections; revocations and
      project ids over the socket, and chains pushed on change; Xenolith
      taking XenoNet actor grants with ctx rights, so an actor holds one
@@ -718,14 +718,14 @@ Will's step on inix and NEO-REX.
    cutover.
    1. Review what phase 6 decided as recommended (questions 6 and 12 to
       14, below) and overturn any of it.
-   2. Done: XenoNet 0.7.2 and Xenolith 2.0.1 are released, and inix's
+   2. Done: XenoNet 0.7.2 and Xenolith 2.0.1 are released, and desk's
       Xenolith is on 2.0.1 with `xenolith upgrade --run` done (no file
       changed but the two space markers; backups in
       `~/Xenolith-backup-2026-11-13-cold`, with the 1.10.0 archive).
-      inix's Desktop, Service and Tools stay on 0.6.6 until step 5.
-   3. On inix, `grok login`, then `cargo run -p xenonet-acp --example
+      desk's Desktop, Service and Tools stay on 0.6.6 until step 5.
+   3. On desk, `grok login`, then `cargo run -p xenonet-acp --example
       probe` for Grok Build, before its headless start is deleted.
-   4. On NEO-REX, the TPM check: `XENONET_REQUIRE_TPM=1 npm run cargo --
+   4. On tower, the TPM check: `XENONET_REQUIRE_TPM=1 npm run cargo --
       test -p xenonet-keys -- --nocapture` passes both TPM tests; after
       installing and setting up, `xenonet doctor`'s `network.signing` is
       ok and names the service's account; note how long a signature takes
@@ -737,13 +737,13 @@ Will's step on inix and NEO-REX.
       over: back up, update the app, its tools and its service, and
       `xenonet service install`; found the person (Touch ID) and offer a
       second device or the recovery phrase; `xenonet net create`, choosing
-      the relays and answering mDNS; join NEO-REX by invite and add it as
+      the relays and answering mDNS; join tower by invite and add it as
       the person's device; set what each network sees; make the
-      delegation grant again and set NEO-REX to Delegated; issue the
+      delegation grant again and set tower to Delegated; issue the
       actors' grants again (Grok Bot's gateway token, the Hermes plugin's
       token); connect Claude Code and Codex again from the window
       (`/hooks` once in Codex).
-   6. The lab's checks ran once on inix (`npm run lab -- check`, on
+   6. The lab's checks ran once on desk (`npm run lab -- check`, on
       macOS 26.5 with Lima 2.1.2): `xenolith-rehearsal` passes, and so do
       each VM's own checks. `xenolith-join`, `xenolith-notes`,
       `xenolith-offline`, `lan-udp` and the multicast check fail because
@@ -752,22 +752,22 @@ Will's step on inix and NEO-REX.
       and never another guest. The lab's LAN has to move to a network
       where guests talk before those five mean anything
       ([the lab's README](../../scripts/lab/README.md)).
-   7. Xenolith on NEO-REX: inix's Xenolith never paired with it, so
+   7. Xenolith on tower: desk's Xenolith never paired with it, so
       nothing waits in a 1.x queue. Install 2.0.1 there
       ([From 1.x to 2.0](../../xenolith/README.md#from-1x-to-20) if it
-      runs 1.x), make UDP 47851 on inix reachable (or set `sync.relays`),
-      run `xenolith invite` on inix and the printed `xenolith join` on
-      NEO-REX within ten minutes, checking the owner and genesis hashes,
-      then `xenolith sync status` on both. To take inix back to 1.x:
+      runs 1.x), make UDP 47851 on desk reachable (or set `sync.relays`),
+      run `xenolith invite` on desk and the printed `xenolith join` on
+      tower within ten minutes, checking the owner and genesis hashes,
+      then `xenolith sync status` on both. To take desk back to 1.x:
       `xenolith upgrade --undo` while 2.0 is still installed, then stop
       it, restore the config and state folders, and reinstall 1.10.0.
    8. On a Mac in the network, shared mode: in Network settings › Shared
       context, Allow "Xenolith asks to sync over the network" with the
       networks ticked (Touch ID), then for each space Make it yours and
-      Share into each network (Touch ID each). NEO-REX stays on the
+      Share into each network (Touch ID each). tower stays on the
       invite until the named pipe is built.
-   9. Check: a session on NEO-REX sees inix's pages in `context_start`, a
-      note left on NEO-REX is filed by inix's curator, and `xenonet
+   9. Check: a session on tower sees desk's pages in `context_start`, a
+      note left on tower is filed by desk's curator, and `xenonet
       doctor` and `xenolith status` are clean on both.
 
 ## Verification plan

@@ -154,3 +154,31 @@ fn the_mesh_refuses_a_non_member_on_a_dial_with_no_hooks() {
     sim.run().unwrap();
     assert_eq!(handed.load(Ordering::SeqCst), 1, "c's connection never reached b's protocols");
 }
+
+#[test]
+fn a_svc_connection_this_machine_dialled_is_handed_to_serve_once() {
+    // One connection stands per peer and protocol, so b's calls to a come
+    // over the one a dialled: a answers them there, and only for svc/2.
+    let mut sim = sim(11);
+    sim.host("b", || async {
+        let mesh = mesh(B, &[A, B]).await?;
+        while mesh.accept().await.is_some() {}
+        Ok(())
+    });
+    sim.client("a", async {
+        let mesh = mesh(A, &[A, B]).await?;
+        let served = Arc::new(AtomicUsize::new(0));
+        let count = served.clone();
+        mesh.serve_dialled(Arc::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+        }));
+        mesh.dial(B, Alpn::Link).await?;
+        assert_eq!(served.load(Ordering::SeqCst), 0, "link/2 is not svc/2");
+        let first = mesh.dial(B, Alpn::Svc).await?;
+        let again = mesh.dial(B, Alpn::Svc).await?;
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+    sim.run().unwrap();
+}

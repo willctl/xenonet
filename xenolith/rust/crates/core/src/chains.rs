@@ -924,8 +924,8 @@ mod tests {
         // sync.json as 1.x writes it on a satellite: home, one space followed by hand, one by home.
         fs::create_dir_all(&h.paths.config_dir).unwrap();
         let cfg = json!({
-            "machine": "neo", "home": "inix", "peers": { "inix": "https://inix.example" },
-            "follow": { "project:atlas": { "peer": "inix", "curator": "0123456789abcdef0123456789abcdef" }, "project:shared": { "peer": "inix", "auto": true } },
+            "machine": "tower", "home": "desk", "peers": { "desk": "https://desk.example" },
+            "follow": { "project:atlas": { "peer": "desk", "curator": "0123456789abcdef0123456789abcdef" }, "project:shared": { "peer": "desk", "auto": true } },
         });
         fs::write(sync_1x_file(&h.paths), cfg.to_string()).unwrap();
         // Founding first, as a start before the copies moved would: nothing for the followed ones.
