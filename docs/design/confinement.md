@@ -1,6 +1,6 @@
 # Confinement
 
-XenoNet confines work through [Adytum](https://github.com/willctl/adytum), a separate Rust workspace that makes sealed cells (Lima VMs, podman or docker containers, OpenShell sandboxes) and enforces walls between them. XenoNet decides who may run what. Adytum makes the cell and keeps the wall. Adytum depends on nothing of XenoNet's.
+XenoNet confines work through [Adytum](https://github.com/willctl/adytum), a Rust library in its own repository (one crate, `adytum`) that makes sealed cells (Lima VMs, OpenShell sandboxes) and enforces walls between them. XenoNet decides who may run what. Adytum makes the cell and keeps the wall. Adytum depends on nothing of XenoNet's.
 
 Related: [authorization](authorization.md), [rust-core](rust-core.md) (the layering), [integrations](../guide/integrations.md) (OpenShell jobs).
 
@@ -8,15 +8,15 @@ Related: [authorization](authorization.md), [rust-core](rust-core.md) (the layer
 
 | Where | What it takes from Adytum |
 |---|---|
-| `adapters/acp` (agent starts over ACP) | `adytum-exec`'s `Spawned`. The agent starts with an empty environment plus the variables the start names, in its own process group. Stopping it kills the group. On Windows a job object kills the tree. |
+| `adapters/acp` (agent starts over ACP) | `adytum::exec`'s `Spawned`. The agent starts with an empty environment plus the variables the start names, in its own process group. Stopping it kills the group. On Windows a job object kills the tree. |
 | `xenonet-service`'s one-shot runs (`compose/runtime/runs.rs`) | `Spawned` too, with the turn's deadline. The pid is recorded at spawn, output is logged live, and a stop kills the group. |
-| `xenonet-service`'s OpenShell jobs (`compose/integrations/openshell.rs`) | `adytum-openshell`. It provides each command's argument list, the native or WSL profile, the policy file's hash, the `policy_denied` check and sandbox names. XenoNet keeps the job records, the confirm-before-upload step, retrieval and reviews. |
-| `xenonet doctor`, cells group | `adytum-doctor`'s checks, called as a library where the `adytum` command is installed. |
-| `xenonet-engine::confine`, `xenonet-service::cells` | The `cell` confinement level, below. |
+| `xenonet-service`'s OpenShell jobs (`compose/integrations/openshell.rs`) | `adytum::openshell` (the `openshell` feature). It provides each command's argument list, the native or WSL profile, the policy file's hash, the `policy_denied` check and sandbox names. XenoNet keeps the job records, the confirm-before-upload step, retrieval and reviews. |
+| `xenonet doctor`, cells group | `adytum::doctor` (the `doctor` feature): it reads the machine and its findings become the check's verdict, where the `adytum` command is installed. |
+| `xenonet-engine::confine`, `xenonet-service::cells` | The `cell` confinement level, below: `Wall` in the engine; `adytum::Cells` and `adytum::lima` (the `lima` feature) in the runner, with `adytum::testing`'s fake driver in its tests. |
 
 `scripts/rust-layers.mjs` holds the rule:
-- `adytum-model`, `adytum-policy` and `adytum-exec` are a library any crate may use.
-- The drivers, the ledger and the doctor are used only by `xenonet-service`, `xenonet-cli` and `xenonet-doctor`.
+- The workspace lists `adytum` with no features: its types, wall rules and process runner, a library any crate may use.
+- Only `xenonet-service`, `xenonet-cli` and `xenonet-doctor` turn on its features (`lima`, `openshell`, `doctor`), and `testing` only in dev-dependencies.
 - Eidolon's crates are used only by `xenonet-service` and `xenonet-cli`.
 
 The engine reaches a cell through a trait, as it reaches platforms.
@@ -40,16 +40,16 @@ The engine's rules are in `crates/xenonet-engine/src/confine.rs`. Each refusal h
 The runner is `crates/xenonet-service/src/cells.rs`. It works in these steps:
 1. Copy the project into a staged copy that leaves out `.env`, `.env.*`, `.git/config` and every symlink or special file.
 2. Make a sealed cell: no mounts, no ports, no secrets.
-3. Copy the staged project in, and run the program under `env -i` in the copy.
+3. Copy the staged project in, and run the program under `env -i` in the copy. The cell's user makes the program's home and writes the copy, so it owns both.
 4. Bring results back only into a fresh folder of its own. A result holding a link or a special file is refused and removed.
 5. Remove the cell, also when the run fails or panics. A cell that can't be removed is an error.
 
-`CellRunner::reconcile_now` settles the ledger.
+Every create, start and remove goes through `adytum::Cells`, which records it in Adytum's ledger first. `CellRunner::reconcile_now` settles the ledger.
 
 Inside a Lima cell, Adytum's boot-time provisioning keeps the wall:
 - Commands run as the `cell` user, which has no sudo.
 - An nftables guard on output and forward drops traffic to the host (`192.168.5.2`, `host.lima.internal`, the gateway) and to private ranges, the host's LAN address included. DNS to Lima's resolver still works.
-- Outbound traffic can be limited to an allow-list.
+- The internet stays open.
 
 The live test `crates/xenonet-service/tests/cells_live.rs` (`ADYTUM_LIVE=1`) checks each of these against a real VM.
 

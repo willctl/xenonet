@@ -181,7 +181,7 @@ one needs a reason too.
 | `regex`, `url`, `unicode-normalization`, `icu_normalizer` | Patterns without lookaround, URLs as the WHATWG standard reads them, names compared after NFKC and NFD, labels in NFC |
 | `portable-pty` | The terminal drawer's shells, in the service (a pty, ConPTY on Windows) |
 | `libc`, `windows-sys` | The few system calls std doesn't wrap, and Windows's job objects |
-| `adytum-*` (path, beside this checkout until its repository is published) | Cells, walls and the process runner: see [confinement](confinement.md) |
+| `adytum` (path, beside this checkout until its rewrite is pushed) | Cells, walls and the process runner: see [confinement](confinement.md) |
 
 ## The layering
 
@@ -249,7 +249,7 @@ reads),
 name in the project detection answer the HTTP golden files pin. An entry goes there only where the word means something other
 than the app, never for a branch on it.
 
-Adytum's crates follow their own rule in the script: `adytum-model`, `adytum-policy` and `adytum-exec` are a library any crate may use, and the drivers, the ledger and the doctor are for the root and `xenonet-doctor` alone ([confinement](confinement.md)).
+Adytum follows its own rule in the script: `adytum` with no features (types, wall rules, the process runner) is a library any crate may use, and its features (the Lima and OpenShell drivers, the doctor, the fakes) are for the root and `xenonet-doctor` alone ([confinement](confinement.md)).
 
 What the check doesn't look at: the adapters' own dependencies
 (`grok-build` builds on `claude-code`'s, `hermes` on `xenonet-actors`, and
