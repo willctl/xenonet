@@ -59,8 +59,11 @@ Scenario 1 needs no new code, only both machines on a current release.
   `--sandbox workspace-write`, approvals never and no network, and refuses
   domains; Grok Build and Hermes have no mapping and refuse. A turn resumed
   or forked for a sandboxed session is sandboxed, and a call that asks to
-  leave the sandbox is never answered by a delegation or a grant. Left:
-  Codex's sandbox reads the whole disk; Claude Code's sandbox wraps shell
+  leave the sandbox is never answered by a delegation or a grant. Decisions
+  taken: a sandbox is never the home folder, the root or what holds home;
+  domains from anyone but her are limited to a list she sets (none by
+  default); a sandboxed Codex start from anyone but her is refused, since
+  its sandbox reads the whole disk. Left: Claude Code's sandbox wraps shell
   commands only, so a fetch of another domain, with domains given, asks.
 
 ## Next

@@ -56,7 +56,7 @@ Always a question, whatever the task says:
 - writing through a redirect, and a command inside a command;
 - any file outside the session's folder, and any command or tool not listed above, including starting another session.
 
-A delegated session runs in its app's own sandbox, which the delegation can't take off ([Sandboxed starts](sandbox.md)): it writes only in its folder and reaches no network unless the start named domains. A command that asks to run outside the sandbox is never covered, whatever the task says, and comes to you alone.
+A delegated session runs in its app's own sandbox, which the delegation can't take off ([Sandboxed starts](sandbox.md)): it writes only in its folder and reaches no network unless the start named domains. A command that asks to run outside the sandbox is never covered, whatever the task says, and comes to you alone. Sandboxed commands are not allowed unasked: each goes through the delegation's rules like any other, so a delete or a push still comes to you. An edit to a hidden file or folder in your home folder, or to Library, is never covered either.
 
 The question says why it wasn't covered: "[outside what you delegated: it has rm in it] rm -rf build". Nobody answering in ten minutes is a deny. XenoNet keeps which sessions run under a delegation in its store for a week, so their prompts are judged against it after the service restarts too.
 
