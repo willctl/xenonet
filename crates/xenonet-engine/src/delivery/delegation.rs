@@ -162,6 +162,12 @@ pub fn judge(tool: &str, input: &Value, folder: &str, home: &str, windows: bool)
         // read outside the folder is the one this would answer. A run's last
         // words, or a send, can carry any file it read: so a read is covered
         // within the folder and nowhere else.
+        // A pattern whose first folder is a wildcard or a brace can match a
+        // link in the folder that leads out of it, which no path judged here
+        // names: the person decides.
+        if tool == "Glob" && input.get("pattern").and_then(Value::as_str).is_some_and(starts_wild) {
+            return ask("its pattern starts with a wildcard, which can match a link that leads out of the folder");
+        }
         for p in read_paths(tool, input) {
             if secretive(&p) {
                 return ask("its path looks like a secret");
@@ -215,6 +221,14 @@ pub fn leaves_sandbox(input: &Value) -> bool {
 
 fn path_of(input: &Value) -> Option<String> {
     ["file_path", "notebook_path", "path"].iter().find_map(|k| input.get(*k).and_then(Value::as_str)).map(str::to_string)
+}
+
+/// Whether a Glob pattern's first folder is a wildcard or a brace
+/// (`*/.config/**`, `{up,x}/**`): it has a folder to match, and that folder
+/// isn't named. A lone `*.rs` is a file in the folder.
+fn starts_wild(pattern: &str) -> bool {
+    let p = pattern.replace('\\', "/");
+    p.split_once('/').is_some_and(|(first, _)| first.contains(['*', '?', '[', '{']))
 }
 
 /// The paths a read tool names: its path keys, and a Glob pattern that
@@ -514,8 +528,12 @@ mod tests {
         ] {
             assert_eq!(judge_unix(tool, json!({ key: p, "pattern": "x" })), Verdict::Allow, "{tool} {p}");
         }
-        for pattern in ["*.rs", "src/**/*.rs", "/Users/will/work/src/*.rs"] {
+        for pattern in ["*.rs", "src/**/*.rs", "/Users/will/work/src/*.rs", "src/*/a.rs", ".config/*"] {
             assert_eq!(judge_unix("Glob", json!({ "pattern": pattern })), Verdict::Allow, "{pattern}");
+        }
+        // A first part that is a wildcard or a brace can match a link that leads out.
+        for pattern in ["*/.config/**", "{up,x}/**", "?p/.ssh/*", "[u]p/**", "**/hosts.yml", "*\\.config/x"] {
+            assert!(asks(judge_unix("Glob", json!({ "pattern": pattern }))), "{pattern}");
         }
         assert_eq!(judge_unix("TodoWrite", json!({ "todos": [] })), Verdict::Allow);
     }
