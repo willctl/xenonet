@@ -121,7 +121,7 @@ fn command(how: &runs::Launch) -> Command {
     let cmd = Command::new(&how.program);
     // adytum-exec's Spawned starts it with no window (CREATE_NO_WINDOW, 0x0800_0000).
     if how.verbatim {
-        how.args.iter().fold(cmd, |c, a| c.raw_arg(a))
+        how.args.iter().fold(cmd, Command::raw_arg)
     } else {
         cmd.args(&how.args)
     }

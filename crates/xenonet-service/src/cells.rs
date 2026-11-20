@@ -122,7 +122,12 @@ impl CellRunner {
         std::fs::create_dir_all(&root).map_err(|e| io("the staging folder could not be made", e))?;
         let dir = root.join(cell.as_str());
         std::fs::create_dir(&dir).map_err(|e| io("this run's staging folder could not be made (it must not exist)", e))?;
-        private(&dir).map_err(|e| io("this run's staging folder could not be locked to its owner", e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| io("this run's staging folder could not be locked to its owner", e))?;
+        }
         Ok(dir)
     }
 
@@ -334,17 +339,6 @@ where
     })
 }
 
-#[cfg(unix)]
-fn private(dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-}
-
-#[cfg(not(unix))]
-fn private(_: &Path) -> std::io::Result<()> {
-    Ok(())
-}
-
 /// Whether a path (relative to the project, `/`-separated) is left out of
 /// the copy: a pattern with a `/` names that path from the top; a pattern
 /// ending in `*` is a prefix of a name; any other is a name, at any depth.
@@ -434,6 +428,7 @@ mod tests {
         panic_exec: bool,
         fail_remove: bool,
         /// What the fake puts in the result folder.
+        #[cfg(unix)]
         out_symlink: bool,
     }
 
