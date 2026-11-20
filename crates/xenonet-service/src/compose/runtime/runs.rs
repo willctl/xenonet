@@ -153,8 +153,8 @@ pub struct Turn<'a> {
 /// The descriptor number a run reads its sign-in from.
 pub const SIGN_IN_FD: i32 = 3;
 
-/// A run in its process group: adytum-exec's, or on unix one that was given
-/// a descriptor, which adytum-exec can't do.
+/// A run in its process group: Adytum's exec, or on unix one that was given
+/// a descriptor, which Adytum's exec can't do.
 enum Proc {
     Group(Spawned),
     #[cfg(unix)]
@@ -221,7 +221,7 @@ impl Proc {
         }
     }
 
-    /// Windows: the child, for a job object (adytum-exec's only).
+    /// Windows: the child, for a job object (Adytum's exec only).
     #[cfg(windows)]
     fn child_mut(&mut self) -> &mut std::process::Child {
         match self {
@@ -231,8 +231,8 @@ impl Proc {
 }
 
 /// Starts `how`: with a descriptor holding `token` on unix when there is
-/// one, else as adytum-exec does.
-fn spawn(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: Option<&str>) -> Result<Proc, ExecError> {
+/// one, else through Adytum's exec.
+fn spawn(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: Option<&str>) -> Result<Proc, adytum::Error> {
     let deadline = Duration::from_secs_f64(runs::TURN_MS / 1000.0);
     #[cfg(unix)]
     if let Some(token) = token {
@@ -249,15 +249,15 @@ fn spawn(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: Option<
 /// the run has as descriptor 3, with the token and a newline written into
 /// it once the run has started, and our end closed (`Held::start`, which
 /// says what is left of a window). The run has descriptors 0 to 3 and no
-/// other. Made with std's command, since adytum-exec has no way to pass a
+/// other. Made with std's command, since Adytum's exec has no way to pass a
 /// descriptor and is Adytum's own repository.
 #[cfg(unix)]
-fn spawn_held(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: &str, deadline: Duration) -> Result<Proc, ExecError> {
+fn spawn_held(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: &str, deadline: Duration) -> Result<Proc, adytum::Error> {
     let mut c = std::process::Command::new(&how.program);
     c.args(&how.args).env_clear().envs(env.iter().map(|(k, v)| (k, v))).current_dir(cwd);
     xenonet_os::process::Held::start(c, Some(deadline), Some(xenonet_os::process::Give { line: token, at: SIGN_IN_FD }))
         .map(Proc::Held)
-        .map_err(|source| ExecError::Spawn { program: how.program.clone().into(), source })
+        .map_err(|source| adytum::Error::Spawn { program: how.program.clone().into(), source })
 }
 
 /// The records, and the sessions whose runs this runner has under way:

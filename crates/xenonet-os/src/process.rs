@@ -113,7 +113,7 @@ fn kill_group(group: libc::pid_t) {
 }
 
 /// A program started on unix with a descriptor of its own at a number it
-/// is told (`Held::start`), which adytum-exec's `Spawned` has no way to
+/// is told (`Held::start`), which Adytum's `exec::Spawned` has no way to
 /// pass: the run's sign-in comes this way, so it is in no environment.
 /// Like `Spawned` it leads its own process group, has a deadline that
 /// stops the group, and is polled rather than waited on.
