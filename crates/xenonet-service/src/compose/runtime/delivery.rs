@@ -23,7 +23,7 @@ use xenonet_engine::delivery::resume;
 use xenonet_engine::delivery::router::Wake;
 use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
-use xenonet_engine::delivery::usage::plan_usage;
+use xenonet_engine::delivery::usage::plan_usage_in;
 use xenonet_engine::delivery::{Delivered, Error, Files};
 use xenonet_os::sync::Locked;
 use xenonet_store::engine::Shared;
@@ -376,15 +376,26 @@ fn windows() -> bool {
 /// A provider's plan as the wake budget reads it, from the live snapshot's
 /// limits.
 fn usage(w: &Runtime, app: &str) -> Option<f64> {
+    usage_in(w, app, None)
+}
+
+/// The same for a session in a folder she named: that folder's own plan.
+fn usage_in(w: &Runtime, app: &str, root: Option<&str>) -> Option<f64> {
     let limits = match w.state().live_snapshot() {
         Ok(s) => s.get("limits").cloned().unwrap_or(Value::Null),
         Err(_) => Value::Null,
     };
-    plan_usage(&limits, app, now_ms())
+    plan_usage_in(&limits, app, root, now_ms())
 }
 
 fn store_error(e: xenonet_store::sql::SqlError) -> Error {
     Error(e.message().to_string())
+}
+
+/// `resume_deliver` for a test to call: the turn a wake or a copy runs.
+#[doc(hidden)]
+pub fn resume_turn(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork: bool) -> Delivered {
+    resume_deliver(w, agent, cwd, input, fork)
 }
 
 /// A turn resumed for a session (or, `fork`, a copy of it) with the
@@ -400,35 +411,43 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     // A session started sandboxed is resumed, or copied, sandboxed: if its
     // sandbox can't be made again, the turn isn't run bare.
     let sandboxed = crate::compose::runtime::sandbox::for_turn(w, agent)?;
-    // A copy of a sandboxed session is given its own id before it runs, and
-    // kept as sandboxed and marked in the store first: waiting for its
-    // stream to name it would leave a copy whose run a restart interrupted
-    // with no record and no mark, to be resumed bare.
-    let args = match (&sandboxed, fork && app == "claude") {
-        (Some(rec), true) => {
+    // How the session was placed by its start, the rule read again, and the
+    // folder it was found in: a turn is run as the start was, or not at all.
+    let placed = crate::compose::runtime::accounts::for_turn(w, &app, agent, cwd, sandboxed.is_some())?;
+    // A copy of a sandboxed or placed session is given its own id before it
+    // runs, and kept as sandboxed, marked and placed in the store first:
+    // waiting for its stream to name it would leave a copy whose run a
+    // restart interrupted with no record and no mark, to be resumed bare.
+    let args = match (fork && app == "claude", sandboxed.is_some() || placed != crate::compose::runtime::accounts::Placed::default()) {
+        (true, true) => {
             let id = crate::compose::runtime::starts::uuid()?;
             let child = format!("{app}:{id}");
-            crate::compose::runtime::sandbox::fork_named(w, &child, rec)?;
+            if let Some(rec) = &sandboxed {
+                crate::compose::runtime::sandbox::fork_named(w, &child, rec)?;
+            }
+            crate::compose::runtime::accounts::fork_named(w, &child, &placed)?;
             crate::compose::runtime::starts::note_fork(w, &child, agent);
             resume::with_session_id(args, &id)
         }
         _ => args,
     };
+    let mut args = args;
+    args.extend(placed.deny.iter().cloned());
     let args = match &sandboxed {
         Some(rec) => crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?.0,
         None => args,
     };
     let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env(w) } else { resume::resume_env(w.starts.environment()) };
-    // A session found in a folder she named runs in that folder, with its
-    // own sign-in, whether it is resumed, copied or woken.
-    let root = crate::compose::runtime::accounts::session_root(w, agent);
-    resume::in_root(&mut env, &app, root.as_deref());
+    // A session found in a folder she named, or placed in one by a rule, runs
+    // in that folder with its own sign-in, whether it is resumed, copied or
+    // woken.
+    resume::in_root(&mut env, &app, placed.root.as_deref());
     // An app whose runs sign in (Claude Code) does with the token you gave
     // XenoNet's runs, and asks its permission prompts of you through this
     // XenoNet's server, waiting a minute past the hold for your answer, as
     // a start does.
     let ways = xenonet_engine::delivery::apps::of(&app).unwrap_or_default();
-    let sign_in = crate::compose::runtime::accounts::sign_in(w, ways.sign_in, root.is_some(), &mut env);
+    let sign_in = crate::compose::runtime::accounts::sign_in(w, &app, ways.sign_in, placed.root.is_some() || placed.ruled, &mut env);
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);
         env.push((v.into(), crate::compose::runtime::starts::mcp_tool_timeout_ms(w).to_string()));
@@ -550,6 +569,14 @@ impl router::Host for RouterHost<'_> {
     }
     fn usage(&mut self, app: &str) -> Option<f64> {
         usage(self.w, app)
+    }
+    fn usage_of(&mut self, agent: &str) -> Option<f64> {
+        let app = agent.split(':').next().unwrap_or("");
+        // A session in a folder she named spends that folder's plan; one
+        // whose folder can't be told is read as the app's own, and its turn
+        // is refused when it comes to it.
+        let root = crate::compose::runtime::accounts::session_root(self.w, app, agent).ok().flatten();
+        usage_in(self.w, app, root.as_deref())
     }
     fn wake_setting(&mut self, agent: &str) -> Wake {
         match &self.via {

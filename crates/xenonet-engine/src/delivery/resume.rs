@@ -71,6 +71,15 @@ pub fn in_root(env: &mut Vec<(String, String)>, app: &str, root: Option<&str>) {
     env.push((var, root.to_string()));
 }
 
+/// `env` without the variables that sign `app` in by some other way than its
+/// folder's own sign-in (its adapter's `sign_in_vars`): for a run placed in a
+/// folder by an account, or found in one she named, which must sign in with
+/// that folder's.
+pub fn without_sign_in_vars(env: &mut Vec<(String, String)>, app: &str) {
+    let vars = xenonet_adapter::platforms().get(app).map(|p| p.sign_in_vars()).unwrap_or_default();
+    env.retain(|(k, _)| !vars.contains(&k.as_str()));
+}
+
 /// The command for one resumed turn, or None for an app or id it can't
 /// resume. `settings` is the listen settings file a Claude Code turn runs
 /// with.
@@ -187,6 +196,25 @@ mod tests {
         // Without a variable of its own in the environment, the root is still set.
         assert!(resume_env_in(vec![("PATH".into(), "/bin".into())], "claude", Some("/r")).contains(&("CLAUDE_CONFIG_DIR".into(), "/r".into())));
         assert!(!resume_env_in(own, "grok", Some("/g")).iter().any(|(k, _)| k == "GROK_HOME"), "an app that keeps one folder takes none");
+    }
+
+    #[test]
+    fn a_run_in_a_folders_own_sign_in_keeps_no_provider_key() {
+        xenonet_platforms::install();
+        let mut env: Vec<(String, String)> = ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "CODEX_API_KEY", "HOME"]
+            .iter()
+            .map(|k| ((*k).to_string(), "x".to_string()))
+            .collect();
+        let mut claude = env.clone();
+        without_sign_in_vars(&mut claude, "claude");
+        assert_eq!(claude.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["PATH", "OPENAI_API_KEY", "CODEX_API_KEY", "HOME"]);
+        let mut codex = env.clone();
+        without_sign_in_vars(&mut codex, "codex");
+        assert_eq!(codex.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "HOME"]);
+        // An app with no such variables, or none known, keeps its environment.
+        let before = env.clone();
+        without_sign_in_vars(&mut env, "grok");
+        assert_eq!(env, before);
     }
 
     #[test]

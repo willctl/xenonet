@@ -261,6 +261,10 @@ impl Platform for Adapter {
         ["sessions", "archived_sessions"].map(|d| std::path::Path::new(folder).join(d).to_string_lossy().into_owned()).to_vec()
     }
 
+    fn sign_in_vars(&self) -> Vec<&'static str> {
+        ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION"].to_vec()
+    }
+
     fn root_paths(&self, root: &str) -> Option<xenonet_adapter::platform::RootPaths> {
         Some(xenonet_adapter::platform::RootPaths { folder: root.to_string(), signin: xenonet_os::paths::join(root, "auth.json") })
     }

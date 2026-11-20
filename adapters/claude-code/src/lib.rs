@@ -242,6 +242,19 @@ impl Platform for Adapter {
         vec![folder.to_string()]
     }
 
+    fn sign_in_vars(&self) -> Vec<&'static str> {
+        [
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+        ]
+        .to_vec()
+    }
+
     fn refuse_args(&self) -> Vec<String> {
         // Claude Code's own switch for permission deny rules, which join
         // those of its settings.

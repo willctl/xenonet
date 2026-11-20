@@ -81,6 +81,9 @@ pub enum Readers {
 struct Map_ {
     graph: Option<Value>,
     index: HashMap<String, usize>,
+    /// Ids two nodes hold from different folders she named (a copied
+    /// folder), whose folder a turn can't be told from.
+    clashes: HashSet<String>,
     parent: HashMap<String, String>,
     sources: Value,
     projects: Vec<Value>,
@@ -182,6 +185,25 @@ async fn all<T>(mut futs: Vec<std::pin::Pin<Box<dyn std::future::Future<Output =
     })
     .await;
     out.into_iter().flatten().collect()
+}
+
+/// Each node's place in the graph by id, and the ids that two nodes hold
+/// from different folders she named. The later node of an id is the one
+/// found by it, as it always was; a clash is flagged so a turn for the id
+/// is refused instead of run in a folder picked by the order of a scan.
+fn index_of(nodes: &[Value]) -> (HashMap<String, usize>, HashSet<String>) {
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut clashes = HashSet::new();
+    for (i, n) in nodes.iter().enumerate() {
+        let id = n.get("id").map(display).unwrap_or_default();
+        if let Some(&before) = index.get(&id) {
+            if nodes[before].get("root") != n.get("root") {
+                clashes.insert(id.clone());
+            }
+        }
+        index.insert(id, i);
+    }
+    (index, clashes)
 }
 
 fn err(m: impl Into<String>) -> CoreError {
@@ -437,6 +459,29 @@ impl MapState {
 
     pub fn projects_dir(&self) -> String {
         lock(&self.inner).projects_dir.clone()
+    }
+
+    /// `identity_project` from the checkouts and rules the store keeps,
+    /// for a folder the map has no project for: the map isn't built yet
+    /// (the service just started), or hasn't met the folder. The store is
+    /// where a rule is kept, so a start's check never reads "no rule" for
+    /// want of a map. Err when the store can't say.
+    fn identity_project_kept(&self, want: &str) -> R<Value> {
+        let none = json!({ "project": null, "rule": null, "check": null });
+        let checkouts = self.store.kept_checkouts().map_err(|why| err(format!("the checkouts XenoNet keeps couldn't be read ({why})")))?;
+        let best = checkouts
+            .iter()
+            .filter_map(|c| {
+                let key = c.get("pathKey").and_then(Value::as_str)?;
+                xenonet_os::paths::is_under(want, key).then_some((key.len(), c))
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, c)| c);
+        let Some(ch) = best else { return Ok(none) };
+        let id = format!("project:{}", ch.get("id").and_then(Value::as_str).unwrap_or_default());
+        let rule = self.store.identities().get("rules").and_then(|r| r.get(&id)).cloned().unwrap_or(Value::Null);
+        let name = ch.get("path").and_then(Value::as_str).map(|p| p.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(p).to_string());
+        Ok(json!({ "project": { "id": id, "name": name, "path": ch.get("path").cloned().unwrap_or(Value::Null) }, "rule": rule, "check": null }))
     }
 
     fn node_of(&self, id: &str) -> Option<Value> {
@@ -770,7 +815,12 @@ impl MapState {
             let pulses = g.memory.updated(&sessions);
             let changed = g.memory.changed(&graph);
             let nodes = items(graph.get("nodes"));
-            g.map.index = nodes.iter().enumerate().map(|(i, n)| (n.get("id").map(display).unwrap_or_default(), i)).collect();
+            let (index, clashes) = index_of(nodes);
+            for id in clashes.difference(&g.map.clashes) {
+                log("warn", "map.clash", &format!("{id} is in more than one folder she named; a turn for it is refused until one is taken away"));
+            }
+            g.map.index = index;
+            g.map.clashes = clashes;
             g.map.parent = items(graph.get("links"))
                 .iter()
                 .filter(|l| s(l, "kind") != Some("lineage-cross"))
@@ -1666,7 +1716,7 @@ impl State for MapState {
             })
             .max_by_key(|(len, _)| *len)
             .map(|(_, n)| n);
-        let Some(node) = found else { return Ok(json!({ "project": null, "rule": null, "check": null })) };
+        let Some(node) = found else { return self.identity_project_kept(&want) };
         let id = node.get("id").cloned().unwrap_or(Value::Null);
         let rule = id.as_str().and_then(|i| self.store.identities().get("rules").and_then(|r| r.get(i)).cloned()).unwrap_or(Value::Null);
         Ok(json!({
@@ -1778,8 +1828,11 @@ impl State for MapState {
         self.after_change().await?;
         self.roots()
     }
-    fn session_root(&self, session: &str) -> Option<String> {
-        self.node_of(session)?.get("root")?.as_str().map(str::to_string)
+    fn session_root(&self, session: &str) -> R<Option<String>> {
+        if lock(&self.inner).map.clashes.contains(session) {
+            return Err(err(format!("{session} is in more than one folder she named, so XenoNet can't tell which a turn for it belongs in")));
+        }
+        Ok(self.node_of(session).and_then(|n| n.get("root")?.as_str().map(str::to_string)))
     }
     fn app_account_roots(&self, app: &str) -> Vec<(Option<String>, Option<String>)> {
         let Some(w) = &self.identities else { return Vec::new() };

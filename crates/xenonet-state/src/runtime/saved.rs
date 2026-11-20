@@ -175,6 +175,16 @@ impl Saved {
         )
     }
 
+    /// The checkouts the store holds now, the gone ones left out: Err when
+    /// the store can't say, an empty list without a store.
+    pub fn kept_checkouts(&self) -> Result<Vec<Value>, String> {
+        match self.store.checkouts() {
+            Ok(v) => Ok(v.get("checkouts").and_then(Value::as_array).into_iter().flatten().filter(|c| c.get("gone") != Some(&Value::Bool(true))).cloned().collect()),
+            Err(e) if e.is_pending() => Ok(Vec::new()),
+            Err(e) => Err(e.message),
+        }
+    }
+
     /// How the map ties a space, from its folder's marker (the Store core's
     /// `space_tie`); by its name without a store, or when the store can't
     /// say.

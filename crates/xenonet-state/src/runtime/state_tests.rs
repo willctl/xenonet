@@ -316,6 +316,54 @@ async fn the_demos_rule_doesnt_match_and_a_folder_finds_its_project() {
     assert!(outside["project"].is_null() && outside["rule"].is_null(), "{outside}");
 }
 
+/// A service just restarted has no map yet, but the store still holds the
+/// checkouts and the rules: a start into a ruled project's folder must find
+/// its rule there, never read "no project" and place nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folders_rule_is_found_in_the_store_while_the_map_is_empty() {
+    let w = world();
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    s.refresh_repos().await;
+    s.refresh_map().await.expect("a map with the repos read");
+    let id = items(s.summary().unwrap().get("identityWarnings"))[0]["id"].as_str().unwrap().to_string();
+    let path = s.node_of(&id).expect("the project")["path"].as_str().unwrap().to_string();
+    s.set_identity_rule(json!(id), json!({ "claude": "nova@example.com", "mode": "refuse" })).await.expect("a rule");
+    // The map as a restart leaves it: nothing built yet.
+    {
+        let mut g = lock(&s.inner);
+        g.map.graph = None;
+        g.map.index.clear();
+    }
+    let found = s.identity_project(&format!("{path}/src")).expect("an answer");
+    assert_eq!(
+        (found["project"]["id"].as_str(), found["rule"]["claude"].as_str(), found["rule"]["mode"].as_str()),
+        (Some(id.as_str()), Some("nova@example.com"), Some("refuse")),
+        "{found}"
+    );
+    let outside = s.identity_project("/nowhere/at/all").expect("an answer");
+    assert!(outside["rule"].is_null(), "{outside}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_id_found_in_two_folders_is_flagged_and_has_no_folder_to_resume_in() {
+    let node = |id: &str, root: Option<&str>| match root {
+        Some(r) => json!({ "id": id, "kind": "session", "root": r }),
+        None => json!({ "id": id, "kind": "session" }),
+    };
+    let nodes = vec![node("claude:a", None), node("claude:b", Some("/h/.claude-work")), node("claude:a", Some("/h/.claude-work")), node("claude:b", Some("/h/.claude-work"))];
+    let (index, clashes) = index_of(&nodes);
+    assert_eq!(clashes.into_iter().collect::<Vec<_>>(), ["claude:a".to_string()], "the same id in the same folder twice is no clash");
+    assert_eq!(index.len(), 2);
+    // The state refuses to name a folder for a clashing id, and still names the others'.
+    let w = world();
+    let s = &w.state;
+    lock(&s.inner).map.clashes.insert("claude:a".into());
+    let why = s.session_root("claude:a").unwrap_err().message;
+    assert!(why.contains("claude:a") && why.contains("more than one folder"), "{why}");
+    assert_eq!(s.session_root(SESSION1).unwrap(), None);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_consoles_simulations_and_clear() {
     let w = world();

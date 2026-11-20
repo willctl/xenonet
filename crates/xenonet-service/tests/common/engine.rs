@@ -55,11 +55,29 @@ pub struct Sess {
     pub cwd: String,
     pub edits: Vec<String>,
     pub live: Value,
+    /// The folder she named that the session was found in, if it was.
+    pub root: Option<String>,
+}
+
+/// What a machine's accounts look like to the map: the rule of each
+/// project folder, and each folder an app is read from with the email its
+/// sign-in holds. A machine with none answers as a state core not wired
+/// yet does.
+#[derive(Clone, Default)]
+pub struct Accounts {
+    /// (folder, rule), the deepest folder that holds a path winning.
+    pub rules: Arc<std::sync::Mutex<Vec<(String, Value)>>>,
+    /// Claude Code's folders: None for its own, then those named.
+    pub roots: Vec<(Option<String>, Option<String>)>,
+    pub answers: bool,
+    /// The live snapshot's `limits`.
+    pub limits: Value,
 }
 
 struct Map {
     at: f64,
     sessions: Vec<Sess>,
+    accounts: Accounts,
 }
 
 #[async_trait]
@@ -71,7 +89,44 @@ impl State for Map {
         1
     }
     fn nodes(&self) -> R<Vec<Value>> {
-        Ok(self.sessions.iter().map(|s| json!({ "id": s.id, "kind": "session", "title": s.title, "cwd": s.cwd, "updatedAt": self.at })).collect())
+        Ok(self
+            .sessions
+            .iter()
+            .map(|s| {
+                let mut n = json!({ "id": s.id, "kind": "session", "title": s.title, "cwd": s.cwd, "updatedAt": self.at });
+                if let Some(r) = &s.root {
+                    n["root"] = json!(r);
+                }
+                n
+            })
+            .collect())
+    }
+    fn session_root(&self, session: &str) -> R<Option<String>> {
+        Ok(self.sessions.iter().find(|s| s.id == session).and_then(|s| s.root.clone()))
+    }
+    fn app_account_roots(&self, app: &str) -> Vec<(Option<String>, Option<String>)> {
+        if app == "claude" {
+            self.accounts.roots.clone()
+        } else {
+            Vec::new()
+        }
+    }
+    fn live_snapshot(&self) -> R<Value> {
+        if !self.accounts.answers {
+            return cores::pending("the map");
+        }
+        Ok(json!({ "limits": self.accounts.limits }))
+    }
+    fn identity_project(&self, path: &str) -> R<Value> {
+        if !self.accounts.answers {
+            return cores::pending("the map");
+        }
+        let rules = self.accounts.rules.lock().unwrap();
+        let best = rules.iter().filter(|(f, _)| path == f || path.starts_with(&format!("{f}/"))).max_by_key(|(f, _)| f.len());
+        Ok(match best {
+            Some((f, rule)) => json!({ "project": { "id": format!("project:{f}"), "name": "atlas", "path": f }, "rule": rule, "check": null }),
+            None => json!({ "project": null, "rule": null, "check": null }),
+        })
     }
     fn node(&self, id: &str) -> R<Option<Value>> {
         Ok(self.nodes()?.into_iter().find(|n| n["id"] == id))
@@ -254,6 +309,11 @@ impl Host {
 
     /// A machine with actors on or off; the founder always has them.
     pub async fn open_with(name: &'static str, dir: PathBuf, sessions: Vec<Sess>, door: Option<u16>, actors: bool) -> Host {
+        Host::open_accounts(name, dir, sessions, door, actors, Accounts::default()).await
+    }
+
+    /// A machine whose map knows project rules and the folders an app is read from.
+    pub async fn open_accounts(name: &'static str, dir: PathBuf, sessions: Vec<Sess>, door: Option<u16>, actors: bool, accounts: Accounts) -> Host {
         let home = dir.join("home").to_string_lossy().into_owned();
         let state = dir.join("state").to_string_lossy().into_owned();
         let on = actors || door.is_some();
@@ -276,7 +336,7 @@ impl Host {
         let config = Config::from(&[], &get);
         let mut cores = Cores::pending(on, false);
         xenonet_service::serve::wire_root(&mut cores);
-        cores.state = Arc::new(Map { at: now_ms(), sessions: sessions.clone() });
+        cores.state = Arc::new(Map { at: now_ms(), sessions: sessions.clone(), accounts });
         let env = WireEnv::new("0.0.0-test");
         // As the binary's serve closure gives the engine its settings.
         let setup = xenonet_service::compose::runtime::Setup {
@@ -501,7 +561,7 @@ pub async fn live(h: &Host, hosts: usize) {
 }
 
 pub fn sess(id: &'static str, title: &'static str, cwd: &str) -> Sess {
-    Sess { id, title, cwd: cwd.to_string(), edits: Vec::new(), live: Value::Null }
+    Sess { id, title, cwd: cwd.to_string(), edits: Vec::new(), live: Value::Null, root: None }
 }
 
 /// studio founds a network (a window host), laptop joins as a window host

@@ -597,7 +597,14 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // A rule that names the account this app is to run as places the start
     // in the folder that holds it, or refuses it.
     let placed = crate::compose::runtime::accounts::place_start(w, &r.app, &cwd, record.is_some())?;
-    if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref(), record.is_some()) {
+    // ACP takes none of that (its agent picks its own folder and sign-in and
+    // takes no switch to refuse commands), so a placed start is not made over it.
+    let acp = if placed == crate::compose::runtime::accounts::Placed::default() {
+        over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref(), record.is_some())
+    } else {
+        None
+    };
+    if let Some(started) = acp {
         if started.is_ok() {
             w.starts.history.locked().push((now, bucket));
         }
@@ -659,7 +666,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         env.retain(|(k, _)| k != v);
         env.push((v.into(), mcp_tool_timeout_ms(w).to_string()));
     }
-    let sign_in = crate::compose::runtime::accounts::sign_in(w, ways.sign_in, placed.ruled, &mut env);
+    let sign_in = crate::compose::runtime::accounts::sign_in(w, &r.app, ways.sign_in, placed.ruled || placed.root.is_some(), &mut env);
     // Kept before the run starts, under its session (Codex names its own
     // later, so it is kept under the run's key until then): a run whose
     // sandbox can't be kept isn't started, since a turn for it later would
@@ -671,6 +678,14 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
             }
             return Err(why);
         }
+    }
+    // The same for where the rule placed the run and what it keeps it from:
+    // every later turn of the session (a wake, a copy) is placed as this start.
+    if let Err(why) = crate::compose::runtime::accounts::keep(w, session.as_deref().unwrap_or(&key), &placed) {
+        if let Some(f) = &prompt_file {
+            let _ = std::fs::remove_file(f);
+        }
+        return Err(why);
     }
     let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text }, sign_in: sign_in.as_deref() };
     let pid = match run_turn(w, &resumes.runner, turn) {
@@ -722,7 +737,8 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         let (key, app, logs) = (key.clone(), app.clone(), runs);
         let (session, folder, prompt_file) = (session.clone(), folder.clone(), prompt_file);
         let record = record.clone();
-        std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, record, &answer));
+        let placed = placed.clone();
+        std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, record, placed, &answer));
     }
     let mut first = json!({ "session": session, "agent": agent, "pid": pid, "folder": folder, "app": app });
     if let (Some(rec), Some(words)) = (&record, &sandbox_words) {
@@ -1128,6 +1144,7 @@ fn watch(
     folder: &str,
     prompt_file: Option<String>,
     sandboxed: Option<sandbox::Record>,
+    placed: crate::compose::runtime::accounts::Placed,
     answer: &Answer,
 ) {
     let mine = |r: &xenonet_engine::delivery::runs::Run| r.key == key && r.pid == Some(f64::from(pid));
@@ -1154,7 +1171,13 @@ fn watch(
             if let Some(found) = starts::session_of(app, &new) {
                 session = Some(found.clone());
                 // An app that names its session once it runs (Codex) is
-                // kept as sandboxed from then on.
+                // kept as placed from then on, as well as sandboxed.
+                if let Err(why) = crate::compose::runtime::accounts::keep(w, &found, &placed) {
+                    w.log("warn", "start.placed", &format!("{found}'s run is stopped: {why}"));
+                    runner.stop(key);
+                    answer(w, "ended", json!({ "session": found, "minutes": 0, "app": app, "live": false, "outcome": "failed", "reason": why }));
+                    break None;
+                }
                 if let Some(rec) = &sandboxed {
                     if let Err(why) = sandbox::keep(w, &found, rec) {
                         w.log("warn", "start.sandbox", &format!("{found}'s run is stopped: {why}"));

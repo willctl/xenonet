@@ -205,6 +205,14 @@ pub trait Platform: Send + Sync {
         Vec::new()
     }
 
+    /// The environment variables that sign the app in some other way than
+    /// its folder's own sign-in and outrank it (a provider's API key, a
+    /// token, a base URL). A run placed in a folder by an account does not
+    /// keep them, since they would run it under another.
+    fn sign_in_vars(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
     /// The arguments that keep a run it starts from committing, pushing or
     /// running gh, for a project whose rule refuses (empty for an app with
     /// no such switch). A prefix rule, so a command written another way

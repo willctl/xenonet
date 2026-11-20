@@ -71,6 +71,11 @@ pub trait Host {
     /// How much of its plan an app's provider has used, 0 to 1 (`usage`);
     /// None without a fresh reading.
     fn usage(&mut self, app: &str) -> Option<f64>;
+    /// The same for the plan the session `agent` runs under: a session in a
+    /// folder she named spends that folder's own. The app's, by default.
+    fn usage_of(&mut self, agent: &str) -> Option<f64> {
+        self.usage(agent.split(':').next().unwrap_or(""))
+    }
     /// This machine's wake setting (Settings → Network) for waking `agent`:
     /// for a message from another machine, the setting of the network it
     /// came in, and `Consent` when that network isn't shown the session.
@@ -328,8 +333,7 @@ impl Router {
     /// A wake for a session's listening Stop hook to hand a message over:
     /// the same budget as any other wake, spent when allowed.
     pub fn wake(&self, h: &mut dyn Host, from: &str, agent: &str) -> WakeAllowed {
-        let app = agent.split(':').next().unwrap_or("").to_string();
-        let usage = h.usage(&app);
+        let usage = h.usage_of(agent);
         let w = h.wake_allowed(from, agent, usage);
         if w.ok() {
             h.spend_wake(from, agent);
@@ -344,7 +348,7 @@ impl Router {
         let idle = matches!(status, Some("idle" | "ended"));
         let id = text_of(a.get("id"));
         if idle {
-            let usage = h.usage(&text_of(a.get("app")));
+            let usage = h.usage_of(&id);
             if !h.wake_allowed(from, &id, usage).ok() {
                 return None;
             }
@@ -471,7 +475,7 @@ impl Router {
         self.with(key, |r| r.from_name = Some(from_name.clone()));
         let mut tried: Vec<String> = Vec::new();
         let wake = if idle {
-            let usage = h.usage(&app);
+            let usage = h.usage_of(&agent);
             h.wake_allowed(&from, &agent, usage)
         } else {
             WakeAllowed::Yes

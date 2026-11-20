@@ -166,8 +166,9 @@ pub trait State: Send + Sync {
     }
     /// The folder she named that a session was found in (`claude:<id>`), or
     /// None for the app's default folder or a session XenoNet doesn't know.
-    fn session_root(&self, _session: &str) -> Option<String> {
-        None
+    /// Err for a session id found in more than one such folder.
+    fn session_root(&self, _session: &str) -> R<Option<String>> {
+        Ok(None)
     }
     /// Each folder an app is read from, its default one first (None), with
     /// the email its sign-in holds now, when it holds one.
