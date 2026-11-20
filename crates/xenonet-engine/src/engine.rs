@@ -2046,6 +2046,11 @@ impl Engine {
             let (login, host) = (as_str(get(rule, "login")).unwrap_or(""), as_str(get(rule, "host")).unwrap_or("github.com"));
             said.push(format!("pushes should sign in as {login} on {host}, but a push from here would sign in as {}", uses(p, "another account")));
         }
+        for (key, what) in [("claude", "Claude Code"), ("chatgpt", "Codex")] {
+            if let (Some(p), Some(want)) = (part(key), as_str(get(get(check, "rule").unwrap_or(&Value::Null), key))) {
+                said.push(format!("{what} should run as {want}, but the last session here ran as {}", uses(p, "another account")));
+            }
+        }
         Ok(format!(
             "XenoNet: this project has an identity rule that doesn't match what git here would use. The rule says {}. Don't commit or push until this is fixed, and tell your user.",
             said.join("; and ")

@@ -487,6 +487,15 @@ fn a_session_is_told_at_its_start_when_its_projects_rule_does_not_match() {
     assert!(said.contains("commits should carry nova@example.com, but git here would use ada@acme.example"), "{said}");
     assert!(said.contains("pushes should sign in as nova-dev on github.com, but a push from here would sign in as ledger-bot/github.com"), "{said}");
     assert!(said.ends_with("Don't commit or push until this is fixed, and tell your user."), "{said}");
+    // The account a session ran as is told too.
+    f.w.locked().rule = Some(json!({
+        "rule": { "claude": "nova-work@example.com" },
+        "claude": { "state": "differs", "uses": "nova@example.com" },
+        "mismatch": true,
+        "unknown": false,
+    }));
+    let said = brief(&f);
+    assert!(said.contains("Claude Code should run as nova-work@example.com, but the last session here ran as nova@example.com"), "{said}");
     // Only the part that differs is named.
     f.w.locked().rule =
         Some(json!({ "rule": rule, "git": { "state": "ok", "uses": "nova@example.com" }, "push": { "state": "differs", "uses": null }, "mismatch": true, "unknown": false }));

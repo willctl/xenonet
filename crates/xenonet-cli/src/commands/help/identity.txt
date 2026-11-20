@@ -9,6 +9,16 @@ project; a rule says which they should be, and warns when they aren't.
                                          set it; either part alone works, and
                                          a part you leave out stays as it is.
                                          host is github.com unless you say
+  xenonet identity rule [<folder>] --claude <email> --chatgpt <email>
+                                         the Claude Code and ChatGPT (Codex)
+                                         account its sessions are to run as
+  xenonet identity rule [<folder>] --mode warn|refuse
+                                         warn (the default) only says. refuse
+                                         makes XenoNet refuse a start here
+                                         that no folder it reads can place
+                                         under the rule's accounts, and keep
+                                         a Claude Code run it starts from
+                                         committing, pushing or running gh
   xenonet identity rule [<folder>] --clear
                                          take the rule away
   xenonet identity check [<folder>]      the check; exits 1 when the project
@@ -22,6 +32,12 @@ project; a rule says which they should be, and warns when they aren't.
   xenonet identity hook remove [<folder>]
                                          take that hook out again
   --json                                 the answer as JSON
+
+A rule's accounts are matched against the folders XenoNet reads for each app
+(xenonet folders). A start picks the folder that is signed in to the account,
+or, under refuse, is refused. What XenoNet can't see stays a warning: your
+own terminals, Claude desktop, a /login inside a running session, pushes over
+SSH, and Codex threads.
 
 Setting or clearing a rule is yours, so it works from your own terminal and
 is refused from a session's.

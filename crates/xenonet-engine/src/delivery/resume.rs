@@ -50,6 +50,20 @@ pub fn resume_env<V>(env: Vec<(String, V)>) -> Vec<(String, V)> {
     env.into_iter().filter(|(k, _)| keep.contains(&k.as_str()) || !marks.iter().any(|m| k.starts_with(m))).collect()
 }
 
+/// `resume_env` for a session found in a folder she named (`root`): that
+/// folder is where the app keeps its sessions and sign-in, so the turn runs
+/// with it (CLAUDE_CONFIG_DIR, CODEX_HOME: the app's roots.env) in place of
+/// the service's own. A session of the app's default folder (`root` None),
+/// or of an app that keeps one folder only, runs as it did.
+pub fn resume_env_in(env: Vec<(String, String)>, app: &str, root: Option<&str>) -> Vec<(String, String)> {
+    let mut env = resume_env(env);
+    let Some(root) = root.filter(|r| xenonet_adapter::platforms().get(app).is_some_and(|p| p.root_paths(r).is_some())) else { return env };
+    let Some(var) = xenonet_adapter::apps::app(app).and_then(|a| a.roots.as_ref()).map(|r| r.env.clone()) else { return env };
+    env.retain(|(k, _)| *k != var);
+    env.push((var, root.to_string()));
+    env
+}
+
 /// The command for one resumed turn, or None for an app or id it can't
 /// resume. `settings` is the listen settings file a Claude Code turn runs
 /// with.

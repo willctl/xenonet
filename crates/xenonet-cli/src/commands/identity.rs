@@ -41,6 +41,15 @@ fn rule_words(rule: &Value) -> String {
     if let Some(p) = rule.get("push") {
         parts.push(format!("pushes as {} on {}", t(p, "login"), p.get("host").and_then(Value::as_str).unwrap_or("github.com")));
     }
+    if let Some(a) = str(rule, "claude") {
+        parts.push(format!("Claude Code as {a}"));
+    }
+    if let Some(a) = str(rule, "chatgpt") {
+        parts.push(format!("Codex as {a}"));
+    }
+    if str(rule, "mode") == Some("refuse") {
+        parts.push("refuses a start it can't place".into());
+    }
     parts.join(", ")
 }
 
@@ -71,7 +80,15 @@ fn show(found: &Value) {
     print(format!("{mark} {} {}", c::bold(&name), c::dim(format!("rule: {}", rule_words(rule)))));
     let git = str(rule, "git").map(|g| format!("commits as {g}"));
     let push = rule.get("push").map(|p| format!("pushes as {} on {}", t(p, "login"), p.get("host").and_then(Value::as_str).unwrap_or("github.com")));
-    for line in [git.and_then(|w| part_line(check, "git", "git ", w)), push.and_then(|w| part_line(check, "push", "push", w))].into_iter().flatten() {
+    let claude = str(rule, "claude").map(|a| format!("Claude Code runs as {a}"));
+    let chatgpt = str(rule, "chatgpt").map(|a| format!("Codex runs as {a}"));
+    let lines = [
+        git.and_then(|w| part_line(check, "git", "git ", w)),
+        push.and_then(|w| part_line(check, "push", "push", w)),
+        claude.and_then(|w| part_line(check, "claude", "claude", w)),
+        chatgpt.and_then(|w| part_line(check, "chatgpt", "codex ", w)),
+    ];
+    for line in lines.into_iter().flatten() {
         print(line);
     }
 }
@@ -87,6 +104,25 @@ fn wanted(current: Option<&Value>, flags: &Flags) -> Result<Map<String, Value>, 
         if let Some(p) = old.get("push") {
             body.insert("push".into(), p.clone());
         }
+        for k in ["claude", "chatgpt", "mode"] {
+            if let Some(v) = old.get(k) {
+                body.insert(k.into(), v.clone());
+            }
+        }
+    }
+    for (key, what) in [("claude", "Claude Code"), ("chatgpt", "Codex")] {
+        if flags.has(key) {
+            match flags.str(key).filter(|g| g.contains('@')) {
+                Some(a) => body.insert(key.into(), json!(a)),
+                None => return Err(Fail::new(format!("--{key} takes the email of the {what} account: xenonet identity rule --{key} nova@example.com"), 2)),
+            };
+        }
+    }
+    if flags.has("mode") {
+        match flags.str("mode").filter(|m| matches!(*m, "warn" | "refuse")) {
+            Some(m) => body.insert("mode".into(), json!(m)),
+            None => return Err(Fail::new("--mode is warn or refuse: warn only says, refuse stops a start XenoNet can't place under the rule's accounts", 2)),
+        };
     }
     if flags.has("git") {
         match flags.str("git").filter(|g| g.contains('@')) {
@@ -117,7 +153,7 @@ fn rule(args: &[String], flags: &Flags) -> Done {
         }
         return Ok(1);
     };
-    let sets = flags.has("git") || flags.has("push");
+    let sets = ["git", "push", "claude", "chatgpt", "mode"].iter().any(|k| flags.has(k));
     if flags.on("clear") && sets {
         return Err(Fail::new("--clear takes the rule away; give it alone", 2));
     }

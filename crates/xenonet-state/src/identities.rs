@@ -586,6 +586,25 @@ pub fn clean_rule(body: &Value) -> Result<Option<Value>, &'static str> {
         }
         Some(_) => return Err("A rule's push account is a login and a host"),
     }
+    // The accounts the project's sessions are to run as.
+    for key in ["claude", "chatgpt"] {
+        if let Some(email) = text(body.get(key))? {
+            if !one_line(&email) || !email.contains('@') {
+                return Err(if key == "claude" { "A rule's Claude account is an email address" } else { "A rule's ChatGPT account is an email address" });
+            }
+            rule.insert(key.into(), Value::String(email));
+        }
+    }
+    // What to do about a mismatch XenoNet can stop: warn unless it says
+    // refuse. It means nothing without a part to hold to.
+    let mode = match text(body.get("mode"))?.as_deref() {
+        None | Some("warn") => None,
+        Some("refuse") => Some("refuse"),
+        Some(_) => return Err("A rule's mode is warn or refuse"),
+    };
+    if let (Some(mode), false) = (mode, rule.is_empty()) {
+        rule.insert("mode".into(), Value::String(mode.into()));
+    }
     Ok((!rule.is_empty()).then_some(Value::Object(rule)))
 }
 
@@ -596,6 +615,21 @@ pub fn clean_rule(body: &Value) -> Result<Option<Value>, &'static str> {
 /// read another, and "unknown" when it read none: that is not a mismatch.
 /// `mismatch` is any part that differs.
 pub fn check_rule(rule: &Value, links: &[Value], list: &[Value]) -> Value {
+    check_rule_with(rule, links, list, &[])
+}
+
+/// An account a session of the project ran as (an identity's id) and when
+/// it last ran.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RanAs {
+    pub id: String,
+    pub at: f64,
+}
+
+/// `check_rule`, and for a rule that names a Claude or ChatGPT account
+/// (`claude`, `chatgpt`): the account the project's newest session of that
+/// kind ran as (`ran`). Not having one is unknown, never a mismatch.
+pub fn check_rule_with(rule: &Value, links: &[Value], list: &[Value], ran: &[RanAs]) -> Value {
     let of = |role: &str| links.iter().find(|l| l.get("role").and_then(Value::as_str) == Some(role)).and_then(|l| l.get("id")).and_then(Value::as_str);
     let rec = |id: &str| list.iter().find(|i| i.get("id").and_then(Value::as_str) == Some(id));
     let part = |wants: String, found: Option<&str>, uses: &dyn Fn(&str) -> Option<String>| match found {
@@ -617,22 +651,63 @@ pub fn check_rule(rule: &Value, links: &[Value], list: &[Value]) -> Value {
         };
         out.insert("push".into(), part(github_id(host, login), of("pushes-as"), &uses));
     }
+    for kind in ["claude", "chatgpt"] {
+        let Some(wanted) = rule.get(kind).and_then(Value::as_str) else { continue };
+        let newest = ran.iter().filter(|r| r.id.split(':').next() == Some(kind)).max_by(|a, b| a.at.total_cmp(&b.at));
+        let handle = newest.and_then(|r| rec(&r.id)).and_then(|r| r.get("handle")).and_then(Value::as_str);
+        out.insert(
+            kind.into(),
+            match (newest, handle) {
+                (None, _) | (Some(_), None) => json!({ "state": "unknown", "uses": null }),
+                (Some(_), Some(h)) => json!({ "state": if h.eq_ignore_ascii_case(wanted) { "ok" } else { "differs" }, "uses": h }),
+            },
+        );
+    }
     let state = |k: &str| out.get(k).and_then(|p| p.get("state")).and_then(Value::as_str);
-    let mismatch = state("git") == Some("differs") || state("push") == Some("differs");
-    let unknown = state("git") == Some("unknown") || state("push") == Some("unknown");
+    let differs = |k: &str| state(k) == Some("differs");
+    let accounts_differ = differs("claude") || differs("chatgpt");
+    let mismatch = differs("git") || differs("push") || accounts_differ;
+    let unknown = ["git", "push", "claude", "chatgpt"].iter().any(|k| state(k) == Some("unknown"));
     if mismatch {
         // In words that name no account, so the Needs you queue can show
         // them with identities masked.
-        let words = match (state("git") == Some("differs"), state("push") == Some("differs")) {
+        let mut words = match (differs("git"), differs("push")) {
             (true, true) => "Commits and pushes here don't use the identity this project's rule names.",
             (true, false) => "Commits here don't use the git identity this project's rule names.",
-            _ => "A push from here doesn't sign in as the account this project's rule names.",
-        };
+            (false, true) => "A push from here doesn't sign in as the account this project's rule names.",
+            _ => "",
+        }
+        .to_string();
+        if accounts_differ {
+            if !words.is_empty() {
+                words.push(' ');
+            }
+            words.push_str("A session here ran as another Claude or ChatGPT account than this project's rule names.");
+        }
         out.insert("words".into(), words.into());
+    }
+    if let Some(mode) = rule.get("mode").and_then(Value::as_str) {
+        out.insert("mode".into(), mode.into());
     }
     out.insert("mismatch".into(), Value::Bool(mismatch));
     out.insert("unknown".into(), Value::Bool(unknown));
     Value::Object(out)
+}
+
+/// The root of an app that holds the account a rule names: each root
+/// (None for the app's default one) with the email it is signed in to. The
+/// first root that holds it, as the person wrote it in any case; none is a
+/// refusal in words, never another account. `app` is the app's name.
+pub fn pick_root(app: &str, roots: &[(Option<String>, Option<String>)], wanted: &str) -> Result<Option<String>, String> {
+    roots
+        .iter()
+        .find(|(_, email)| email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(wanted)))
+        .map(|(root, _)| root.clone())
+        .ok_or_else(|| {
+            format!(
+                "This project's rule says {app} runs as {wanted}, and no folder XenoNet reads for {app} is signed in to that account. Sign in to it in a folder, then name the folder with xenonet folders add, or change the rule."
+            )
+        })
 }
 
 /// The projects whose rule doesn't match, one `{ id, title, text }` each,
@@ -652,7 +727,18 @@ pub fn identity_warnings(nodes: &[Value]) -> Vec<Value> {
 /// Puts each rule's check on its project's node (`identityRule`), given
 /// the nodes as the map has them with their identity links, and the
 /// identities list. A project with no rule gets nothing.
-pub fn apply_rules(nodes: &mut [Value], rules: &Value, list: &[Value]) {
+pub fn apply_rules(nodes: &mut [Value], rules: &Value, list: &[Value], map_links: &[(Value, Value, Value)]) {
+    // What each session ran as and when, by session.
+    let ran: HashMap<String, RanAs> = nodes
+        .iter()
+        .filter(|n| n.get("kind").and_then(Value::as_str) == Some("session"))
+        .filter_map(|n| {
+            let id = n.get("id")?.as_str()?;
+            let account = n.get("ranAs")?.get("id")?.as_str()?;
+            let at = n.get("updatedAt").or_else(|| n.get("createdAt")).and_then(Value::as_f64).unwrap_or(0.0);
+            Some((id.to_string(), RanAs { id: account.to_string(), at }))
+        })
+        .collect();
     for n in nodes {
         let Some(id) = n.get("id").and_then(Value::as_str) else { continue };
         let Some(rule) = rules.get(id).filter(|r| r.is_object()) else { continue };
@@ -660,7 +746,13 @@ pub fn apply_rules(nodes: &mut [Value], rules: &Value, list: &[Value]) {
             continue;
         }
         let links = n.get("identities").and_then(Value::as_array).cloned().unwrap_or_default();
-        let check = check_rule(rule, &links, list);
+        // The project's own sessions.
+        let mine: Vec<RanAs> = map_links
+            .iter()
+            .filter(|(src, _, kind)| src.as_str() == Some(id) && kind.as_str() == Some("session"))
+            .filter_map(|(_, tgt, _)| ran.get(tgt.as_str()?).cloned())
+            .collect();
+        let check = check_rule_with(rule, &links, list, &mine);
         if let Some(o) = n.as_object_mut() {
             o.insert("identityRule".into(), check);
         }
@@ -1677,7 +1769,7 @@ mod tests {
             json!({ "id": "project:ledger", "kind": "project", "identities": [] }),
             json!({ "id": "claude:s1", "kind": "session" }),
         ];
-        apply_rules(&mut nodes, &json!({ "project:atlas": { "git": "nova@example.com" }, "claude:s1": { "git": "nova@example.com" } }), &list);
+        apply_rules(&mut nodes, &json!({ "project:atlas": { "git": "nova@example.com" }, "claude:s1": { "git": "nova@example.com" } }), &list, &[]);
         assert_eq!(nodes[0]["identityRule"]["mismatch"], true);
         assert_eq!(
             identity_warnings(&nodes),

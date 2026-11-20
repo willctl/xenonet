@@ -354,7 +354,7 @@ impl IdentityWatch {
             }
             // Each project's rule, checked against what was just read.
             if let Some(rules) = saved.get("rules") {
-                ids::apply_rules(list, rules, &out.list);
+                ids::apply_rules(list, rules, &out.list, &links);
             }
         }
         // What linking changed of the saved state: the sign-in timelines
