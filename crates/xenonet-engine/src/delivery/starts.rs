@@ -62,6 +62,42 @@ const HOUR_MS: f64 = 3600e3;
 /// is never kept for later.
 pub const FRESH_MS: f64 = 120e3;
 
+/// What a request says of the sandbox: nothing (`Unset`, which the sender
+/// fills in by who asks and where, and a receiver takes as off), off, or on
+/// with the domains the run may reach.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SandboxAsk {
+    #[default]
+    Unset,
+    Off,
+    On(Vec<String>),
+}
+
+impl SandboxAsk {
+    /// The domains of a sandboxed run, None for one that isn't.
+    pub fn domains(&self) -> Option<&[String]> {
+        match self {
+            SandboxAsk::On(d) => Some(d),
+            _ => None,
+        }
+    }
+}
+
+/// A domain a sandboxed run may reach: a host name, or `*.` and one.
+fn domain(d: &str) -> Result<String, String> {
+    let d = d.trim().to_ascii_lowercase();
+    let host = d.strip_prefix("*.").unwrap_or(&d);
+    let ok = !host.is_empty()
+        && host.len() <= 253
+        && host.contains('.')
+        && host.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    if ok {
+        Ok(d)
+    } else {
+        Err(format!("{d} isn't a domain a sandboxed run can be let reach: a host name like github.com, or *.example.org"))
+    }
+}
+
 /// What a request asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
@@ -75,6 +111,9 @@ pub struct Request {
     /// Asked as delegated work: the machine starts it only when it's set to
     /// delegate (a session or actor asking; you asking is never refused).
     pub delegate: bool,
+    /// Whether the run is held to its app's own sandbox, and the domains it
+    /// may reach.
+    pub sandbox: SandboxAsk,
 }
 
 impl Request {
@@ -82,6 +121,11 @@ impl Request {
         let mut v = json!({ "folder": self.folder, "app": self.app, "mode": self.mode, "prompt": self.prompt });
         if self.delegate {
             v["delegate"] = json!(true);
+        }
+        // Only a sandboxed run says so: a sender that says nothing is an
+        // older one, and a receiver takes nothing as off.
+        if let SandboxAsk::On(domains) = &self.sandbox {
+            v["sandbox"] = json!({ "domains": domains });
         }
         v
     }
@@ -128,7 +172,53 @@ pub fn request(v: &Value) -> Result<Request, String> {
         return Err("that folder is too long to be one".into());
     }
     let delegate = v.get("delegate").and_then(Value::as_bool).unwrap_or(false);
-    Ok(Request { folder, app, mode, prompt, delegate })
+    let sandbox = sandbox_of(v)?;
+    Ok(Request { folder, app, mode, prompt, delegate, sandbox })
+}
+
+/// A request's `sandbox` (true, false, or `{ domains }`) and its `domains`.
+fn sandbox_of(v: &Value) -> Result<SandboxAsk, String> {
+    let given = match v.get("domains") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(a)) => Some(a.iter().map(|d| d.as_str().ok_or("a domain is text".to_string()).and_then(domain)).collect::<Result<Vec<_>, _>>()?),
+        Some(_) => return Err("domains is a list of host names".into()),
+    };
+    let (on, inside) = match v.get("sandbox") {
+        None | Some(Value::Null) => (None, None),
+        Some(Value::Bool(b)) => (Some(*b), None),
+        Some(o @ Value::Object(_)) => {
+            let inside = match o.get("domains") {
+                None | Some(Value::Null) => None,
+                Some(Value::Array(a)) => Some(a.iter().map(|d| d.as_str().ok_or("a domain is text".to_string()).and_then(domain)).collect::<Result<Vec<_>, _>>()?),
+                Some(_) => return Err("domains is a list of host names".into()),
+            };
+            (Some(o.get("on").and_then(Value::as_bool).unwrap_or(true)), inside)
+        }
+        Some(_) => return Err("sandbox is true, false or an object with domains".into()),
+    };
+    let mut domains: Vec<String> = given.into_iter().chain(inside).flatten().collect();
+    domains.sort();
+    domains.dedup();
+    match (on, domains.is_empty()) {
+        (None, true) => Ok(SandboxAsk::Unset),
+        (Some(false), true) => Ok(SandboxAsk::Off),
+        (Some(false), false) => Err("domains are for a sandboxed run: they reach nothing with the sandbox off".into()),
+        // Domains alone ask for the sandbox.
+        (_, _) => Ok(SandboxAsk::On(domains)),
+    }
+}
+
+/// The sandbox's words in the app's own terms, or why the app can't start
+/// sandboxed here: no mapping for its sandbox (Grok Build, and the apps
+/// started over ACP alone), or a limit of its own (native Windows, domains).
+/// `windows` is whether this machine is native Windows.
+pub fn sandbox_plan(r: &Request, plan: &xenonet_adapter::delivery::Plan<'_>, windows: bool) -> Result<String, String> {
+    let name = apps().into_iter().find(|a| a.id == r.app).map_or(r.app.clone(), |a| a.name.clone());
+    let ways = apps::of(&r.app).and_then(|w| w.sandbox).ok_or_else(|| format!("{name} has no sandbox XenoNet can drive, so it isn't started sandboxed: start it without the sandbox from your own console, or use Claude Code or Codex"))?;
+    if let Some(why) = (ways.unavailable)(plan, windows) {
+        return Err(why);
+    }
+    Ok((ways.words)(plan))
 }
 
 /// One-line text for a title, without what could break the framing.
@@ -146,7 +236,7 @@ pub const DELEGATED_RULES: &str = "Within that delegation XenoNet answers your p
 /// `delegation` is the machine that put this one on standing delegation
 /// and the day (a session or actor starts under it): the prompt then says
 /// the asker's authority is your user's, checked here, not claimed.
-pub fn framed(by: &Value, from: Option<&str>, prompt: &str, delegation: Option<(&str, &str)>) -> String {
+pub fn framed(by: &Value, from: Option<&str>, prompt: &str, delegation: Option<(&str, &str)>, sandbox: Option<&str>) -> String {
     let kind = by.get("kind").and_then(Value::as_str).unwrap_or("session");
     let mut rules = String::new();
     let line = if kind == "you" {
@@ -172,7 +262,10 @@ pub fn framed(by: &Value, from: Option<&str>, prompt: &str, delegation: Option<(
             None => format!("[XenoNet] This was asked by {what} «{title}» ({id}) on this machine.{tail}"),
         }
     };
-    format!("{line}\n\n{rules}{prompt}")
+    // A sandboxed run is told it is, and what it may reach, so it doesn't
+    // spend its turns on what the sandbox will refuse.
+    let sandboxed = sandbox.map(|w| format!("[XenoNet] This run is sandboxed. {w}\n\n")).unwrap_or_default();
+    format!("{line}\n\n{sandboxed}{rules}{prompt}")
 }
 
 /// Whether the app reads a turn's prompt from a file XenoNet writes, as its
@@ -189,9 +282,17 @@ pub fn prompt_in_file(app: &str) -> bool {
 /// `prompt_file` where the prompt was written for an app that reads it
 /// from a file. Or why there's no such command: the app's adapter has no
 /// start.
-pub fn command(r: &Request, id: &str, cwd: &str, settings: Option<&str>, server: &str, prompt_file: Option<&str>) -> Result<(String, Vec<String>), String> {
+pub fn command(
+    r: &Request,
+    id: &str,
+    cwd: &str,
+    settings: Option<&str>,
+    server: &str,
+    prompt_file: Option<&str>,
+    sandbox: Option<xenonet_adapter::delivery::SandboxFiles<'_>>,
+) -> Result<(String, Vec<String>), String> {
     let start = apps::of(&r.app).and_then(|w| w.start).ok_or_else(|| format!("XenoNet has no way to start a {} session here", r.app))?;
-    Ok(start(&Start { id, cwd, mode: r.mode.as_deref(), settings, server, prompt_file }))
+    Ok(start(&Start { id, cwd, mode: r.mode.as_deref(), settings, server, prompt_file, sandbox }))
 }
 
 /// Who asked a start here, in the starts' history: one asker on this
@@ -375,7 +476,7 @@ mod tests {
     fn a_request_says_its_app_mode_folder_and_prompt() {
         xenonet_platforms::install();
         let r = request(&json!({ "prompt": "  Fix the login form  " })).unwrap();
-        assert_eq!(r, Request { folder: "~".into(), app: "claude".into(), mode: None, prompt: "Fix the login form".into(), delegate: false });
+        assert_eq!(r, Request { folder: "~".into(), app: "claude".into(), mode: None, prompt: "Fix the login form".into(), delegate: false, sandbox: SandboxAsk::Unset });
         assert_eq!(request(&json!({ "app": "grok", "mode": "plan", "folder": "project:atlas", "prompt": "x" })).unwrap().mode.as_deref(), Some("plan"));
         assert_eq!(request(&json!({ "mode": "manual", "prompt": "x" })).unwrap().mode, None, "manual is the person's own settings");
         assert_eq!(request(&json!({ "mode": "bypassPermissions", "prompt": "x" })), Err("XenoNet never starts a session that bypasses its permission checks".into()));
@@ -404,37 +505,101 @@ mod tests {
     }
 
     #[test]
+    fn a_request_says_whether_the_run_is_sandboxed_and_where_it_may_reach() {
+        xenonet_platforms::install();
+        let ask = |v: Value| request(&v).unwrap().sandbox;
+        assert_eq!(ask(json!({ "prompt": "x" })), SandboxAsk::Unset);
+        assert_eq!(ask(json!({ "prompt": "x", "sandbox": false })), SandboxAsk::Off);
+        assert_eq!(ask(json!({ "prompt": "x", "sandbox": true })), SandboxAsk::On(vec![]));
+        assert_eq!(ask(json!({ "prompt": "x", "sandbox": { "domains": ["GitHub.com", "github.com", "*.npmjs.org"] } })), SandboxAsk::On(vec!["*.npmjs.org".into(), "github.com".into()]));
+        assert_eq!(ask(json!({ "prompt": "x", "domains": ["github.com"] })), SandboxAsk::On(vec!["github.com".into()]), "domains alone ask for it");
+        for bad in ["localhost", "https://github.com", "a b.com", "-x.com", "git hub.com", ""] {
+            assert!(request(&json!({ "prompt": "x", "domains": [bad] })).is_err(), "{bad}");
+        }
+        assert!(request(&json!({ "prompt": "x", "sandbox": false, "domains": ["github.com"] })).is_err());
+        // Only a sandboxed run says so on the wire, and it comes back as it went.
+        let on = request(&json!({ "prompt": "x", "domains": ["github.com"] })).unwrap();
+        assert_eq!(on.to_json()["sandbox"], json!({ "domains": ["github.com"] }));
+        assert_eq!(request(&on.to_json()).unwrap(), on);
+        assert!(request(&json!({ "prompt": "x", "sandbox": false })).unwrap().to_json().get("sandbox").is_none());
+    }
+
+    #[test]
+    fn an_app_without_a_sandbox_refuses_a_sandboxed_start_in_words() {
+        xenonet_platforms::install();
+        let plan = |d: &'static [String]| xenonet_adapter::delivery::Plan { folder: "/w/atlas", home: "/h", domains: d, port: "47840", bin: "xenonet" };
+        let r = |app: &str| request(&json!({ "app": app, "prompt": "x", "sandbox": true })).unwrap();
+        let none: &'static [String] = &[];
+        assert!(sandbox_plan(&r("claude"), &plan(none), false).unwrap().contains("no network"));
+        assert!(sandbox_plan(&r("claude"), &plan(none), true).unwrap_err().contains("WSL2"));
+        for app in ["grok", "hermes-agent"] {
+            let why = sandbox_plan(&r(app), &plan(none), false).unwrap_err();
+            assert!(why.contains("has no sandbox XenoNet can drive"), "{app}: {why}");
+        }
+        assert!(sandbox_plan(&r("codex"), &plan(none), false).unwrap().contains("no network"));
+        let some: &'static [String] = Box::leak(vec!["github.com".to_string()].into_boxed_slice());
+        assert!(sandbox_plan(&r("codex"), &plan(some), false).unwrap_err().contains("named domains"));
+        assert!(sandbox_plan(&r("claude"), &plan(some), false).unwrap().contains("github.com"));
+    }
+
+    #[test]
+    fn a_sandboxed_run_loads_xenonets_settings_and_servers_and_none_of_the_repos() {
+        xenonet_platforms::install();
+        use xenonet_adapter::delivery::{Plan, SandboxFiles};
+        let id = "0190d3e0-0000-7000-8000-00000000ab01";
+        let r = |app: &str| Request { folder: "~".into(), app: app.into(), mode: None, prompt: "x".into(), delegate: false, sandbox: SandboxAsk::On(vec![]) };
+        let plan = Plan { folder: "/w/atlas", home: "/h", domains: &[], port: "47840", bin: "xenonet" };
+        let files = SandboxFiles { plan, settings: "/s/runs/a.settings.json", mcp: "/s/runs/a.mcp.json" };
+        let (_, args) = command(&r("claude"), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None, Some(files)).unwrap();
+        let at = args.iter().position(|a| a == "--settings").unwrap();
+        assert_eq!(args[at + 1], "/s/runs/a.settings.json", "the run's own file, not the listening one: {args:?}");
+        assert!(!args.iter().any(|a| a == "/s/listen.json"));
+        assert!(args.contains(&"--setting-sources=".to_string()) && args.contains(&"--strict-mcp-config".to_string()));
+        assert_eq!(args[args.iter().position(|a| a == "--mcp-config").unwrap() + 1], "/s/runs/a.mcp.json");
+        let (_, codex) = command(&r("codex"), id, "/w/atlas", None, "xenonet", None, Some(files)).unwrap();
+        assert_eq!(codex[..6], ["exec", "--json", "-C", "/w/atlas", "--sandbox", "workspace-write"]);
+        assert!(codex.contains(&"approval_policy=\"never\"".to_string()) && codex.contains(&"sandbox_workspace_write.network_access=false".to_string()), "{codex:?}");
+        assert_eq!(codex.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn a_sandboxed_run_is_told_so_in_its_first_prompt() {
+        let you = json!({ "kind": "you", "id": "actor:you" });
+        assert_eq!(framed(&you, Some("inix"), "Go.", None, Some("It reaches nothing.")), "[XenoNet] Started by you, at inix's console.\n\n[XenoNet] This run is sandboxed. It reaches nothing.\n\nGo.");
+    }
+
+    #[test]
     fn the_first_prompt_says_who_asked() {
         let you = json!({ "kind": "you", "id": "actor:you" });
-        assert_eq!(framed(&you, Some("desk"), "Go.", None), "[XenoNet] Started by you, at desk's console.\n\nGo.");
-        assert_eq!(framed(&you, None, "Go.", None), "[XenoNet] Started by you, at this machine's console.\n\nGo.");
+        assert_eq!(framed(&you, Some("desk"), "Go.", None, None), "[XenoNet] Started by you, at desk's console.\n\nGo.");
+        assert_eq!(framed(&you, None, "Go.", None, None), "[XenoNet] Started by you, at this machine's console.\n\nGo.");
         let s = json!({ "kind": "session", "id": "claude:aaaaaaaa-0001", "title": "Fix «it»\n\u{1b}[31mnow" });
         assert_eq!(
-            framed(&s, Some("desk"), "Go.", None),
+            framed(&s, Some("desk"), "Go.", None, None),
             "[XenoNet] desk says this was asked by the session «Fix \"it\" now» (claude:aaaaaaaa-0001). It came from an agent, not from your user.\n\nGo."
         );
         let a = json!({ "kind": "actor", "id": "actor:muse" });
-        assert!(framed(&a, None, "Go.", None).starts_with("[XenoNet] This was asked by the actor «actor:muse» (actor:muse) on this machine."));
+        assert!(framed(&a, None, "Go.", None, None).starts_with("[XenoNet] This was asked by the actor «actor:muse» (actor:muse) on this machine."));
     }
 
     #[test]
     fn a_delegated_start_says_your_user_delegated_it_and_what_stays_off_limits() {
         let s = json!({ "kind": "session", "id": "claude:aaaaaaaa-0001", "title": "Update" });
-        let text = framed(&s, Some("desk"), "Go.", Some(("desk", "2026-11-01")));
+        let text = framed(&s, Some("desk"), "Go.", Some(("desk", "2026-11-01")), None);
         assert!(text.starts_with("[XenoNet] desk says this was asked by the session «Update» (claude:aaaaaaaa-0001). Your user delegated it: they put this machine on standing delegation at desk's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.\n\n"));
         assert!(text.ends_with(&format!("{DELEGATED_RULES}\n\nGo.")));
         assert!(!text.contains("not from your user"), "the agent line is gone: the delegation is your user's");
         // A start by you says what it said, delegation or not.
         let you = json!({ "kind": "you", "id": "actor:you" });
-        assert_eq!(framed(&you, Some("desk"), "Go.", Some(("desk", "2026-11-01"))), "[XenoNet] Started by you, at desk's console.\n\nGo.");
+        assert_eq!(framed(&you, Some("desk"), "Go.", Some(("desk", "2026-11-01")), None), "[XenoNet] Started by you, at desk's console.\n\nGo.");
     }
 
     #[test]
     fn each_app_starts_its_own_way_and_the_prompt_never_goes_as_an_argument() {
         xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
-        let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into(), delegate: false };
-        let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
+        let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into(), delegate: false, sandbox: SandboxAsk::Unset };
+        let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None, None).unwrap();
         assert_eq!(app, "claude");
         assert_eq!(
             args,
@@ -454,19 +619,19 @@ mod tests {
             ]
         );
         assert_eq!(
-            command(&r("claude", None), id, "/w", None, "xenonet-dev", None).unwrap().1,
+            command(&r("claude", None), id, "/w", None, "xenonet-dev", None, None).unwrap().1,
             ["-p", "--session-id", id, "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "mcp__xenonet-dev__permission"]
         );
-        assert_eq!(command(&r("codex", None), id, "/w/atlas", None, "xenonet", None).unwrap().1, ["exec", "--json", "-C", "/w/atlas", "-"]);
+        assert_eq!(command(&r("codex", None), id, "/w/atlas", None, "xenonet", None, None).unwrap().1, ["exec", "--json", "-C", "/w/atlas", "-"]);
         assert_eq!(
-            command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt")).unwrap().1,
+            command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt"), None).unwrap().1,
             ["--prompt-file", "/s/runs/p.txt", "-s", id, "--output-format", "json", "--permission-mode", "default"]
         );
         for app in apps().iter().filter(|a| !acp_only(a)).map(|a| a.id.as_str()) {
-            assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p")).unwrap().1.iter().any(|a| a.contains("rm -rf")), "{app}");
+            assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p"), None).unwrap().1.iter().any(|a| a.contains("rm -rf")), "{app}");
         }
         assert!(prompt_in_file("grok") && !prompt_in_file("claude") && !prompt_in_file("codex"));
-        assert!(command(&r("opencode", None), id, "/w", None, "xenonet", None).is_err(), "no start in its adapter");
+        assert!(command(&r("opencode", None), id, "/w", None, "xenonet", None, None).is_err(), "no start in its adapter");
     }
 
     #[test]

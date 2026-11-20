@@ -28,6 +28,53 @@ pub struct Start<'a> {
     /// Where the first prompt was written, for an app that reads it from a
     /// file (`Ways::prompt_file`).
     pub prompt_file: Option<&'a str>,
+    /// For a sandboxed run: the files of its settings and servers, which
+    /// XenoNet wrote from the app's `SandboxWays`. None: not sandboxed.
+    pub sandbox: Option<SandboxFiles<'a>>,
+}
+
+/// What a sandboxed run is held to: it writes only in `folder` (its working
+/// folder), reads none of `home` but the folder, and reaches the network
+/// only at `domains` (none: not at all).
+#[derive(Clone, Copy, Debug)]
+pub struct Plan<'a> {
+    pub folder: &'a str,
+    pub home: &'a str,
+    pub domains: &'a [String],
+    /// XenoNet's port and the xenonet command, which its hooks and its MCP
+    /// server in the run go through.
+    pub port: &'a str,
+    pub bin: &'a str,
+}
+
+/// The files a sandboxed run is started with, for an app whose sandbox is
+/// settings.
+#[derive(Clone, Copy, Debug)]
+pub struct SandboxFiles<'a> {
+    pub plan: Plan<'a>,
+    /// The one settings file the run loads, instead of the user's, the
+    /// project's and the local ones.
+    pub settings: &'a str,
+    /// The one MCP configuration the run loads: XenoNet's server.
+    pub mcp: &'a str,
+}
+
+/// How an app's own sandbox is driven. An app without one has no
+/// `Ways::sandbox`, and a sandboxed start of it is refused.
+#[derive(Clone, Copy, Debug)]
+pub struct SandboxWays {
+    /// Why a sandboxed start can't run (in words), given whether this is
+    /// native Windows: None when it can.
+    pub unavailable: fn(&Plan<'_>, bool) -> Option<String>,
+    /// For an app whose sandbox is settings: the settings file of one run
+    /// (the sandbox's keys, the permission rules that hold what the sandbox
+    /// doesn't cover, and XenoNet's hooks), with `listen` the settings a
+    /// session listens with, merged in; and the MCP configuration that
+    /// holds XenoNet's server only, named `server`.
+    pub files: Option<fn(&Plan<'_>, Option<&Value>, &str) -> (Value, Value)>,
+    /// What a sandboxed run's answer and first prompt say it may reach,
+    /// beyond its folder: the words for the domains.
+    pub words: fn(&Plan<'_>) -> String,
 }
 
 /// The command that starts a new session with a first prompt: the program
@@ -108,6 +155,8 @@ pub struct Ways {
     /// The alias that starts the app so that XenoNet reaches its server,
     /// for an app whose own server takes messages.
     pub server_alias: Option<&'static str>,
+    /// How the app's own sandbox is driven, if XenoNet can drive one.
+    pub sandbox: Option<SandboxWays>,
 }
 
 /// Whether lines of a run's output say something.

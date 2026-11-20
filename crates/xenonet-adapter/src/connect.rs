@@ -185,7 +185,7 @@ pub fn list_strings(v: &Value) -> Vec<String> {
 }
 
 /// `'…'`, for a POSIX shell.
-fn quote(s: &str) -> String {
+pub fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 

@@ -38,6 +38,12 @@ pub fn format(app: &App, shared: &Shared) -> Box<dyn Format> {
     Box::new(ClaudeSettings::new(app, shared))
 }
 
+/// XenoNet's hooks for Claude Code: an HTTP hook posting to `hook_url` for
+/// each event, and `session_start` (a command hook) for SessionStart.
+pub fn hook_entries(app: &App, hook_url: &str, session_start: &Value) -> Value {
+    hook_set(&events_of(app), |event| if event == "SessionStart" { session_start.clone() } else { json!({ "type": "http", "url": hook_url, "timeout": 5 }) })
+}
+
 /// Claude Code's settings.
 pub struct ClaudeSettings {
     id: String,
@@ -69,20 +75,14 @@ impl ClaudeSettings {
         let events = events_of(app);
         // Claude Code takes HTTP hooks, which cost nothing to run, except at
         // SessionStart, which takes only commands.
-        let hooks = hook_set(&events, |event| {
-            if event == "SessionStart" {
-                let mut h = Map::new();
-                h.insert("type".into(), json!("command"));
-                h.insert("command".into(), json!(if win { k.windows_hook(&app.id) } else { k.hook_command(&app.id) }));
-                if win {
-                    h.insert("shell".into(), json!("powershell"));
-                }
-                h.insert("timeout".into(), json!(10));
-                Value::Object(h)
-            } else {
-                json!({ "type": "http", "url": hook_url, "timeout": 5 })
-            }
-        });
+        let mut start = Map::new();
+        start.insert("type".into(), json!("command"));
+        start.insert("command".into(), json!(if win { k.windows_hook(&app.id) } else { k.hook_command(&app.id) }));
+        if win {
+            start.insert("shell".into(), json!("powershell"));
+        }
+        start.insert("timeout".into(), json!(10));
+        let hooks = hook_entries(app, &hook_url, &Value::Object(start));
         ClaudeSettings {
             id: app.id.clone(),
             name: app.name.clone(),

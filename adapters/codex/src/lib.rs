@@ -39,8 +39,41 @@ fn resume(id: &str, _: Option<&str>) -> (String, Vec<String>) {
 
 // codex exec --json -C <folder> -: the prompt goes on standard input, and
 // Codex names the new thread in its first event.
+//
+// Sandboxed: codex exec --json -C <folder> --sandbox workspace-write
+//   -c approval_policy="never" -c sandbox_workspace_write.network_access=false
+//   -c sandbox_workspace_write.exclude_slash_tmp=true
+//   -c sandbox_workspace_write.exclude_tmpdir_env_var=true -
+// Commands write only in the folder and have no network, and nothing is
+// asked of anyone. Codex's workspace-write sandbox reads the whole disk.
 fn start(s: &Start<'_>) -> (String, Vec<String>) {
-    ("codex".into(), ["exec", "--json", "-C", s.cwd, "-"].into_iter().map(str::to_string).collect())
+    let mut args: Vec<&str> = vec!["exec", "--json", "-C", s.cwd];
+    if s.sandbox.is_some() {
+        args.extend([
+            "--sandbox",
+            "workspace-write",
+            "-c",
+            "approval_policy=\"never\"",
+            "-c",
+            "sandbox_workspace_write.network_access=false",
+            "-c",
+            "sandbox_workspace_write.exclude_slash_tmp=true",
+            "-c",
+            "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+        ]);
+    }
+    args.push("-");
+    ("codex".into(), args.into_iter().map(str::to_string).collect())
+}
+
+// Codex's sandbox can't name the domains a command may reach: with some,
+// the start is refused, and with none its network is off.
+fn sandbox_unavailable(p: &delivery::Plan<'_>, _windows: bool) -> Option<String> {
+    (!p.domains.is_empty()).then(|| "Codex's sandbox can't limit the network to named domains: start it with none (no network at all) or use Claude Code".to_string())
+}
+
+fn sandbox_words(p: &delivery::Plan<'_>) -> String {
+    format!("It runs in Codex's workspace-write sandbox: its commands write only in {} and have no network. Codex's sandbox lets them read the rest of the disk.", p.folder)
 }
 
 // Codex names the new thread in thread.started's thread_id.
@@ -140,6 +173,7 @@ impl Platform for Adapter {
             finish: Some(finish),
             reported: Some(reported),
             plan_used: Some(plan_used),
+            sandbox: Some(delivery::SandboxWays { unavailable: sandbox_unavailable, files: None, words: sandbox_words }),
             ..Ways::default()
         })
     }
