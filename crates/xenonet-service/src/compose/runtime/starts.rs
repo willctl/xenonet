@@ -559,6 +559,14 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // resolved on the machine that runs the start, whoever asked.
     if record.is_some() {
         starts::sandbox_folder(&cwd, &w.setup.home, cfg!(windows))?;
+        // Claude Code loads the folder's own skills, agents and commands
+        // whatever settings sources it is given, and their hooks run
+        // outside its sandbox.
+        if r.app == "claude" {
+            if let Some(why) = starts::project_hooks(std::path::Path::new(&cwd)) {
+                return Err(why);
+            }
+        }
     }
     // The app has a sandbox to drive here, or the start says why not.
     let sandbox_words = match &record {

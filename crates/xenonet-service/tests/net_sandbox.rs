@@ -685,3 +685,29 @@ async fn an_intents_run_is_checked_as_a_run_that_is_not_the_persons() {
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Claude Code loads a folder's own skills, agents and commands whatever
+/// settings sources it is given, and their hooks run outside its sandbox: a
+/// confined start in a folder that has some isn't made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_confined_claude_start_is_refused_in_a_folder_whose_skills_or_agents_carry_hooks() {
+    let root = root("sandbox-hooks");
+    let t = two_networks(&root).await;
+    let atlas = root.join("desk/home/atlas");
+    let agent = atlas.join(".claude/agents/guard.md");
+    std::fs::create_dir_all(agent.parent().unwrap()).unwrap();
+    std::fs::write(&agent, "---\nname: guard\nhooks:\n  Stop: []\n---\nGuard.\n").unwrap();
+    let folder = atlas.to_string_lossy().into_owned();
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": folder, "prompt": "tidy atlas", "sandbox": true })).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains(".claude/agents/guard.md") && e.contains("outside the sandbox")), "{v}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
+    // The control: without the hooks the same start runs, and the person's own unconfined start never mattered.
+    std::fs::write(&agent, "---\nname: guard\n---\nGuard.\n").unwrap();
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": folder, "prompt": "tidy atlas again", "sandbox": true })).await;
+    assert_eq!(s, 200, "{v}");
+    let _ = ran(&t.desk, 1).await;
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -471,6 +471,38 @@ pub fn sandbox_folder(cwd: &str, home: &str, windows: bool) -> Result<(), String
     Ok(())
 }
 
+/// Why a Claude Code run mustn't be sandboxed in `dir`, if it holds skills,
+/// agents or commands of its own that carry hooks: Claude Code loads
+/// `.claude/skills`, `.claude/agents` and `.claude/commands` from the folder
+/// it starts in whatever `--setting-sources` leaves out, and a hook, or a
+/// skill that is a plugin, runs as Claude Code's own process, outside the
+/// sandbox that wraps its commands. Folders and files that don't read are
+/// taken as holding none, since the run can't read them either.
+pub fn project_hooks(dir: &std::path::Path) -> Option<String> {
+    let claude = dir.join(".claude");
+    let has_hooks_key = |f: &std::path::Path| -> bool {
+        let Ok(text) = std::fs::read_to_string(f) else { return false };
+        let mut lines = text.lines();
+        lines.next().is_some_and(|l| l.trim() == "---") && lines.take_while(|l| l.trim() != "---").any(|l| l.starts_with("hooks:") || l.starts_with("\"hooks\":"))
+    };
+    let entries = |d: &std::path::Path| std::fs::read_dir(d).map(|r| r.flatten().map(|e| e.path()).collect::<Vec<_>>()).unwrap_or_default();
+    let words = |what: String| format!("{what} carries hooks or is a plugin, which Claude Code runs outside the sandbox that holds its commands, so a sandboxed run isn't started in this folder: use another folder, or take them out");
+    for sub in ["agents", "commands"] {
+        for f in entries(&claude.join(sub)) {
+            if has_hooks_key(&f) {
+                return Some(words(format!(".claude/{sub}/{}", f.file_name()?.to_string_lossy())));
+            }
+        }
+    }
+    for skill in entries(&claude.join("skills")) {
+        let name = skill.file_name()?.to_string_lossy().into_owned();
+        if has_hooks_key(&skill.join("SKILL.md")) || skill.join("hooks").exists() || skill.join("plugin.json").exists() || skill.join(".claude-plugin").exists() {
+            return Some(words(format!(".claude/skills/{name}")));
+        }
+    }
+    None
+}
+
 /// Whether a run's output says the app isn't signed in, for an app whose
 /// runs sign in with the token you gave them (Claude Code).
 pub fn signed_out(app: &str, log: &str) -> bool {
@@ -727,6 +759,39 @@ mod tests {
         assert!(sandbox_folder("C:\\Users\\Me\\AppData\\Roaming\\x", "C:\\Users\\Me", true).is_err());
         assert!(sandbox_folder("/home/me/work/.github", "/home/me", false).is_ok(), "a dot-folder further down a project is fine");
         assert!(sandbox_folder("/srv/.cache/atlas", "/home/me", false).is_ok(), "and one outside home");
+    }
+
+    #[test]
+    fn a_project_with_skills_or_agents_that_carry_hooks_is_not_sandboxed_for_claude_code() {
+        let base = std::env::temp_dir().join(format!("xenonet-hooks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let write = |name: &str, text: &str| {
+            let f = base.join(name);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, text).unwrap();
+        };
+        // Skills and agents without hooks load beside the sandbox harmlessly.
+        write(".claude/skills/review/SKILL.md", "---\nname: review\ndescription: Reads a diff\n---\nLook at the diff.\n");
+        write(".claude/agents/helper.md", "---\nname: helper\n---\nHelp.\n");
+        write("README.md", "hooks: are described here\n");
+        assert_eq!(project_hooks(&base), None, "no hooks in them");
+        assert_eq!(project_hooks(&base.join("nowhere")), None);
+        for (name, text) in [
+            (".claude/skills/fmt/SKILL.md", "---\nname: fmt\nhooks:\n  PostToolUse:\n    - command: ./fmt.sh\n---\nFormat.\n"),
+            (".claude/agents/guard.md", "---\nname: guard\ntools: Read\nhooks:\n  Stop: []\n---\nGuard.\n"),
+            (".claude/commands/ship.md", "---\nhooks:\n  Stop: []\n---\nShip.\n"),
+            (".claude/skills/tool/hooks/hooks.json", "{}"),
+            (".claude/skills/pack/.claude-plugin/plugin.json", "{\"name\":\"pack\"}"),
+            (".claude/skills/pack2/plugin.json", "{\"name\":\"pack2\"}"),
+        ] {
+            let _ = std::fs::remove_dir_all(base.join(".claude"));
+            write(".claude/skills/review/SKILL.md", "---\nname: review\n---\nok\n");
+            write(name, text);
+            let why = project_hooks(&base).unwrap_or_default();
+            assert!(why.starts_with(".claude/"), "{name}: {why}");
+            assert!(why.contains("hooks") && why.contains("outside the sandbox"), "{name}: {why}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
