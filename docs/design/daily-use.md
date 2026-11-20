@@ -100,8 +100,6 @@ Scenario 1 needs no new code, only both machines on a current release.
 
 ## Next
 
-Each waits until scenario 1 has run for real.
-
 - **More apps on the map**, through their own documented interfaces.
 - **Release watch.** The app registry records which version each reader
   was last checked against, and `xenonet doctor` compares it with what is
@@ -115,3 +113,7 @@ Each waits until scenario 1 has run for real.
   folders. Sandboxed starts are the mitigation, for the runs XenoNet starts.
 - A message already stored is handed over after its project stops being
   shared; closing that needs the message's network in the store.
+- No confined command has been seen blocked in a real run yet: that needs
+  Claude Code and Codex signed in on the machine that tests it.
+- Cell starts are refused until a cell can carry the app's sign-in and
+  bring its session back to the map.
