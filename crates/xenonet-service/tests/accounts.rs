@@ -35,7 +35,7 @@ const TOKEN: &str = "made-up-token-for-the-ledger-run";
 /// them.
 fn service_env() -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> =
-        ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"].iter().map(|k| ((*k).to_string(), "not-for-the-run".to_string())).collect();
+        ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS"].iter().map(|k| ((*k).to_string(), "not-for-the-run".to_string())).collect();
     env.push(("PATH".into(), std::env::var("PATH").unwrap_or_default()));
     env
 }
@@ -115,7 +115,7 @@ async fn signs_in_on_its_own(h: &Host, n: usize) {
     let names = env_of(h, n).await;
     assert!(!names.iter().any(|k| k == "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" || k == "CLAUDE_CODE_OAUTH_TOKEN"), "run {n} was given XenoNet's token: {names:?}");
     assert!(fd_token(h, n).is_none(), "run {n} read a token");
-    for k in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"] {
+    for k in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS"] {
         assert!(!names.iter().any(|n| n == k), "run {n} kept {k}, which outranks the folder's sign-in: {names:?}");
     }
 }

@@ -277,13 +277,18 @@ pub fn env(w: &Runtime) -> Vec<(String, String)> {
 /// the ones that point at a Unix socket (`SSH_AUTH_SOCK`, `DOCKER_HOST`,
 /// any name ending in `_SOCK` or `_SOCKET`), which a command in the sandbox
 /// could use to reach the agent or the daemon outside it where the
-/// sandbox's own filter against Unix sockets isn't there.
+/// sandbox's own filter against Unix sockets isn't there. It also holds none
+/// of the variables that sign an app in some other way or point it at
+/// another endpoint (each adapter's `sign_in_vars`: a base URL, a cloud
+/// provider's switch, extra headers), since the run's token is sent to
+/// wherever the app is pointed and must go only to the app's own service.
 pub fn env_from(vars: Vec<(String, String)>) -> Vec<(String, String)> {
     let socket = |k: &str| {
         let up = k.to_ascii_uppercase();
         up == "DOCKER_HOST" || up == "CONTAINER_HOST" || up.ends_with("_SOCK") || up.ends_with("_SOCKET")
     };
-    xenonet_acp::agent_env(xenonet_engine::delivery::resume::resume_env(vars), &[]).into_iter().filter(|(k, _)| !socket(k)).collect()
+    let redirects: Vec<&str> = xenonet_adapter::platforms().iter().flat_map(|p| p.sign_in_vars()).collect();
+    xenonet_acp::agent_env(xenonet_engine::delivery::resume::resume_env(vars), &[]).into_iter().filter(|(k, _)| !socket(k) && !redirects.contains(&k.as_str())).collect()
 }
 
 #[cfg(test)]
@@ -358,6 +363,18 @@ mod tests {
             "GPG_AGENT_SOCK",
             "CLAUDE_CODE_MESSAGING_SOCKET",
         ]);
+        let names: Vec<String> = env_from(given).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(names, ["PATH", "HOME"], "{names:?}");
+    }
+
+    #[test]
+    fn a_confined_run_keeps_nothing_that_would_send_the_runs_token_elsewhere() {
+        xenonet_platforms::install();
+        let given: Vec<(String, String)> =
+            ["PATH", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "OPENAI_BASE_URL", "HOME"]
+                .iter()
+                .map(|n| ((*n).to_string(), "x".to_string()))
+                .collect();
         let names: Vec<String> = env_from(given).into_iter().map(|(k, _)| k).collect();
         assert_eq!(names, ["PATH", "HOME"], "{names:?}");
     }

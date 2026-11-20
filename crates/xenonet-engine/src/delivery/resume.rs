@@ -201,16 +201,20 @@ mod tests {
     #[test]
     fn a_run_in_a_folders_own_sign_in_keeps_no_provider_key() {
         xenonet_platforms::install();
-        let mut env: Vec<(String, String)> = ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "CODEX_API_KEY", "HOME"]
-            .iter()
-            .map(|k| ((*k).to_string(), "x".to_string()))
-            .collect();
+        let mut env: Vec<(String, String)> =
+            ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "OPENAI_API_KEY", "CODEX_API_KEY", "HOME"]
+                .iter()
+                .map(|k| ((*k).to_string(), "x".to_string()))
+                .collect();
         let mut claude = env.clone();
         without_sign_in_vars(&mut claude, "claude");
         assert_eq!(claude.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["PATH", "OPENAI_API_KEY", "CODEX_API_KEY", "HOME"]);
         let mut codex = env.clone();
         without_sign_in_vars(&mut codex, "codex");
-        assert_eq!(codex.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "HOME"]);
+        assert_eq!(
+            codex.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "HOME"]
+        );
         // An app with no such variables, or none known, keeps its environment.
         let before = env.clone();
         without_sign_in_vars(&mut env, "grok");
