@@ -600,3 +600,39 @@ async fn until_value<F: std::future::Future<Output = Option<Value>>>(what: &str,
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
+
+/// The run of an intent is made here for the person's own id, but it is
+/// unattended and its last words go out as the outcome: it is checked as
+/// a run that isn't the person's, whoever's id it carries.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_intents_run_is_checked_as_a_run_that_is_not_the_persons() {
+    use std::sync::Arc;
+    use xenonet_engine::delivery::starts::{ConfineAsk, Request};
+    use xenonet_service::compose::runtime::intents::Intended;
+    use xenonet_service::compose::runtime::starts::{run_here, Answer, Apart, Kind};
+    let root = root("sandbox-intent");
+    let t = two_networks(&root).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    let by = json!({ "kind": "you", "id": xenonet_model::ids::YOU, "title": "you" });
+    let answer: Answer = Arc::new(|_, _, _| {});
+    let intent = |n: u32, app: &str, domains: Vec<String>| Apart {
+        request: Request { folder: atlas.clone(), app: app.into(), mode: None, prompt: String::new(), delegate: true, confine: ConfineAsk::Vendor(domains) },
+        prompt: xenonet_authz::Information::new(format!("Tidy atlas {n}")),
+        intent: Some(Intended { id: "int_nova".into(), delegation: "dlg_0123456789abcdef".into(), from: None }),
+    };
+    let run = |a: &Apart| run_here(&t.desk.world, &by, None, Kind::You, xenonet_model::ids::YOU, a, answer.clone());
+    // Codex's sandbox reads the whole disk: not for a run that reports its last words.
+    let why = run(&intent(1, "codex", Vec::new())).unwrap_err();
+    assert!(why.contains("Codex") && why.contains("anyone but you"), "{why}");
+    // The domains a run reaches are the ones the person allowed on this machine.
+    let why = run(&intent(2, "claude", vec!["evil.example".into()])).unwrap_err();
+    assert!(why.contains("evil.example") && why.contains("xenonet runs domains"), "{why}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
+    // The control: the intent that asks for no domain, in Claude Code, runs.
+    run(&intent(3, "claude", Vec::new())).unwrap();
+    let (args, _) = ran(&t.desk, 1).await;
+    assert!(args.iter().any(|a| a == "--strict-mcp-config"), "it ran, sandboxed: {args:?}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -531,6 +531,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         }
         return Err(CELL_NOT_WIRED.into());
     }
+    // An intent's run carries the person's id (the intent is theirs) but is
+    // unattended, and its last words go out as the outcome: for what is
+    // allowed it is not the person's own run.
+    let own = kind == Kind::You && start.intent.is_none();
     let record = match (r.confine.domains(), kind) {
         (Some(domains), _) => Some(sandbox::Record { folder: cwd.clone(), domains: domains.to_vec() }),
         (None, Kind::You) => None,
@@ -538,10 +542,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     };
     // An app whose sandbox reads the whole disk is for the person's own runs.
     if record.is_some() {
-        starts::sandbox_enough(&r.app, kind == Kind::You)?;
+        starts::sandbox_enough(&r.app, own)?;
     }
     // Anyone but the person reaches only the domains the person allowed.
-    if let (Some(rec), false) = (&record, kind == Kind::You) {
+    if let (Some(rec), false) = (&record, own) {
         starts::domains_within(&rec.domains, &sandbox_domains(w))?;
     }
     // A sandbox is a project folder: checked here, on the folder as it
