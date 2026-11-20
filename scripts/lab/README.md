@@ -312,20 +312,20 @@ worktree of its own, `~/xenolith-1x`, and then, in
 `~/.local/share/xenonet-lab/xenolith-rehearsal/`, one line a stage:
 
 1. `built`: both builds are there;
-2. `1x-synced`: a 1.x curator ("inix", HTTP on 127.0.0.1:47863) with a page,
-   and a 1.x satellite ("neo", 47864) paired with `pair offer` and
+2. `1x-synced`: a 1.x curator ("desk", HTTP on 127.0.0.1:47863) with a page,
+   and a 1.x satellite ("tower", 47864) paired with `pair offer` and
    `pair join`, holding the page;
-3. `queued`: inix stopped, a note left on neo waits in its inbox;
+3. `queued`: desk stopped, a note left on tower waits in its inbox;
 4. `upgraded`: both stopped and copied (folder, config and state), 2.0
    started on each (sync on 127.0.0.1:47861 and 47862), its dry run says
    the upgrade waits and the folders are untouched, `upgrade --run` on
-   inix then neo; inix's space has its marker, and neo's copy is moved aside
+   desk then tower; desk's space has its marker, and tower's copy is moved aside
    with the queued note in it;
 5. `rolledback`: the written rollback order, `upgrade --undo` on both with
    2.0 running, 2.0 stopped, the config and state put back from the copy;
    both folders are as 1.x left them, byte for byte;
-6. `1x-again`: 1.x started again on both, and neo's queued note reaches
-   inix.
+6. `1x-again`: 1.x started again on both, and tower's queued note reaches
+   desk.
 
 The first FAIL ends it. Everything it made is deleted afterwards; the
 worktree and its build stay for the next run.

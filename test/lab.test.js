@@ -528,14 +528,14 @@ test("the Xenolith checks fail when a build, a join, sync, a note's stamp, a cat
   assert.deepEqual(await runXCheck(xcheck("xenolith-holder"), withheld), { status: "FAIL", detail: "vm2 didn't get the page from vm3 in 60 s with vm1 stopped" });
   assert.ok(withheld.lab.at.vm1.up && withheld.lab.at.vm2.up, "both started again");
   assert.deepEqual(await run("xenolith-rehearsal", { oldFails: true }), { status: "FAIL", detail: "vm1: Xenolith 1.10.0 didn't build (error[E0599]: no method)" });
-  assert.deepEqual(await run("xenolith-rehearsal", { rehearsal: "stage=built ok 1.x 1.10.0\nstage=1x-synced ok paired\nstage=queued ok waiting\nstage=upgraded FAIL neo's queued note isn't kept with its moved-aside copy" }), { status: "FAIL", detail: "upgraded: neo's queued note isn't kept with its moved-aside copy" });
+  assert.deepEqual(await run("xenolith-rehearsal", { rehearsal: "stage=built ok 1.x 1.10.0\nstage=1x-synced ok paired\nstage=queued ok waiting\nstage=upgraded FAIL tower's queued note isn't kept with its moved-aside copy" }), { status: "FAIL", detail: "upgraded: tower's queued note isn't kept with its moved-aside copy" });
 });
 
 test("the rehearsal's verdict: every stage ok, the first FAIL, or where it stopped", () => {
   assert.deepEqual(REHEARSAL, ["built", "1x-synced", "queued", "upgraded", "rolledback", "1x-again"]);
   const all = REHEARSAL.map((s) => `stage=${s} ok ${s} done`).join("\n");
   assert.deepEqual(rehearsalVerdict(`noise\n${all}\n`), { status: "ok", detail: REHEARSAL.map((s) => `${s} done`).join("; ") });
-  assert.deepEqual(rehearsalVerdict("stage=built ok b\nstage=1x-synced FAIL inix's page didn't reach neo"), { status: "FAIL", detail: "1x-synced: inix's page didn't reach neo" });
+  assert.deepEqual(rehearsalVerdict("stage=built ok b\nstage=1x-synced FAIL desk's page didn't reach tower"), { status: "FAIL", detail: "1x-synced: desk's page didn't reach tower" });
   assert.deepEqual(rehearsalVerdict("stage=built ok b\nstage=1x-synced ok s"), { status: "FAIL", detail: "the rehearsal stopped before queued, after 1x-synced" });
   assert.deepEqual(rehearsalVerdict(""), { status: "FAIL", detail: "the rehearsal stopped before built" });
 });

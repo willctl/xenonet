@@ -406,12 +406,12 @@ mod tests {
     #[test]
     fn the_first_prompt_says_who_asked() {
         let you = json!({ "kind": "you", "id": "actor:you" });
-        assert_eq!(framed(&you, Some("inix"), "Go.", None), "[XenoNet] Started by you, at inix's console.\n\nGo.");
+        assert_eq!(framed(&you, Some("desk"), "Go.", None), "[XenoNet] Started by you, at desk's console.\n\nGo.");
         assert_eq!(framed(&you, None, "Go.", None), "[XenoNet] Started by you, at this machine's console.\n\nGo.");
         let s = json!({ "kind": "session", "id": "claude:aaaaaaaa-0001", "title": "Fix «it»\n\u{1b}[31mnow" });
         assert_eq!(
-            framed(&s, Some("inix"), "Go.", None),
-            "[XenoNet] inix says this was asked by the session «Fix \"it\" now» (claude:aaaaaaaa-0001). It came from an agent, not from your user.\n\nGo."
+            framed(&s, Some("desk"), "Go.", None),
+            "[XenoNet] desk says this was asked by the session «Fix \"it\" now» (claude:aaaaaaaa-0001). It came from an agent, not from your user.\n\nGo."
         );
         let a = json!({ "kind": "actor", "id": "actor:muse" });
         assert!(framed(&a, None, "Go.", None).starts_with("[XenoNet] This was asked by the actor «actor:muse» (actor:muse) on this machine."));
@@ -420,13 +420,13 @@ mod tests {
     #[test]
     fn a_delegated_start_says_your_user_delegated_it_and_what_stays_off_limits() {
         let s = json!({ "kind": "session", "id": "claude:aaaaaaaa-0001", "title": "Update" });
-        let text = framed(&s, Some("inix"), "Go.", Some(("inix", "2026-11-01")));
-        assert!(text.starts_with("[XenoNet] inix says this was asked by the session «Update» (claude:aaaaaaaa-0001). Your user delegated it: they put this machine on standing delegation at inix's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.\n\n"));
+        let text = framed(&s, Some("desk"), "Go.", Some(("desk", "2026-11-01")));
+        assert!(text.starts_with("[XenoNet] desk says this was asked by the session «Update» (claude:aaaaaaaa-0001). Your user delegated it: they put this machine on standing delegation at desk's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.\n\n"));
         assert!(text.ends_with(&format!("{DELEGATED_RULES}\n\nGo.")));
         assert!(!text.contains("not from your user"), "the agent line is gone: the delegation is your user's");
         // A start by you says what it said, delegation or not.
         let you = json!({ "kind": "you", "id": "actor:you" });
-        assert_eq!(framed(&you, Some("inix"), "Go.", Some(("inix", "2026-11-01"))), "[XenoNet] Started by you, at inix's console.\n\nGo.");
+        assert_eq!(framed(&you, Some("desk"), "Go.", Some(("desk", "2026-11-01"))), "[XenoNet] Started by you, at desk's console.\n\nGo.");
     }
 
     #[test]
@@ -472,13 +472,13 @@ mod tests {
     #[test]
     fn twenty_starts_an_hour_here_and_ten_from_one_machine() {
         let now = 10_000_000.0;
-        let mut h: Vec<(f64, String)> = (0..10).map(|i| (now - f64::from(i) * 1000.0, "inix".to_string())).collect();
-        assert_eq!(admit(&h, "inix", now).as_deref(), Some("inix asks for at most 10 sessions an hour here"));
+        let mut h: Vec<(f64, String)> = (0..10).map(|i| (now - f64::from(i) * 1000.0, "desk".to_string())).collect();
+        assert_eq!(admit(&h, "desk", now).as_deref(), Some("desk asks for at most 10 sessions an hour here"));
         assert_eq!(admit(&h, "", now), None, "this machine has its own ten");
         h.extend((0..10).map(|_| (now - 5.0, String::new())));
         assert_eq!(admit(&h, "studio", now).as_deref(), Some("this machine starts at most 20 sessions an hour"));
         assert_eq!(admit(&h, "studio", now + HOUR_MS), None, "an hour on");
-        assert_eq!(kept(&h, now + HOUR_MS - 6000.0).len(), 16, "six of inix's and this machine's ten");
+        assert_eq!(kept(&h, now + HOUR_MS - 6000.0).len(), 16, "six of desk's and this machine's ten");
         // Each asker here has its own ten: one session's don't hold
         // another's, or yours.
         let a = asker("claude:a");
@@ -533,12 +533,12 @@ mod tests {
     fn the_answers_in_words() {
         let a = json!({ "session": "claude:0190d3e0-0000-7000-8000-00000000ab01", "folder": "~/src/atlas" });
         assert_eq!(
-            answer_words("started", "neo-rex", &a),
-            "[XenoNet] Started claude:0190d3e0-0000-7000-8000-00000000ab01 on neo-rex, in ~/src/atlas. Message it as you would any session."
+            answer_words("started", "tower", &a),
+            "[XenoNet] Started claude:0190d3e0-0000-7000-8000-00000000ab01 on tower, in ~/src/atlas. Message it as you would any session."
         );
         assert_eq!(
-            answer_words("refused", "neo-rex", &json!({ "reason": "only you start sessions here" })),
-            "[XenoNet] No session was started on neo-rex: only you start sessions here."
+            answer_words("refused", "tower", &json!({ "reason": "only you start sessions here" })),
+            "[XenoNet] No session was started on tower: only you start sessions here."
         );
         let ended = json!({ "session": "claude:x", "exit": 0, "minutes": 4 });
         assert_eq!(
@@ -548,21 +548,21 @@ mod tests {
         let ended = |outcome: &str, extra: Value| {
             let mut a = json!({ "session": "claude:x", "exit": 0, "minutes": 5, "outcome": outcome, "last": "All set." });
             a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
-            answer_words("ended", "neo-rex", &a)
+            answer_words("ended", "tower", &a)
         };
-        assert_eq!(ended("asked", json!({ "last": "Want me to go ahead?" })), "[XenoNet] claude:x on neo-rex stopped to ask something, and has done nothing more after 5 min. Answer it by messaging it: it takes up from there.\nIts last words: «Want me to go ahead?»");
-        assert_eq!(ended("finished", json!({})), "[XenoNet] claude:x on neo-rex finished after 5 min, but sent no report of its own.\nIts last words: «All set.»");
-        assert_eq!(ended("reported", json!({})), "[XenoNet] claude:x on neo-rex finished after 5 min and reported back itself.\nIts last words: «All set.»");
+        assert_eq!(ended("asked", json!({ "last": "Want me to go ahead?" })), "[XenoNet] claude:x on tower stopped to ask something, and has done nothing more after 5 min. Answer it by messaging it: it takes up from there.\nIts last words: «Want me to go ahead?»");
+        assert_eq!(ended("finished", json!({})), "[XenoNet] claude:x on tower finished after 5 min, but sent no report of its own.\nIts last words: «All set.»");
+        assert_eq!(ended("reported", json!({})), "[XenoNet] claude:x on tower finished after 5 min and reported back itself.\nIts last words: «All set.»");
         assert_eq!(
             ended("denied", json!({ "denied": ["Bash", "Edit"] })),
-            "[XenoNet] claude:x on neo-rex stopped after 5 min for want of permission to use Bash, Edit, which it was denied.\nIts last words: «All set.»"
+            "[XenoNet] claude:x on tower stopped after 5 min for want of permission to use Bash, Edit, which it was denied.\nIts last words: «All set.»"
         );
         assert_eq!(
             ended("failed", json!({ "exit": 1, "reason": "Claude Code needs a sign-in" })),
-            "[XenoNet] claude:x on neo-rex failed after 5 min (exit 1): Claude Code needs a sign-in.\nIts last words: «All set.»"
+            "[XenoNet] claude:x on tower failed after 5 min (exit 1): Claude Code needs a sign-in.\nIts last words: «All set.»"
         );
-        assert_eq!(ended("silent", json!({ "last": "" })), "[XenoNet] claude:x on neo-rex ended after 5 min without a word: it sent no report and left no last message (exit 0).");
-        assert_eq!(sign_in_words("neo-rex"), "Claude Code on neo-rex needs a sign-in for XenoNet's runs: run xenonet runs sign-in there");
+        assert_eq!(ended("silent", json!({ "last": "" })), "[XenoNet] claude:x on tower ended after 5 min without a word: it sent no report and left no last message (exit 0).");
+        assert_eq!(sign_in_words("tower"), "Claude Code on tower needs a sign-in for XenoNet's runs: run xenonet runs sign-in there");
     }
 
     #[test]

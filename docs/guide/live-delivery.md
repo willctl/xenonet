@@ -180,7 +180,7 @@ that's anyone the setting lets in, so keep a token only on a machine whose
 settings you'd trust with it.
 
 A run whose output says Claude Code isn't signed in ends saying so, and
-Needs you shows "Claude Code on neo-rex needs a sign-in for XenoNet's
+Needs you shows "Claude Code on tower needs a sign-in for XenoNet's
 runs", with what to run there.
 
 ### OpenCode

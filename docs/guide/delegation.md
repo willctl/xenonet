@@ -10,14 +10,14 @@ This widens what the network may do there, so it asks you (Touch ID on a Mac, Wi
 
 The first time, it also issues your **delegation**: an entry in your identity, signed by your key, that lets your machines start sessions and answer their routine prompts for work you started on any of them. It names all your machines' keys, those you add later too, and lasts a year. Issuing it asks you twice: once to approve it, once to sign it. A machine needs a key of yours to be named in it, so a machine that joined without your identity can't take delegated work, and XenoNet says so when you press it.
 
-The machine that does the work checks both: its own start setting, and a delegation of yours that names both its key and the key of the machine the task came from. Since the standard delegation names every machine of yours, a session on any of them can hand work to any other you set to Delegated: one machine, or each of several. The console shows who set it and when under the machine's settings: "Delegated by inix, Nov 1."
+The machine that does the work checks both: its own start setting, and a delegation of yours that names both its key and the key of the machine the task came from. Since the standard delegation names every machine of yours, a session on any of them can hand work to any other you set to Delegated: one machine, or each of several. The console shows who set it and when under the machine's settings: "Delegated by desk, Nov 1."
 
 ## What an assistant does
 
 An assistant calls the xenonet MCP server's `delegate` tool with the machine, a task, and optionally a folder there:
 
 ```text
-delegate machine: neo-rex, task: "Update XenoNet to the latest release, then report the version and what the doctor says."
+delegate machine: tower, task: "Update XenoNet to the latest release, then report the version and what the doctor says."
 ```
 
 The answer comes at once. When the new session stops, the assistant is told what it came to (finished, stopped to ask something, was denied a tool, failed, or left nothing), with its last words, and is woken if it is idle. The session needn't be told to report: XenoNet does it.
@@ -30,7 +30,7 @@ To hand a task to an agent outside your machines that speaks A2A, the assistant 
 
 The first prompt of a delegated session says whose delegation it runs on, which the machine checked:
 
-> [XenoNet] inix says this was asked by the session «Fix the login form» (claude:…). Your user delegated it: they put this machine on standing delegation at inix's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.
+> [XenoNet] desk says this was asked by the session «Fix the login form» (claude:…). Your user delegated it: they put this machine on standing delegation at desk's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.
 
 The machine writes that line from its own settings and its copy of your identity. What the asker sent is the task, after the line, and can't change it. A start from an agent without a delegation says "it came from an agent, not from your user", so a careful session stops to ask before anything that matters; under a delegation it doesn't have to ask about what the delegation covers.
 

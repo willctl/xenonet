@@ -288,11 +288,11 @@ mod tests {
     }
 
     // Every flag a command's help shows with a value takes the word after
-    // it, so "--on neo-rex" is neo-rex and not "--on" and a stray word.
+    // it, so "--on tower" is tower and not "--on" and a stray word.
     #[test]
     fn the_flags_help_shows_with_a_value_take_one() {
-        let net = parse(&args(&["net", "set", "--on", "neo-rex", "--start", "network", "--wake", "network"]));
-        assert_eq!((net.rest, net.flags), (args(&["net", "set"]), flags(json!({ "on": "neo-rex", "start": "network", "wake": "network" }))));
+        let net = parse(&args(&["net", "set", "--on", "tower", "--start", "network", "--wake", "network"]));
+        assert_eq!((net.rest, net.flags), (args(&["net", "set"]), flags(json!({ "on": "tower", "start": "network", "wake": "network" }))));
         assert_eq!(parse(&args(&["net", "set", "--on", "desk", "--approve", "p1"])).flags, flags(json!({ "on": "desk", "approve": "p1" })));
         let start = parse(&args(&["start", "--on", "desk", "--in", "~/app", "--app", "codex", "--mode", "plan", "fix", "it"]));
         assert_eq!((start.rest, start.flags), (args(&["start", "fix", "it"]), flags(json!({ "on": "desk", "in": "~/app", "app": "codex", "mode": "plan" }))));

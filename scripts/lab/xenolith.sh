@@ -200,16 +200,16 @@ fp() {
 # the curator's URL.
 port_of() {
   case "$1" in
-    inix) echo 47863 ;;
-    neo) echo 47864 ;;
+    desk) echo 47863 ;;
+    tower) echo 47864 ;;
   esac
 }
 
-# A 1.x curator ("inix") with a page, and a 1.x satellite ("neo") paired with it, in this VM on
-# 127.0.0.1 (1.x serves only there); a note queued on neo while inix is stopped; the cutover
+# A 1.x curator ("desk") with a page, and a 1.x satellite ("tower") paired with it, in this VM on
+# 127.0.0.1 (1.x serves only there); a note queued on tower while desk is stopped; the cutover
 # (both stopped, both copied); 2.0's dry run, then `upgrade --run`; the rollback in its written
 # order (`upgrade --undo` with 2.0 still running, 2.0 stopped, the config and state folders put
-# back from the copy, 1.x again); and 1.x syncing again, the queued note reaching inix. One
+# back from the copy, 1.x again); and 1.x syncing again, the queued note reaching desk. One
 # `stage=<id> ok|FAIL <detail>` line a stage, stopping at the first FAIL. Everything it made is
 # deleted afterwards.
 xrehearse() {
@@ -218,80 +218,80 @@ xrehearse() {
   local O="$OLD/xenolith" N="$NEW/xenolith" S="$NEW/xenolith-service"
   local note m offer code port fpi fpn st i
   note="lab-queued-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
-  trap 'for m in inix neo; do xdown "$m"; done; rm -rf "$XROOT"' EXIT
+  trap 'for m in desk tower; do xdown "$m"; done; rm -rf "$XROOT"' EXIT
   [ -x "$O" ] || die built "no 1.x build at $O"
   [ -x "$N" ] && [ -x "$S" ] || die built "no 2.0 build at $NEW"
   stage built ok "1.x $("$O" --version), 2.0 $("$N" --version)"
 
-  for m in inix neo; do xdown "$m"; done
+  for m in desk tower; do xdown "$m"; done
   rm -rf "$XROOT"
-  for m in inix neo; do xinit "$m" "$O" || die 1x-synced "1.x's serve --init failed on $m"; done
-  xrun inix "$O" spaces add project:atlas >/dev/null || die 1x-synced "1.x couldn't add project:atlas on inix"
-  printf -- '---\ntitle: Atlas database\ntype: project\n---\n\n# Atlas database\n\nPostgres 16 on inix.\n' >"$(xdir inix)/wiki/spaces/project/atlas/pages/db.md"
-  for m in inix neo; do xup "$m" "$O" "$(port_of "$m")" || die 1x-synced "1.x didn't answer on $m"; done
-  offer="$(xrun inix "$O" pair offer --json)" || die 1x-synced "1.x's pair offer was refused on inix"
-  port="$(port_of inix)"
+  for m in desk tower; do xinit "$m" "$O" || die 1x-synced "1.x's serve --init failed on $m"; done
+  xrun desk "$O" spaces add project:atlas >/dev/null || die 1x-synced "1.x couldn't add project:atlas on desk"
+  printf -- '---\ntitle: Atlas database\ntype: project\n---\n\n# Atlas database\n\nPostgres 16 on desk.\n' >"$(xdir desk)/wiki/spaces/project/atlas/pages/db.md"
+  for m in desk tower; do xup "$m" "$O" "$(port_of "$m")" || die 1x-synced "1.x didn't answer on $m"; done
+  offer="$(xrun desk "$O" pair offer --json)" || die 1x-synced "1.x's pair offer was refused on desk"
+  port="$(port_of desk)"
   # The code goes from the offer to the join's stdin: never an argument, never this output.
   code="$(printf %s "$offer" | jget code)"
-  printf '%s\n' "$code" | xrun neo "$O" pair join --url "http://127.0.0.1:$port" --name neo --peer inix --json >/dev/null || die 1x-synced "1.x's pair join failed on neo"
+  printf '%s\n' "$code" | xrun tower "$O" pair join --url "http://127.0.0.1:$port" --name tower --peer desk --json >/dev/null || die 1x-synced "1.x's pair join failed on tower"
   code=""
-  xup neo "$O" "$(port_of neo)" || die 1x-synced "1.x didn't answer on neo after the join"
-  xrun neo "$O" sync --json >/dev/null || die 1x-synced "neo's 1.x sync pass failed"
-  cmp -s "$(xdir inix)/wiki/spaces/project/atlas/pages/db.md" "$(xdir neo)/wiki/spaces/project/atlas/pages/db.md" || die 1x-synced "inix's page didn't reach neo"
-  stage 1x-synced ok "neo paired with inix and holds its page"
+  xup tower "$O" "$(port_of tower)" || die 1x-synced "1.x didn't answer on tower after the join"
+  xrun tower "$O" sync --json >/dev/null || die 1x-synced "tower's 1.x sync pass failed"
+  cmp -s "$(xdir desk)/wiki/spaces/project/atlas/pages/db.md" "$(xdir tower)/wiki/spaces/project/atlas/pages/db.md" || die 1x-synced "desk's page didn't reach tower"
+  stage 1x-synced ok "tower paired with desk and holds its page"
 
-  xdown inix
-  xrun neo "$O" note "$note" --body "Queued on neo while inix was away." --space project:atlas >/dev/null || die queued "1.x refused the note on neo"
-  xrun neo "$O" sync --json >/dev/null 2>&1 || true
-  grep -rlqF -- "$note" "$(xdir neo)/wiki/spaces/project/atlas/inbox" || die queued "the note isn't waiting in neo's inbox"
-  stage queued ok "a note waits in neo's 1.x inbox with inix stopped"
+  xdown desk
+  xrun tower "$O" note "$note" --body "Queued on tower while desk was away." --space project:atlas >/dev/null || die queued "1.x refused the note on tower"
+  xrun tower "$O" sync --json >/dev/null 2>&1 || true
+  grep -rlqF -- "$note" "$(xdir tower)/wiki/spaces/project/atlas/inbox" || die queued "the note isn't waiting in tower's inbox"
+  stage queued ok "a note waits in tower's 1.x inbox with desk stopped"
 
-  xdown neo
-  for m in inix neo; do cp -a "$(xdir "$m")" "$XROOT/$m.copy"; done
-  fpi="$(fp inix)"
-  fpn="$(fp neo)"
+  xdown tower
+  for m in desk tower; do cp -a "$(xdir "$m")" "$XROOT/$m.copy"; done
+  fpi="$(fp desk)"
+  fpn="$(fp tower)"
   # Two 2.0s in one VM, each on a port of its own, apart from the lab's own Xenolith.
   i=47861
-  for m in inix neo; do
+  for m in desk tower; do
     node -e 'const f = process.argv[1]; const c = JSON.parse(require("fs").readFileSync(f, "utf8")); c.sync = { bind: process.argv[2] }; require("fs").writeFileSync(f, JSON.stringify(c, null, 2) + "\n");' "$(xdir "$m")/home/config.json" "127.0.0.1:$i"
     i=$((i + 1))
     xup "$m" "$S" "$(port_of "$m")" || die upgraded "2.0 didn't answer on $m"
   done
-  for m in inix neo; do
+  for m in desk tower; do
     st="$(xrun "$m" "$N" upgrade --json | jget upgrade.stage)"
     [ "$st" = waiting ] || die upgraded "$m: 2.0's dry run says the upgrade is \"$st\", not waiting"
   done
-  [ "$(fp inix)" = "$fpi" ] && [ "$(fp neo)" = "$fpn" ] || die upgraded "a 2.0 start changed a folder before upgrade --run"
-  for m in inix neo; do
+  [ "$(fp desk)" = "$fpi" ] && [ "$(fp tower)" = "$fpn" ] || die upgraded "a 2.0 start changed a folder before upgrade --run"
+  for m in desk tower; do
     xrun "$m" "$N" upgrade --run --json >/dev/null || die upgraded "$m: upgrade --run failed"
   done
-  [ -f "$(xdir inix)/wiki/spaces/project/atlas/xenolith-space.json" ] || die upgraded "inix's project:atlas has no marker after --run"
-  grep -rlqF -- "$note" "$(xdir neo)/home/1x-copies/project/atlas/inbox" || die upgraded "neo's queued note isn't kept with its moved-aside copy"
-  stage upgraded ok "inix founded project:atlas; neo's copy moved aside with its queued note"
+  [ -f "$(xdir desk)/wiki/spaces/project/atlas/xenolith-space.json" ] || die upgraded "desk's project:atlas has no marker after --run"
+  grep -rlqF -- "$note" "$(xdir tower)/home/1x-copies/project/atlas/inbox" || die upgraded "tower's queued note isn't kept with its moved-aside copy"
+  stage upgraded ok "desk founded project:atlas; tower's copy moved aside with its queued note"
 
-  for m in inix neo; do
+  for m in desk tower; do
     xrun "$m" "$N" upgrade --undo --json >/dev/null || die rolledback "$m: upgrade --undo failed"
   done
-  for m in inix neo; do xdown "$m"; done
-  for m in inix neo; do
+  for m in desk tower; do xdown "$m"; done
+  for m in desk tower; do
     rm -rf "$(xdir "$m")/home"
     cp -a "$XROOT/$m.copy/home" "$(xdir "$m")/home"
   done
-  [ "$(fp inix)" = "$fpi" ] || die rolledback "inix's folder isn't as 1.x left it after --undo"
-  [ "$(fp neo)" = "$fpn" ] || die rolledback "neo's folder isn't as 1.x left it after --undo"
+  [ "$(fp desk)" = "$fpi" ] || die rolledback "desk's folder isn't as 1.x left it after --undo"
+  [ "$(fp tower)" = "$fpn" ] || die rolledback "tower's folder isn't as 1.x left it after --undo"
   stage rolledback ok "both folders as 1.x left them, byte for byte; config and state back from the copy"
 
-  for m in inix neo; do xup "$m" "$O" "$(port_of "$m")" || die 1x-again "1.x didn't answer on $m again"; done
-  xrun neo "$O" sync --json >/dev/null || die 1x-again "neo's 1.x sync pass failed"
+  for m in desk tower; do xup "$m" "$O" "$(port_of "$m")" || die 1x-again "1.x didn't answer on $m again"; done
+  xrun tower "$O" sync --json >/dev/null || die 1x-again "tower's 1.x sync pass failed"
   for i in $(seq 1 30); do
-    if grep -rlqF --exclude-dir=.history -- "$note" "$(xdir inix)/wiki/spaces/project/atlas"; then
-      cmp -s "$(xdir inix)/wiki/spaces/project/atlas/pages/db.md" "$(xdir neo)/wiki/spaces/project/atlas/pages/db.md" || die 1x-again "neo's copy of the page no longer matches inix's"
-      stage 1x-again ok "neo's queued note reached inix's 1.x"
+    if grep -rlqF --exclude-dir=.history -- "$note" "$(xdir desk)/wiki/spaces/project/atlas"; then
+      cmp -s "$(xdir desk)/wiki/spaces/project/atlas/pages/db.md" "$(xdir tower)/wiki/spaces/project/atlas/pages/db.md" || die 1x-again "tower's copy of the page no longer matches desk's"
+      stage 1x-again ok "tower's queued note reached desk's 1.x"
       return 0
     fi
     sleep 1
   done
-  die 1x-again "neo's queued note didn't reach inix in 30 s"
+  die 1x-again "tower's queued note didn't reach desk in 30 s"
 }
 
 "$STEP"
