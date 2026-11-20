@@ -293,6 +293,9 @@ pub const RULES: &[Rule] = &[
     r("GET",    "/api/runs/sign-in", YOU, Nothing),
     r("POST",   "/api/runs/sign-in", YOU, Nothing),
     r("DELETE", "/api/runs/sign-in", YOU, Nothing),
+    r("GET",    "/api/runs/sandbox-domains", YOU, Nothing),
+    r("PUT",    "/api/runs/sandbox-domains", YOU, Nothing),
+    r("DELETE", "/api/runs/sandbox-domains", YOU, Nothing),
 
     // ---- delivery's controls ----
     r("POST",   "/api/delivery/pause", YOU, Nothing),

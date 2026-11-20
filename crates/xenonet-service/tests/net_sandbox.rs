@@ -90,6 +90,9 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
     desk_takes_starts(&t).await;
     let desk_home = root.join("desk/home");
     let atlas = desk_home.join("atlas").to_string_lossy().into_owned();
+    // Desk's person lets runs they didn't start reach github.com.
+    let (s, v) = t.desk.window("PUT", "/api/runs/sandbox-domains", json!({ "domains": ["github.com"] })).await;
+    assert_eq!(s, 200, "{v}");
     let (s, v) = as_agent(
         &t.contractor,
         VM_ATLAS,
@@ -320,6 +323,49 @@ async fn a_copy_forked_from_a_sandboxed_session_stays_sandboxed_across_a_restart
     starts::forget_forks(w);
     assert_eq!(sandbox::of(w, child), Some(record.clone()));
     assert_eq!(sandbox::for_turn(w, child), Ok(Some(record)));
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_run_you_didnt_start_reaches_only_the_domains_you_allowed() {
+    let root = root("sandbox-domains");
+    let t = two_networks(&root).await;
+    desk_takes_starts(&t).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    let ask = |n: u32, domain: &str| {
+        let body = json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": format!("tidy atlas {n}"), "domains": [domain] });
+        let t = &t;
+        async move { as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", body).await }
+    };
+    // By default such a run reaches no domain at all.
+    let (s, v) = ask(1, "github.com").await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let said = told(&t, "a domain nobody allowed").await;
+    assert!(said.contains("github.com") && said.contains("xenonet runs domains"), "{said}");
+    // The list is the person's (the route is YOU's, as the sign-in's is: a
+    // session's shell is refused by its process, which this harness has not).
+    let (s, v) = t.desk.window("PUT", "/api/runs/sandbox-domains", json!({ "domains": ["localhost"] })).await;
+    assert_eq!(s, 400, "a bad name is refused: {v}");
+    let (s, v) = t.desk.window("PUT", "/api/runs/sandbox-domains", json!({ "domains": ["GitHub.com", "*.npmjs.org"] })).await;
+    assert_eq!((s, v["domains"].clone()), (200, json!(["*.npmjs.org", "github.com"])), "{v}");
+    let (s, v) = t.desk.window("GET", "/api/runs/sandbox-domains", Value::Null).await;
+    assert_eq!((s, v["domains"].clone()), (200, json!(["*.npmjs.org", "github.com"])), "{v}");
+    // Inside the list it runs; outside it is refused, in words.
+    let (s, v) = ask(2, "registry.npmjs.org").await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    assert!(told(&t, "an allowed domain").await.contains("Started"));
+    let (s, v) = ask(3, "evil.example").await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let said = told(&t, "a domain outside the list").await;
+    assert!(said.contains("evil.example") && said.contains("github.com"), "{said}");
+    assert_eq!(fake_runs(&t.desk).len(), 1, "only the allowed one ran");
+    // The person's own start names any domain.
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas 4", "domains": ["evil.example"] })).await;
+    assert_eq!(s, 200, "{v}");
+    // And the list can be cleared.
+    let (s, v) = t.desk.window("DELETE", "/api/runs/sandbox-domains", Value::Null).await;
+    assert_eq!((s, v["domains"].clone()), (200, json!([])), "{v}");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

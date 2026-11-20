@@ -104,6 +104,12 @@ pub trait Engine: Send + Sync {
     async fn runs_sign_in(&self, _action: &str, _token: &str) -> R<Value> {
         pending(ENGINE)
     }
+    /// The domains a sandboxed run that isn't the person's own may reach
+    /// (`xenonet runs domains`): `action` is status, set (with `domains`)
+    /// or clear. `{ domains }` back.
+    async fn runs_sandbox_domains(&self, _action: &str, _domains: Vec<String>) -> R<Value> {
+        pending(ENGINE)
+    }
     /// A run's permission prompt (the xenonet MCP server's `permission`
     /// tool), from `me`, titled `title`, with how the route's process check
     /// found the caller (`by`): held until you answer. The answer Claude

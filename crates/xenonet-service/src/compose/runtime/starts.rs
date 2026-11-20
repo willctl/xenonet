@@ -493,6 +493,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         (None, Kind::You) => None,
         (None, _) => return Err("a run started by anyone but the person runs in its app's sandbox: this start asked for none".into()),
     };
+    // Anyone but the person reaches only the domains the person allowed.
+    if let (Some(rec), false) = (&record, kind == Kind::You) {
+        starts::domains_within(&rec.domains, &sandbox_domains(w))?;
+    }
     // A sandbox is a project folder: checked here, on the folder as it
     // resolved on the machine that runs the start, whoever asked.
     if record.is_some() {
@@ -730,6 +734,43 @@ pub fn signed_env(w: &Runtime, variable: &str, env: &mut Vec<(String, String)>) 
         env.retain(|(k, _)| k != variable);
         env.push((variable.into(), t));
     }
+}
+
+/// The setting the domains a run that isn't the person's own may reach are
+/// kept in, which leaves the store's schema as it is.
+const SANDBOX_DOMAINS_SETTING: &str = "sandbox-domains";
+
+/// The domains a sandboxed run that isn't the person's own may reach, as
+/// the person set them: none until they do.
+pub fn sandbox_domains(w: &Runtime) -> Vec<String> {
+    w.store
+        .0
+        .db()
+        .setting(SANDBOX_DOMAINS_SETTING)
+        .ok()
+        .as_ref()
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|d| d.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// `xenonet runs domains`: `status` (the list), `set` it to `domains`, or
+/// `clear` it. `{ domains }` back.
+pub fn sandbox_domains_for(w: &Runtime, action: &str, domains: &[String]) -> Result<Value, (u16, String)> {
+    match action {
+        "status" => {}
+        "set" => {
+            let list = starts::allowed_domains(domains).map_err(|why| (400, why))?;
+            w.store.0.db().set_setting(SANDBOX_DOMAINS_SETTING, Some(&json!(list))).map_err(|e| (500, format!("the domains couldn't be kept: {}", e.message)))?;
+            w.log("info", "runs.sandbox-domains", &format!("runs not started by you may now reach {}", if list.is_empty() { "no domain".to_string() } else { list.join(", ") }));
+        }
+        "clear" => {
+            w.store.0.db().set_setting(SANDBOX_DOMAINS_SETTING, None).map_err(|e| (500, format!("the domains couldn't be cleared: {}", e.message)))?;
+            w.log("info", "runs.sandbox-domains", "runs not started by you may now reach no domain");
+        }
+        other => return Err((400, format!("{other} isn't something xenonet runs domains does: status, set or clear"))),
+    }
+    Ok(json!({ "domains": sandbox_domains(w) }))
 }
 
 /// `xenonet runs sign-in` and its kin: `status` (whether a token is kept,

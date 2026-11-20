@@ -98,6 +98,41 @@ fn domain(d: &str) -> Result<String, String> {
     }
 }
 
+/// The domains the person lets runs they didn't start themselves reach, as
+/// they gave them: each a host name or `*.` and one, in lower case.
+pub fn allowed_domains(given: &[String]) -> Result<Vec<String>, String> {
+    let mut all = given.iter().map(|d| domain(d)).collect::<Result<Vec<_>, _>>()?;
+    all.sort();
+    all.dedup();
+    Ok(all)
+}
+
+/// Why a run started by anyone but the person may not reach `wanted`, given
+/// the domains the person allows such runs (`allowed`): the first domain
+/// outside them, in words. A name is within an entry that is the same name,
+/// or a `*.` entry that holds it as a subdomain (`*.example.org` holds
+/// `api.example.org` and `*.api.example.org`, not `example.org`).
+pub fn domains_within(wanted: &[String], allowed: &[String]) -> Result<(), String> {
+    let within = |d: &str| {
+        allowed.iter().any(|a| {
+            let (core, wild) = (d.strip_prefix("*.").unwrap_or(d), d.starts_with("*."));
+            match a.strip_prefix("*.") {
+                Some(zone) => a == d || core.ends_with(&format!(".{zone}")),
+                None => !wild && a == d,
+            }
+        })
+    };
+    match wanted.iter().find(|d| !within(d)) {
+        None => Ok(()),
+        Some(d) if allowed.is_empty() => Err(format!(
+            "{d} can't be reached by a run you didn't start yourself: this machine lets such runs reach no domain, and you can allow some with xenonet runs domains set"
+        )),
+        Some(d) => {
+            Err(format!("{d} is not among the domains this machine lets a run you didn't start yourself reach ({}): change them with xenonet runs domains", allowed.join(", ")))
+        }
+    }
+}
+
 /// What a request asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
@@ -583,6 +618,24 @@ mod tests {
         assert!(codex.contains(&"sandbox_workspace_write.network_access=false".to_string()), "{codex:?}");
         assert_eq!(codex.last().map(String::as_str), Some("-"));
         assert!(sandboxed("grok", &files, vec![]).is_err());
+    }
+
+    #[test]
+    fn a_run_you_didnt_start_reaches_only_the_domains_you_allowed() {
+        let list = |d: &[&str]| allowed_domains(&d.iter().map(ToString::to_string).collect::<Vec<_>>()).unwrap();
+        let ask = |d: &[&str]| d.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let allowed = list(&["GitHub.com", "*.npmjs.org", "github.com"]);
+        assert_eq!(allowed, ["*.npmjs.org", "github.com"]);
+        assert!(domains_within(&ask(&["github.com", "registry.npmjs.org", "*.registry.npmjs.org"]), &allowed).is_ok());
+        assert!(domains_within(&[], &[]).is_ok(), "no domain asked, none to allow");
+        for bad in ["evil.com", "api.github.com", "npmjs.org", "*.npmjs.org.evil.com", "xnpmjs.org"] {
+            assert!(domains_within(&ask(&[bad]), &allowed).is_err(), "{bad}");
+        }
+        assert!(domains_within(&ask(&["*.npmjs.org"]), &allowed).is_ok(), "the entry itself");
+        assert!(domains_within(&ask(&["*.github.com"]), &allowed).is_err(), "a wildcard is not within a name");
+        let why = domains_within(&ask(&["github.com"]), &[]).unwrap_err();
+        assert!(why.contains("github.com") && why.contains("xenonet runs domains"), "{why}");
+        assert!(allowed_domains(&["localhost".to_string()]).is_err());
     }
 
     #[test]
