@@ -26,6 +26,14 @@ fn show(found: &Value, home: &str) {
             print(format!("  {} {} {}", c::dim("○"), shown(home, path), c::dim(format!("looks like one; xenonet folders add {} {} reads it", t(app, "app"), shown(home, path)))));
         }
     }
+    for h in list(found, "hooks") {
+        let root = shown(home, &t(h, "root"));
+        if str(h, "hooks") == Some("removed") {
+            print(format!("{} XenoNet's hooks are out of {root}.", c::green("✓")));
+        } else {
+            print(c::yellow(format!("! XenoNet's hooks are still in {root}: {}", t(h, "why"))));
+        }
+    }
     if found.get("restart") == Some(&Value::Bool(true)) {
         print(c::yellow("! The folders you named change when XenoNet's service starts again: xenonet service stop, then xenonet service start."));
     }

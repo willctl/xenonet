@@ -28,6 +28,8 @@ struct Fake {
     hook_out: Mutex<Option<Value>>,
     environment: Mutex<Value>,
     root_info: Value,
+    /// The folders named for Claude Code.
+    named_roots: Mutex<Vec<String>>,
     fail_send: Mutex<Option<String>>,
     fail_integration: Mutex<Option<CoreError>>,
     /// The events connect's own Claude Code hooks are there for.
@@ -126,6 +128,10 @@ impl cores::Connect for Fake {
     async fn remove(&self) -> R<Value> {
         Ok(json!({ "removed": true }))
     }
+    async fn remove_root_hooks(&self, app: &str, root: &str) -> R<Value> {
+        self.note("removeRootHooks", json!([app, root]));
+        Ok(json!({ "app": app, "root": root, "hooks": "removed" }))
+    }
     async fn hook_connected(&self, event: &str) -> R<bool> {
         self.note("hookConnected", json!(event));
         Ok(self.connected.lock().unwrap().iter().any(|e| e == event))
@@ -207,6 +213,17 @@ impl cores::State for Fake {
     }
     fn root_info(&self) -> R<Value> {
         Ok(self.root_info.clone())
+    }
+    fn app_roots(&self) -> R<Value> {
+        let named = self.named_roots.lock().unwrap().clone();
+        let roots: Vec<Value> = std::iter::once(json!({ "root": null, "folder": "/h/.claude", "named": false }))
+            .chain(named.iter().map(|r| json!({ "root": r, "folder": r, "named": true })))
+            .collect();
+        Ok(json!({ "apps": [{ "app": "claude", "name": "Claude Code", "roots": roots, "candidates": [] }], "restart": false }))
+    }
+    async fn set_app_roots(&self, _app: Value, roots: Value) -> R<Value> {
+        *self.named_roots.lock().unwrap() = roots.as_array().into_iter().flatten().filter_map(|r| r.as_str().map(str::to_string)).collect();
+        self.app_roots()
     }
     async fn set_root(&self, path: Value) -> R<Value> {
         self.note("setRoot", path.clone());
@@ -816,6 +833,26 @@ async fn from_your_terminal_the_folder_changes_and_goes_back() {
     assert_eq!(go(&ctx, "DELETE", "/api/workspace/root", &[], None).await.status, 200);
     assert_eq!(go(&ctx, "POST", "/api/workspace/root", &[], Some(json!({}))).await.status, 400, "no folder named");
     assert_eq!(f.was("setRoot"), vec![json!("~/Clients"), Value::Null]);
+}
+
+#[tokio::test]
+async fn a_folder_taken_away_loses_xenonets_hooks_and_the_answer_says_so() {
+    let (ctx, f) = service();
+    *f.named_roots.lock().unwrap() = vec!["/h/.claude-work".into(), "/h/.claude-play".into()];
+    let put = |roots: Value| Some(json!({ "app": "claude", "roots": roots }));
+    // Keeping one and adding none takes the other away, and only that.
+    let r = go(&ctx, "PUT", "/api/workspace/app-roots", &[], put(json!(["/h/.claude-work"]))).await;
+    assert_eq!(r.status, 200, "{:?}", r.body_json());
+    assert_eq!(f.was("removeRootHooks"), vec![json!(["claude", "/h/.claude-play"])]);
+    assert_eq!(r.body_json()["hooks"], json!([{ "app": "claude", "root": "/h/.claude-play", "hooks": "removed" }]));
+    // Naming one more takes none away: no hooks removed, none said.
+    let r = go(&ctx, "PUT", "/api/workspace/app-roots", &[], put(json!(["/h/.claude-work", "/h/.claude-new"]))).await;
+    assert_eq!(f.was("removeRootHooks").len(), 1);
+    assert!(r.body_json().get("hooks").is_none());
+    // Naming none takes the rest away.
+    let r = go(&ctx, "PUT", "/api/workspace/app-roots", &[], put(json!([]))).await;
+    assert_eq!(f.was("removeRootHooks").len(), 3);
+    assert_eq!(r.body_json()["hooks"].as_array().map(Vec::len), Some(2));
 }
 
 // ---------- reads of another machine ----------

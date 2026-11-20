@@ -805,6 +805,17 @@ impl Connect {
         self.preview(c)
     }
 
+    /// XenoNet's hooks out of one app's settings, and nothing else of it or
+    /// of the others': a folder she named for the app and then took away.
+    pub fn remove_hooks_of(&self, c: &mut dyn Machine, app: &str) -> Result<()> {
+        for (a, f) in &self.apps {
+            if a.id == app {
+                f.remove_hooks(&self.k, c)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Each app's hooks first, then its server, then its console's.
     pub fn remove(&self, c: &mut dyn Machine) -> Result<Value> {
         for (_, f) in &self.apps {
@@ -1166,6 +1177,15 @@ mod tests {
             json!({ "hooks": { "Start": [{ "hooks": [{ "type": "command", "command": "my-own" }] }] } })
         );
         assert_eq!(m.asked[..3], ["cli wren", "/bin/wren mcp remove xenonet", "cli wren"], "its hooks, then its server, then the preview");
+
+        // Taking one app's hooks out of a folder touches no server and no other app.
+        c.apply(&mut m, &["wren".to_string()]).unwrap();
+        m.asked.clear();
+        c.remove_hooks_of(&mut m, "claude").unwrap();
+        assert!(m.files["/h/.wren/hooks.json"].contains("hook wren"), "an app it isn't asked about keeps its hooks");
+        c.remove_hooks_of(&mut m, "wren").unwrap();
+        assert!(!m.files["/h/.wren/hooks.json"].contains("hook wren"), "{}", m.files["/h/.wren/hooks.json"]);
+        assert!(m.asked.iter().all(|a| !a.contains("mcp remove")), "{:?}", m.asked);
         assert!(!c.hook_connected(&mut m, "Start").unwrap(), "no format here says");
 
         assert_eq!(

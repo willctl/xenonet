@@ -84,6 +84,7 @@ pub(crate) fn bin(setup: &Setup) -> String {
 /// each folder she named for an app (`xenonet folders`), which has hooks of
 /// its own.
 pub struct ConnectDriver {
+    options: Options,
     core: std::sync::Arc<Core>,
     /// Each named root's app, and the connect for that root.
     roots: Vec<(String, String, std::sync::Arc<Core>)>,
@@ -126,7 +127,7 @@ impl ConnectDriver {
             .flat_map(|(app, roots)| roots.as_array().into_iter().flatten().filter_map(|r| Some((app.clone(), r.as_str()?.to_string()))))
             .filter_map(|(app, root)| Some((app.clone(), root.clone(), std::sync::Arc::new(Core::new(in_root(options.clone(), &app, &root)?)))))
             .collect();
-        ConnectDriver { core: std::sync::Arc::new(Core::new(options)), roots }
+        ConnectDriver { core: std::sync::Arc::new(Core::new(options.clone())), options, roots }
     }
 
     async fn run(&self, f: impl FnOnce(&Core, &mut Here) -> Result<Value, Problem> + Send + 'static) -> R<Value> {
@@ -195,6 +196,21 @@ impl Connect for ConnectDriver {
         }
         Ok(out)
     }
+    async fn remove_root_hooks(&self, app: &str, root: &str) -> R<Value> {
+        let Some(options) = in_root(self.options.clone(), app, root) else {
+            return Err(CoreError::new(format!("{app} keeps its hooks in one folder, so there is none to take them out of")));
+        };
+        let (core, name) = (Core::new(options), app.to_string());
+        run_on(move || {
+            core.remove_hooks_of(&mut Here, &name)?;
+            Ok(serde_json::json!({ "app": name, "hooks": "removed" }))
+        })
+        .await
+        .map(|mut v| {
+            v["root"] = Value::String(root.to_string());
+            v
+        })
+    }
     async fn hook_connected(&self, event: &str) -> R<bool> {
         let event = event.to_string();
         Ok(self.run(move |c, k| c.hook_connected(k, &event).map(Value::Bool)).await?.as_bool().unwrap_or(false))
@@ -233,6 +249,27 @@ mod tests {
             platform: "linux".into(),
             instances: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn a_folder_taken_away_has_xenonets_hooks_taken_out_and_nothing_else() {
+        xenonet_platforms::install();
+        let dir = std::env::temp_dir().join(format!("xenonet-connect-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        let ours = serde_json::json!({ "type": "command", "command": "XENONET_PORT=47840 '/x/xenonet' hook claude" });
+        let mine = serde_json::json!({ "type": "command", "command": "my-own-hook" });
+        let settings = serde_json::json!({ "theme": "dark", "hooks": { "Stop": [{ "hooks": [ours, mine] }] } });
+        std::fs::write(&file, settings.to_string()).unwrap();
+        let driver = ConnectDriver { options: options(), core: std::sync::Arc::new(Core::new(options())), roots: Vec::new() };
+        let done = driver.remove_root_hooks("claude", &dir.to_string_lossy()).await.unwrap();
+        assert_eq!((done["app"].as_str(), done["hooks"].as_str()), (Some("claude"), Some("removed")), "{done}");
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(after, serde_json::json!({ "theme": "dark", "hooks": { "Stop": [{ "hooks": [mine] }] } }));
+        // An app that keeps one folder has no folder to take them out of.
+        assert!(driver.remove_root_hooks("hermes", "/x").await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

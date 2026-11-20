@@ -13,6 +13,7 @@ app's own folder, and reads another only once you name it here.
 Each folder has its own sign-in and its own timeline of accounts, so a
 session in a folder that has had one account is linked to it by its folder.
 Resuming, forking or waking a session runs it in the folder it was found in.
+Removing a folder takes XenoNet's hooks out of it at once and says so.
 
 Naming folders is yours, so it works from your own terminal and is refused
 from a session's. XenoNet reads the folders you named when its service

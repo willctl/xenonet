@@ -171,6 +171,11 @@ pub trait Connect: Send + Sync {
     async fn remove(&self) -> R<Value> {
         pending(CONNECT)
     }
+    /// XenoNet's hooks out of the folder `root`, which she named for `app`
+    /// and has taken away. `{ app, root, hooks: "removed" }`.
+    async fn remove_root_hooks(&self, _app: &str, _root: &str) -> R<Value> {
+        pending(CONNECT)
+    }
     /// Whether connect's own Claude Code hook for `event` is in Claude
     /// Code's settings, so the copy XenoNet's plugin posts stands by. None
     /// is, until connect is there.
