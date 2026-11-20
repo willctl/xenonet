@@ -585,6 +585,14 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         }
         None => None,
     };
+    // In acceptEdits, auto and dontAsk Claude Code approves edits and
+    // commands without calling the permission tool, so what judges a run
+    // that isn't the person's never sees them: only the person picks a mode.
+    if let (Some(mode), false) = (&r.mode, own) {
+        return Err(format!(
+            "only the person picks a permission mode, and this start isn't theirs: it asked for {mode}, which would let the run approve its own edits without XenoNet judging them"
+        ));
+    }
     if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref(), record.is_some()) {
         if started.is_ok() {
             w.starts.history.locked().push((now, bucket));

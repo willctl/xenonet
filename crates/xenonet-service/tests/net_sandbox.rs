@@ -798,3 +798,35 @@ async fn hooks_added_to_the_folder_between_turns_refuse_the_next_turn() {
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// In acceptEdits, auto and dontAsk Claude Code approves edits and commands
+/// without calling the permission tool, so the delegation's judge never sees
+/// them: only the person starts a run with a mode of its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_start_that_is_not_the_persons_may_not_pick_a_permission_mode() {
+    let root = root("sandbox-mode");
+    let t = two_networks(&root).await;
+    desk_takes_starts(&t).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    for (n, mode) in ["acceptEdits", "auto", "dontAsk", "plan"].into_iter().enumerate() {
+        let body = json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": format!("tidy atlas {n}"), "sandbox": true, "mode": mode });
+        let (s, v) = as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", body).await;
+        assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{mode}: {v}");
+        until("desk logs the refusal", 20, || async { t.desk.logged("start").iter().filter(|l| l.contains("permission mode")).count() > n }).await;
+    }
+    let refused = t.desk.logged("start").join("\n");
+    assert!(refused.contains("only the person picks a permission mode"), "the refusal says why: {refused}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
+    // The controls: the same start without a mode runs, and the person's own with one does too.
+    let (s, v) =
+        as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": "tidy atlas", "sandbox": true })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let _ = ran(&t.desk, 1).await;
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas again", "mode": "acceptEdits" })).await;
+    assert_eq!(s, 200, "{v}");
+    let (args, _) = ran(&t.desk, 2).await;
+    assert!(args.windows(2).any(|w| w == ["--permission-mode", "acceptEdits"]), "{args:?}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
