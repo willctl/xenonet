@@ -141,6 +141,9 @@ pub struct StartSide {
     /// The environment the runs XenoNet starts are made from: the
     /// service's own, unless a test gave another.
     environment: Mutex<Option<Vec<(String, String)>>>,
+    /// The sign-in the runs are given, unless the credential store has one:
+    /// only a test gives it (`set_sign_in`).
+    sign_in: Mutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -185,6 +188,17 @@ impl StartSide {
     #[doc(hidden)]
     pub fn set_environment(&self, vars: Vec<(String, String)>) {
         *self.environment.locked() = Some(vars);
+    }
+
+    /// Gives the runs this token as their sign-in, in place of the
+    /// credential store's, which a test mustn't touch.
+    #[doc(hidden)]
+    pub fn set_sign_in(&self, token: &str) {
+        *self.sign_in.locked() = Some(token.to_string());
+    }
+
+    fn sign_in_override(&self) -> Option<String> {
+        self.sign_in.locked().clone()
     }
 
     /// Holds what names a run to the store until the guard is dropped, so a
@@ -635,9 +649,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         env.retain(|(k, _)| k != v);
         env.push((v.into(), mcp_tool_timeout_ms(w).to_string()));
     }
-    if let Some(s) = ways.sign_in {
-        signed_env(w, s.variable, &mut env);
-    }
+    let sign_in = ways.sign_in.and_then(|s| signed_env(w, &s, &mut env));
     // Kept before the run starts, under its session (Codex names its own
     // later, so it is kept under the run's key until then): a run whose
     // sandbox can't be kept isn't started, since a turn for it later would
@@ -650,7 +662,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
             return Err(why);
         }
     }
-    let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text } };
+    let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text }, sign_in: sign_in.as_deref() };
     let pid = match run_turn(w, &resumes.runner, turn) {
         Ok(pid) => pid,
         Err(why) => {
@@ -800,17 +812,30 @@ fn secrets(w: &Runtime) -> crate::compose::runtime::wakes::Secrets {
 /// credential store: for its runs' environment alone, never logged or
 /// shown.
 pub fn run_token(w: &Runtime) -> Option<String> {
+    if let Some(t) = w.starts.sign_in_override() {
+        return Some(t);
+    }
     secrets(w).get(starts::SIGN_IN_TARGET).ok().flatten().filter(|t| !t.is_empty())
 }
 
-/// The environment of a run with XenoNet's sign-in, when you gave it one,
-/// in the variable the app's adapter names (Claude Code's
-/// CLAUDE_CODE_OAUTH_TOKEN).
-pub fn signed_env(w: &Runtime, variable: &str, env: &mut Vec<(String, String)>) {
-    if let Some(t) = run_token(w) {
-        env.retain(|(k, _)| k != variable);
-        env.push((variable.into(), t));
+/// XenoNet's sign-in for a run, when you gave it one. On unix, for an app
+/// that can read it from a descriptor (Claude Code), the environment gets
+/// the variable that says so (with the descriptor's number) and no token,
+/// and the token comes back for the caller to hand to the run
+/// (`Turn::sign_in`): a command of the same user can read another
+/// process's environment on macOS, and never a descriptor. Elsewhere the
+/// token is in the variable the app's adapter names (Claude Code's
+/// CLAUDE_CODE_OAUTH_TOKEN) and nothing comes back.
+pub fn signed_env(w: &Runtime, s: &xenonet_adapter::delivery::SignIn, env: &mut Vec<(String, String)>) -> Option<String> {
+    let t = run_token(w)?;
+    env.retain(|(k, _)| k != s.variable && Some(k.as_str()) != s.fd_variable);
+    #[cfg(unix)]
+    if let Some(fd) = s.fd_variable {
+        env.push((fd.into(), crate::compose::runtime::runs::SIGN_IN_FD.to_string()));
+        return Some(t);
     }
+    env.push((s.variable.into(), t));
+    None
 }
 
 /// The setting the domains a run that isn't the person's own may reach are

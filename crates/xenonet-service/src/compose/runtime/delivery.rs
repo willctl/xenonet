@@ -410,9 +410,7 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     // XenoNet's server, waiting a minute past the hold for your answer, as
     // a start does.
     let ways = xenonet_engine::delivery::apps::of(&app).unwrap_or_default();
-    if let Some(s) = ways.sign_in {
-        crate::compose::runtime::starts::signed_env(w, s.variable, &mut env);
-    }
+    let sign_in = ways.sign_in.and_then(|s| crate::compose::runtime::starts::signed_env(w, &s, &mut env));
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);
         env.push((v.into(), crate::compose::runtime::starts::mcp_tool_timeout_ms(w).to_string()));
@@ -431,7 +429,7 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     } else {
         None
     };
-    let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input };
+    let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input, sign_in: sign_in.as_deref() };
     match crate::compose::runtime::starts::run_turn(w, &r.runner, turn) {
         Ok(pid) => {
             crate::compose::runtime::starts::after_resume(w, &r.runner, &app, &key, pid, fork.then_some(agent), prompt_file, sandboxed);

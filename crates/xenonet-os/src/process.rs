@@ -112,6 +112,132 @@ fn kill_group(group: libc::pid_t) {
     }
 }
 
+/// A program started on unix with a descriptor of its own at a number it
+/// is told (`Held::start`), which adytum-exec's `Spawned` has no way to
+/// pass: the run's sign-in comes this way, so it is in no environment.
+/// Like `Spawned` it leads its own process group, has a deadline that
+/// stops the group, and is polled rather than waited on.
+#[cfg(unix)]
+pub struct Held {
+    child: std::process::Child,
+    group: libc::pid_t,
+    started: std::time::Instant,
+    deadline: Option<std::time::Duration>,
+    ended: bool,
+    code: Option<i32>,
+    timed_out: bool,
+    pub stdin: Option<std::process::ChildStdin>,
+    pub stdout: Option<std::process::ChildStdout>,
+    pub stderr: Option<std::process::ChildStderr>,
+}
+
+/// How a `Held` ended: its exit code (None if a signal ended it), and
+/// whether its deadline stopped it.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeldExit {
+    pub code: Option<i32>,
+    pub timed_out: bool,
+}
+
+#[cfg(unix)]
+impl Held {
+    /// Starts `cmd` with its standard input, output and error as pipes, in
+    /// a process group of its own. `give` is a descriptor and the number it
+    /// has in the child (every other descriptor of ours stays
+    /// close-on-exec, as std makes them); ours is closed once the child
+    /// has it.
+    pub fn start(mut cmd: std::process::Command, deadline: Option<std::time::Duration>, give: Option<(std::os::fd::OwnedFd, i32)>) -> std::io::Result<Held> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+        if let Some((fd, at)) = &give {
+            give_fd(&mut cmd, fd.as_raw_fd(), *at);
+        }
+        let mut child = cmd.spawn()?;
+        drop(give);
+        let group = libc::pid_t::try_from(child.id()).map_err(|_| std::io::Error::other("a process id too large for a group"))?;
+        let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+        Ok(Held { child, group, started: std::time::Instant::now(), deadline, ended: false, code: None, timed_out: false, stdin, stdout, stderr })
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// Whether anything in the child's group still runs: signal 0 sends
+    /// nothing, and a member that has exited but isn't reaped counts.
+    #[expect(unsafe_code, reason = "killpg(2) with signal 0, which std doesn't wrap")]
+    pub fn group_running(&self) -> bool {
+        // SAFETY: killpg takes a plain group id and a signal; 0 sends none.
+        unsafe { libc::killpg(self.group, 0) == 0 }
+    }
+
+    /// Whether the child has ended, without waiting. Past the deadline the
+    /// group is killed, as `Spawned::try_wait` does.
+    pub fn try_wait(&mut self) -> std::io::Result<Option<HeldExit>> {
+        if !self.ended {
+            if let Some(status) = self.child.try_wait()? {
+                self.ended = true;
+                self.code = status.code();
+            }
+        }
+        let late = self.deadline.is_some_and(|d| self.started.elapsed() >= d);
+        if late && (!self.ended || self.group_running()) {
+            self.kill_group();
+            self.timed_out = true;
+            self.ended = true;
+        }
+        Ok(self.ended.then_some(HeldExit { code: self.code, timed_out: self.timed_out }))
+    }
+
+    /// Kills the child and its group now, and reaps the child.
+    pub fn kill_group(&mut self) {
+        kill_group(self.group);
+        let _ = self.child.wait();
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Held {
+    fn drop(&mut self) {
+        if !self.ended && !matches!(self.child.try_wait(), Ok(Some(_))) {
+            self.kill_group();
+        }
+    }
+}
+
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "pre_exec, which std marks unsafe")]
+fn give_fd(cmd: &mut std::process::Command, from: libc::c_int, at: libc::c_int) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: the closure makes only dup2 and fcntl calls, which are
+    // async-signal-safe, and touches no memory of the parent's.
+    unsafe {
+        cmd.pre_exec(move || place(from, at));
+    }
+}
+
+/// In the child, between fork and exec: `from` at the number `at`, without
+/// close-on-exec. When it already has that number it only loses the flag.
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "dup2(2) and fcntl(2), which std doesn't wrap")]
+fn place(from: libc::c_int, at: libc::c_int) -> std::io::Result<()> {
+    // SAFETY: plain descriptor numbers; both calls are async-signal-safe.
+    unsafe {
+        if from == at {
+            let flags = libc::fcntl(at, libc::F_GETFD);
+            if flags < 0 || libc::fcntl(at, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        } else if libc::dup2(from, at) < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 /// A Windows job object whose processes end when its last handle closes
 /// (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).
 #[cfg(windows)]

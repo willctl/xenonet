@@ -54,6 +54,24 @@ async fn files_ready(h: &Host, n: usize) -> (Option<String>, Vec<String>) {
     }
 }
 
+/// What the `n`th run of the fake on the machine whose folder is `dir` read
+/// from the descriptor it was told to: the token's length and cksum. None if
+/// it was told of none.
+fn fake_fd_token(dir: &std::path::Path, n: usize) -> Option<(usize, String)> {
+    let got = std::fs::read_to_string(dir.join("bin").join(format!("fdtoken-{}", n - 1))).ok()?;
+    let (len, sum) = got.trim().split_once(' ')?;
+    Some((len.parse().ok()?, sum.to_string()))
+}
+
+/// The length and cksum of `token`, as `fake_fd_token` reports them.
+fn token_mark(token: &str) -> (usize, String) {
+    use std::io::Write;
+    let mut c = std::process::Command::new("cksum").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    c.stdin.take().unwrap().write_all(token.as_bytes()).unwrap();
+    let out = String::from_utf8(c.wait_with_output().unwrap().stdout).unwrap();
+    (token.len(), out.split_whitespace().next().unwrap().to_string())
+}
+
 /// What the service's own environment holds on desk in these tests: the
 /// sign-in of the person's own Claude Code, a key, and the sockets of the
 /// SSH agent and of Docker. None of it is for a sandboxed run.
@@ -170,6 +188,33 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
     assert!(settings["hooks"]["Stop"].is_array(), "XenoNet's own hooks stay: {settings}");
     // Its environment: the scrubbed one, and nothing of the service's secrets.
     assert_unreachable_from_the_run(&names);
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_runs_sign_in_comes_on_a_descriptor_and_is_in_no_environment() {
+    let root = root("sandbox-fd");
+    let t = two_networks(&root).await;
+    let token = "made-up-token-for-the-ledger-run";
+    t.desk.world.starts.set_sign_in(token);
+    t.desk.world.starts.set_environment(service_env());
+    desk_takes_starts(&t).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    // A sandboxed start from another machine, then the person's own start.
+    let (s, v) =
+        as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": "tidy atlas", "sandbox": true })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let _ = ran(&t.desk, 1).await;
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas again" })).await;
+    assert_eq!(s, 200, "{v}");
+    let _ = ran(&t.desk, 2).await;
+    for n in [1, 2] {
+        let (_, names) = files_ready(&t.desk, n).await;
+        assert!(!names.iter().any(|k| k == "CLAUDE_CODE_OAUTH_TOKEN"), "run {n}: the token is in no environment: {names:?}");
+        assert!(names.iter().any(|k| k == "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"), "run {n} is told where to read it: {names:?}");
+        assert_eq!(fake_fd_token(&t.desk.dir, n), Some(token_mark(token)), "run {n} read its token from the descriptor");
+    }
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

@@ -183,6 +183,10 @@ pub type PlanUsed = fn(Option<&Value>, f64) -> Option<Vec<f64>>;
 pub struct SignIn {
     /// The variable that hands a run the token.
     pub variable: &'static str,
+    /// The variable that tells the app to read the token from a descriptor
+    /// instead, which keeps it out of the environment (unix only): the
+    /// number it holds is the descriptor.
+    pub fd_variable: Option<&'static str>,
     /// Whether a run's output says the app isn't signed in.
     pub signed_out: fn(&str) -> bool,
 }

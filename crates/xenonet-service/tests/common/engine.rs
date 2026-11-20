@@ -110,7 +110,9 @@ impl State for Map {
 /// --fork-session it names its copy as Claude Code's stream does. It also
 /// keeps the file --settings names as `settings-N` and the names (never the
 /// values) of the variables it was given, sorted, as `env-N` (`fake_files`
-/// reads both), without the ones its own shell adds.
+/// reads both), without the ones its own shell adds. When it is told to
+/// read its sign-in from a descriptor it does, and keeps only the token's
+/// length and its cksum, as `fdtoken-N` (`fake_fd_token` reads it).
 pub fn fake_cli(dir: &Path) -> String {
     let bin = dir.join("bin").join("fake-cli");
     std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
@@ -131,6 +133,10 @@ printf '%s\n' "$@" > "$here/args-$n"
 printf '%s' "$prompt" > "$here/prompt-$n"
 printf '%s' "$MCP_TOOL_TIMEOUT" > "$here/timeout-$n"
 [ -n "$settings" ] && cat "$settings" > "$here/settings-$n"
+if [ -n "$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" ]; then
+  IFS= read -r tok <&"$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"
+  printf '%s %s\n' "${#tok}" "$(printf '%s' "$tok" | cksum | cut -d' ' -f1)" > "$here/fdtoken-$n"
+fi
 env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | grep -v -x -e PWD -e OLDPWD -e SHLVL -e _ | sort > "$here/env-$n"
 case "$*" in *--fork-session*) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac
 case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
