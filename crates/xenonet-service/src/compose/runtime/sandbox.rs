@@ -249,7 +249,7 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     }
     let (settings, mcp) = (settings.to_string_lossy().into_owned(), mcp.to_string_lossy().into_owned());
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
-    let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp, server: &server }, args)?;
+    let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp, server: &server, not_own: rec.for_others.is_some() }, args)?;
     Ok((args, (ways.words)(&plan)))
 }
 

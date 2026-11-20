@@ -292,7 +292,7 @@ mod tests {
     use xenonet_adapter::delivery::{Plan, SandboxFiles};
 
     fn files(domains: &[String]) -> SandboxFiles<'_> {
-        SandboxFiles { plan: Plan { folder: "/w/atlas", home: "/h", domains, port: "47840", bin: "/usr/bin/xenonet" }, settings: "", mcp: "", server: "xenonet" }
+        SandboxFiles { plan: Plan { folder: "/w/atlas", home: "/h", domains, port: "47840", bin: "/usr/bin/xenonet" }, settings: "", mcp: "", server: "xenonet", not_own: false }
     }
 
     fn has(args: &[String], flags: &[&str]) -> bool {

@@ -56,6 +56,10 @@ pub struct SandboxFiles<'a> {
     pub mcp: &'a str,
     /// XenoNet's MCP server's name in the app's settings.
     pub server: &'a str,
+    /// The run isn't the person's own: a start for someone else (a session,
+    /// an actor, another machine, a delegation, an intent). The app's own
+    /// permission mode is then never one a resumed session brings back.
+    pub not_own: bool,
 }
 
 /// The files of one sandboxed run: its settings (given the plan, the

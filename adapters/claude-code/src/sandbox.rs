@@ -41,18 +41,43 @@ fn words(p: &Plan<'_>) -> String {
 /// hooks and servers would run outside the sandbox: the settings file the
 /// turn had is replaced by the run's, and the user's, the project's and the
 /// local settings and every other MCP server are left out.
+///
+/// `--disable-slash-commands` leaves out the folder's skills and commands
+/// too (checked on 2.1.327: no skill and no slash command loads, and the
+/// settings' hooks and the MCP server still do). Its agents still load, so
+/// the walk of `.claude` stays. `--safe-mode` would leave all of it out but
+/// XenoNet's own hooks and server with it, and `--bare` takes no OAuth
+/// sign-in.
+///
+/// A run that isn't the person's own never takes a permission mode from the
+/// session it resumes or copies: Claude Code keeps one in the transcript
+/// (a `permission-mode` entry, as of 2.1.327), and `default` asks for every
+/// edit, which the delegation's rules answer.
 fn turn(f: &SandboxFiles<'_>, args: Vec<String>) -> Vec<String> {
     let mut out = Vec::new();
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
-        if a == "--settings" {
+        if a == "--settings" || (f.not_own && a == "--permission-mode") {
             it.next();
-        } else {
+        } else if !(f.not_own && a.starts_with("--permission-mode=")) {
             out.push(a);
         }
     }
-    out.extend(["--settings", f.settings, "--setting-sources=", "--strict-mcp-config", "--mcp-config", f.mcp].map(str::to_string));
+    out.extend(["--settings", f.settings, "--setting-sources=", "--strict-mcp-config", "--mcp-config", f.mcp, "--disable-slash-commands"].map(str::to_string));
+    if f.not_own {
+        out.extend(["--permission-mode", "default"].map(str::to_string));
+    }
     out
+}
+
+/// The paths a command of a run may not write inside its folder: any
+/// `.claude` (commands, agents, skills, settings, plugins), the servers
+/// file, git's hooks and config. Claude Code's sandbox protects some of
+/// them by itself; this names them whatever its list.
+fn deny_write(folder: &str) -> Vec<String> {
+    let mut v = vec![format!("{}/.claude", folder.trim_end_matches('/'))];
+    v.extend(["**/.claude", "**/.claude/**", "**/.mcp.json", "**/.claude.json", "**/.git/hooks/**", "**/.git/config"].map(str::to_string));
+    v
 }
 
 /// The settings file and the MCP configuration of one run.
@@ -77,7 +102,11 @@ fn files(p: &Plan<'_>, listen: Option<&Value>, server: &str) -> (Value, Value) {
             // The sign-in is in the run's environment for Claude Code
             // itself; a command it runs doesn't get it.
             "credentials": { "envVars": [{ "name": crate::SIGN_IN_VARIABLE, "mode": "deny" }] },
-            "filesystem": { "allowWrite": [p.folder], "denyRead": [p.home], "allowRead": [p.folder] },
+            // What Claude Code loads later, outside the sandbox (its own
+            // folder, the servers file, git's hooks and config), can't be
+            // written by a command of this run: denyWrite wins over the
+            // folder's allowWrite for what it names (2.1.327).
+            "filesystem": { "allowWrite": [p.folder], "denyWrite": deny_write(p.folder), "denyRead": [p.home], "allowRead": [p.folder] },
             // No Unix socket (the SSH agent's, Docker's): on macOS none is
             // allowed by path, and on Linux the seccomp filter that blocks
             // them is not switched off.
@@ -145,12 +174,54 @@ mod tests {
     #[test]
     fn a_turn_swaps_the_listening_settings_for_the_runs_and_leaves_the_repos_out() {
         let p = plan(&[]);
-        let f = SandboxFiles { plan: p, settings: "/s/a.json", mcp: "/s/m.json", server: "xenonet" };
+        let f = SandboxFiles { plan: p, settings: "/s/a.json", mcp: "/s/m.json", server: "xenonet", not_own: false };
         let args = turn(&f, ["-p", "--resume", "x", "--settings", "/s/listen.json", "--permission-prompt-tool", "t"].map(str::to_string).to_vec());
         assert_eq!(
             args,
-            ["-p", "--resume", "x", "--permission-prompt-tool", "t", "--settings", "/s/a.json", "--setting-sources=", "--strict-mcp-config", "--mcp-config", "/s/m.json"]
+            [
+                "-p",
+                "--resume",
+                "x",
+                "--permission-prompt-tool",
+                "t",
+                "--settings",
+                "/s/a.json",
+                "--setting-sources=",
+                "--strict-mcp-config",
+                "--mcp-config",
+                "/s/m.json",
+                "--disable-slash-commands"
+            ],
+            "skills and commands of the folder aren't loaded, and a person's own run keeps the mode it has"
         );
+    }
+
+    #[test]
+    fn a_turn_of_a_run_that_is_not_the_persons_own_never_takes_a_permission_mode_from_the_session() {
+        let f = SandboxFiles { plan: plan(&[]), settings: "/s/a.json", mcp: "/s/m.json", server: "xenonet", not_own: true };
+        for given in [
+            vec!["-p", "--resume", "x"],
+            vec!["-p", "--resume", "x", "--permission-mode", "acceptEdits"],
+            vec!["-p", "--fork-session", "--permission-mode=bypassPermissions", "--resume", "x"],
+        ] {
+            let args = turn(&f, given.iter().map(ToString::to_string).collect());
+            let at: Vec<usize> = args.iter().enumerate().filter(|(_, a)| a.starts_with("--permission-mode")).map(|(i, _)| i).collect();
+            assert_eq!(at.len(), 1, "one mode, the default: {args:?}");
+            assert_eq!(args[at[0]], "--permission-mode");
+            assert_eq!(args[at[0] + 1], "default", "{args:?}");
+            assert!(!args.iter().any(|a| a == "acceptEdits" || a.contains("bypassPermissions")), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn a_command_in_the_sandbox_cannot_write_what_claude_code_loads_later() {
+        let (s, _) = files(&plan(&[]), None, "xenonet");
+        let deny: Vec<&str> = s["sandbox"]["filesystem"]["denyWrite"].as_array().expect("denyWrite is set").iter().filter_map(Value::as_str).collect();
+        for want in ["/home/me/atlas/.claude", "**/.claude", "**/.claude/**", "**/.mcp.json", "**/.git/hooks/**", "**/.git/config"] {
+            assert!(deny.contains(&want), "{want} is denied: {deny:?}");
+        }
+        // The folder stays writable: denyWrite wins over allowWrite for what it names only.
+        assert_eq!(s["sandbox"]["filesystem"]["allowWrite"], json!(["/home/me/atlas"]));
     }
 
     #[test]
