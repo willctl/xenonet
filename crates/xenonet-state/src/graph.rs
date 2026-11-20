@@ -138,6 +138,49 @@ fn items(v: Option<&Value>) -> &[Value] {
     v.and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
 
+/// A session that ran in a linked git worktree sits where the worktree's
+/// main checkout does, wherever the worktree folder is (T3 Code's, `git
+/// worktree add ../x`, any tool's), when that checkout is a project the map
+/// has: its folder becomes the main checkout's and its worktree the
+/// worktree's, as Claude desktop's and Grok Build's worktree sessions give
+/// them. A worktree of a folder that isn't a project, one that doesn't
+/// share the main checkout's git folder, and a session that already names
+/// its worktree stay as they are.
+fn in_main_checkouts(sessions: &[Value], project_keys: &HashSet<String>) -> Vec<Value> {
+    let checkouts = xenonet_adapter::repo::checkouts();
+    // Sessions often share a folder, and each lookup reads the disk.
+    let mut seen: HashMap<String, Option<(String, String)>> = HashMap::new();
+    sessions
+        .iter()
+        .map(|s| {
+            let local = get(s, "host").is_none_or(Value::is_null) && str_of(s, "observed").is_none();
+            let cwd = get(s, "cwd").filter(|c| c.is_string()).map(display).filter(|c| !c.is_empty());
+            let (true, None, Some(cwd)) = (local, get(s, "worktree").filter(|w| truthy(Some(w))), cwd) else { return s.clone() };
+            let moved = seen
+                .entry(cwd.clone())
+                .or_insert_with(|| {
+                    let here = checkouts.find(std::path::Path::new(&cwd))?;
+                    let main = here.worktree_of.clone()?;
+                    let main_s = main.to_string_lossy().into_owned();
+                    if !path_key(&main_s).is_some_and(|k| project_keys.contains(&k)) || !checkouts.open(&main).is_some_and(|m| m.common == here.common) {
+                        return None;
+                    }
+                    let inside = std::path::Path::new(&cwd).strip_prefix(&here.top).ok().filter(|r| !r.as_os_str().is_empty());
+                    let folder = inside.map_or_else(|| main_s.clone(), |r| main.join(r).to_string_lossy().into_owned());
+                    Some((folder, here.top.to_string_lossy().into_owned()))
+                })
+                .clone();
+            let Some((folder, worktree)) = moved else { return s.clone() };
+            let mut s = s.clone();
+            if let Some(m) = s.as_object_mut() {
+                m.insert("cwd".into(), Value::String(folder));
+                m.insert("worktree".into(), Value::String(worktree));
+            }
+            s
+        })
+        .collect()
+}
+
 /// buildGraph(input), with `parent_of` (a project's key → the key of the
 /// project it orbits) from projectRelations. `input` holds what buildGraph
 /// takes, with `repos` as [[key, status], …].
@@ -146,7 +189,9 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     let projects_dir = field("projectsDir").map(display).unwrap_or_default();
     let home_dir = field("homeDir").filter(|v| truthy(Some(v))).map(display);
     let projects = items(field("projects"));
-    let sessions = items(field("sessions"));
+    let project_keys: HashSet<String> = projects.iter().filter_map(|p| get(p, "key").map(display)).collect();
+    let placed = in_main_checkouts(items(field("sessions")), &project_keys);
+    let sessions = &placed[..];
     let native_projects = items(field("nativeProjects"));
     let resources = items(field("resources"));
     let wiki = field("wiki");
