@@ -361,7 +361,10 @@ mod kq {
             assert_eq!(e.kind, EventKind::Modify(ModifyKind::Data(DataChange::Content)));
             let moved = d.join("moved.jsonl");
             std::fs::rename(&a, &moved).unwrap();
-            let e = next_of(&rx, &a).expect("its move");
+            // kqueue may tell one write as more than one event (its flags
+            // can be posted apart, and the thread can read between them), so
+            // writes told late are skipped: the move comes after them.
+            let e = std::iter::from_fn(|| next_of(&rx, &a)).find(|e| e.kind != EventKind::Modify(ModifyKind::Data(DataChange::Content))).expect("its move");
             assert_eq!(e.kind, EventKind::Modify(ModifyKind::Name(RenameMode::From)));
             assert!(f.followed().is_empty(), "a file moved away is let go");
             assert!(!f.follow(&a), "nothing at its path to follow");

@@ -1813,7 +1813,10 @@ impl Worker {
             return;
         }
         let holders = self.holders_for(group, &curator);
-        if let Some(ask) = self.fetching.fetches.want(group, &curator, from, &holders, now()) {
+        // A hello is a new connection: if this member is the one asked
+        // already, the Want may have gone on one let go, and it goes again.
+        let f = &mut self.fetching.fetches;
+        if let Some(ask) = f.want(group, &curator, from, &holders, now()).or_else(|| f.again(group, &curator, peer, now())) {
             self.ask(ask);
         }
     }

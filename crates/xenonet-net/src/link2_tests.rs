@@ -138,6 +138,8 @@ struct Party {
     /// version taken and the presence it adds up to.
     presence: Mutex<crate::presence::Live>,
     seen: Mutex<BTreeMap<PeerId, (u64, crate::presence::Own)>>,
+    /// What link/2 last said of each peer's connection: up, or down.
+    up: Mutex<BTreeMap<PeerId, bool>>,
     links: OnceLock<Arc<Links>>,
     /// What another host's task asks of this machine, done on its own
     /// simulated host: a socket is written only from the host it's on.
@@ -190,6 +192,7 @@ impl Party {
             post: Mutex::new(crate::mailbox::Post::default()),
             presence: Mutex::new(crate::presence::Live::default()),
             seen: Mutex::new(BTreeMap::new()),
+            up: Mutex::new(BTreeMap::new()),
             links: OnceLock::new(),
             own: OnceLock::new(),
         })
@@ -623,6 +626,7 @@ impl Machine for Party {
     }
 
     fn up(&self, peer: PeerId, up: bool) {
+        self.up.locked().insert(peer, up);
         let mut p = self.presence.locked();
         if up {
             p.theirs.up(peer);
@@ -987,6 +991,17 @@ fn a_reconnect_storm_ends_with_one_connection_a_pair_and_every_entry_once() {
             // Settled: one connection between each pair, the same on both
             // ends.
             until("settled", || [&a2, &b2, &c2].iter().all(|m| m.links().peers().len() == 2)).await?;
+            // And each says the other two are up: a connection let go for
+            // the one kept never said its peer was down.
+            for m in [&a2, &b2, &c2] {
+                let up = m.up.locked().clone();
+                let others = [&a2, &b2, &c2].into_iter().filter(|o| o.n != m.n).map(|o| peer(o.n));
+                for p in others {
+                    if up.get(&p) != Some(&true) {
+                        return Err(NetError::internal(format!("{} says {p} is down with a connection up: {up:?}", m.n)).into());
+                    }
+                }
+            }
             Ok(())
         });
         s.run().unwrap_or_else(|e| panic!("seed {seed}: {e}"));

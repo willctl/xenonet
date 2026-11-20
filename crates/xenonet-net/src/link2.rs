@@ -724,13 +724,19 @@ impl Links {
                 link.close(Close::Done);
             }
         }
-        {
+        // Down only when no other connection to the peer took this one's
+        // place: two that dialled at once both come up, and the one let go
+        // ends while the other stays.
+        let down = {
             let mut conns = self.conns.locked();
             if conns.get(&peer).is_some_and(|c| Arc::ptr_eq(&c.link, &link)) {
                 conns.remove(&peer);
             }
+            !conns.contains_key(&peer)
+        };
+        if down {
+            self.machine.up(peer, false);
         }
-        self.machine.up(peer, false);
         self.changed.notify_one();
     }
 

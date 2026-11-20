@@ -239,6 +239,18 @@ impl Fetches {
         }
     }
 
+    /// A new connection to `peer`, the holder asked now: the Want went on
+    /// a connection that may be gone (one of two dialled at once, let go
+    /// for the other), so it goes again, with its time from `now`.
+    pub fn again(&mut self, network: &str, author: &str, peer: PeerId, now: u64) -> Option<Ask> {
+        let f = self.open.get_mut(&(network.to_string(), author.to_string()))?;
+        if f.asking.is_none_or(|(p, _)| p != peer) {
+            return None;
+        }
+        f.asking = Some((peer, now));
+        Some(Ask { to: peer, network: network.into(), author: author.into(), from: f.from })
+    }
+
     /// `peer` answered that it doesn't have it, or served something that
     /// didn't check: the next holder is asked.
     pub fn lacks(&mut self, network: &str, author: &str, peer: PeerId, holders: &[PeerId], now: u64) -> Option<Ask> {
@@ -612,6 +624,19 @@ mod tests {
         assert_eq!(f.len(), 1, "not filled yet");
         f.filled(N, "a", from);
         assert!(f.is_empty(), "done");
+    }
+
+    #[test]
+    fn the_holder_asked_is_asked_again_on_a_new_connection_and_no_one_else_is() {
+        let mut f = Fetches::default();
+        let from = Pos::new(T, 3);
+        let hs = [p(1), p(2)];
+        assert_eq!(f.want(N, "a", from, &hs, 0).unwrap().to, p(1));
+        assert_eq!(f.again(N, "a", p(2), 100), None, "not the one asked");
+        assert_eq!(f.again(N, "b", p(1), 100), None, "no fetch of that feed");
+        assert_eq!(f.again(N, "a", p(1), 5_000), Some(Ask { to: p(1), network: N.into(), author: "a".into(), from }));
+        assert_eq!(f.due(ASK_MS, |_, _| hs.to_vec()), [], "its time starts again");
+        assert_eq!(f.due(5_000 + ASK_MS, |_, _| hs.to_vec())[0].to, p(2));
     }
 
     #[test]

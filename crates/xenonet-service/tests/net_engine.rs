@@ -1961,7 +1961,12 @@ async fn an_intent_for_any_machine_goes_to_one_taker_by_its_arbiter_alone() {
     let (b_runs, c_runs) = (fake_runs(&b).len(), fake_runs(&c).len());
     let (s, v) =
         b.window("POST", "/api/intents", json!({ "goal": "hold-on: whoever's free", "target": "any", "arbiter": "desk", "project": project, "delegation": DLG, "hours": 1 })).await;
-    assert_eq!((s, v["state"].clone(), v["target"].clone()), (200, json!("made"), json!("any")), "{v}");
+    assert_eq!((s, v["target"].clone()), (200, json!("any")), "{v}");
+    // The reply is the intent as laptop holds it when it answers: made,
+    // or already given out when laptop's take and desk's assign made the
+    // round trip first (both are on loopback). Who it went to is waited
+    // for below.
+    assert!(v["state"] == "made" || (v["state"] == "assigned" && v["workedOn"].is_string()), "{v}");
     let id = v["id"].as_str().unwrap().to_string();
     let given = until_value("desk gives it out", 20, || async { intent(&c, &id).await["workedOn"].as_str().map(|w| json!(w)) }).await;
     for h in [&a, &b] {
