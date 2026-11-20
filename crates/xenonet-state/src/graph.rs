@@ -162,7 +162,7 @@ fn in_main_checkouts(sessions: &[Value], project_keys: &HashSet<String>) -> Vec<
                     let here = checkouts.find(std::path::Path::new(&cwd))?;
                     let main = here.worktree_of.clone()?;
                     let main_s = main.to_string_lossy().into_owned();
-                    if !path_key(&main_s).is_some_and(|k| project_keys.contains(&k)) || !checkouts.open(&main).is_some_and(|m| m.common == here.common) {
+                    if !path_key(&main_s).is_some_and(|k| project_keys.contains(&k)) || checkouts.open(&main).is_none_or(|m| m.common != here.common) {
                         return None;
                     }
                     let inside = std::path::Path::new(&cwd).strip_prefix(&here.top).ok().filter(|r| !r.as_os_str().is_empty());

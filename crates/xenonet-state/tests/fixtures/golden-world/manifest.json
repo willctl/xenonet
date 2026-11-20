@@ -17,6 +17,8 @@
   {"path":"home/.claude/projects/demo-atlas-api/0190d3e0-0000-7000-8000-000000000011.jsonl","kind":"file","mtime":1791027250000},
   {"path":"home/.claude/projects/demo-atlas-web","kind":"dir","mtime":1791021600000},
   {"path":"home/.claude/projects/demo-atlas-web/0190d3e0-0000-7000-8000-000000000003.jsonl","kind":"file","mtime":1791028640000},
+  {"path":"home/.claude/projects/demo-checkout-v3","kind":"dir","mtime":1791021600000},
+  {"path":"home/.claude/projects/demo-checkout-v3/0190d3e0-0000-7000-8000-000000000018.jsonl","kind":"file","mtime":1791025750000},
   {"path":"home/.claude/projects/demo-infra","kind":"dir","mtime":1791021600000},
   {"path":"home/.claude/projects/demo-infra/0190d3e0-0000-7000-8000-000000000007.jsonl","kind":"file","mtime":1791017350000},
   {"path":"home/.claude/projects/demo-labs","kind":"dir","mtime":1791021600000},
@@ -219,6 +221,8 @@
   ["home/.claude/projects/demo-atlas-api/0190d3e0-0000-7000-8000-000000000011.jsonl",1791027250000],
   ["home/.claude/projects/demo-atlas-web",1791021600000],
   ["home/.claude/projects/demo-atlas-web/0190d3e0-0000-7000-8000-000000000003.jsonl",1791028640000],
+  ["home/.claude/projects/demo-checkout-v3",1791021600000],
+  ["home/.claude/projects/demo-checkout-v3/0190d3e0-0000-7000-8000-000000000018.jsonl",1791025750000],
   ["home/.claude/projects/demo-infra",1791021600000],
   ["home/.claude/projects/demo-infra/0190d3e0-0000-7000-8000-000000000007.jsonl",1791017350000],
   ["home/.claude/projects/demo-labs",1791021600000],
@@ -414,7 +418,8 @@
   "<world>/home/Projects/atlas-web",
   "<world>/home/Documents/Codex/2026-10-03/regex-help",
   "<world>/home/Projects/pathfinder",
-  "<world>/home/Projects/labs/geofence"
+  "<world>/home/Projects/labs/geofence",
+  "<world>/home/.t3/worktrees/atlas/checkout-v3"
  ],
  "demoPicks": [
   {"path":"labs/snippets","as":"project"}
@@ -680,6 +685,7 @@
   "grok:0190d3e0-0000-7000-8000-000000000015",
   "grok:0190d3e0-0000-7000-8000-000000000016",
   "grok:0190d3e0-0000-7000-8000-000000000017",
+  "claude:0190d3e0-0000-7000-8000-000000000018",
   "claude:0190d3e0-0000-7000-8000-0000000000e1",
   "claude:0190d3e0-0000-7000-8000-0000000000e5",
   "codex:0190d3e0-0000-7000-8000-0000000000e2",

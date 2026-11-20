@@ -1937,6 +1937,99 @@
    ]
   }
  },
+ "claude:0190d3e0-0000-7000-8000-000000000018": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000018",
+  "app": "claude",
+  "from": 1791025650000,
+  "to": 1791025750000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 107610,
+   "cacheWrite": 0,
+   "output": 900,
+   "tokens": 108590,
+   "cost": 0.046022999999999994,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.00024
+   },
+   "cacheRead": {
+    "tokens": 107610,
+    "cost": 0.032283
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 900,
+    "cost": 0.0135
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 2,
+    "tokens": 108590,
+    "cost": 0.046022999999999994,
+    "priced": true,
+    "from": 1791025700000,
+    "to": 1791025750000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791025650000,
+    "end": 1791025750000,
+    "prompt": "The checkout total is a cent off when a coupon applies. Find out why.",
+    "tokens": 108590,
+    "cost": 0.046022999999999994,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 108590,
+      "cost": 0.046022999999999994
+     }
+    },
+    "tools": 1,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Read",
+    "category": "read",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791025700000,
+    "used": 52692,
+    "window": 200000
+   },
+   {
+    "t": 1791025750000,
+    "used": 55898,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
  "claude:0190d3e0-0000-7000-8000-0000000000e1": {
   "id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
   "app": "claude",

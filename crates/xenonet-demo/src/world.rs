@@ -443,6 +443,10 @@ impl Writer {
     fn prompt(&mut self, text: &str, ts: f64, a: &mut dyn Around) {
         self.entries.push(json!({ "id": a.uuid(), "ts": n(ts), "role": "user", "text": text }));
         if self.app == "claude" {
+            // T3 Code's sessions say so on their lines, as its transcripts do.
+            if flag(&self.s, "t3") {
+                return self.write(&[json!({ "type": "user", "entrypoint": "t3-code", "timestamp": iso(ts), "message": { "role": "user", "content": text } })]);
+            }
             return self.write(&[json!({ "type": "user", "timestamp": iso(ts), "message": { "role": "user", "content": text } })]);
         }
         if self.app == "grok" {
@@ -1193,7 +1197,7 @@ mod tests {
         // T3 Code's session, in a worktree of atlas-web under its own folder.
         let t3 = claude.last().unwrap();
         assert_eq!(t3["runsIn"], "t3-code");
-        assert!(claude.iter().filter(|s| s.get("runsIn").is_some()).count() == 1);
+        assert_eq!(claude.iter().filter(|s| s.get("runsIn").is_some()).count(), 1);
         let cwd = t3["cwd"].as_str().unwrap();
         assert!(cwd.replace('\\', "/").ends_with(".t3/worktrees/atlas/checkout-v3"), "{cwd}");
         assert!(demo.transcript("nope").is_err());
