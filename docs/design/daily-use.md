@@ -114,6 +114,28 @@ Scenario 1 needs no new code, only both machines on a current release.
   version, and the weekly routine that moves `checked` after a manual
   check; both are outside the doctor.
 
+- **T3 Code on the map.** T3 Code runs Claude Code through the Agent SDK
+  with the person's settings, so XenoNet's hooks and MCP server work in its
+  threads with nothing built. The Claude reader reads the transcript's
+  `entrypoint`: a session whose entrypoint is `t3-code` has `runsIn:
+  "t3-code"` (every other Claude session `null`) and the inspector's origin
+  row says T3 Code. A session in a linked git worktree is in the project of
+  the main checkout, wherever the worktree is (T3 Code's `~/.t3/worktrees`,
+  `git worktree add ../x`, any tool's), when that checkout is a project the
+  map has and shares its git folder; its folder is the main checkout's and
+  its worktree the worktree's. The demo has one such session in atlas-web
+  ([the guide](../guide/agents.md#t3-code)). Seen on a real install (T3 Code
+  0.1.11, Claude Code 2.1.288): the hook environment has
+  `CLAUDE_CODE_ENTRYPOINT=t3-code` and `T3CODE_THREAD_ID`, kept for starting
+  and messaging threads later. Decision taken: the worktree rule is for every
+  app and tool, not T3 Code alone. Unverified: Codex under T3 Code (its
+  threads failed before writing anything while Codex was signed out), and
+  any session while Claude Code is signed in, since the install was signed
+  out. T3 Code's threads default to full access with no OS sandbox, so
+  confined starts don't cover them. Left: reading T3 Code's SQLite or MCP
+  server, starting and messaging threads by the thread id, a release watch
+  row for T3 Code, detecting Codex under it.
+
 ## Next
 
 - **More apps on the map**, through their own documented interfaces.
