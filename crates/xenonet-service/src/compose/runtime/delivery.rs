@@ -400,6 +400,20 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     // A session started sandboxed is resumed, or copied, sandboxed: if its
     // sandbox can't be made again, the turn isn't run bare.
     let sandboxed = crate::compose::runtime::sandbox::for_turn(w, agent)?;
+    // A copy of a sandboxed session is given its own id before it runs, and
+    // kept as sandboxed and marked in the store first: waiting for its
+    // stream to name it would leave a copy whose run a restart interrupted
+    // with no record and no mark, to be resumed bare.
+    let args = match (&sandboxed, fork && app == "claude") {
+        (Some(rec), true) => {
+            let id = crate::compose::runtime::starts::uuid()?;
+            let child = format!("{app}:{id}");
+            crate::compose::runtime::sandbox::fork_named(w, &child, rec)?;
+            crate::compose::runtime::starts::note_fork(w, &child, agent);
+            resume::with_session_id(args, &id)
+        }
+        _ => args,
+    };
     let args = match &sandboxed {
         Some(rec) => crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?.0,
         None => args,

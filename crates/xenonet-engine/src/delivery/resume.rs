@@ -77,6 +77,15 @@ pub fn fork_command(agent: &str, settings: Option<&str>) -> Option<Command> {
     Some(fork(id, settings))
 }
 
+/// A fork's arguments with the copy's own id chosen, which the app takes
+/// beside `--fork-session` (Claude Code's `--session-id`): the copy is known
+/// before it runs, so what must hold it (a sandbox, a mark) is kept first.
+pub fn with_session_id(mut args: Vec<String>, id: &str) -> Vec<String> {
+    let at = args.iter().position(|a| a == "--fork-session").map_or(args.len(), |i| i + 1);
+    args.splice(at..at, ["--session-id".to_string(), id.to_string()]);
+    args
+}
+
 /// A turn XenoNet runs of an app that takes a permission prompt tool
 /// (Claude Code) asks its permission prompts of you, through the xenonet
 /// MCP server (`server`, its name in the session's settings) and its
@@ -154,6 +163,16 @@ mod tests {
         );
         assert!(fork_command(&format!("codex:{id}"), None).is_none());
         assert!(fork_command("claude:abc", None).is_none());
+    }
+
+    #[test]
+    fn a_forks_own_id_comes_after_fork_session() {
+        xenonet_platforms::install();
+        let id = "0190d3e0-0000-7000-8000-00000000ab01";
+        let (_, fork) = fork_command(&format!("claude:{id}"), Some("/s/listen.json")).unwrap();
+        let args = with_session_id(fork, "0190d3e0-0000-7000-8000-0000000c0c01");
+        assert_eq!(&args[..5], ["-p", "--resume", id, "--fork-session", "--session-id"], "{args:?}");
+        assert_eq!(args[5], "0190d3e0-0000-7000-8000-0000000c0c01");
     }
 
     #[test]

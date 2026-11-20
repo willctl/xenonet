@@ -448,7 +448,6 @@ async fn a_copy_forked_from_a_sandboxed_session_stays_sandboxed_across_a_restart
     let t = two_networks_in(&root, false, false, false, true).await;
     let w = &t.desk.world;
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
-    let child = "claude:0190d3e0-0000-7000-8000-0000000f0f01";
     let record = sandbox::Record { folder: atlas, domains: vec!["github.com".into()], for_others: Some("a session on contractor-vm".into()) };
     sandbox::keep(w, DESK_ATLAS_ENDED, &record).unwrap();
     // A message for the session wakes it, and it is open, so XenoNet runs a copy.
@@ -462,11 +461,12 @@ async fn a_copy_forked_from_a_sandboxed_session_stays_sandboxed_across_a_restart
     t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: frame }).unwrap();
     let (args, _) = ran(&t.desk, 1).await;
     assert!(args.iter().any(|a| a == "--fork-session") && args.iter().any(|a| a == "--strict-mcp-config"), "a sandboxed copy: {args:?}");
-    // Its stream names the copy: XenoNet links it and keeps it as sandboxed in its own right.
-    until("the copy is named and sandboxed", 20, || async {
-        sandbox::of(w, child) == Some(record.clone()) && starts::forks(w).iter().any(|(c, p)| c == child && p == DESK_ATLAS_ENDED)
-    })
-    .await;
+    // The copy's id is chosen before the run, and the copy is kept as sandboxed and marked in the
+    // store before it starts: the fake's stream never names it (a restart mid-turn), so nothing
+    // after the start could have.
+    let id = args.iter().position(|a| a == "--session-id").and_then(|i| args.get(i + 1)).expect("the copy's id is given to the run");
+    let child = &format!("claude:{id}");
+    assert_eq!(sandbox::of(w, child), Some(record.clone()), "the copy is sandboxed from the start");
     assert_eq!(sandbox::confined_for(w, child), Ok(Some("a session on contractor-vm".to_string())), "and marked in the store");
     // A restart forgets whose copy it is; it is still sandboxed, and a turn for it is too.
     starts::forget_forks(w);

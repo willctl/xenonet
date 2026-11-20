@@ -107,7 +107,9 @@ impl State for Map {
 /// Build's prompt file) beside itself, says it isn't signed in when the
 /// prompt asks it to, waits 25 seconds when it says hold-on, and
 /// otherwise takes a second and ends well. With
-/// --fork-session it names its copy as Claude Code's stream does. It also
+/// --fork-session it names its copy as Claude Code's stream does, unless
+/// it was given the copy's id with --session-id, in which case its stream
+/// never says (a restart before it does). It also
 /// keeps the file --settings names as `settings-N` and the names (never the
 /// values) of the variables it was given, sorted, as `env-N` (`fake_files`
 /// reads both), without the ones its own shell adds. When it is told to
@@ -138,7 +140,7 @@ if [ -n "$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" ]; then
   printf '%s %s\n' "${#tok}" "$(printf '%s' "$tok" | cksum | cut -d' ' -f1)" > "$here/fdtoken-$n"
 fi
 env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | grep -v -x -e PWD -e OLDPWD -e SHLVL -e _ | sort > "$here/env-$n"
-case "$*" in *--fork-session*) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac
+case "$*" in *--fork-session*) case "$*" in *--session-id*) ;; *) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac ;; esac
 case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
 case "$prompt" in
   *ask-first*) echo '{"type":"result","subtype":"success","is_error":false,"result":"Want me to go ahead with the update?","permission_denials":[]}' ;;
