@@ -187,23 +187,37 @@ async fn all<T>(mut futs: Vec<std::pin::Pin<Box<dyn std::future::Future<Output =
     out.into_iter().flatten().collect()
 }
 
-/// Each node's place in the graph by id, and the ids that two nodes hold
-/// from different folders she named. The later node of an id is the one
-/// found by it, as it always was; a clash is flagged so a turn for the id
-/// is refused instead of run in a folder picked by the order of a scan.
-fn index_of(nodes: &[Value]) -> (HashMap<String, usize>, HashSet<String>) {
-    let mut index: HashMap<String, usize> = HashMap::new();
+/// Each node's place in the graph by id. The later node of an id is the
+/// one found by it, as it always was.
+fn index_of(nodes: &[Value]) -> HashMap<String, usize> {
+    nodes.iter().enumerate().map(|(i, n)| (n.get("id").map(display).unwrap_or_default(), i)).collect()
+}
+
+/// The ids that the listers found in different folders she named (a copied
+/// folder), from the lists before the graph is built: the graph keeps one
+/// node for an id, so a clash is only seen here. A folder turn for such an
+/// id is refused instead of run in one picked by the order of a scan.
+fn clashes_in(lists: &[(&str, bool, &[Value])]) -> HashSet<String> {
+    let mut seen: HashMap<String, Option<String>> = HashMap::new();
     let mut clashes = HashSet::new();
-    for (i, n) in nodes.iter().enumerate() {
-        let id = n.get("id").map(display).unwrap_or_default();
-        if let Some(&before) = index.get(&id) {
-            if nodes[before].get("root") != n.get("root") {
-                clashes.insert(id.clone());
+    for (_, ok, list) in lists {
+        if !ok {
+            continue;
+        }
+        for n in *list {
+            let (id, root) = (n.get("id").map(display).unwrap_or_default(), n.get("root").and_then(Value::as_str).map(str::to_string));
+            match seen.get(&id) {
+                Some(before) if *before != root => {
+                    clashes.insert(id);
+                }
+                Some(_) => {}
+                None => {
+                    seen.insert(id, root);
+                }
             }
         }
-        index.insert(id, i);
     }
-    (index, clashes)
+    clashes
 }
 
 fn err(m: impl Into<String>) -> CoreError {
@@ -643,6 +657,7 @@ impl MapState {
         let titles: HashMap<String, Value> = lock(&self.inner).demo_titles.iter().cloned().collect();
         let ok = |st: &Value| st.get("ok") == Some(&Value::Bool(true));
         let lists: Vec<(&str, bool, &[Value])> = lists_found.iter().map(|(app, list, st)| (*app, ok(st), items(Some(list)))).collect();
+        let clashes = clashes_in(&lists);
         let mut sessions = decide::merge_sessions(&prev, &lists, &observed, &titles);
         // Where sessions ran is evidence of where the projects are, so the
         // scan comes after the session lists.
@@ -815,7 +830,7 @@ impl MapState {
             let pulses = g.memory.updated(&sessions);
             let changed = g.memory.changed(&graph);
             let nodes = items(graph.get("nodes"));
-            let (index, clashes) = index_of(nodes);
+            let index = index_of(nodes);
             for id in clashes.difference(&g.map.clashes) {
                 log("warn", "map.clash", &format!("{id} is in more than one folder she named; a turn for it is refused until one is taken away"));
             }

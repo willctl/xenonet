@@ -351,10 +351,11 @@ async fn a_session_id_found_in_two_folders_is_flagged_and_has_no_folder_to_resum
         Some(r) => json!({ "id": id, "kind": "session", "root": r }),
         None => json!({ "id": id, "kind": "session" }),
     };
-    let nodes = vec![node("claude:a", None), node("claude:b", Some("/h/.claude-work")), node("claude:a", Some("/h/.claude-work")), node("claude:b", Some("/h/.claude-work"))];
-    let (index, clashes) = index_of(&nodes);
+    let list = vec![node("claude:a", None), node("claude:b", Some("/h/.claude-work")), node("claude:a", Some("/h/.claude-work")), node("claude:b", Some("/h/.claude-work"))];
+    let clashes = clashes_in(&[("claude", true, &list)]);
     assert_eq!(clashes.into_iter().collect::<Vec<_>>(), ["claude:a".to_string()], "the same id in the same folder twice is no clash");
-    assert_eq!(index.len(), 2);
+    assert!(clashes_in(&[("claude", false, &list)]).is_empty(), "a list that failed says nothing");
+    assert_eq!(index_of(&list).len(), 2);
     // The state refuses to name a folder for a clashing id, and still names the others'.
     let w = world();
     let s = &w.state;
@@ -660,6 +661,66 @@ async fn a_project_space_is_tied_by_its_signed_marker_not_its_folder() {
     write(&marker(&prj, "person:prs_mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm", &lith));
     let (_, tied, about) = read(&s.refresh_map().await.expect("a map"));
     assert_eq!((tied, about), (false, Some(json!(prj))), "about atlas, owned by someone else: shown so, tied to nothing");
+    s.end();
+    std::fs::remove_dir_all(&home).expect("cleaned up");
+}
+
+/// A made-up home with Claude Code's default folder and the folders named,
+/// each holding a transcript of `id` for `cwd`, listed by the real
+/// listers.
+fn two_folders_world(tag: &str, named: &[&str], id: &str) -> (std::path::PathBuf, String, MapConfig) {
+    let home = std::env::temp_dir().join(format!("xenonet-state-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let p = home.join("Projects").join("atlas");
+    std::fs::create_dir_all(&p).expect("a project");
+    let home_s = std::fs::canonicalize(&home).expect("the home").to_string_lossy().into_owned();
+    let cwd = std::path::Path::new(&home_s).join("Projects").join("atlas").to_string_lossy().into_owned();
+    let line = json!({ "type": "user", "uuid": "u1", "parentUuid": null, "sessionId": id, "cwd": cwd, "version": "2.0.1", "timestamp": xenonet_text::time::iso(now_ms() - 60e3), "message": { "role": "user", "content": "Add a health check route" } });
+    for folder in named {
+        let at = std::path::Path::new(&home_s).join(folder).join("projects").join(cwd.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
+        std::fs::create_dir_all(&at).expect("Claude Code's folder");
+        std::fs::write(at.join(format!("{id}.jsonl")), xenonet_text::json::stringify(&line, 0) + "\n").expect("a transcript");
+    }
+    let mut env = process_env();
+    env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));
+    env.insert("XENONET_CLAUDE_USAGE".into(), json!("off"));
+    env.insert("XENONET_CLAUDE_DESKTOP_DIR".into(), json!(home.join("no-desktop").to_string_lossy()));
+    env.insert("XENONET_STATE_DIR".into(), json!(home.join(".state").to_string_lossy()));
+    env.insert("XENONET_CACHE_DIR".into(), json!(home.join(".cache").to_string_lossy()));
+    env.insert("XENONET_WIKI_DIR".into(), json!(home.join("no-wiki").to_string_lossy()));
+    env.insert("HOME".into(), json!(home_s));
+    for k in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XENONET_PROJECTS_DIR", "XENONET_READERS", "XENONET_NUMBAT_FILE", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"] {
+        env.shift_remove(k);
+    }
+    xenonet_platforms::install();
+    let mut cfg = MapConfig::new(false, false, env, &home_s, None);
+    let paths = named.iter().map(|f| std::path::Path::new(&home_s).join(f).to_string_lossy().into_owned()).collect();
+    cfg.name_roots(&std::collections::BTreeMap::from([("claude".to_string(), paths)]));
+    (home, home_s, cfg)
+}
+
+fn real_state(cfg: MapConfig, store: Saved) -> Arc<MapState> {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+    let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
+    let live = Live::new(&[(cfg.claude_projects_dir.clone(), "claude".into())], None, false, &cfg.home_dir, vendor.clone());
+    MapState::new(cfg, store, vendor, &WireEnv::new("0.0.0"), Readers::Real, live)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_session_id_in_two_named_folders_is_refused_a_turn_as_the_listers_find_it() {
+    let id = "0190d3e0-0000-7000-8000-00000000bbbb";
+    let (home, _, cfg) = two_folders_world("clash", &[".claude-work", ".claude-play"], id);
+    let s = real_state(cfg, crate::runtime::saved::in_memory());
+    s.refresh_map().await.expect("a map");
+    let why = s.session_root(&format!("claude:{id}")).expect_err("a clash").message;
+    assert!(why.contains("more than one folder"), "{why}");
+    // The same folder read twice, or an id found once, is no clash.
+    s.end();
+    std::fs::remove_dir_all(&home).expect("cleaned up");
+    let (home, _, cfg) = two_folders_world("noclash", &[".claude-work"], id);
+    let s = real_state(cfg, crate::runtime::saved::in_memory());
+    s.refresh_map().await.expect("a map");
+    assert!(s.session_root(&format!("claude:{id}")).expect("no clash").is_some_and(|r| r.ends_with(".claude-work")));
     s.end();
     std::fs::remove_dir_all(&home).expect("cleaned up");
 }
