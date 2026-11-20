@@ -1000,4 +1000,61 @@ mod tests {
         let host = Fake::default();
         assert_eq!(ready(run_with(&host, "no.such".into(), Facts { data: json!({}) }, Vec::new())), Err(Failure::msg("no such check: no.such")));
     }
+
+    /// A release-watch check, run against a made-up machine whose
+    /// `--version` answers `version` (a program's reply, as the runner gives
+    /// it); `missing` leaves the command off PATH.
+    fn release(id: &str, version: Value, missing: bool) -> Value {
+        xenonet_platforms::install();
+        let mut host = Fake { run: Box::new(move |_file, args| if args == ["--version"] { version.clone() } else { json!({ "stdout": "", "code": 0 }) }), ..Fake::default() };
+        if missing {
+            host.missing = vec!["claude", "codex", "grok"];
+        }
+        let facts = Facts { data: json!({ "home": "/Users/ada", "platform": "darwin", "paths": {} }) };
+        ready(run(&host, id.into(), facts)).unwrap_or_else(|e| panic!("{id}: {e:?}"))
+    }
+
+    fn says(stdout: &str) -> Value {
+        json!({ "stdout": stdout, "stderr": "", "code": 0 })
+    }
+
+    #[test]
+    fn a_newer_version_than_the_readers_were_checked_against_warns_with_both() {
+        let v = release("claude.release", says("2.1.340 (Claude Code)\n"), false);
+        assert_eq!(v["status"], json!("warn"));
+        assert_eq!(
+            v["detail"],
+            json!("XenoNet's reader was last checked against Claude Code 2.1.327; 2.1.340 is installed. If the map shows something wrong for its sessions, that version is the first suspect.")
+        );
+        assert!(v["fix"].is_string());
+        let v = release("codex.release", says("codex-cli 9.0.0\n"), false);
+        assert_eq!(v["status"], json!("warn"));
+        assert!(v["detail"].as_str().unwrap().contains("Codex 0.150.0; 9.0.0 is installed"), "{v}");
+        let v = release("grok.release", says("grok 9.0.0 (50ca579fa996) [stable]\n"), false);
+        assert_eq!(v["status"], json!("warn"));
+        assert!(v["detail"].as_str().unwrap().contains("Grok Build 1.0.77; 9.0.0 is installed"), "{v}");
+    }
+
+    #[test]
+    fn the_checked_version_is_ok_and_an_older_one_is_a_note() {
+        let v = release("claude.release", says("2.1.327 (Claude Code)\n"), false);
+        assert_eq!(v["status"], json!("ok"));
+        assert!(v["detail"].as_str().unwrap().contains("2.1.327"), "{v}");
+        let v = release("claude.release", says("2.0.9 (Claude Code)\n"), false);
+        assert_eq!(v["status"], json!("info"));
+        let d = v["detail"].as_str().unwrap();
+        assert!(d.contains("2.0.9") && d.contains("2.1.327") && d.contains("older"), "{d}");
+    }
+
+    #[test]
+    fn no_command_and_a_hung_or_unreadable_probe_are_said_plainly() {
+        let v = release("claude.release", says("2.1.340\n"), true);
+        assert_eq!((v["status"].as_str(), v["detail"].as_str()), (Some("skip"), Some("Claude Code isn't installed")));
+        let v = release("claude.release", json!({ "stdout": "", "stderr": "", "code": null, "timedOut": true }), false);
+        assert_eq!(v["status"], json!("warn"));
+        assert!(v["detail"].as_str().unwrap().contains("didn't answer in 4 seconds"), "{v}");
+        let v = release("claude.release", says("not a version\n"), false);
+        assert_eq!(v["status"], json!("info"));
+        assert!(v["detail"].as_str().unwrap().contains("couldn't read a version"), "{v}");
+    }
 }
