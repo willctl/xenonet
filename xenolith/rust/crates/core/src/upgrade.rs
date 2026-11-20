@@ -473,10 +473,10 @@ mod tests {
         }
         fs::write(spaces::space_dir(&h.root, &sp("project:atlas")).join("inbox").join("n1.md"), "a note\n").unwrap();
         fs::write(h.root.join(chains::MARKER), "{\"by\": \"hand\"}\n").unwrap();
-        let cfg = json!({ "machine": "neo", "home": "inix", "follow": { "project:atlas": { "peer": "inix" }, "project:shared": { "peer": "inix", "auto": true } } });
+        let cfg = json!({ "machine": "tower", "home": "desk", "follow": { "project:atlas": { "peer": "desk" }, "project:shared": { "peer": "desk", "auto": true } } });
         fs::write(chains::sync_1x_file(&h.paths), cfg.to_string()).unwrap();
         fs::create_dir_all(h.paths.config_dir.join("peers")).unwrap();
-        fs::write(h.paths.config_dir.join("peers").join("inix.token"), "xenolith_0123\n").unwrap();
+        fs::write(h.paths.config_dir.join("peers").join("desk.token"), "xenolith_0123\n").unwrap();
     }
 
     fn both(h: &Home) -> (Tree, Tree) {

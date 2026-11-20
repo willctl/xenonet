@@ -242,7 +242,7 @@ mod tests {
 
     impl FakeTpm {
         fn new() -> FakeTpm {
-            FakeTpm { present: true, account: "NEO-REX\\will".into(), keys: Mutex::new(HashMap::new()), refuse_create: false, fail_open: false }
+            FakeTpm { present: true, account: "TOWER\\will".into(), keys: Mutex::new(HashMap::new()), refuse_create: false, fail_open: false }
         }
     }
 
@@ -322,13 +322,13 @@ mod tests {
         let sig = again.sign(Purpose::FEED, b"entry").unwrap();
         assert!(key.public().verify(Purpose::FEED, b"entry", &sig));
         let file: Value = serde_json::from_str(&std::fs::read_to_string(d.join(MACHINE_FILE)).unwrap()).unwrap();
-        assert_eq!((file["kind"].as_str(), file["account"].as_str()), (Some(TPM), Some("NEO-REX\\will")));
+        assert_eq!((file["kind"].as_str(), file["account"].as_str()), (Some(TPM), Some("TOWER\\will")));
         assert_eq!(file["name"].as_str(), Some(key_name(&d).as_str()));
         assert!(file.get("seed").is_none(), "no secret in the file");
         let row = standing(&d, Some(&tpm));
         assert_eq!(status(row.as_ref()), "ok", "{row:?}");
         let detail = row.as_ref().unwrap()["detail"].as_str().unwrap();
-        assert!(detail.starts_with("in the TPM, in the key store of NEO-REX\\will") && detail.contains("one signature took"), "{detail}");
+        assert!(detail.starts_with("in the TPM, in the key store of TOWER\\will") && detail.contains("one signature took"), "{detail}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -348,12 +348,12 @@ mod tests {
         unchanged();
         let row = standing(&d, Some(&cleared));
         assert_eq!(status(row.as_ref()), "fail", "{row:?}");
-        assert!(row.as_ref().unwrap()["fix"].as_str().unwrap().contains("NEO-REX\\will"), "{row:?}");
+        assert!(row.as_ref().unwrap()["fix"].as_str().unwrap().contains("TOWER\\will"), "{row:?}");
 
         // XenoNet runs as another account.
-        let other = FakeTpm { account: "NEO-REX\\svc".into(), ..FakeTpm::new() };
+        let other = FakeTpm { account: "TOWER\\svc".into(), ..FakeTpm::new() };
         let e = signer(&d, Some(&other)).err().unwrap();
-        assert!(e.message.contains("key store of NEO-REX\\will, while XenoNet runs as NEO-REX\\svc"), "{}", e.message);
+        assert!(e.message.contains("key store of TOWER\\will, while XenoNet runs as TOWER\\svc"), "{}", e.message);
 
         // The TPM fails, or isn't there now.
         let failing = FakeTpm { fail_open: true, keys: Mutex::new(tpm.keys.lock().unwrap().clone()), ..FakeTpm::new() };
