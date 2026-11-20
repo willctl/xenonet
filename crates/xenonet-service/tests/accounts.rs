@@ -71,6 +71,7 @@ async fn desk(name: &str, atlas_rule: Value, sessions: impl FnOnce(&str, &str) -
         rules: std::sync::Arc::new(std::sync::Mutex::new(vec![(atlas.clone(), atlas_rule), (ledger.clone(), json!({ "claude": "nova-work@example.com" }))])),
         roots: std::sync::Arc::new(std::sync::Mutex::new(vec![(None, Some("nova@example.com".into())), (Some(work.clone()), Some("nova-work@example.com".into()))])),
         unreadable: Default::default(),
+        codex_roots: vec![(None, Some("nova@example.com".into()))],
         answers: true,
         limits: json!({ "claude": { "fiveHour": 40 }, format!("claude@{work}"): { "fiveHour": 92 } }),
     };
@@ -321,4 +322,26 @@ async fn a_rule_that_cannot_be_read_refuses_a_start_and_a_wake() {
     let (s, v) = d.host.window("POST", "/api/start", json!({ "folder": d.atlas, "prompt": "tidy 2" })).await;
     assert_ne!(s, 200, "{v}");
     assert_eq!(fake_runs(&d.host).len(), 1);
+}
+
+/// Codex names its session only once it runs, so its start's placement is
+/// kept under the run's key first and under the thread once Codex says it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_codex_placement_survives_once_codex_names_its_thread() {
+    let d = desk("accounts-codex", json!({ "chatgpt": "nova@example.com" }), |_, _| Vec::new()).await;
+    let (s, v) = d.host.window("POST", "/api/start", json!({ "folder": d.atlas, "app": "codex", "prompt": "codex-names tidy" })).await;
+    assert_eq!(s, 200, "{v}");
+    let w = &d.host.world;
+    let thread = "codex:0190d3e0-0000-7000-8000-0000000d0d01";
+    let end = std::time::Instant::now() + Duration::from_secs(15);
+    while accounts::of(w, thread).unwrap().is_none() {
+        assert!(std::time::Instant::now() < end, "waited for the thread's placement");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(accounts::of(w, thread).unwrap().is_some_and(|p| p.ruled), "the thread is held to the rule that placed its start");
+    // And its wake is placed as the start was: a rule that now names another account refuses it.
+    ends(&d.host, thread).await;
+    d.rules.lock().unwrap()[0].1 = json!({ "chatgpt": "someone-else@example.com" });
+    let why = delivery::resume_turn(w, thread, Some(&d.atlas), "wake up", false).unwrap_err();
+    assert!(why.contains("someone-else@example.com"), "{why}");
 }

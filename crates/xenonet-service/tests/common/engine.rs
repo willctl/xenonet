@@ -69,6 +69,8 @@ pub struct Accounts {
     pub rules: Arc<std::sync::Mutex<Vec<(String, Value)>>>,
     /// Claude Code's folders: None for its own, then those named.
     pub roots: Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>,
+    /// Codex's folders, the same way.
+    pub codex_roots: Vec<(Option<String>, Option<String>)>,
     /// Whether the store that keeps the rules can't be read.
     pub unreadable: Arc<std::sync::atomic::AtomicBool>,
     pub answers: bool,
@@ -107,10 +109,10 @@ impl State for Map {
         Ok(self.sessions.iter().find(|s| s.id == session).and_then(|s| s.root.clone()))
     }
     fn app_account_roots(&self, app: &str) -> Vec<(Option<String>, Option<String>)> {
-        if app == "claude" {
-            self.accounts.roots.lock().unwrap().clone()
-        } else {
-            Vec::new()
+        match app {
+            "claude" => self.accounts.roots.lock().unwrap().clone(),
+            "codex" => self.accounts.codex_roots.clone(),
+            _ => Vec::new(),
         }
     }
     fn live_snapshot(&self) -> R<Value> {
@@ -201,6 +203,7 @@ if [ -n "$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" ]; then
 fi
 env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | grep -v -x -e PWD -e OLDPWD -e SHLVL -e _ | sort > "$here/env-$n"
 case "$*" in *--fork-session*) case "$*" in *--session-id*) ;; *) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac ;; esac
+case "$prompt" in *codex-names*) echo '{"type":"thread.started","thread_id":"0190d3e0-0000-7000-8000-0000000d0d01"}' ;; esac
 case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
 case "$prompt" in
   *ask-first*) echo '{"type":"result","subtype":"success","is_error":false,"result":"Want me to go ahead with the update?","permission_denials":[]}' ;;
