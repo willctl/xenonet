@@ -306,7 +306,8 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     let id = xenonet_engine::network::new_id("ask").map_err(|t| (500, t.message))?;
     let kind = prompt_kind(&tool);
     if let Some((folder, from)) = crate::compose::runtime::starts::delegated(w, me) {
-        match delegation::judge(&tool, &input, &folder, &w.setup.home, cfg!(windows)) {
+        let (judged, judged_folder) = resolved(&input, &folder);
+        match delegation::judge(&tool, &judged, &judged_folder, &w.setup.home, cfg!(windows)) {
             Verdict::Allow if !reads_env(&input) => {
                 match granted(
                     w,
@@ -346,6 +347,41 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     let answer = hold(w, me, a, kind, by).map(|(d, by, _)| (d, by));
     let (decision, why) = said(answer.as_ref(), hold_ms(w));
     Ok(answer_json(&decision, &input, &why))
+}
+
+/// The input of a tool call with the paths it names resolved through links
+/// as far as they exist, and the folder the same way: a link in the folder
+/// that points out of it is judged by where it points, not by its name. The
+/// answer to the call still carries the input as it was asked.
+fn resolved(input: &Value, folder: &str) -> (Value, String) {
+    // Windows paths resolve to `\\?\` names the judge doesn't read.
+    if cfg!(windows) {
+        return (input.clone(), folder.to_string());
+    }
+    let real = |p: &str, base: &std::path::Path| -> Option<String> {
+        let full = if let Some(rest) = p.strip_prefix('~') { std::path::PathBuf::from(format!("{}{rest}", base.display())) } else { base.join(p) };
+        // The nearest ancestor that exists is resolved, and the rest kept as written.
+        let mut tail = Vec::new();
+        let mut at = full.as_path();
+        loop {
+            if let Ok(done) = at.canonicalize() {
+                return Some(tail.iter().rev().fold(done, |acc, x: &std::ffi::OsString| acc.join(x)).to_string_lossy().into_owned());
+            }
+            tail.push(at.file_name()?.to_os_string());
+            at = at.parent()?;
+        }
+    };
+    let base = std::path::Path::new(folder);
+    let mut out = input.clone();
+    if let Some(o) = out.as_object_mut() {
+        for k in ["file_path", "notebook_path", "path"] {
+            let Some(p) = o.get(k).and_then(Value::as_str).filter(|p| !p.starts_with('~')) else { continue };
+            if let Some(r) = real(p, base) {
+                o.insert(k.to_string(), Value::String(r));
+            }
+        }
+    }
+    (out, real(".", base).unwrap_or_else(|| folder.to_string()))
 }
 
 /// An answer as the asker hears it: allow or deny, and why a deny.

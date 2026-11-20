@@ -19,6 +19,8 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use xenonet_model::ops::{Kind, Outgoing, To};
 use xenonet_net::node::now_ms;
+use xenonet_service::http::Req;
+use xenonet_service::routes::api;
 
 fn root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("xenonet-{name}-{}", std::process::id()));
@@ -500,4 +502,101 @@ async fn a_cell_start_is_yours_alone_and_not_yet_wired() {
     let _ = ran(&t.desk, 1).await;
     drop(t);
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// A delegated, confined run's file tools: a read within its folder is
+/// answered by the delegation and any other, however the path is written,
+/// comes to the person, who is the only one who can let it be sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_delegated_confined_run_reads_in_its_folder_and_nowhere_else_without_asking_you() {
+    const ASKER: &str = "claude:0190d3e0-0000-7000-8000-00000000b001";
+    let root = root("sandbox-delegated-reads");
+    for h in ["studio", "laptop", "desk"] {
+        std::fs::create_dir_all(root.join(h).join("home").join("work")).unwrap();
+    }
+    let home = root.join("desk/home");
+    let work = home.join("work");
+    std::fs::create_dir_all(home.join("other")).unwrap();
+    std::fs::create_dir_all(home.join(".config/gh")).unwrap();
+    std::fs::write(work.join("a.txt"), "in the folder").unwrap();
+    std::fs::write(home.join("other/file"), "elsewhere").unwrap();
+    std::fs::write(home.join(".config/gh/hosts.yml"), "oauth_token: made-up").unwrap();
+    std::os::unix::fs::symlink(home.join("other/file"), work.join("link")).unwrap();
+    let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
+    let (a, b, c) = three(&root, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![sess(DESK_ATLAS, "Ledger fixtures", &at("desk"))]]).await;
+    until("desk takes starts, as studio sees it", 10, || async { a.state().await["hosts"].as_array().unwrap().iter().any(|h| h["id"] == "desk" && h["can"].as_array().is_some_and(|c| c.contains(&json!("start")))) }).await;
+    let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "delegate" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("desk is on delegate", 10, || async { c.state().await["start"] == "delegate" }).await;
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "folder": at("desk"), "prompt": "hold-on: read around", "delegate": true })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let (args, _) = ran(&c, 1).await;
+    let run = format!("claude:{}", args[2]);
+    let ask = |tool: &'static str, input: Value| {
+        let ctx = c.ctx.clone();
+        let run = run.clone();
+        tokio::spawn(async move {
+            let req = Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", run.as_str())], Some(&json!({ "tool_name": tool, "input": input, "tool_use_id": "toolu_1" }).to_string()));
+            let r = api(&ctx, common::local(&ctx, req)).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let shown = || {
+        let b = b.ctx.clone();
+        async move {
+            let req = Req::fake("GET", "/api/runs/asks", &[("x-xenonet-window", b.window_key.reveal())], None);
+            api(&b, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+    // The control: a file in the folder is answered at once.
+    let input = json!({ "file_path": work.join("a.txt").to_string_lossy() });
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(3), ask("Read", input.clone())).await.expect("the read in the folder was held, not allowed").unwrap();
+    assert_eq!((s, answer), (200, json!({ "behavior": "allow", "updatedInput": input })));
+    assert!(shown().await.is_empty(), "and asks nobody");
+    // The rest are held for the person, each saying why: elsewhere in home, a
+    // sign-in file, the process's own environment, and a link in the folder
+    // that points out of it.
+    for (n, (tool, input)) in [
+        ("Read", json!({ "file_path": home.join("other/file").to_string_lossy() })),
+        ("Read", json!({ "file_path": home.join(".config/gh/hosts.yml").to_string_lossy() })),
+        ("Read", json!({ "file_path": "/proc/self/environ" })),
+        ("Grep", json!({ "pattern": "token", "path": home.join(".config").to_string_lossy() })),
+        ("Glob", json!({ "pattern": format!("{}/.config/**/*", home.display()) })),
+        ("Read", json!({ "file_path": work.join("link").to_string_lossy() })),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let held = ask(tool, input.clone());
+        let waiting = until_value(&format!("the {tool} {n} at laptop"), 10, || async { shown().await.into_iter().find(|x| x["host"] == "desk") }).await;
+        assert!(waiting["input"].as_str().unwrap().starts_with("[outside what you delegated: it reads "), "{tool} {input}: {waiting}");
+        let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": waiting["id"], "decision": "deny" })).await;
+        assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
+        let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+        assert_eq!((s, answer["behavior"].clone()), (200, json!("deny")), "{tool} {input}: {answer}");
+    }
+    // A file that hooks tools later is the person's to allow, in the folder too.
+    for file in [".git/hooks/pre-commit", ".claude/settings.json", ".mcp.json", ".vscode/tasks.json"] {
+        let held = ask("Write", json!({ "file_path": work.join(file).to_string_lossy(), "content": "x" }));
+        let waiting = until_value(&format!("the write of {file} at laptop"), 10, || async { shown().await.into_iter().find(|x| x["host"] == "desk") }).await;
+        assert!(waiting["input"].as_str().unwrap().starts_with("[outside what you delegated: it changes a file that hooks"), "{file}: {waiting}");
+        b.window("POST", "/api/runs/answer", json!({ "ask": waiting["id"], "decision": "deny" })).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap();
+    }
+    let input = json!({ "file_path": work.join("notes.md").to_string_lossy(), "content": "x" });
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(3), ask("Write", input.clone())).await.expect("an ordinary write in the folder was held").unwrap();
+    assert_eq!((s, answer), (200, json!({ "behavior": "allow", "updatedInput": input })));
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+async fn until_value<F: std::future::Future<Output = Option<Value>>>(what: &str, secs: u64, mut get: impl FnMut() -> F) -> Value {
+    let end = std::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(v) = get().await {
+            return v;
+        }
+        assert!(std::time::Instant::now() < end, "waited {secs} s for {what}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }

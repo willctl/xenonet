@@ -8,8 +8,13 @@
 //!
 //! Covered, with no question:
 //!
-//! - reading files (not ones that look like secrets), searching, listing;
-//! - creating and editing files under the session's folder;
+//! - reading files, searching and listing, within the session's folder (a
+//!   delegated run is a confined one; its file tools are not held by the
+//!   app's sandbox, so a read elsewhere, and any of `/proc`, `/dev` and
+//!   `/sys`, is a question), but not files that look like secrets;
+//! - creating and editing files under the session's folder, but not those
+//!   that hook or configure tools that run later (`.git/hooks`, `.claude`,
+//!   `.mcp.json`, `.vscode`, `.envrc`...);
 //! - routine commands: listing, printing and searching, read-only git,
 //!   XenoNet's own `--version`, `doctor`, `status`, `logs`, `update` and
 //!   `service`, and an app's version probe as its adapter gives it
@@ -152,10 +157,23 @@ pub fn judge(tool: &str, input: &Value, folder: &str, home: &str, windows: bool)
         return if server.starts_with("xenonet") && XENONET_TOOLS.contains(&tool_name) { Verdict::Allow } else { ask(format!("{tool_name} isn't a tool a delegation covers")) };
     }
     if READING.contains(&tool) {
-        return match path_of(input) {
-            Some(p) if secretive(&p) => ask("its path looks like a secret"),
-            _ => Verdict::Allow,
-        };
+        // A delegated run is a vendor-confined run, whose sandbox holds its
+        // commands and not the file tools, and the app's own prompt for a
+        // read outside the folder is the one this would answer. A run's last
+        // words, or a send, can carry any file it read: so a read is covered
+        // within the folder and nowhere else.
+        for p in read_paths(tool, input) {
+            if secretive(&p) {
+                return ask("its path looks like a secret");
+            }
+            if in_kernel_files(&p, folder, home, windows) {
+                return ask("it reads the machine's own process and device files");
+            }
+            if !within(&p, folder, home, windows) {
+                return ask(format!("it reads outside {}", xenonet_os::paths::tilde(folder, home)));
+            }
+        }
+        return Verdict::Allow;
     }
     if EDITING.contains(&tool) {
         let Some(p) = path_of(input) else { return ask("it names no file") };
@@ -164,6 +182,9 @@ pub fn judge(tool: &str, input: &Value, folder: &str, home: &str, windows: bool)
         }
         if in_dot_or_library(&p, folder, home, windows) {
             return ask("it changes a hidden file or folder in your home folder, or Library, where a change outlives the run");
+        }
+        if runs_later(&p, folder, home, windows) {
+            return ask("it changes a file that hooks, configures or starts tools later, outside the sandbox");
         }
         return if within(&p, folder, home, windows) { Verdict::Allow } else { ask(format!("it changes a file outside {}", xenonet_os::paths::tilde(folder, home))) };
     }
@@ -194,6 +215,66 @@ pub fn leaves_sandbox(input: &Value) -> bool {
 
 fn path_of(input: &Value) -> Option<String> {
     ["file_path", "notebook_path", "path"].iter().find_map(|k| input.get(*k).and_then(Value::as_str)).map(str::to_string)
+}
+
+/// The paths a read tool names: its path keys, and a Glob pattern that
+/// names its own root (an absolute or `~` pattern, or one that climbs with
+/// `..`), which reads there whatever its folder.
+fn read_paths(tool: &str, input: &Value) -> Vec<String> {
+    let mut out: Vec<String> = ["file_path", "notebook_path", "path"].iter().filter_map(|k| input.get(*k).and_then(Value::as_str)).map(str::to_string).collect();
+    if tool == "Glob" {
+        if let Some(p) = input.get("pattern").and_then(Value::as_str) {
+            let rooted = p.starts_with(['/', '\\', '~']) || p.chars().nth(1) == Some(':');
+            if rooted || p.replace('\\', "/").split('/').any(|x| x == "..") {
+                out.push(p.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Whether `path` is under `/proc`, `/dev` or `/sys`, where a read gives the
+/// run's own environment, a device or the kernel's view of the machine.
+fn in_kernel_files(path: &str, folder: &str, home: &str, windows: bool) -> bool {
+    let target = parts_of(path, folder, home, windows);
+    matches!(target.first().map(String::as_str), Some("proc" | "dev" | "sys"))
+}
+
+/// Folders anywhere in a path whose contents hook or configure tools that
+/// run later, outside the sandbox: git's (hooks, config, info/attributes),
+/// the app's own (`.claude`: settings, skills, agents, commands), the
+/// editors', the hook managers' and the toolchains'. The list follows the
+/// folders Claude Code's own sandbox keeps write-protected, with the files
+/// that run a command when a project is opened or built.
+const RUNS_LATER_FOLDERS: [&str; 12] = [".git", ".githooks", ".husky", ".claude", ".vscode", ".idea", ".devcontainer", ".cargo", ".yarn", ".mvn", ".direnv", "node_modules"];
+/// Files that do the same, by name.
+const RUNS_LATER_FILES: [&str; 17] = [
+    ".mcp.json",
+    ".envrc",
+    ".gitattributes",
+    ".gitmodules",
+    ".gitconfig",
+    ".npmrc",
+    ".yarnrc",
+    ".yarnrc.yml",
+    ".pre-commit-config.yaml",
+    "lefthook.yml",
+    "lefthook.yaml",
+    "mise.toml",
+    ".mise.toml",
+    ".tool-versions",
+    ".bunfig.toml",
+    "bunfig.toml",
+    ".pnpmfile.cjs",
+];
+
+/// Whether an edit of `path` leaves something that runs later: a file in one
+/// of the folders above, or one of the files by name, wherever it is. Names
+/// are matched whatever their case.
+fn runs_later(path: &str, folder: &str, home: &str, windows: bool) -> bool {
+    let target: Vec<String> = parts_of(path, folder, home, windows).into_iter().map(|x| x.to_lowercase()).collect();
+    let Some((name, dirs)) = target.split_last() else { return false };
+    dirs.iter().any(|d| RUNS_LATER_FOLDERS.contains(&d.as_str())) || RUNS_LATER_FOLDERS.contains(&name.as_str()) || RUNS_LATER_FILES.contains(&name.as_str())
 }
 
 fn secretive(path: &str) -> bool {
@@ -363,10 +444,95 @@ mod tests {
     #[test]
     fn reading_and_searching_are_covered_but_not_what_looks_like_a_secret() {
         assert_eq!(judge_unix("Read", json!({ "file_path": "/Users/will/work/a.txt" })), Verdict::Allow);
-        assert_eq!(judge_unix("Grep", json!({ "pattern": "x", "path": "/etc" })), Verdict::Allow);
+        assert_eq!(judge_unix("Grep", json!({ "pattern": "x", "path": "/Users/will/work/src" })), Verdict::Allow);
         assert_eq!(judge_unix("Glob", json!({ "pattern": "*.rs" })), Verdict::Allow);
         assert!(asks(judge_unix("Read", json!({ "file_path": "/Users/will/.ssh/id_rsa" }))));
         assert!(asks(judge_unix("Read", json!({ "file_path": "/Users/will/work/.env" }))));
+    }
+
+    #[test]
+    fn a_delegated_run_reads_only_within_its_folder() {
+        // The sandbox's denyRead covers its commands, not the file tools, and
+        // the app's own outside-the-folder prompt is what the delegation
+        // would answer: so the delegation never does. A run's last words, or a
+        // send, can carry any file it read.
+        for (tool, key, p) in [
+            ("Read", "file_path", "/Users/will/.config/gh/hosts.yml"),
+            ("Read", "file_path", "~/.netrc"),
+            ("Read", "file_path", "/Users/will/.docker/config.json"),
+            ("Read", "file_path", "/Users/will/.kube/config"),
+            ("Read", "file_path", "/proc/self/environ"),
+            ("Read", "file_path", "/dev/stdin"),
+            ("Read", "file_path", "/sys/kernel/notes"),
+            ("Read", "file_path", "/Users/will/other/file"),
+            ("Read", "file_path", "/Users/will/work/../other/file"),
+            ("Read", "file_path", "../other/file"),
+            ("Grep", "path", "/etc"),
+            ("LS", "path", "/Users/will"),
+            ("NotebookRead", "notebook_path", "/Users/will/other/a.ipynb"),
+        ] {
+            assert!(asks(judge_unix(tool, json!({ key: p, "pattern": "x" }))), "{tool} {p}");
+        }
+        // A pattern that names its own root is a path too.
+        for pattern in ["/Users/will/.config/gh/*", "~/.config/**/hosts.yml", "../other/*", "/proc/*/environ"] {
+            assert!(asks(judge_unix("Glob", json!({ "pattern": pattern }))), "{pattern}");
+        }
+        // The controls: the folder, as an absolute, a ~ or a relative path.
+        for (tool, key, p) in [
+            ("Read", "file_path", "/Users/will/work/a.txt"),
+            ("Read", "file_path", "~/work/src/a.txt"),
+            ("Read", "file_path", "src/a.txt"),
+            ("Grep", "path", "/Users/will/work"),
+            ("LS", "path", "/Users/will/work/src"),
+        ] {
+            assert_eq!(judge_unix(tool, json!({ key: p, "pattern": "x" })), Verdict::Allow, "{tool} {p}");
+        }
+        for pattern in ["*.rs", "src/**/*.rs", "/Users/will/work/src/*.rs"] {
+            assert_eq!(judge_unix("Glob", json!({ "pattern": pattern })), Verdict::Allow, "{pattern}");
+        }
+        assert_eq!(judge_unix("TodoWrite", json!({ "todos": [] })), Verdict::Allow);
+    }
+
+    #[test]
+    fn a_file_that_runs_or_configures_tools_later_is_never_covered_to_edit() {
+        // What an edit leaves behind runs later, outside any sandbox: git
+        // hooks and config, the app's own settings, editor and shell-hook
+        // folders, a tool's config. Inside the folder or not, it comes to the
+        // person.
+        for p in [
+            "/Users/will/work/.git/hooks/pre-commit",
+            "/Users/will/work/.git/config",
+            ".git/info/attributes",
+            "/Users/will/work/.claude/settings.json",
+            "/Users/will/work/.claude/settings.local.json",
+            "/Users/will/work/.claude/skills/x/SKILL.md",
+            "/Users/will/work/.claude/agents/a.md",
+            "/Users/will/work/.claude/commands/c.md",
+            "/Users/will/work/.mcp.json",
+            "/Users/will/work/.vscode/tasks.json",
+            "/Users/will/work/.envrc",
+            "/Users/will/work/.idea/workspace.xml",
+            "/Users/will/work/.husky/pre-push",
+            "/Users/will/work/.githooks/pre-commit",
+            "/Users/will/work/.GIT/hooks/x",
+            "/Users/will/work/sub/.git/hooks/x",
+            "/Users/will/work/.gitattributes",
+            "/Users/will/work/.gitmodules",
+            "/Users/will/work/.npmrc",
+            "/Users/will/work/.pre-commit-config.yaml",
+            "/Users/will/work/.devcontainer/devcontainer.json",
+            "/Users/will/work/.cargo/config.toml",
+            "/Users/will/work/mise.toml",
+            "/Users/will/work/node_modules/x/index.js",
+            "/Users/will/other/.git/hooks/x",
+        ] {
+            assert!(asks(judge_unix("Write", json!({ "file_path": p }))), "{p}");
+            assert!(asks(judge_unix("Edit", json!({ "file_path": p }))), "{p}");
+        }
+        assert_eq!(judge_unix("Write", json!({ "file_path": "/Users/will/work/.github/workflows/ci.yml" })), Verdict::Allow);
+        assert_eq!(judge_unix("Write", json!({ "file_path": "/Users/will/work/.gitignore" })), Verdict::Allow);
+        assert_eq!(judge_unix("Write", json!({ "file_path": "/Users/will/work/docs/git-hooks.md" })), Verdict::Allow);
+        assert_eq!(judge_unix("Write", json!({ "file_path": "/Users/will/work/src/claude.rs" })), Verdict::Allow);
     }
 
     #[test]
