@@ -195,7 +195,7 @@ impl CellRunner {
         let staged = stage.join("in");
         std::fs::create_dir(&staged).map_err(|e| ConfineError::Host(format!("the staged copy could not be made: {e}")))?;
         stage_project(&plan.project, &staged, &plan.copy_exclude).map_err(|e| ConfineError::Host(format!("the project could not be staged: {e}")))?;
-        self.driver.copy_in(name, &staged, &guest_project).await.map_err(host)?;
+        self.driver.copy_in(name, &staged, &guest_project, None).await.map_err(host)?;
 
         // The driver runs it as the cell's user. `env -i` empties whatever
         // the guest's login gave, then names exactly the plan's variables.
@@ -372,7 +372,7 @@ impl CellHost for CellRunner {
 mod tests {
     use super::*;
     use adytum::exec::{Duplex, Output};
-    use adytum::testing::{failed, ok, Call, FakeDriver, Leaves, Op};
+    use adytum::testing::{failed, ok, Exec, FakeDriver, Leaves, Op};
     use adytum::{Arch, CellState, Listed};
     use std::sync::Mutex;
     use xenonet_engine::confine::{plan, CellRequest, Confinement};
@@ -426,9 +426,9 @@ mod tests {
         async fn stream(&self, name: &CellName, argv: &[String]) -> adytum::Result<Duplex> {
             self.inner.stream(name, argv).await
         }
-        async fn copy_in(&self, name: &CellName, host: &Path, guest: &str) -> adytum::Result<()> {
+        async fn copy_in(&self, name: &CellName, host: &Path, guest: &str, owner: Option<&adytum::GuestUser>) -> adytum::Result<()> {
             self.copied.lock().expect("lock").push(listing(host));
-            self.inner.copy_in(name, host, guest).await
+            self.inner.copy_in(name, host, guest, owner).await
         }
         async fn copy_out(&self, name: &CellName, guest: &str, host: &Path) -> adytum::Result<()> {
             std::fs::write(host.join("made.txt"), "hi").expect("a file");
@@ -451,7 +451,7 @@ mod tests {
 
     impl Fake {
         fn calls(&self) -> Vec<String> {
-            self.inner.calls()
+            self.inner.calls().iter().map(ToString::to_string).collect()
         }
         fn cells(&self) -> Vec<(CellName, CellState)> {
             self.inner.cells()
@@ -467,7 +467,7 @@ mod tests {
 
     /// The runner on a fake whose program says `done`, with the calls of
     /// `exec` kept.
-    fn runner(behave: Behave, home: &Path) -> (CellRunner, Arc<Fake>, Arc<Mutex<Vec<Call>>>) {
+    fn runner(behave: Behave, home: &Path) -> (CellRunner, Arc<Fake>, Arc<Mutex<Vec<Exec>>>) {
         let execs = Arc::new(Mutex::new(Vec::new()));
         let inner = FakeDriver::new();
         let kept = execs.clone();
