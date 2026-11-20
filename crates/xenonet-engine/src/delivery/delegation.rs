@@ -247,25 +247,52 @@ fn in_kernel_files(path: &str, folder: &str, home: &str, windows: bool) -> bool 
 /// folders Claude Code's own sandbox keeps write-protected, with the files
 /// that run a command when a project is opened or built.
 const RUNS_LATER_FOLDERS: [&str; 12] = [".git", ".githooks", ".husky", ".claude", ".vscode", ".idea", ".devcontainer", ".cargo", ".yarn", ".mvn", ".direnv", "node_modules"];
-/// Files that do the same, by name.
-const RUNS_LATER_FILES: [&str; 17] = [
+/// Files that do the same, by name: Claude Code's own list of what it keeps
+/// write-protected (2.1.327's, shell startup files included), with the ones
+/// above that it doesn't list.
+const RUNS_LATER_FILES: [&str; 42] = [
     ".mcp.json",
+    ".claude.json",
     ".envrc",
+    ".ripgreprc",
     ".gitattributes",
     ".gitmodules",
     ".gitconfig",
     ".npmrc",
     ".yarnrc",
     ".yarnrc.yml",
+    ".pnp.cjs",
+    ".pnp.loader.mjs",
+    ".pnpmfile.cjs",
     ".pre-commit-config.yaml",
     "lefthook.yml",
     "lefthook.yaml",
+    ".lefthook.yml",
+    ".lefthook.yaml",
     "mise.toml",
     ".mise.toml",
     ".tool-versions",
     ".bunfig.toml",
     "bunfig.toml",
-    ".pnpmfile.cjs",
+    ".bazelrc",
+    ".bazelversion",
+    ".bazeliskrc",
+    "gradle-wrapper.properties",
+    "maven-wrapper.properties",
+    ".devcontainer.json",
+    "pyrightconfig.json",
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".bash_aliases",
+    ".bash_logout",
+    ".zshrc",
+    ".zprofile",
+    ".zshenv",
+    ".zlogin",
+    ".zlogout",
+    ".profile",
+    ".direnvrc",
 ];
 
 /// Whether an edit of `path` leaves something that runs later: a file in one
@@ -523,6 +550,26 @@ mod tests {
             "/Users/will/work/.devcontainer/devcontainer.json",
             "/Users/will/work/.cargo/config.toml",
             "/Users/will/work/mise.toml",
+            // The rest of Claude Code's own list of what it keeps write-protected (2.1.327).
+            "/Users/will/work/.claude.json",
+            "/Users/will/work/.ripgreprc",
+            "/Users/will/work/.pnp.cjs",
+            "/Users/will/work/.pnp.loader.mjs",
+            "/Users/will/work/.bazelrc",
+            "/Users/will/work/.bazelversion",
+            "/Users/will/work/.bazeliskrc",
+            "/Users/will/work/.lefthook.yml",
+            "/Users/will/work/.lefthook.yaml",
+            "/Users/will/work/gradle/wrapper/gradle-wrapper.properties",
+            "/Users/will/work/.mvn/wrapper/maven-wrapper.properties",
+            "/Users/will/work/.devcontainer.json",
+            "/Users/will/work/pyrightconfig.json",
+            "/Users/will/work/.zshenv",
+            "/Users/will/work/.zshrc",
+            "/Users/will/work/.bash_profile",
+            "/Users/will/work/.profile",
+            "/Users/will/work/.zlogin",
+            "/Users/will/work/.bash_aliases",
             "/Users/will/work/node_modules/x/index.js",
             "/Users/will/other/.git/hooks/x",
         ] {
