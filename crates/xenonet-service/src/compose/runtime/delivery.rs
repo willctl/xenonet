@@ -572,11 +572,14 @@ impl router::Host for RouterHost<'_> {
     }
     fn usage_of(&mut self, agent: &str) -> Option<f64> {
         let app = agent.split(':').next().unwrap_or("");
-        // A session in a folder she named spends that folder's plan; one
-        // whose folder can't be told is read as the app's own, and its turn
-        // is refused when it comes to it.
-        let root = crate::compose::runtime::accounts::session_root(self.w, app, agent).ok().flatten();
-        usage_in(self.w, app, root.as_deref())
+        // A session in a folder she named spends that folder's plan. One whose
+        // folder can't be told (an id in two folders, a folder she hasn't
+        // named) reads as a plan used up, so no wake is made for it, rather
+        // than as the app's own, whose plan it may not spend.
+        match crate::compose::runtime::accounts::session_root(self.w, app, agent) {
+            Ok(root) => usage_in(self.w, app, root.as_deref()),
+            Err(_) => Some(1.0),
+        }
     }
     fn wake_setting(&mut self, agent: &str) -> Wake {
         match &self.via {

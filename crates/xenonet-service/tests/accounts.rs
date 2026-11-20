@@ -278,10 +278,15 @@ async fn the_wake_budget_reads_the_plan_of_the_sessions_own_folder() {
     let d = desk("accounts-usage", json!({ "claude": "nova@example.com" }), |_, work| {
         let mut a = sess("claude:0190d3e0-0000-7000-8000-0000000c0001", "Work", "/x");
         a.root = Some(work.to_string());
-        vec![a, sess("claude:0190d3e0-0000-7000-8000-0000000c0003", "Home", "/x")]
+        let mut stray = sess("claude:0190d3e0-0000-7000-8000-0000000c0002", "Stray", "/x");
+        stray.root = Some("/somewhere/else".into());
+        vec![a, stray, sess("claude:0190d3e0-0000-7000-8000-0000000c0003", "Home", "/x")]
     })
     .await;
     let mut host = delivery::RouterHost::of(&d.host.world);
+    // One whose folder can't be told gets no wake, rather than the default folder's plan.
+    let plan = host.usage_of(STRAY_SESSION).expect("a reading that refuses");
+    assert!(plan >= 0.9, "{plan}");
     assert_eq!(host.usage_of(WORK_SESSION), Some(0.92), "the work folder's plan");
     assert_eq!(host.usage_of("claude:0190d3e0-0000-7000-8000-0000000c0003"), Some(0.4), "the default folder's");
 }
