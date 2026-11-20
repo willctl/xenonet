@@ -239,7 +239,9 @@ fn check(_pid: u32, _others: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{running, Tree};
+    use super::running;
+    #[cfg(unix)]
+    use super::Tree;
 
     #[test]
     fn this_process_runs_and_nothing_else_is_made_up() {

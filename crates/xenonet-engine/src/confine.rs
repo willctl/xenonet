@@ -415,7 +415,9 @@ fn resolve_project(project: &Path, host_home: &str, protected: &[PathBuf]) -> Re
         }
         if let Ok(rest) = at.strip_prefix(&home) {
             let first = rest.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
-            if first.starts_with('.') || first == "library" {
+            // `folded` lowers the case only where the file system ignores it;
+            // Library is refused in any case everywhere.
+            if first.starts_with('.') || first.eq_ignore_ascii_case("library") {
                 return refuse("it is inside a dot folder or Library of the home folder, where settings, keys and tokens live");
             }
         }
