@@ -42,11 +42,26 @@ pub fn place(app: &str, kind: Option<&str>, rule: &Value, roots: &[(Option<Strin
 /// folder is in, and the folders now read for the app.
 pub fn place_start(w: &Runtime, app: &str, cwd: &str, confined: bool) -> Result<Placed, String> {
     let state = w.state();
-    let found = state.identity_project(cwd).map_err(|e| e.message)?;
+    // A folder the map can't place in a project (or no map to ask) has no
+    // rule.
+    let Ok(found) = state.identity_project(cwd) else { return Ok(Placed::default()) };
     let Some(rule) = found.get("rule").filter(|r| r.is_object()) else { return Ok(Placed::default()) };
     let Some(a) = xenonet_adapter::apps::app(app) else { return Ok(Placed::default()) };
     let refuse = xenonet_adapter::platforms().get(app).map(|p| p.refuse_args()).unwrap_or_default();
     place(&a.name, a.identity.as_deref(), rule, &state.app_account_roots(app), confined, &refuse)
+}
+
+/// The run's sign-in, as `starts::signed_env` makes it, except for a run
+/// that is placed by an account (`ruled`) or a session of a folder she named
+/// (`rooted`): that run signs in with its folder's own sign-in, so it gets
+/// no token, and none it inherited either.
+pub fn sign_in(w: &Runtime, s: Option<xenonet_adapter::delivery::SignIn>, own_folder: bool, env: &mut Vec<(String, String)>) -> Option<String> {
+    let s = s?;
+    if own_folder {
+        env.retain(|(k, _)| k != s.variable && Some(k.as_str()) != s.fd_variable);
+        return None;
+    }
+    super::starts::signed_env(w, &s, env)
 }
 
 /// The folder a session (`claude:<id>`) was found in, if she named it.
