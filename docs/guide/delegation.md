@@ -42,7 +42,7 @@ A delegated session is a Claude Code run, and its permission prompts come to Xen
 
 Covered, with no question:
 
-- reading files, searching and listing within the folder the session started in, except files that look like secrets (`.ssh`, `.aws`, `.env`, anything named for credentials, tokens or passwords). A link in the folder is judged by where it points;
+- reading files, searching and listing within the folder the session started in, except files that look like secrets (`.ssh`, `.aws`, `.env`, anything named for credentials, tokens or passwords). A path is judged by its name first, and only one that lies inside the folder is followed through links (`~` is your home folder): one inside whose target is outside is judged by the target, so a link `up` to home doesn't make `~/work/up/.zshrc` or a read of `up/.config/gh/hosts.yml` part of the folder, and a Glob is judged by where its root (the folders before its first wildcard) leads. A path named outside the folder is never looked up;
 - creating and editing files under that folder, except the ones that hook or configure tools that run later (below);
 - routine commands: listing, printing and searching, read-only git, and XenoNet's own `--version`, `doctor`, `status`, `logs`, `update` and `service`, one after another with `;`, `&&`, `||` or `|`;
 - the xenonet tools that report back (`send`, `inbox`, `peers`, `who_has`, `whoami`, `doctor`, `focus`, `claim`, `release`).
@@ -55,8 +55,10 @@ Always a question, whatever the task says:
 - the network: `curl`, `wget`, the web tools, a push;
 - writing through a redirect, and a command inside a command;
 - any read or edit outside the session's folder, and anything under `/proc`, `/dev` or `/sys`: the sandbox holds a run's commands and not its file tools, and what a run reads can go out in its last words or a `send`, so `~/.config/gh/hosts.yml`, `~/.netrc` or `/proc/self/environ` come to you;
-- an edit that outlives the run and runs outside its sandbox, inside the folder too: `.git` (hooks, config, attributes), `.claude` (settings, skills, agents, commands), `.mcp.json`, `.vscode`, `.idea`, `.husky`, `.githooks`, `.devcontainer`, `.cargo`, `.envrc` and tool configuration such as `.npmrc`, `.pre-commit-config.yaml`, `.gitattributes`, `mise.toml`, and `node_modules`;
+- an edit that outlives the run and runs outside its sandbox, inside the folder too: `.git` (hooks, config, attributes), `.claude` (settings, skills, agents, commands), `.mcp.json`, `.vscode`, `.idea`, `.husky`, `.githooks`, `.devcontainer`, `.cargo`, `.envrc` and tool configuration such as `.npmrc`, `.pre-commit-config.yaml`, `.gitattributes`, `mise.toml`, and `node_modules`, and the rest of what Claude Code keeps write-protected itself (`.claude.json`, `.ripgreprc`, `.pnp.cjs`, `.bazelrc`, `.lefthook.yml`, `gradle-wrapper.properties`, `.devcontainer.json`, `pyrightconfig.json`, shell startup files such as `.zshrc` and `.zshenv`);
 - any command or tool not listed above, including starting another session.
+
+A delegated start can't pick a permission mode: in `acceptEdits`, `auto` and `dontAsk` Claude Code approves edits without asking, which these rules would never see, so the machine that runs the start refuses a mode from anyone but you.
 
 A delegated session runs in its app's own sandbox, which the delegation can't take off ([Sandboxed starts](sandbox.md)): it writes only in its folder and reaches no network unless the start named domains. A command that asks to run outside the sandbox is never covered, whatever the task says, and comes to you alone. Sandboxed commands are not allowed unasked: each goes through the delegation's rules like any other, so a delete or a push still comes to you. An edit to a hidden file or folder in your home folder, or to Library, is never covered either, and a sandboxed run isn't started in a folder under one.
 
