@@ -1100,7 +1100,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
                 // own sign-in and timeline.
                 let root = n.get("root").and_then(Value::as_str).and_then(|r| rooted.iter().find(|x| x.kind == kind && x.root == r));
                 match root {
-                    Some(r) => by_folder(&signins[&r.key], acc(&r.key), when, nn(n.get("createdAt")).or(when)),
+                    Some(r) => by_folder(&signins[&r.key], acc(&r.key), when, nn(n.get("createdAt"))),
                     None => account_at(&signins[kind], Some(&current(acc(kind))), when, &known[kind]),
                 }
             } else {
@@ -1635,9 +1635,11 @@ mod tests {
         let rooted = [RootedSignin::new("claude", root)];
         let nodes = [
             json!({ "id": "claude:s1", "kind": "session", "app": "claude", "updatedAt": 1000 }),
-            json!({ "id": "claude:s2", "kind": "session", "app": "claude", "root": root, "updatedAt": 1000 }),
+            json!({ "id": "claude:s2", "kind": "session", "app": "claude", "root": root, "createdAt": 900, "updatedAt": 1000 }),
             // One that ran before XenoNet first read the folder's sign-in (at 500) may have run under another.
             json!({ "id": "claude:s3", "kind": "session", "app": "claude", "root": root, "createdAt": 100, "updatedAt": 200 }),
+            // One that doesn't say when it started can't be told to have started after, whenever it last ran.
+            json!({ "id": "claude:s4", "kind": "session", "app": "claude", "root": root, "updatedAt": 1000 }),
         ];
         let accounts = json!({
             "claude": claude_account("claude:a:o", "nova@example.com"), "claudeFile": "/h/.claude.json",
@@ -1651,6 +1653,7 @@ mod tests {
         // The named root's holds one account, so it is recorded by its folder, above likely.
         assert_eq!((links[1]["id"].as_str(), links[1]["confidence"].as_str(), links[1]["via"].as_str()), (Some("claude:b:p"), Some("exact"), Some("its folder")));
         assert_eq!((links[2]["id"].as_str(), links[2]["confidence"].as_str()), (Some("claude:b:p"), Some("likely")), "{}", links[2]);
+        assert_eq!((links[3]["id"].as_str(), links[3]["confidence"].as_str()), (Some("claude:b:p"), Some("likely")), "{}", links[3]);
     }
 
     #[test]
