@@ -8,6 +8,7 @@
 pub mod apps;
 pub mod channel;
 pub mod delegation;
+mod hook_walk;
 pub mod opencode;
 pub mod policy;
 pub mod resume;
