@@ -486,7 +486,9 @@ pub fn project_hooks(dir: &std::path::Path) -> Option<String> {
         lines.next().is_some_and(|l| l.trim() == "---") && lines.take_while(|l| l.trim() != "---").any(|l| l.starts_with("hooks:") || l.starts_with("\"hooks\":"))
     };
     let entries = |d: &std::path::Path| std::fs::read_dir(d).map(|r| r.flatten().map(|e| e.path()).collect::<Vec<_>>()).unwrap_or_default();
-    let words = |what: String| format!("{what} carries hooks or is a plugin, which Claude Code runs outside the sandbox that holds its commands, so a sandboxed run isn't started in this folder: use another folder, or take them out");
+    let words = |what: String| {
+        format!("{what} carries hooks or is a plugin, which Claude Code runs outside the sandbox that holds its commands, so a sandboxed run isn't started in this folder: use another folder, or take them out")
+    };
     for sub in ["agents", "commands"] {
         for f in entries(&claude.join(sub)) {
             if has_hooks_key(&f) {

@@ -7,7 +7,7 @@
 //! by every turn, written for a copy when its stream names it, and not
 //! swept by age; a session started for anyone but the person that has none
 //! is refused, never run bare. That session is also marked in the store
-//! ("confined: vendor, for <who>") before its run, for as long as it exists,
+//! ("confined: vendor, for whom") before its run, for as long as it exists,
 //! so deleting its record file, or a store that can't be read, refuses its
 //! turns rather than running them bare.
 //!
@@ -47,7 +47,11 @@ fn mark_key(session: &str) -> String {
 /// exists.
 fn mark(w: &Runtime, session: &str, who: &str) -> Result<(), String> {
     let v = json!({ "level": "vendor", "for": who, "at": xenonet_net::node::now_ms() });
-    w.store.0.db().set_setting(&mark_key(session), Some(&v)).map_err(|e| format!("the sandbox of {session} couldn't be kept in the store ({}), and a session that can't be held to its sandbox later isn't started", e.message))
+    w.store
+        .0
+        .db()
+        .set_setting(&mark_key(session), Some(&v))
+        .map_err(|e| format!("the sandbox of {session} couldn't be kept in the store ({}), and a session that can't be held to its sandbox later isn't started", e.message))
 }
 
 /// Who `session` was started for, if the store marks it as confined for
@@ -278,20 +282,20 @@ mod tests {
         let marked = Ok(Some("a session on contractor-vm".to_string()));
         let unmarked: Result<Option<String>, String> = Ok(None);
         // Positive control: with its record, it runs confined.
-        assert_eq!(verdict(Some(rec.clone()), true, &[marked.clone()], false), Ok(Some(rec.clone())));
+        assert_eq!(verdict(Some(rec.clone()), true, std::slice::from_ref(&marked), false), Ok(Some(rec.clone())));
         // Without its record, the mark refuses it, for the session or the one it is a copy of.
-        let why = verdict(None, false, &[marked.clone()], false).unwrap_err();
+        let why = verdict(None, false, std::slice::from_ref(&marked), false).unwrap_err();
         assert!(why.contains("started for a session on contractor-vm"), "{why}");
         assert!(verdict(None, false, &[unmarked.clone(), marked], false).is_err());
         // A store that can't be read refuses, with or without a record, never "not confined".
         let broken: Result<Option<String>, String> = Err("the database is locked".into());
         for have in [Some(rec), None] {
-            let why = verdict(have, false, &[broken.clone()], false).unwrap_err();
+            let why = verdict(have, false, std::slice::from_ref(&broken), false).unwrap_err();
             assert!(why.contains("can't be read") && why.contains("the database is locked"), "{why}");
         }
         // A record file that doesn't read, and an old delegation row, still refuse.
-        assert!(verdict(None, true, &[unmarked.clone()], false).is_err());
-        assert!(verdict(None, false, &[unmarked.clone()], true).is_err());
+        assert!(verdict(None, true, std::slice::from_ref(&unmarked), false).is_err());
+        assert!(verdict(None, false, std::slice::from_ref(&unmarked), true).is_err());
         // Nothing known of it: not confined, as before.
         assert_eq!(verdict(None, false, &[unmarked], false), Ok(None));
     }

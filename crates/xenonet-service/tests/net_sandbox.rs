@@ -109,7 +109,10 @@ async fn a_start_from_another_machine_without_the_sandbox_is_refused() {
     t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: older_start(&t, 1, &atlas, None) }).unwrap();
     until("desk logs the refusal", 20, || async { t.desk.logged("start").iter().any(|l| l.contains("was refused")) }).await;
     let refused = t.desk.logged("start").join("\n");
-    assert!(refused.contains("a start from contractor-vm was refused: a run started by anyone but the person runs in its app's sandbox: this start asked for none"), "the refusal says why: {refused}");
+    assert!(
+        refused.contains("a start from contractor-vm was refused: a run started by anyone but the person runs in its app's sandbox: this start asked for none"),
+        "the refusal says why: {refused}"
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
     // The control: the same frame with the sandbox in it runs.
@@ -354,7 +357,8 @@ async fn a_session_started_for_another_machine_is_never_resumed_bare_even_with_i
     let t = two_networks(&root).await;
     desk_takes_starts(&t).await;
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
-    let (s, v) = as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": "tidy atlas", "domains": [] })).await;
+    let (s, v) =
+        as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": "tidy atlas", "domains": [] })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let (args, _) = ran(&t.desk, 1).await;
     let session = format!("claude:{}", args[2]);
@@ -414,7 +418,10 @@ async fn a_copy_forked_from_a_sandboxed_session_stays_sandboxed_across_a_restart
     let (args, _) = ran(&t.desk, 1).await;
     assert!(args.iter().any(|a| a == "--fork-session") && args.iter().any(|a| a == "--strict-mcp-config"), "a sandboxed copy: {args:?}");
     // Its stream names the copy: XenoNet links it and keeps it as sandboxed in its own right.
-    until("the copy is named and sandboxed", 20, || async { sandbox::of(w, child) == Some(record.clone()) && starts::forks(w).iter().any(|(c, p)| c == child && p == DESK_ATLAS_ENDED) }).await;
+    until("the copy is named and sandboxed", 20, || async {
+        sandbox::of(w, child) == Some(record.clone()) && starts::forks(w).iter().any(|(c, p)| c == child && p == DESK_ATLAS_ENDED)
+    })
+    .await;
     assert_eq!(sandbox::confined_for(w, child), Ok(Some("a session on contractor-vm".to_string())), "and marked in the store");
     // A restart forgets whose copy it is; it is still sandboxed, and a turn for it is too.
     starts::forget_forks(w);
@@ -573,7 +580,10 @@ async fn a_delegated_confined_run_reads_in_its_folder_and_nowhere_else_without_a
     std::os::unix::fs::symlink(home.join("other/file"), work.join("link")).unwrap();
     let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
     let (a, b, c) = three(&root, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![sess(DESK_ATLAS, "Ledger fixtures", &at("desk"))]]).await;
-    until("desk takes starts, as studio sees it", 10, || async { a.state().await["hosts"].as_array().unwrap().iter().any(|h| h["id"] == "desk" && h["can"].as_array().is_some_and(|c| c.contains(&json!("start")))) }).await;
+    until("desk takes starts, as studio sees it", 10, || async {
+        a.state().await["hosts"].as_array().unwrap().iter().any(|h| h["id"] == "desk" && h["can"].as_array().is_some_and(|c| c.contains(&json!("start"))))
+    })
+    .await;
     let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "delegate" })).await;
     assert_eq!(s, 200, "{v}");
     until("desk is on delegate", 10, || async { c.state().await["start"] == "delegate" }).await;
@@ -585,7 +595,12 @@ async fn a_delegated_confined_run_reads_in_its_folder_and_nowhere_else_without_a
         let ctx = c.ctx.clone();
         let run = run.clone();
         tokio::spawn(async move {
-            let req = Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", run.as_str())], Some(&json!({ "tool_name": tool, "input": input, "tool_use_id": "toolu_1" }).to_string()));
+            let req = Req::fake(
+                "POST",
+                "/api/runs/permission",
+                &[("x-xenonet-agent", run.as_str())],
+                Some(&json!({ "tool_name": tool, "input": input, "tool_use_id": "toolu_1" }).to_string()),
+            );
             let r = api(&ctx, common::local(&ctx, req)).await.unwrap();
             (r.status, r.body_json())
         })
