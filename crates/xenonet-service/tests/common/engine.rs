@@ -59,6 +59,10 @@ pub struct Sess {
     pub root: Option<String>,
 }
 
+/// The folders an app is read from, each with the email its sign-in holds:
+/// None for the app's own, then those named. Shared, so a test can take one away.
+pub type Roots = Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
+
 /// What a machine's accounts look like to the map: the rule of each
 /// project folder, and each folder an app is read from with the email its
 /// sign-in holds. A machine with none answers as a state core not wired
@@ -68,7 +72,7 @@ pub struct Accounts {
     /// (folder, rule), the deepest folder that holds a path winning.
     pub rules: Arc<std::sync::Mutex<Vec<(String, Value)>>>,
     /// Claude Code's folders: None for its own, then those named.
-    pub roots: Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>,
+    pub roots: Roots,
     /// Codex's folders, the same way.
     pub codex_roots: Vec<(Option<String>, Option<String>)>,
     /// Whether the store that keeps the rules can't be read.

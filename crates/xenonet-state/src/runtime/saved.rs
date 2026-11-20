@@ -256,111 +256,109 @@ pub fn flaky() -> (Saved, Arc<std::sync::atomic::AtomicBool>) {
 
 #[cfg(test)]
 use std::sync::atomic::Ordering;
-#[cfg(test)]
-use xenonet_api::cores::R;
 
 #[cfg(test)]
 impl Store for Flaky {
-    fn ack(&self, session: &str) -> R<()> {
+    fn ack(&self, session: &str) -> xenonet_api::cores::R<()> {
         self.0.ack(session)
     }
-    fn acks(&self) -> R<Value> {
+    fn acks(&self) -> xenonet_api::cores::R<Value> {
         self.0.acks()
     }
-    fn marks(&self) -> R<Value> {
+    fn marks(&self) -> xenonet_api::cores::R<Value> {
         self.0.marks()
     }
-    fn layout(&self) -> R<Value> {
+    fn layout(&self) -> xenonet_api::cores::R<Value> {
         self.0.layout()
     }
-    fn set_layout(&self, positions: &Value) -> R<()> {
+    fn set_layout(&self, positions: &Value) -> xenonet_api::cores::R<()> {
         self.0.set_layout(positions)
     }
-    fn clear_layout(&self) -> R<()> {
+    fn clear_layout(&self) -> xenonet_api::cores::R<()> {
         self.0.clear_layout()
     }
-    fn theme(&self) -> R<Value> {
+    fn theme(&self) -> xenonet_api::cores::R<Value> {
         self.0.theme()
     }
-    fn set_theme(&self, id: &str) -> R<()> {
+    fn set_theme(&self, id: &str) -> xenonet_api::cores::R<()> {
         self.0.set_theme(id)
     }
-    fn environment(&self) -> R<Value> {
+    fn environment(&self) -> xenonet_api::cores::R<Value> {
         self.0.environment()
     }
-    fn set_environment(&self, id: &str) -> R<()> {
+    fn set_environment(&self, id: &str) -> xenonet_api::cores::R<()> {
         self.0.set_environment(id)
     }
-    fn workspace_root(&self) -> R<Value> {
+    fn workspace_root(&self) -> xenonet_api::cores::R<Value> {
         self.0.workspace_root()
     }
-    fn set_workspace_root(&self, dir: Option<&str>) -> R<()> {
+    fn set_workspace_root(&self, dir: Option<&str>) -> xenonet_api::cores::R<()> {
         self.0.set_workspace_root(dir)
     }
-    fn roots(&self) -> R<Value> {
+    fn roots(&self) -> xenonet_api::cores::R<Value> {
         self.0.roots()
     }
-    fn set_roots(&self, roots: &[String]) -> R<()> {
+    fn set_roots(&self, roots: &[String]) -> xenonet_api::cores::R<()> {
         self.0.set_roots(roots)
     }
-    fn app_roots(&self) -> R<Value> {
+    fn app_roots(&self) -> xenonet_api::cores::R<Value> {
         self.0.app_roots()
     }
-    fn set_app_roots(&self, roots: &Value) -> R<()> {
+    fn set_app_roots(&self, roots: &Value) -> xenonet_api::cores::R<()> {
         self.0.set_app_roots(roots)
     }
-    fn reconcile_checkouts(&self, found: &Value) -> R<Value> {
+    fn reconcile_checkouts(&self, found: &Value) -> xenonet_api::cores::R<Value> {
         self.0.reconcile_checkouts(found)
     }
-    fn agents_of(&self, sessions: &[String]) -> R<Value> {
+    fn agents_of(&self, sessions: &[String]) -> xenonet_api::cores::R<Value> {
         self.0.agents_of(sessions)
     }
-    fn checkouts(&self) -> R<Value> {
+    fn checkouts(&self) -> xenonet_api::cores::R<Value> {
         self.0.checkouts()
     }
-    fn space_tie(&self, marker: &Value) -> R<Value> {
+    fn space_tie(&self, marker: &Value) -> xenonet_api::cores::R<Value> {
         self.0.space_tie(marker)
     }
-    fn confirm_checkout(&self, id: &str) -> R<Value> {
+    fn confirm_checkout(&self, id: &str) -> xenonet_api::cores::R<Value> {
         self.0.confirm_checkout(id)
     }
-    fn project_rules(&self) -> R<Value> {
+    fn project_rules(&self) -> xenonet_api::cores::R<Value> {
         self.0.project_rules()
     }
-    fn set_project_rule(&self, key: &str, rule: Option<&Value>) -> R<()> {
+    fn set_project_rule(&self, key: &str, rule: Option<&Value>) -> xenonet_api::cores::R<()> {
         self.0.set_project_rule(key, rule)
     }
-    fn clear_project_rules(&self, under_key: Option<&str>) -> R<()> {
+    fn clear_project_rules(&self, under_key: Option<&str>) -> xenonet_api::cores::R<()> {
         self.0.clear_project_rules(under_key)
     }
-    fn app_setting(&self, app: &str, name: &str, scope: &str) -> R<Option<Value>> {
+    fn app_setting(&self, app: &str, name: &str, scope: &str) -> xenonet_api::cores::R<Option<Value>> {
         self.0.app_setting(app, name, scope)
     }
-    fn set_app_setting(&self, app: &str, name: &str, scope: &str, value: Option<&Value>) -> R<()> {
+    fn set_app_setting(&self, app: &str, name: &str, scope: &str, value: Option<&Value>) -> xenonet_api::cores::R<()> {
         self.0.set_app_setting(app, name, scope, value)
     }
-    fn identities(&self) -> R<Value> {
+    fn identities(&self) -> xenonet_api::cores::R<Value> {
         if self.1.load(Ordering::SeqCst) {
             return Err(xenonet_api::cores::CoreError::new("the store is unreadable"));
         }
         self.0.identities()
     }
-    fn set_identity_name(&self, id: &str, name: Option<&str>) -> R<()> {
+    fn set_identity_name(&self, id: &str, name: Option<&str>) -> xenonet_api::cores::R<()> {
         self.0.set_identity_name(id, name)
     }
-    fn set_identity_hidden(&self, id: &str, hidden: bool) -> R<()> {
+    fn set_identity_hidden(&self, id: &str, hidden: bool) -> xenonet_api::cores::R<()> {
         self.0.set_identity_hidden(id, hidden)
     }
-    fn set_identity_pin(&self, node: &str, identity: Option<&str>) -> R<()> {
+    fn set_identity_pin(&self, node: &str, identity: Option<&str>) -> xenonet_api::cores::R<()> {
         self.0.set_identity_pin(node, identity)
     }
-    fn set_identity_rule(&self, project: &str, rule: Option<&Value>) -> R<()> {
+    fn set_identity_rule(&self, project: &str, rule: Option<&Value>) -> xenonet_api::cores::R<()> {
         self.0.set_identity_rule(project, rule)
     }
-    fn set_identity_known(&self, id: &str, value: &Value) -> R<()> {
+    fn set_identity_known(&self, id: &str, value: &Value) -> xenonet_api::cores::R<()> {
         self.0.set_identity_known(id, value)
     }
-    fn set_signins(&self, app: &str, spans: &Value) -> R<()> {
+    fn set_signins(&self, app: &str, spans: &Value) -> xenonet_api::cores::R<()> {
         self.0.set_signins(app, spans)
     }
 }

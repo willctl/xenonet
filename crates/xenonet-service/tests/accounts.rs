@@ -48,7 +48,7 @@ struct Desk {
     ledger: String,
     work: String,
     rules: std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>,
-    roots: std::sync::Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>,
+    roots: Roots,
     unreadable: std::sync::Arc<std::sync::atomic::AtomicBool>,
     root: PathBuf,
 }
@@ -70,7 +70,7 @@ async fn desk(name: &str, atlas_rule: Value, sessions: impl FnOnce(&str, &str) -
     let accounts = Accounts {
         rules: std::sync::Arc::new(std::sync::Mutex::new(vec![(atlas.clone(), atlas_rule), (ledger.clone(), json!({ "claude": "nova-work@example.com" }))])),
         roots: std::sync::Arc::new(std::sync::Mutex::new(vec![(None, Some("nova@example.com".into())), (Some(work.clone()), Some("nova-work@example.com".into()))])),
-        unreadable: Default::default(),
+        unreadable: std::sync::Arc::default(),
         codex_roots: vec![(None, Some("nova@example.com".into()))],
         answers: true,
         limits: json!({ "claude": { "fiveHour": 40 }, format!("claude@{work}"): { "fiveHour": 92 } }),
