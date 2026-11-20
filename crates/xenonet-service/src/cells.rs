@@ -393,7 +393,8 @@ mod tests {
     struct Fake {
         inner: FakeDriver,
         copied: Mutex<Vec<String>>,
-        behave: Behave,
+        #[cfg(unix)]
+        out_symlink: bool,
     }
 
     fn listing(dir: &Path) -> String {
@@ -433,7 +434,7 @@ mod tests {
         async fn copy_out(&self, name: &CellName, guest: &str, host: &Path) -> adytum::Result<()> {
             std::fs::write(host.join("made.txt"), "hi").expect("a file");
             #[cfg(unix)]
-            if self.behave.out_symlink {
+            if self.out_symlink {
                 std::os::unix::fs::symlink("/etc/hosts", host.join("link")).expect("a link");
             }
             self.inner.copy_out(name, guest, host).await
@@ -486,7 +487,12 @@ mod tests {
             inner.fail_next(Op::Remove, Leaves::Nothing);
             inner.fail_next(Op::Remove, Leaves::Nothing);
         }
-        let driver = Arc::new(Fake { inner, copied: Mutex::new(Vec::new()), behave });
+        let driver = Arc::new(Fake {
+            inner,
+            copied: Mutex::new(Vec::new()),
+            #[cfg(unix)]
+            out_symlink: behave.out_symlink,
+        });
         let image = ImagePin::new("https://example.test/a.img".into(), format!("sha256:{}", "ab".repeat(32)), Arch::Aarch64).expect("a pin");
         let apps = vec![CellApp { app: "fake-agent".into(), program: "/bin/sh".into() }];
         let r = CellRunner::with_driver(driver.clone(), DriverKind::Lima, home.to_path_buf(), image, apps).with_prefix("adytum-test-").expect("prefix");
