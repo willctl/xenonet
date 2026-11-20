@@ -145,8 +145,8 @@ pub struct Turn<'a> {
     pub text: String,
     /// The run's sign-in, for an app that takes it on a descriptor (unix:
     /// Claude Code's CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR, which `env`
-    /// then names as 3). It is written into a socket pair the run gets one
-    /// end of, so it is in no environment a command could read.
+    /// then names as 3). It is written into a pipe the run gets the read end
+    /// of, so it is in no environment a command could read.
     pub sign_in: Option<&'a str>,
 }
 
@@ -245,22 +245,17 @@ fn spawn(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: Option<
     Spawned::start(&cmd).map(Proc::Group)
 }
 
-/// A run that reads its sign-in from descriptor 3: the token and a newline
-/// are written into a socket pair, our end is dropped, and the run gets the
-/// other. XenoNet's own descriptors stay close-on-exec, so the run has no
+/// A run that reads its sign-in from descriptor 3: a pipe whose read end
+/// the run has as descriptor 3, with the token and a newline written into
+/// it once the run has started, and our end closed (`Held::start`, which
+/// says what is left of a window). The run has descriptors 0 to 3 and no
 /// other. Made with std's command, since adytum-exec has no way to pass a
 /// descriptor and is Adytum's own repository.
 #[cfg(unix)]
 fn spawn_held(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: &str, deadline: Duration) -> Result<Proc, ExecError> {
-    let io = |source| ExecError::Io { what: "hand the run its sign-in", source };
-    let (ours, theirs) = std::os::unix::net::UnixStream::pair().map_err(io)?;
-    {
-        let mut ours = ours;
-        ours.write_all(token.as_bytes()).and_then(|()| ours.write_all(b"\n")).map_err(io)?;
-    }
     let mut c = std::process::Command::new(&how.program);
     c.args(&how.args).env_clear().envs(env.iter().map(|(k, v)| (k, v))).current_dir(cwd);
-    xenonet_os::process::Held::start(c, Some(deadline), Some((theirs.into(), SIGN_IN_FD)))
+    xenonet_os::process::Held::start(c, Some(deadline), Some(xenonet_os::process::Give { line: token, at: SIGN_IN_FD }))
         .map(Proc::Held)
         .map_err(|source| ExecError::Spawn { program: how.program.clone().into(), source })
 }
@@ -583,11 +578,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenonet-runner-fd-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        // Stands in for Claude Code: reads a line from descriptor 3, then
-        // reads the rest, which ends at once only if no process holds the
-        // other end open (XenoNet's end was dropped and wasn't passed on).
+        // Stands in for Claude Code: opens /dev/fd/3 (a pipe, as on Linux)
+        // for a line, then for the rest, which ends at once only if no
+        // process holds the write end open (XenoNet's was closed and wasn't
+        // passed on), and lists any descriptor past 3.
         let bin = dir.join("claude");
-        std::fs::write(&bin, "#!/bin/sh\nread line\nIFS= read -r tok <&3\nrest=$(cat <&3)\necho \"len: ${#tok} rest: ${#rest}\"\nenv | grep -c made-up-token\nexit 0\n").unwrap();
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\nread line\nIFS= read -r tok < /dev/fd/3\nrest=$(cat < /dev/fd/3)\necho \"len: ${#tok} rest: ${#rest}\"\necho \"env: $(env | grep -c made-up-token)\"\nn=4; while [ $n -lt 120 ]; do [ -e /dev/fd/$n ] && echo \"open $n\"; n=$((n+1)); done\necho \"fds done\"\nexit 0\n",
+        )
+        .unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -606,6 +606,8 @@ mod tests {
         let rec = r.list().into_iter().find(|x| x.pid == Some(f64::from(pid))).unwrap();
         let log = std::fs::read_to_string(dir.join("runs").join(format!("{}.log", rec.id))).unwrap();
         assert!(log.contains("len: 18 rest: 0"), "the run read its token from descriptor 3 and then the end: {log}");
+        assert!(log.contains("env: 0\n"), "it is in no environment: {log}");
+        assert!(log.contains("fds done") && !log.contains("open "), "the run has no descriptor past 3: {log}");
         assert!(!log.contains("made-up-token"), "the token isn't printed: {log}");
         let _ = std::fs::remove_dir_all(&dir);
     }
