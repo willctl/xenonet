@@ -36,6 +36,21 @@ const D1: &str = "codex:cccccccc-0001";
 const D2: &str = "claude:cccccccc-0002";
 const L2: &str = "claude:bbbbbbbb-0002";
 
+/// A first prompt without the paragraph that says the run is sandboxed, and
+/// whether it had one.
+fn without_sandbox_line(prompt: &str) -> (String, bool) {
+    let mut kept = Vec::new();
+    let mut had = false;
+    for paragraph in prompt.split("\n\n") {
+        if paragraph.starts_with("[XenoNet] This run is sandboxed.") {
+            had = true;
+        } else {
+            kept.push(paragraph);
+        }
+    }
+    (kept.join("\n\n"), had)
+}
+
 /// What a run of the fake keeps of its settings file and its environment:
 /// the file's contents and the variables' names, never their values.
 #[test]
@@ -1471,6 +1486,10 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let (args, prompt) = ran(&c, 1).await;
     assert_eq!(&args[..3], ["-p", "--session-id", session.trim_start_matches("claude:")], "{args:?}");
     assert!(args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1].ends_with("__permission")), "{args:?}");
+    // From another machine, a start is sandboxed unless it says otherwise,
+    // and the first prompt says so after who asked.
+    let (prompt, sandboxed) = without_sandbox_line(&prompt);
+    assert!(sandboxed, "a start from another machine is sandboxed by default");
     assert_eq!(prompt, "[XenoNet] Started by you, at studio's console.\n\nLook at the ledger.");
     let ended = studio.next("start", 15, |d| d["state"] == "ended").await;
     assert_eq!(
@@ -1540,32 +1559,30 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     // …and started once the founder lets the network start sessions there.
     a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
     until("desk's start is network", 10, || async { c.state().await["start"] == "network" }).await;
+    // A session's start of Grok Build, which has no sandbox to drive, is
+    // refused in words: a start that isn't yours is sandboxed.
     as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
-    let got =
-        until_value("laptop's session hears desk started it", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("Started grok:")).map(Value::String) }).await;
-    assert!(got.as_str().unwrap().ends_with("on desk, in ~. Message it as you would any session."), "{got}");
+    let got = until_value("laptop's session hears grok can't be sandboxed", 15, || async {
+        inbox(&b, ASKER).await.into_iter().find(|t| t.contains("Grok Build has no sandbox")).map(Value::String)
+    })
+    .await;
+    assert!(got.as_str().unwrap().starts_with("[XenoNet] No session was started on desk:"), "{got}");
+    assert_eq!(fake_runs(&c).len(), 1);
+    // You may start it at studio's window, unsandboxed if you say so.
+    let grok = json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan", "sandbox": false });
+    let (s, v) = a.window("POST", "/api/start", grok.clone()).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let started = studio.next("start", 15, |d| d["state"] == "started" && d["session"].as_str().is_some_and(|s| s.starts_with("grok:"))).await;
     let (args, prompt) = ran(&c, 2).await;
     assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]) && args.contains(&"--prompt-file".to_string()), "{args:?}");
-    assert_eq!(
-        prompt,
-        format!(
-            "[XenoNet] laptop says this was asked by the session «Fix the login form» ({asker}). It came from an agent, not from your user.\n\nRun the fixtures.",
-            asker = b.agt(ASKER)
-        )
-    );
-    let got = until_value("laptop's session hears the run ended", 15, || async {
-        inbox(&b, ASKER).await.into_iter().find(|t| t.contains("sent no report of its own")).map(Value::String)
-    })
-    .await;
-    assert!(got.as_str().unwrap().contains("on desk finished after") && got.as_str().unwrap().contains("Its last words: «Done: ledger checked.»"), "{got}");
+    assert_eq!(prompt, "[XenoNet] Started by you, at studio's console.\n\nRun the fixtures.");
+    let ended = studio.next("start", 15, |d| d["state"] == "ended" && d["session"] == started["session"]).await;
+    assert!(ended["words"].as_str().unwrap().contains("finished after") && ended["words"].as_str().unwrap().contains("Its last words: «Done: ledger checked.»"), "{ended}");
     // The same start again within the minute: a repeat, held by desk's
     // limits on messages.
-    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
-    let got = until_value("laptop's session hears the repeat was held", 15, || async {
-        inbox(&b, ASKER).await.into_iter().find(|t| t.contains("asked for under a minute ago")).map(Value::String)
-    })
-    .await;
-    assert_eq!(got, "[XenoNet] No session was started on desk: the same start was asked for under a minute ago.");
+    a.window("POST", "/api/start", grok).await;
+    let refused = studio.next("start", 15, |d| d["state"] == "refused").await;
+    assert_eq!(refused["reason"], "the same start was asked for under a minute ago", "{refused}");
     assert_eq!(fake_runs(&c).len(), 2);
     // Bypassing permission checks is never taken.
     let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "x", "mode": "bypassPermissions" })).await;
@@ -1823,6 +1840,8 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let (args, prompt) = ran(&c, 1).await;
     let day = xenonet_text::time::iso(now_ms()).chars().take(10).collect::<String>();
+    let (prompt, sandboxed) = without_sandbox_line(&prompt);
+    assert!(sandboxed, "a delegated start is sandboxed");
     assert_eq!(
         prompt,
         format!(

@@ -6,6 +6,7 @@
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+#![expect(dead_code, reason = "the shared engine harness does more than this file uses")]
 
 mod common;
 #[path = "common/engine.rs"]
@@ -75,7 +76,7 @@ async fn a_start_from_another_machine_without_the_sandbox_is_refused() {
     let refused = t.desk.logged("start").join("\n");
     assert!(refused.contains("sandbox"), "the refusal says why: {refused}");
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(fake_runs(&t.desk).is_empty(), "nothing ran");
+    assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -159,7 +160,38 @@ async fn an_app_with_no_sandbox_refuses_a_sandboxed_start_in_words() {
     let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "app": "grok", "prompt": "tidy atlas", "sandbox": true })).await;
     assert_eq!(s, 409, "{v}");
     assert!(v["error"].as_str().is_some_and(|e| e.contains("Grok Build") && e.contains("sandbox")), "{v}");
-    assert!(fake_runs(&t.desk).is_empty());
+    assert_eq!(fake_runs(&t.desk).len(), 0);
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A session that was started sandboxed is resumed sandboxed: the turn a
+/// message wakes it for loads the run's settings and none of the repo's, and
+/// has the scrubbed environment, never the bare turn a session without a
+/// sandbox gets.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_turn_resumed_for_a_sandboxed_session_is_sandboxed_too() {
+    let root = root("sandbox-resume");
+    std::env::set_var("SANDBOX_TEST_API_KEY", "not-for-the-run");
+    let t = two_networks_ended(&root).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    let record = xenonet_service::compose::runtime::sandbox::Record { folder: atlas.clone(), domains: Vec::new() };
+    xenonet_service::compose::runtime::sandbox::keep(&t.desk.world, DESK_ATLAS_ENDED, &record);
+    until("desk knows contractor-vm's session", 20, || async { t.desk.peers(DESK_ATLAS_ENDED).await.contains(&t.contractor.agt(VM_ATLAS)) }).await;
+    let (s, v) = t.desk.window("PUT", "/api/net/settings", json!({ "network": "work", "host": "desk", "wake": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    let frame = json!({
+        "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-000000000071", "sender": VM_ATLAS, "senderKind": "agent", "agent": t.contractor.agt(VM_ATLAS),
+        "target": t.desk.agt(DESK_ATLAS_ENDED), "body": "The fixtures moved.", "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now_ms() as i64,
+    });
+    t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: frame }).unwrap();
+    let (args, _) = ran(&t.desk, 1).await;
+    assert_eq!(&args[..2], ["-p", "--resume"], "{args:?}");
+    assert!(args.iter().any(|a| a == "--strict-mcp-config") && args.iter().any(|a| a == "--setting-sources="), "{args:?}");
+    let (settings, names) = fake_files(&t.desk.dir, 1).unwrap();
+    let settings: Value = serde_json::from_str(&settings.expect("a settings file")).unwrap();
+    assert_eq!(settings["sandbox"]["filesystem"]["allowWrite"], json!([atlas]));
+    assert!(!names.iter().any(|n| n == "SANDBOX_TEST_API_KEY"), "{names:?}");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
