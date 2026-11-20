@@ -245,6 +245,10 @@ fn sessions(today: &str) -> Vec<Value> {
         ] }),
         json!({ "app": "grok", "project": "atlas-web", "title": "Check contrast on every page", "ago": 3, "parent": 14, "subagent": true, "turns": [{ "prompt": "Check contrast on every page in dark mode.", "steps": [["run", "npm run test:contrast", true]], "reply": "All 23 pages pass. The sale badge was closest, at 4.6 to 1." }] }),
         json!({ "app": "grok", "project": "pathfinder", "title": "Map the depot loading rules", "ago": 75, "turns": [{ "prompt": "Write down the depot's loading rules as constraints the solver can use.", "steps": [["read", "src/solver.rs"], ["mcp", "xenolith", "context_log", { "pages": ["pathfinder"] }]], "reply": "The loading rules are on the pathfinder context page as seven constraints. Two need data the depot doesn't send yet." }] }),
+        // T3 Code's, last again: a Claude Code session it runs in a
+        // worktree of atlas-web under its own folder, which the map puts in
+        // atlas-web.
+        json!({ "app": "claude", "project": "atlas-web", "cwd": [".t3", "worktrees", "atlas", "checkout-v3"], "title": "Fix the rounding in the checkout total", "branch": "checkout-v3", "ago": 50, "t3": true, "turns": [{ "prompt": "The checkout total is a cent off when a coupon applies. Find out why.", "steps": [["read", "app/checkout/page.tsx"]], "reply": "The coupon is applied per line and rounded each time. Rounding once on the sum fixes it." }] }),
     ]
 }
 
@@ -811,6 +815,14 @@ impl Demo {
                 }
             }
         }
+        // The worktree T3 Code made for one of the sessions, where it keeps
+        // them: atlas-web's, in a folder outside Projects.
+        if git_ok {
+            let wt = NATIVE.join(&[&home, ".t3", "worktrees", "atlas", "checkout-v3"]);
+            if files::mkdir_p(&NATIVE.dirname(&wt), None).is_ok() {
+                git(&projects("atlas-web"), &["worktree", "add", "-q", "-b", "checkout-v3", &wt]);
+            }
+        }
         let clients = |rel: &str| NATIVE.join(&[&home, "Clients", rel]);
         self.client_repos = Self::write_files(CLIENTS, &clients, git_ok)?;
         self.sessions = sessions(&self.today);
@@ -1028,6 +1040,10 @@ impl Demo {
                 "parentKind": parent.as_ref().map(|_| if subagent { "subagent" } else { "spawn" }),
                 "claudeAccount": if app == "claude" && desktop { demo_claude_account(s.get("project").and_then(Value::as_str)) } else { Value::Null },
             });
+            // The app that runs it, for the sessions T3 Code does.
+            if flag(s, "t3") {
+                session["runsIn"] = json!("t3-code");
+            }
             // A session of the second Claude folder carries it.
             if flag(s, "workRoot") {
                 session["root"] = json!(self.world.claude_work);
@@ -1174,6 +1190,12 @@ mod tests {
         assert_eq!((summary["parent_session_id"].as_str(), summary["session_kind"].as_str()), (Some(id_of(14).as_str()), Some("subagent")));
         let first: Value = serde_json::from_str(std::fs::read_to_string(folder.join("updates.jsonl")).unwrap().lines().next().unwrap()).unwrap();
         assert_eq!(first["params"]["update"]["sessionUpdate"], "user_message_chunk");
+        // T3 Code's session, in a worktree of atlas-web under its own folder.
+        let t3 = claude.last().unwrap();
+        assert_eq!(t3["runsIn"], "t3-code");
+        assert!(claude.iter().filter(|s| s.get("runsIn").is_some()).count() == 1);
+        let cwd = t3["cwd"].as_str().unwrap();
+        assert!(cwd.replace('\\', "/").ends_with(".t3/worktrees/atlas/checkout-v3"), "{cwd}");
         assert!(demo.transcript("nope").is_err());
         assert_eq!(demo_picks(&json!([{ "path": "labs/snippets", "xenonet": "folder" }]))[0]["as"], "project");
         std::fs::remove_dir_all(&tmp).unwrap();
