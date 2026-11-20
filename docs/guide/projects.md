@@ -28,7 +28,7 @@ A worktree inside its repo, such as one in Claude's `.claude/worktrees` folder, 
 
 ### Worktrees
 
-A session that ran in a linked git worktree (`git worktree add`) belongs to the project of the checkout the worktree is of, wherever the worktree folder is: under `~/.t3/worktrees` for T3 Code, beside the repo, or anywhere another tool puts it. The session's folder is then the main checkout's, and the inspector's worktree row shows the worktree, as it does for Claude desktop's and Grok Build's worktree sessions.
+A session that ran in a linked git worktree (`git worktree add`) belongs to the project of the checkout the worktree is of, wherever the worktree folder is: under `~/.t3/worktrees` for T3 Code, beside the repo, or anywhere another tool puts it. The session's folder is then the main checkout's, and the inspector's worktree row shows the folder in the worktree where it ran (a resumed turn runs there), as it does for Claude desktop's and Grok Build's worktree sessions.
 
 This holds when the main checkout is itself a project XenoNet has, and the worktree uses that checkout's own git folder. A worktree of any other folder stays a folder of its own, as before.
 

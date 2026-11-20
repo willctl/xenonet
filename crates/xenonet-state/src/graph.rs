@@ -143,9 +143,11 @@ fn items(v: Option<&Value>) -> &[Value] {
 /// worktree add ../x`, any tool's), when that checkout is a project the map
 /// has: its folder becomes the main checkout's and its worktree the
 /// worktree's, as Claude desktop's and Grok Build's worktree sessions give
-/// them. A worktree of a folder that isn't a project, one that doesn't
-/// share the main checkout's git folder, and a session that already names
-/// its worktree stay as they are.
+/// them. The worktree keeps the exact folder the session ran in, since a
+/// resumed turn runs there and Claude Code finds its transcript by it. A
+/// worktree of a folder that isn't a project, one that doesn't share the
+/// main checkout's git folder, and a session that already names its
+/// worktree stay as they are.
 fn in_main_checkouts(sessions: &[Value], project_keys: &HashSet<String>) -> Vec<Value> {
     let checkouts = xenonet_adapter::repo::checkouts();
     // Sessions often share a folder, and each lookup reads the disk.
@@ -167,7 +169,7 @@ fn in_main_checkouts(sessions: &[Value], project_keys: &HashSet<String>) -> Vec<
                     }
                     let inside = std::path::Path::new(&cwd).strip_prefix(&here.top).ok().filter(|r| !r.as_os_str().is_empty());
                     let folder = inside.map_or_else(|| main_s.clone(), |r| main.join(r).to_string_lossy().into_owned());
-                    Some((folder, here.top.to_string_lossy().into_owned()))
+                    Some((folder, cwd.clone()))
                 })
                 .clone();
             let Some((folder, worktree)) = moved else { return s.clone() };
@@ -644,7 +646,7 @@ mod tests {
         assert_eq!(home("claude:t3"), Some(project.clone()));
         assert_eq!((node("claude:t3")["cwd"].as_str(), node("claude:t3")["worktree"].as_str()), (Some(&*atlas_s), Some(&*atlas_wt_s)));
         assert_eq!(home("claude:sub"), Some(project), "a folder inside the worktree too");
-        assert_eq!(node("claude:sub")["worktree"].as_str(), Some(&*atlas_wt_s));
+        assert_eq!(node("claude:sub")["worktree"].as_str(), Some(&*format!("{atlas_wt_s}/src")), "the folder it ran in, where a resumed turn runs");
         // A worktree of a folder that isn't a project stays where it was.
         assert!(home("claude:other").is_some_and(|h| h.starts_with("zone:")), "{:?}", home("claude:other"));
         assert!(node("claude:other")["worktree"].is_null());
