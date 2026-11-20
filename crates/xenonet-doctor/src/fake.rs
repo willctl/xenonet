@@ -25,13 +25,15 @@ pub struct Fake {
     pub run: Run,
     pub login: Option<Value>,
     pub network: Option<Value>,
+    /// The drift log's records, as the host reads them.
+    pub drift: Option<Value>,
     /// Commands `which` doesn't find.
     pub missing: Vec<&'static str>,
 }
 
 impl Default for Fake {
     fn default() -> Self {
-        Fake { run: Box::new(|file, args| json!({ "stdout": format!("ran {file} {}", args.first().unwrap_or(&"")), "code": 0 })), login: None, network: None, missing: Vec::new() }
+        Fake { run: Box::new(|file, args| json!({ "stdout": format!("ran {file} {}", args.first().unwrap_or(&"")), "code": 0 })), login: None, network: None, drift: None, missing: Vec::new() }
     }
 }
 
@@ -87,7 +89,7 @@ impl DoctorHost for Fake {
         unreachable!("errors")
     }
     async fn drift(&self) -> Value {
-        unreachable!("drift")
+        self.drift.clone().unwrap_or_else(|| unreachable!("drift"))
     }
     async fn login(&self) -> Option<Value> {
         self.login.clone()
