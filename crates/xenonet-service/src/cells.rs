@@ -504,7 +504,7 @@ mod tests {
         let args = ["agent.sh".to_owned()];
         let req = CellRequest {
             wall: &wall,
-            identity_id: "git:x",
+            signer_id: "git:x",
             app: "fake-agent",
             args: &args,
             stdin: Some(b"prompt"),

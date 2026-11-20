@@ -195,10 +195,13 @@ pub struct CellApp {
 /// A start, as the engine hands it to a cell.
 #[derive(Clone, Debug)]
 pub struct CellRequest<'a> {
-    /// The wall the signed act names: the identity's own, or refused.
+    /// The wall the signed act names: the signer's own, or refused.
     pub wall: &'a str,
-    /// The identity the start runs as (`identity/v1`'s id).
-    pub identity_id: &'a str,
+    /// The id the wall is made from: the verified signer's person id
+    /// (`prs_…`), the one the service made the signed wall from
+    /// (`wall_for_identity`), never the id of the account the app signs in
+    /// with.
+    pub signer_id: &'a str,
     pub app: &'a str,
     /// The arguments after the program. The host's own path to the app is
     /// not here: the program run is the image's.
@@ -275,7 +278,7 @@ pub trait CellHost: Send + Sync {
 /// Checks every rule for a start and makes its plan. Nothing is run or
 /// written.
 pub fn plan(host: &dyn CellHost, req: &CellRequest<'_>) -> Result<CellPlan, ConfineError> {
-    let wall = check_wall(req.wall, req.identity_id)?;
+    let wall = check_wall(req.wall, req.signer_id)?;
     let program = host
         .apps()
         .into_iter()
@@ -476,7 +479,7 @@ mod tests {
     fn request<'a>(wall: &'a str, identity: &'a str, project: &'a Path) -> CellRequest<'a> {
         CellRequest {
             wall,
-            identity_id: identity,
+            signer_id: identity,
             app: "fake-agent",
             args: &[],
             stdin: None,
@@ -488,6 +491,23 @@ mod tests {
             keep: false,
             deadline: None,
         }
+    }
+
+    #[test]
+    fn the_wall_the_service_signs_is_the_one_the_plan_checks_by_the_signers_id() {
+        // The service signs wall_for_identity(<the verified signer's person id>)
+        // into the act; the plan is handed that same id and no other.
+        let (signer, account) = ("prs_nova0123456789abcdefghijklmnopq", "claude:acct_1:org_1");
+        let signed = cell_for(signer);
+        let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
+        let tree = Tree::new("signer-wall");
+        let (project, home) = (tree.base.join("home/Projects/atlas"), tree.home());
+        let mut req = request(&signed, signer, &project);
+        req.host_home = &home;
+        assert!(plan(&fake, &req).is_ok(), "the signer's id: the wall passes");
+        // The id of the account the app signs in with is not the id the wall was made from.
+        req.signer_id = account;
+        assert!(matches!(plan(&fake, &req), Err(ConfineError::WallNotIdentitys { .. })));
     }
 
     #[test]

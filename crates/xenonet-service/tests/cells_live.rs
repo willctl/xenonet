@@ -113,7 +113,7 @@ env | sort | cut -d= -f1 | tr '\n' ' '; echo
         &runner,
         &CellRequest {
             wall: &wall,
-            identity_id: identity,
+            signer_id: identity,
             app: "fake-agent",
             args: &args,
             stdin: Some(b"hello prompt\n"),
