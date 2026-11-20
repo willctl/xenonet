@@ -440,7 +440,7 @@ fn apart(mut r: Request) -> Apart {
 /// behind: the request never names one, and the act is built with the
 /// wall the signer's id gives, so the signature covers that wall and no
 /// other.
-fn run_act(machine: &xenonet_authz::MachineId, r: &Request, signer: Option<&str>) -> Result<(xenonet_authz::Resource, xenonet_authz::Act), String> {
+fn run_act(machine: &xenonet_authz::MachineId, r: &Request, signer: Option<&xenonet_authz::PersonId>) -> Result<(xenonet_authz::Resource, xenonet_authz::Act), String> {
     let app = xenonet_authz::AppId::new(&r.app).map_err(|e| e.message)?;
     let folder = xenonet_authz::Folder::new(&r.folder).map_err(|e| e.message)?;
     let mode = if r.delegate { xenonet_authz::StartMode::Delegated } else { xenonet_authz::StartMode::Asks };
@@ -1259,7 +1259,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     let token_text = by.as_object_mut().and_then(|o| o.remove("token")).and_then(|t| t.as_str().map(str::to_string));
     let Some(g) = crate::compose::runtime::ground::ground(w, None) else { return Err((503, "this machine's governance isn't plugged in, so it starts nothing".into())) };
     // The identity that signs a start of yours, whose wall a cell runs behind.
-    let signer = (kind == Kind::You).then(|| g.facts.identity.person_id()).flatten();
+    let signer = (kind == Kind::You).then(|| g.facts.identity.person_id()).flatten().and_then(|p| xenonet_authz::PersonId::new(&p).ok());
     let token = match (kind, &token_text) {
         (Kind::Actor, Some(t)) => Some(xenonet_authz::Token::parse(t, xenonet_authz::ACTOR_PREFIX, &g, g.facts.now).map_err(|e| (403, e.message))?),
         (Kind::Actor, None) => return Err((403, "an actor starts a session with its token".into())),
@@ -1271,7 +1271,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         let start = apart(r);
         let r = &start.request;
         let id = s(&by, "id").unwrap_or_default();
-        let (resource, act) = run_act(&g.facts.machine, r, signer.as_deref()).map_err(|why| (400, why))?;
+        let (resource, act) = run_act(&g.facts.machine, r, signer.as_ref()).map_err(|why| (400, why))?;
         let principal = match (&token, kind) {
             (_, Kind::You) => {
                 let auth =
@@ -1336,7 +1336,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     // actor: a token minted for the start, once its own has the right.
     let authority = if kind == "you" {
         let there = crate::compose::runtime::ground::machine(&host).map_err(|why| (400, why))?;
-        let (resource, act) = run_act(&there, &r, signer.as_deref()).map_err(|why| (400, why))?;
+        let (resource, act) = run_act(&there, &r, signer.as_ref()).map_err(|why| (400, why))?;
         crate::compose::runtime::ground::authority(&g.facts.identity, at_window, &resource, &act, &format!("start {} on {host} as you", r.app), g.facts.now)
             .map_err(|why| (403, why))?
     } else if let Some(t) = &token {
@@ -1460,8 +1460,9 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, ag
     // The signer of a person's start, from the authority it came with: its
     // wall is derived from that, never taken from the request. The
     // signature is checked over the act built with it.
-    let signer = (k == Kind::You).then(|| authority.get("person").and_then(|p| p.get("person")).and_then(Value::as_str)).flatten();
-    let decided = run_act(&g.facts.machine, r, signer).and_then(|(resource, act)| {
+    let signer =
+        (k == Kind::You).then(|| authority.get("person").and_then(|p| p.get("person")).and_then(Value::as_str)).flatten().and_then(|p| xenonet_authz::PersonId::new(p).ok());
+    let decided = run_act(&g.facts.machine, r, signer.as_ref()).and_then(|(resource, act)| {
         crate::compose::runtime::network::judge_remote_reaching(
             w,
             &mut g,

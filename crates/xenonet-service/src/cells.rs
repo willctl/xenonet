@@ -500,11 +500,11 @@ mod tests {
     }
 
     fn make_plan(r: &CellRunner, project: &Path, keep: bool, copy_out: bool) -> CellPlan {
-        let wall = xenonet_engine::confine::wall_for_identity("git:x").expect("wall").to_string();
+        let wall = xenonet_engine::confine::wall_for_identity(&xenonet_authz::PersonId::new("git:x").unwrap()).expect("wall").to_string();
         let args = ["agent.sh".to_owned()];
         let req = CellRequest {
             wall: &wall,
-            signer_id: "git:x",
+            signer_id: &xenonet_authz::PersonId::new("git:x").unwrap(),
             app: "fake-agent",
             args: &args,
             stdin: Some(b"prompt"),
@@ -538,7 +538,7 @@ mod tests {
         let name: CellName = run.cell.parse().expect("a name");
         let spec = driver.inner.spec(&name).expect("the spec");
         assert!(spec.sealed && spec.mounts.is_empty() && spec.ports.is_empty() && spec.network.is_none());
-        assert_eq!(spec.wall, xenonet_engine::confine::wall_for_identity("git:x").expect("wall"));
+        assert_eq!(spec.wall, xenonet_engine::confine::wall_for_identity(&xenonet_authz::PersonId::new("git:x").unwrap()).expect("wall"));
         let execs = execs.lock().expect("lock");
         assert_eq!(execs[0].argv, ["mkdir", "-p", "--", "/tmp/xn-home"], "the cell's user makes its home");
         let ran = execs[1].argv.join(" ");

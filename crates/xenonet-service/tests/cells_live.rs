@@ -103,8 +103,8 @@ env | sort | cut -d= -f1 | tr '\n' ' '; echo
     std::fs::write(project.join("agent.sh"), script).unwrap();
     std::fs::write(project.join(".env"), "SECRET=1\n").unwrap();
 
-    let identity = "git:live-test";
-    let wall = wall_for_identity(identity).unwrap().to_string();
+    let identity = xenonet_authz::PersonId::new("git:live-test").unwrap();
+    let wall = wall_for_identity(&identity).unwrap().to_string();
     let runner = CellRunner::lima(home.0.clone(), vec![CellApp { app: "fake-agent".into(), program: "/bin/sh".into() }]).unwrap().with_prefix("adytum-test-").unwrap();
     let args = ["agent.sh".to_owned()];
     let host_home = std::env::var("HOME").unwrap_or_default();
@@ -113,7 +113,7 @@ env | sort | cut -d= -f1 | tr '\n' ' '; echo
         &runner,
         &CellRequest {
             wall: &wall,
-            signer_id: identity,
+            signer_id: &identity,
             app: "fake-agent",
             args: &args,
             stdin: Some(b"hello prompt\n"),

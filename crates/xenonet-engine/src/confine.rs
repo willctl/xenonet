@@ -37,6 +37,7 @@ use sha2::{Digest, Sha256};
 use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use xenonet_authz::PersonId;
 
 /// What is not copied into a cell from a project: files that hold secrets.
 pub const COPY_EXCLUDE: &[&str] = &[".env", ".env.*", ".git/config"];
@@ -109,12 +110,19 @@ impl fmt::Display for ConfineError {
 
 impl std::error::Error for ConfineError {}
 
+/// The wall of the person who signs a start, from their id as the chain gives
+/// it (`prs_…`): never the id of the account an app signs in with, which is
+/// another kind of id and has its own type (or none) wherever it is kept.
+pub fn wall_for_identity(person: &PersonId) -> Result<Wall, ConfineError> {
+    wall_of(person.as_str())
+}
+
 /// The wall of an identity, from its id (`claude:<account>:<org>`,
 /// `github:<host>/<login>`…). The rule: `wall_`, the id as a lowercase slug
 /// (anything outside a-z and 0-9 becomes one `-`, at most 32 characters),
 /// `_`, and the first 16 hex digits of the id's SHA-256. The hash is of the
 /// id as written, so two ids that slug alike still get two walls.
-pub fn wall_for_identity(identity_id: &str) -> Result<Wall, ConfineError> {
+fn wall_of(identity_id: &str) -> Result<Wall, ConfineError> {
     if identity_id.trim().is_empty() {
         return Err(ConfineError::IdentityMissing);
     }
@@ -142,9 +150,9 @@ pub fn wall_for_identity(identity_id: &str) -> Result<Wall, ConfineError> {
 /// Whether `wall` is the wall of the identity the start runs as. The wall
 /// of a start comes from the signed act and the identity from the verified
 /// signer, never from the request.
-pub fn check_wall(wall: &str, identity_id: &str) -> Result<Wall, ConfineError> {
+pub fn check_wall(wall: &str, person: &PersonId) -> Result<Wall, ConfineError> {
     let given = wall.parse::<Wall>().map_err(|_| ConfineError::WallMalformed(wall.to_owned()))?;
-    let expected = wall_for_identity(identity_id)?;
+    let expected = wall_for_identity(person)?;
     if given == expected {
         Ok(given)
     } else {
@@ -201,7 +209,7 @@ pub struct CellRequest<'a> {
     /// (`prs_…`), the one the service made the signed wall from
     /// (`wall_for_identity`), never the id of the account the app signs in
     /// with.
-    pub signer_id: &'a str,
+    pub signer_id: &'a PersonId,
     pub app: &'a str,
     /// The arguments after the program. The host's own path to the app is
     /// not here: the program run is the image's.
@@ -472,14 +480,19 @@ mod tests {
         }
     }
 
-    fn cell_for(identity: &str) -> String {
-        wall_for_identity(identity).expect("a wall").to_string()
+    fn person(id: &str) -> PersonId {
+        PersonId::new(id).expect("a person id")
     }
 
-    fn request<'a>(wall: &'a str, identity: &'a str, project: &'a Path) -> CellRequest<'a> {
+    fn cell_for(identity: &str) -> String {
+        wall_for_identity(&person(identity)).expect("a wall").to_string()
+    }
+
+    fn request<'a>(wall: &'a str, identity: &str, project: &'a Path) -> CellRequest<'a> {
         CellRequest {
             wall,
-            signer_id: identity,
+            // Leaked: a test's request borrows its signer for as long as the test.
+            signer_id: Box::leak(Box::new(person(identity))),
             app: "fake-agent",
             args: &[],
             stdin: None,
@@ -506,20 +519,21 @@ mod tests {
         req.host_home = &home;
         assert!(plan(&fake, &req).is_ok(), "the signer's id: the wall passes");
         // The id of the account the app signs in with is not the id the wall was made from.
-        req.signer_id = account;
+        let account = person(account);
+        req.signer_id = &account;
         assert!(matches!(plan(&fake, &req), Err(ConfineError::WallNotIdentitys { .. })));
     }
 
     #[test]
     fn a_malformed_wall_is_refused() {
-        assert_eq!(check_wall("work", "git:x"), Err(ConfineError::WallMalformed("work".into())));
-        assert_eq!(check_wall("", "git:x"), Err(ConfineError::WallMalformed(String::new())));
+        assert_eq!(check_wall("work", &person("git:x")), Err(ConfineError::WallMalformed("work".into())));
+        assert_eq!(check_wall("", &person("git:x")), Err(ConfineError::WallMalformed(String::new())));
     }
 
     #[test]
     fn another_identitys_wall_is_refused() {
         let theirs = cell_for("github:github.com/other");
-        assert!(matches!(check_wall(&theirs, "github:github.com/nova"), Err(ConfineError::WallNotIdentitys { .. })));
+        assert!(matches!(check_wall(&theirs, &person("github:github.com/nova")), Err(ConfineError::WallNotIdentitys { .. })));
         let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
         let req = request(&theirs, "github:github.com/nova", work());
         assert!(matches!(plan(&fake, &req), Err(ConfineError::WallNotIdentitys { .. })));
@@ -529,34 +543,34 @@ mod tests {
     #[test]
     fn an_identitys_own_wall_passes() {
         let mine = cell_for("github:github.com/nova");
-        assert_eq!(check_wall(&mine, "github:github.com/nova").map(|w| w.to_string()), Ok(mine));
+        assert_eq!(check_wall(&mine, &person("github:github.com/nova")).map(|w| w.to_string()), Ok(mine));
     }
 
     #[test]
     fn the_wall_for_an_identity_is_derived_the_documented_way() {
-        let w = wall_for_identity("claude:Nova@Example.com:Atlas Org").expect("a wall");
+        let w = wall_of("claude:Nova@Example.com:Atlas Org").expect("a wall");
         let text = w.to_string();
         assert!(text.starts_with("wall_claude-nova-example-com-atlas-or_"), "{text}");
         assert_eq!(text.len(), "wall_claude-nova-example-com-atlas-or_".len() + 16);
-        assert_eq!(wall_for_identity("claude:Nova@Example.com:Atlas Org").expect("again"), w, "the same id gives the same wall");
+        assert_eq!(wall_of("claude:Nova@Example.com:Atlas Org").expect("again"), w, "the same id gives the same wall");
     }
 
     #[test]
     fn ids_that_slug_alike_get_different_walls() {
-        let a = wall_for_identity("git:a.b").expect("a");
-        let b = wall_for_identity("git:a-b").expect("b");
-        let c = wall_for_identity("GIT:A_B").expect("c");
+        let a = wall_for_identity(&person("git:a.b")).expect("a");
+        let b = wall_for_identity(&person("git:a-b")).expect("b");
+        let c = wall_for_identity(&person("GIT:A_B")).expect("c");
         assert!(a != b && b != c && a != c);
     }
 
     #[test]
     fn a_long_or_odd_id_still_gives_a_valid_wall() {
         for id in [&"x".repeat(500)[..], "::::", "é", "a b\tc"] {
-            let w = wall_for_identity(id).expect(id);
+            let w = wall_of(id).expect(id);
             assert!(w.as_str().len() <= 5 + 64, "{w}");
         }
-        assert_eq!(wall_for_identity(""), Err(ConfineError::IdentityMissing));
-        assert_eq!(wall_for_identity("  "), Err(ConfineError::IdentityMissing));
+        assert_eq!(wall_of(""), Err(ConfineError::IdentityMissing));
+        assert_eq!(wall_of("  "), Err(ConfineError::IdentityMissing));
     }
 
     #[test]
@@ -740,7 +754,7 @@ mod tests {
         assert_eq!(names, ["PATH", "HOME", "LANG"]);
         assert_eq!(plan.env[1].1, CELL_HOME);
         assert!(!plan.env.iter().any(|(_, v)| v.contains(HOME)));
-        assert_eq!(plan.wall, wall_for_identity("git:x").expect("wall"));
+        assert_eq!(plan.wall, wall_for_identity(&person("git:x")).expect("wall"));
     }
 
     #[test]
