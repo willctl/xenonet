@@ -531,7 +531,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         }
         None => None,
     };
-    if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref()) {
+    if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref(), record.is_some()) {
         if started.is_ok() {
             w.starts.history.locked().push((now, bucket));
         }
@@ -663,6 +663,13 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     Ok(first)
 }
 
+/// What a sandboxed start does about ACP, which has no sandbox XenoNet
+/// drives: an app with a headless start is started that way (None), and one
+/// without isn't started.
+fn acp_for_sandboxed(name: &str, headless: bool) -> Option<Result<Value, String>> {
+    (!headless).then(|| Err(format!("{name} would be started over ACP, which has no sandbox XenoNet drives, so a sandboxed start of it isn't made")))
+}
+
 /// A start over ACP, for an app the registry gives `acp`, with no mode
 /// asked for (ACP has no word for XenoNet's modes): its first answer once
 /// its session is open, or why it couldn't be. None leaves it to the
@@ -681,11 +688,15 @@ fn over_acp(
     cwd: &str,
     answer: &Answer,
     intent: Option<&crate::compose::runtime::intents::Intended>,
+    sandboxed: bool,
 ) -> Option<Result<Value, String>> {
     let side = w.acp.get()?.clone();
     let platform = xenonet_adapter::platforms().get(&r.app)?;
     platform.app().acp.as_ref()?;
     let headless = xenonet_engine::delivery::apps::of(&r.app).is_some_and(|w| w.start.is_some());
+    if sandboxed {
+        return acp_for_sandboxed(&platform.app().name, headless);
+    }
     if r.mode.is_some() {
         return None;
     }
@@ -1159,6 +1170,12 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     if r.sandbox == starts::SandboxAsk::Unset {
         r.sandbox = if kind != Kind::You || machine.is_some() || r.delegate { starts::SandboxAsk::On(Vec::new()) } else { starts::SandboxAsk::Off };
     }
+    // Only the person starts a run without the sandbox, and it is refused
+    // here as well as at the door: a start sent to another machine is
+    // decided there, and an older XenoNet would take "off" for no word.
+    if r.sandbox == starts::SandboxAsk::Off && kind != Kind::You {
+        return Err((409, "a session or an actor can't start a run without its app's sandbox: only you can, from your own console".into()));
+    }
     // An actor's own token, as it called with it: decided here, and never
     // kept with the start.
     let mut by = by;
@@ -1436,7 +1453,7 @@ pub fn sign_in_hint(w: &Runtime, host: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{now_ms, Asked, StartSide, Tail, NAMED_FOR_MS, NAMED_MAX_MS};
+    use super::{acp_for_sandboxed, now_ms, Asked, StartSide, Tail, NAMED_FOR_MS, NAMED_MAX_MS};
     use serde_json::json;
     use std::sync::Arc;
     use xenonet_engine::delivery::starts;
@@ -1444,6 +1461,13 @@ mod tests {
 
     // The token is kept under a name the credential store takes, and read
     // back from it: each store checks the name the same way.
+    #[test]
+    fn a_sandboxed_start_never_goes_over_acp() {
+        assert!(acp_for_sandboxed("Claude Code", true).is_none(), "its headless start takes it, sandboxed");
+        let why = acp_for_sandboxed("Nova", false).unwrap().unwrap_err();
+        assert!(why.contains("ACP") && why.contains("sandbox"), "{why}");
+    }
+
     #[test]
     fn a_runs_token_is_kept_and_read_back() {
         assert!(xenonet_actors::secret_store::is_target(starts::SIGN_IN_TARGET), "{}", starts::SIGN_IN_TARGET);

@@ -42,7 +42,9 @@ async fn desk_takes_starts(t: &TwoNetworks) {
 async fn files_ready(h: &Host, n: usize) -> (Option<String>, Vec<String>) {
     let end = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        if let Some(f) = fake_files(&h.dir, n) {
+        // The fake writes its environment last of the two, and a read of a
+        // file it is still writing is empty.
+        if let Some(f) = fake_files(&h.dir, n).filter(|f| !f.1.is_empty()) {
             return f;
         }
         assert!(std::time::Instant::now() < end, "waited for run {n}'s files on {}", h.name);
@@ -424,6 +426,25 @@ async fn a_codex_start_is_sandboxed_for_the_person_alone_and_closes_its_own_conf
     let (args, _) = ran(&t.desk, 1).await;
     assert_eq!(args[..3], ["exec", "--sandbox", "workspace-write"], "{args:?}");
     assert!(args.iter().any(|a| a == "--ignore-user-config") && args.iter().any(|a| a == "notify=[]"), "{args:?}");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_session_cannot_ask_for_no_sandbox_not_even_of_a_peer_that_would_not_know_it() {
+    let root = root("sandbox-off");
+    let t = two_networks(&root).await;
+    desk_takes_starts(&t).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    // Sent to desk, an older XenoNet there would take "sandbox": false as no word on it.
+    let (s, v) =
+        as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": "tidy atlas", "sandbox": false })).await;
+    assert!(s >= 400 && v["error"].as_str().is_some_and(|e| e.contains("sandbox") && e.contains("you")), "{s} {v}");
+    // And on this machine.
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas", "sandbox": false })).await;
+    assert!(s >= 400 && v["error"].as_str().is_some_and(|e| e.contains("sandbox")), "{s} {v}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 0);
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
