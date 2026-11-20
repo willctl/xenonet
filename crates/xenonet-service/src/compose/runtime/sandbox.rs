@@ -166,8 +166,22 @@ fn sweep_runs(d: &Path, older_than_ms: f64) {
 /// What a sandboxed run's environment holds: the service's, scrubbed as an
 /// ACP agent's is. The caller adds the app's sign-in and tool timeout after
 /// this (`starts::signed_env`), and nothing else.
-pub fn env() -> Vec<(String, String)> {
-    xenonet_acp::agent_env(xenonet_engine::delivery::resume::resume_env(std::env::vars().collect()), &[])
+pub fn env(w: &Runtime) -> Vec<(String, String)> {
+    env_from(w.starts.environment())
+}
+
+/// A sandboxed run's environment from `vars`: without XenoNet's own
+/// variables, session marks and anything named for a secret, and without
+/// the ones that point at a Unix socket (`SSH_AUTH_SOCK`, `DOCKER_HOST`,
+/// any name ending in `_SOCK` or `_SOCKET`), which a command in the sandbox
+/// could use to reach the agent or the daemon outside it where the
+/// sandbox's own filter against Unix sockets isn't there.
+pub fn env_from(vars: Vec<(String, String)>) -> Vec<(String, String)> {
+    let socket = |k: &str| {
+        let up = k.to_ascii_uppercase();
+        up == "DOCKER_HOST" || up == "CONTAINER_HOST" || up.ends_with("_SOCK") || up.ends_with("_SOCKET")
+    };
+    xenonet_acp::agent_env(xenonet_engine::delivery::resume::resume_env(vars), &[]).into_iter().filter(|(k, _)| !socket(k)).collect()
 }
 
 #[cfg(test)]
@@ -202,10 +216,23 @@ mod tests {
     }
 
     #[test]
-    fn the_environment_holds_no_secret_and_no_session_mark() {
-        std::env::set_var("SANDBOX_UNIT_API_KEY", "x");
-        std::env::set_var("CLAUDECODE", "1");
-        let names: Vec<String> = env().into_iter().map(|(k, _)| k).collect();
-        assert!(!names.iter().any(|n| n == "SANDBOX_UNIT_API_KEY" || n == "CLAUDECODE" || n.starts_with("XENONET_")), "{names:?}");
+    fn the_environment_holds_no_secret_no_session_mark_and_no_socket() {
+        xenonet_platforms::install();
+        let vars = |names: &[&str]| names.iter().map(|n| ((*n).to_string(), "x".to_string())).collect::<Vec<_>>();
+        let given = vars(&[
+            "PATH",
+            "HOME",
+            // The sign-in the app's runs use, which the service's own environment may hold:
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDECODE",
+            "XENONET_PORT",
+            "SSH_AUTH_SOCK",
+            "DOCKER_HOST",
+            "GPG_AGENT_SOCK",
+            "CLAUDE_CODE_MESSAGING_SOCKET",
+        ]);
+        let names: Vec<String> = env_from(given).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(names, ["PATH", "HOME"], "{names:?}");
     }
 }

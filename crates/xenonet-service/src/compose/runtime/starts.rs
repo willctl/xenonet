@@ -138,6 +138,9 @@ pub struct StartSide {
     /// Writes to the store held while a transaction is open around what
     /// names a run (`hold_writes`).
     held: Mutex<Held>,
+    /// The environment the runs XenoNet starts are made from: the
+    /// service's own, unless a test gave another.
+    environment: Mutex<Option<Vec<(String, String)>>>,
 }
 
 #[derive(Default)]
@@ -171,6 +174,19 @@ impl Drop for WritesHeld<'_> {
 }
 
 impl StartSide {
+    /// The environment a run is made from (the service's), before what
+    /// each kind of run takes out and puts in.
+    pub fn environment(&self) -> Vec<(String, String)> {
+        self.environment.locked().clone().unwrap_or_else(|| std::env::vars().collect())
+    }
+
+    /// Gives the runs another environment than the process's, so a test
+    /// needn't change the process's (which other threads read).
+    #[doc(hidden)]
+    pub fn set_environment(&self, vars: Vec<(String, String)>) {
+        *self.environment.locked() = Some(vars);
+    }
+
     /// Holds what names a run to the store until the guard is dropped, so a
     /// transaction around it (an entry being taken) that rolls back doesn't
     /// take back what this side kept: it is written, as it stands here, once
@@ -568,7 +584,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     };
     // A sandboxed run gets the scrubbed environment an ACP agent gets, and
     // its sign-in; the service's own, without session marks, otherwise.
-    let mut env: Vec<(String, String)> = if record.is_some() { sandbox::env() } else { xenonet_engine::delivery::resume::resume_env(std::env::vars().collect()) };
+    let mut env: Vec<(String, String)> = if record.is_some() { sandbox::env(w) } else { xenonet_engine::delivery::resume::resume_env(w.starts.environment()) };
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);
         env.push((v.into(), mcp_tool_timeout_ms(w).to_string()));

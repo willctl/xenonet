@@ -50,6 +50,22 @@ async fn files_ready(h: &Host, n: usize) -> (Option<String>, Vec<String>) {
     }
 }
 
+/// What the service's own environment holds on desk in these tests: the
+/// sign-in of the person's own Claude Code, a key, and the sockets of the
+/// SSH agent and of Docker. None of it is for a sandboxed run.
+const SERVICE_ENV: [&str; 5] = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "SSH_AUTH_SOCK", "DOCKER_HOST", "XENONET_TOKEN"];
+
+fn service_env() -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = SERVICE_ENV.iter().map(|k| ((*k).to_string(), "not-for-the-run".to_string())).collect();
+    env.push(("PATH".into(), std::env::var("PATH").unwrap_or_default()));
+    env
+}
+
+fn assert_unreachable_from_the_run(names: &[String]) {
+    let leaked: Vec<&String> = names.iter().filter(|n| SERVICE_ENV.contains(&n.as_str())).collect();
+    assert!(leaked.is_empty(), "a sandboxed run's environment has {leaked:?}: {names:?}");
+}
+
 /// What contractor-vm's session is told next that is a XenoNet note.
 async fn told(t: &TwoNetworks, what: &str) -> String {
     let end = std::time::Instant::now() + Duration::from_secs(20);
@@ -96,9 +112,8 @@ async fn a_start_from_another_machine_without_the_sandbox_is_refused() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_else() {
     let root = root("sandbox-on");
-    // A secret in the service's environment, which a sandboxed run never gets.
-    std::env::set_var("SANDBOX_TEST_API_KEY", "not-for-the-run");
     let t = two_networks(&root).await;
+    t.desk.world.starts.set_environment(service_env());
     desk_takes_starts(&t).await;
     let desk_home = root.join("desk/home");
     let atlas = desk_home.join("atlas").to_string_lossy().into_owned();
@@ -124,6 +139,9 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
     let settings: Value = serde_json::from_str(&settings.expect("a settings file")).unwrap();
     let sandbox = &settings["sandbox"];
     assert_eq!((&sandbox["enabled"], &sandbox["failIfUnavailable"], &sandbox["allowUnsandboxedCommands"]), (&json!(true), &json!(true), &json!(false)));
+    assert_eq!(sandbox["credentials"]["envVars"], json!([{ "name": "CLAUDE_CODE_OAUTH_TOKEN", "mode": "deny" }]), "its commands don't get the run's sign-in");
+    assert_eq!(sandbox["autoAllowBashIfSandboxed"], json!(false), "and a command still asks");
+    assert_eq!((&sandbox["network"]["allowUnixSockets"], &sandbox["network"]["allowAllUnixSockets"]), (&json!([]), &json!(false)));
     assert_eq!(sandbox["filesystem"]["allowWrite"], json!([atlas]), "it writes only in the folder");
     assert_eq!(sandbox["filesystem"]["denyRead"], json!([desk_home.to_string_lossy()]), "it reads none of the home folder");
     assert!(sandbox["filesystem"]["allowRead"].as_array().unwrap().contains(&json!(atlas)), "but the folder");
@@ -133,7 +151,7 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
     assert!(settings["permissions"]["allow"].as_array().unwrap().contains(&json!("WebFetch(domain:github.com)")), "{settings}");
     assert!(settings["hooks"]["Stop"].is_array(), "XenoNet's own hooks stay: {settings}");
     // Its environment: the scrubbed one, and nothing of the service's secrets.
-    assert!(!names.iter().any(|n| n == "SANDBOX_TEST_API_KEY" || n.starts_with("XENONET_")), "{names:?}");
+    assert_unreachable_from_the_run(&names);
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -141,8 +159,8 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_start_with_no_domains_allows_the_network_none_and_a_persons_own_run_stays_unsandboxed() {
     let root = root("sandbox-local");
-    std::env::set_var("SANDBOX_TEST_API_KEY", "not-for-the-run");
     let t = two_networks(&root).await;
+    t.desk.world.starts.set_environment(service_env());
     desk_takes_starts(&t).await;
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
     // The person's own console start on this machine, which has the switch off.
@@ -152,7 +170,10 @@ async fn a_start_with_no_domains_allows_the_network_none_and_a_persons_own_run_s
     assert!(!prompt.to_lowercase().contains("sandbox"), "{prompt}");
     let (settings, names) = files_ready(&t.desk, 1).await;
     assert!(!settings.unwrap_or_default().contains("\"sandbox\""));
-    assert!(names.iter().any(|n| n == "SANDBOX_TEST_API_KEY"), "an unsandboxed run keeps the service's environment, as before");
+    assert!(
+        ["ANTHROPIC_API_KEY", "SSH_AUTH_SOCK", "DOCKER_HOST"].iter().all(|k| names.iter().any(|n| n == k)),
+        "an unsandboxed run keeps the service's environment, as before: {names:?}"
+    );
     // The same, sandboxed, with the switch on and no domains.
     let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas again", "sandbox": true })).await;
     assert_eq!(s, 200, "{v}");
@@ -161,7 +182,7 @@ async fn a_start_with_no_domains_allows_the_network_none_and_a_persons_own_run_s
     let settings: Value = serde_json::from_str(&settings.unwrap()).unwrap();
     assert_eq!(settings["sandbox"]["network"]["allowedDomains"], json!([]));
     assert!(settings["permissions"]["deny"].as_array().unwrap().contains(&json!("WebFetch")), "{settings}");
-    assert!(!names.iter().any(|n| n == "SANDBOX_TEST_API_KEY"));
+    assert_unreachable_from_the_run(&names);
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -214,8 +235,8 @@ async fn a_sandbox_is_never_the_home_folder_whoever_asks_and_wherever_it_is_chec
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_turn_resumed_for_a_sandboxed_session_is_sandboxed_too() {
     let root = root("sandbox-resume");
-    std::env::set_var("SANDBOX_TEST_API_KEY", "not-for-the-run");
     let t = two_networks_ended(&root).await;
+    t.desk.world.starts.set_environment(service_env());
     let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
     let record = xenonet_service::compose::runtime::sandbox::Record { folder: atlas.clone(), domains: Vec::new() };
     xenonet_service::compose::runtime::sandbox::keep(&t.desk.world, DESK_ATLAS_ENDED, &record).unwrap();
@@ -233,7 +254,7 @@ async fn a_turn_resumed_for_a_sandboxed_session_is_sandboxed_too() {
     let (settings, names) = files_ready(&t.desk, 1).await;
     let settings: Value = serde_json::from_str(&settings.expect("a settings file")).unwrap();
     assert_eq!(settings["sandbox"]["filesystem"]["allowWrite"], json!([atlas]));
-    assert!(!names.iter().any(|n| n == "SANDBOX_TEST_API_KEY"), "{names:?}");
+    assert_unreachable_from_the_run(&names);
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

@@ -91,7 +91,7 @@ impl Check for Sandbox {
                     }
                 }
                 if missing.is_empty() {
-                    Ok(Verdict::ok("bwrap and socat are installed"))
+                    Ok(unix_sockets(std::env::consts::ARCH))
                 } else {
                     Ok(Verdict::warn(
                         format!("{} isn't on your PATH, which Claude Code's sandbox needs, so a sandboxed start of it here fails", missing.join(" and ")),
@@ -100,6 +100,25 @@ impl Check for Sandbox {
                 }
             }
         }
+    }
+}
+
+/// What the check says about Unix sockets once bwrap and socat are there.
+/// Claude Code's sandbox keeps a command off Unix sockets (the SSH agent's,
+/// Docker's) with a seccomp filter that it ships for x64 and arm64 only.
+/// Whether the filter loads can't be tested from outside Claude Code (it
+/// reports `sandbox_seccomp_unavailable` itself, in /sandbox), so this says
+/// so, and warns where it is known not to exist.
+fn unix_sockets(arch: &str) -> Verdict {
+    if matches!(arch, "x86_64" | "aarch64") {
+        Verdict::ok(format!(
+            "bwrap and socat are installed. Whether Claude Code's seccomp filter, which keeps a sandboxed command off Unix sockets such as the SSH agent's, loads can't be tested from outside Claude Code: /sandbox in claude shows it (this CPU, {arch}, is one it ships the filter for)"
+        ))
+    } else {
+        Verdict::warn(
+            format!("bwrap and socat are installed, but Claude Code's seccomp filter, which keeps a sandboxed command off Unix sockets such as the SSH agent's, isn't available for this CPU ({arch}): a sandboxed command could reach them"),
+            Some("Start sandboxed sessions on an x64 or arm64 machine."),
+        )
     }
 }
 
@@ -218,6 +237,17 @@ mod tests {
         let v = verdict(&Sandbox, &FakeCtx::new(json!({ "home": "C:\\Users\\ada", "platform": "win32", "paths": {} })).cli("claude", "C:\\claude.exe"));
         assert_eq!(v.status, Status::Info);
         assert_eq!(verdict(&Sandbox, &FakeCtx::new(facts()).cli("claude", "/bin/claude")).status, Status::Ok, "macOS needs nothing");
+    }
+
+    #[test]
+    fn the_sandbox_check_says_what_it_cannot_test_about_unix_sockets() {
+        let ok = unix_sockets("aarch64");
+        assert_eq!(ok.status, Status::Ok);
+        assert!(ok.detail.contains("seccomp") && ok.detail.contains("can't be tested from outside"), "{}", ok.detail);
+        assert_eq!(unix_sockets("x86_64").status, Status::Ok);
+        let v = unix_sockets("x86");
+        assert_eq!(v.status, Status::Warn);
+        assert!(v.detail.contains("seccomp") && v.detail.contains("Unix sockets") && v.fix.is_some(), "{}", v.detail);
     }
 
     #[test]

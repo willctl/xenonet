@@ -11,7 +11,8 @@
 //! is not used, since it also strips the environment of hooks and MCP
 //! servers),
 //! sandbox.filesystem.{allowWrite,denyRead,allowRead},
-//! sandbox.network.{allowedDomains,strictAllowlist},
+//! sandbox.network.{allowedDomains,strictAllowlist,allowUnixSockets (macOS
+//! only), allowAllUnixSockets},
 //! permissions.{blockReadsOutsideWorkingDirectories,
 //! blockWritesOutsideWorkingDirectories,allow,deny}.
 
@@ -77,7 +78,10 @@ fn files(p: &Plan<'_>, listen: Option<&Value>, server: &str) -> (Value, Value) {
             // itself; a command it runs doesn't get it.
             "credentials": { "envVars": [{ "name": crate::SIGN_IN_VARIABLE, "mode": "deny" }] },
             "filesystem": { "allowWrite": [p.folder], "denyRead": [p.home], "allowRead": [p.folder] },
-            "network": { "allowedDomains": p.domains, "strictAllowlist": true },
+            // No Unix socket (the SSH agent's, Docker's): on macOS none is
+            // allowed by path, and on Linux the seccomp filter that blocks
+            // them is not switched off.
+            "network": { "allowedDomains": p.domains, "strictAllowlist": true, "allowUnixSockets": [], "allowAllUnixSockets": false },
         },
         "permissions": { "blockReadsOutsideWorkingDirectories": true, "blockWritesOutsideWorkingDirectories": true, "allow": allow, "deny": deny },
         "hooks": Value::Object(Map::new()),
@@ -115,6 +119,7 @@ mod tests {
         assert_eq!(s["sandbox"]["filesystem"]["allowWrite"], json!(["/home/me/atlas"]));
         assert_eq!(s["sandbox"]["filesystem"]["denyRead"], json!(["/home/me"]));
         assert_eq!(s["sandbox"]["network"]["allowedDomains"], json!(["github.com"]));
+        assert_eq!((&s["sandbox"]["network"]["allowUnixSockets"], &s["sandbox"]["network"]["allowAllUnixSockets"]), (&json!([]), &json!(false)), "no Unix socket: {s}");
         assert_eq!(s["permissions"]["allow"], json!(["WebFetch(domain:github.com)"]));
         assert_eq!(s["permissions"]["deny"], json!(["WebSearch"]));
         assert!(s["hooks"]["Stop"].as_array().unwrap().len() >= 2, "its own hook for Stop and the listening one");

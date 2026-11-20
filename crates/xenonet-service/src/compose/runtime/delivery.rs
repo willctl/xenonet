@@ -404,7 +404,7 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
         Some(rec) => crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?.0,
         None => args,
     };
-    let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env() } else { resume::resume_env(std::env::vars().collect()) };
+    let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env(w) } else { resume::resume_env(w.starts.environment()) };
     // An app whose runs sign in (Claude Code) does with the token you gave
     // XenoNet's runs, and asks its permission prompts of you through this
     // XenoNet's server, waiting a minute past the hold for your answer, as
