@@ -6,12 +6,12 @@
 
 mod answers;
 mod common;
+mod confine;
 mod delegate;
 mod intents;
 mod matrix;
 mod presence;
 mod props;
-mod sandbox;
 mod sees;
 mod spaces;
 mod tokens;

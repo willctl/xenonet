@@ -1,6 +1,7 @@
-//! How much a start is walled in: `off` (the app's own settings), `vendor`
-//! (the app's own sandbox, asked for by the adapter) or `cell` (the app runs
-//! inside an Adytum cell behind one wall, in a VM or container of its own).
+//! The `cell` level of confinement: the app runs inside an Adytum cell
+//! behind one wall, in a VM or container of its own. The levels themselves
+//! (`off`, `vendor`, `cell`) are `xenonet_authz::Confine`, which the person
+//! signs on a start; this file holds what only a cell needs.
 //!
 //! This file holds only the rules, as pure functions, and the trait the
 //! engine calls to run a start in a cell. It names Adytum's wall type and
@@ -9,8 +10,6 @@
 //! engine's other traits on the machine.
 //!
 //! The rules, each with its refusal test:
-//! - A level is always named. A missing one is refused, never defaulted.
-//! - `cell` names a wall, and no other level does.
 //! - The wall is the starting identity's wall, derived from the identity's
 //!   id by [`wall_for_identity`]. Another identity's wall is refused.
 //! - The project folder is copied into the cell, never mounted. It is
@@ -53,37 +52,16 @@ pub const CELL_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 /// never the user's home folder.
 pub const CELL_HOME: &str = "/tmp/xn-home";
 
-/// How much a start is walled in.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Confinement {
-    /// The app's own settings; no sandbox is asked for.
-    Off,
-    /// The app's own sandbox, which the adapter turns on.
-    Vendor,
-    /// Inside a cell behind this wall.
-    Cell { wall: Wall },
-}
-
 /// Why a start was not confined, or could not run confined. Each reads as a
 /// sentence that says what to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfineError {
-    /// No level was named.
-    LevelMissing,
-    /// A level other than off, vendor or cell.
-    LevelUnknown(String),
-    /// `cell` without a wall.
-    WallMissing,
-    /// A wall with off or vendor.
-    WallNotAllowed(String),
     /// A wall that is not written as a wall.
     WallMalformed(String),
     /// A wall that is not the starting identity's.
     WallNotIdentitys { wall: String, expected: String },
     /// An identity id that is empty.
     IdentityMissing,
-    /// A start at `off` or `vendor` was sent to a cell.
-    NotACellStart,
     /// An app with no build in the cell image.
     NoLinuxBuild { app: String },
     /// A variable outside the allowlist.
@@ -107,16 +85,11 @@ pub enum ConfineError {
 impl fmt::Display for ConfineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LevelMissing => f.write_str("The start does not say how confined it is. Name one: off, vendor or cell."),
-            Self::LevelUnknown(l) => write!(f, "{l:?} is not a confinement level. Use off, vendor or cell."),
-            Self::WallMissing => f.write_str("A start in a cell needs the wall of the identity it runs as. Name the wall, or choose off or vendor."),
-            Self::WallNotAllowed(l) => write!(f, "A wall only goes with the cell level, and this start is {l}. Leave the wall out, or choose cell."),
             Self::WallMalformed(w) => write!(f, "{w:?} is not a wall. A wall is written wall_ and then lowercase letters, digits, _ or -."),
             Self::WallNotIdentitys { wall, expected } => {
                 write!(f, "The wall {wall} is not this identity's. A start runs behind its own identity's wall, which is {expected}.")
             }
             Self::IdentityMissing => f.write_str("A start in a cell needs the identity it runs as, to find its wall. Name the identity."),
-            Self::NotACellStart => f.write_str("Only a start at the cell level runs in a cell. Choose cell, or run it the way its level says."),
             Self::NoLinuxBuild { app } => {
                 write!(f, "{app} has no Linux build in the cell image, so it cannot run in a cell. Start it with vendor confinement or off, or add it to the image.")
             }
@@ -135,22 +108,6 @@ impl fmt::Display for ConfineError {
 }
 
 impl std::error::Error for ConfineError {}
-
-impl Confinement {
-    /// The level a request names, with the wall it names for `cell`. A level
-    /// is never defaulted: `None` is refused.
-    pub fn parse(level: Option<&str>, wall: Option<&str>) -> Result<Self, ConfineError> {
-        let level = level.filter(|l| !l.is_empty()).ok_or(ConfineError::LevelMissing)?;
-        match (level, wall.filter(|w| !w.is_empty())) {
-            ("cell", None) => Err(ConfineError::WallMissing),
-            ("cell", Some(w)) => w.parse::<Wall>().map(|wall| Self::Cell { wall }).map_err(|_| ConfineError::WallMalformed(w.to_owned())),
-            ("off" | "vendor", Some(_)) => Err(ConfineError::WallNotAllowed(level.to_owned())),
-            ("off", None) => Ok(Self::Off),
-            ("vendor", None) => Ok(Self::Vendor),
-            (other, _) => Err(ConfineError::LevelUnknown(other.to_owned())),
-        }
-    }
-}
 
 /// The wall of an identity, from its id (`claude:<account>:<org>`,
 /// `github:<host>/<login>`…). The rule: `wall_`, the id as a lowercase slug
@@ -182,21 +139,16 @@ pub fn wall_for_identity(identity_id: &str) -> Result<Wall, ConfineError> {
     wall.parse::<Wall>().map_err(|_| ConfineError::WallMalformed(wall))
 }
 
-impl Confinement {
-    /// Whether this level fits the identity the start runs as: a cell's wall
-    /// must be that identity's. Off and vendor name no wall.
-    pub fn check_identity(&self, identity_id: &str) -> Result<(), ConfineError> {
-        match self {
-            Self::Cell { wall } => {
-                let expected = wall_for_identity(identity_id)?;
-                if *wall == expected {
-                    Ok(())
-                } else {
-                    Err(ConfineError::WallNotIdentitys { wall: wall.to_string(), expected: expected.to_string() })
-                }
-            }
-            Self::Off | Self::Vendor => Ok(()),
-        }
+/// Whether `wall` is the wall of the identity the start runs as. The wall
+/// of a start comes from the signed act and the identity from the verified
+/// signer, never from the request.
+pub fn check_wall(wall: &str, identity_id: &str) -> Result<Wall, ConfineError> {
+    let given = wall.parse::<Wall>().map_err(|_| ConfineError::WallMalformed(wall.to_owned()))?;
+    let expected = wall_for_identity(identity_id)?;
+    if given == expected {
+        Ok(given)
+    } else {
+        Err(ConfineError::WallNotIdentitys { wall: given.to_string(), expected: expected.to_string() })
     }
 }
 
@@ -243,7 +195,8 @@ pub struct CellApp {
 /// A start, as the engine hands it to a cell.
 #[derive(Clone, Debug)]
 pub struct CellRequest<'a> {
-    pub confinement: &'a Confinement,
+    /// The wall the signed act names: the identity's own, or refused.
+    pub wall: &'a str,
     /// The identity the start runs as (`identity/v1`'s id).
     pub identity_id: &'a str,
     pub app: &'a str,
@@ -322,10 +275,7 @@ pub trait CellHost: Send + Sync {
 /// Checks every rule for a start and makes its plan. Nothing is run or
 /// written.
 pub fn plan(host: &dyn CellHost, req: &CellRequest<'_>) -> Result<CellPlan, ConfineError> {
-    let Confinement::Cell { wall } = req.confinement else {
-        return Err(ConfineError::NotACellStart);
-    };
-    req.confinement.check_identity(req.identity_id)?;
+    let wall = check_wall(req.wall, req.identity_id)?;
     let program = host
         .apps()
         .into_iter()
@@ -339,7 +289,7 @@ pub fn plan(host: &dyn CellHost, req: &CellRequest<'_>) -> Result<CellPlan, Conf
         return Err(ConfineError::ArgRefused);
     }
     Ok(CellPlan {
-        wall: wall.clone(),
+        wall,
         app: req.app.to_owned(),
         program,
         args: req.args.to_vec(),
@@ -519,13 +469,13 @@ mod tests {
         }
     }
 
-    fn cell_for(identity: &str) -> Confinement {
-        Confinement::Cell { wall: wall_for_identity(identity).expect("a wall") }
+    fn cell_for(identity: &str) -> String {
+        wall_for_identity(identity).expect("a wall").to_string()
     }
 
-    fn request<'a>(c: &'a Confinement, identity: &'a str, project: &'a Path) -> CellRequest<'a> {
+    fn request<'a>(wall: &'a str, identity: &'a str, project: &'a Path) -> CellRequest<'a> {
         CellRequest {
-            confinement: c,
+            wall,
             identity_id: identity,
             app: "fake-agent",
             args: &[],
@@ -541,44 +491,15 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_level_is_refused_never_defaulted() {
-        assert_eq!(Confinement::parse(None, None), Err(ConfineError::LevelMissing));
-        assert_eq!(Confinement::parse(Some(""), None), Err(ConfineError::LevelMissing));
-        assert_eq!(Confinement::parse(None, Some("wall_a")), Err(ConfineError::LevelMissing));
-    }
-
-    #[test]
-    fn a_cell_start_without_a_wall_is_refused() {
-        assert_eq!(Confinement::parse(Some("cell"), None), Err(ConfineError::WallMissing));
-        assert_eq!(Confinement::parse(Some("cell"), Some("")), Err(ConfineError::WallMissing));
-        assert!(ConfineError::WallMissing.to_string().contains("needs the wall"));
-    }
-
-    #[test]
-    fn a_wall_with_any_other_level_is_refused() {
-        for level in ["off", "vendor"] {
-            assert_eq!(Confinement::parse(Some(level), Some("wall_a")), Err(ConfineError::WallNotAllowed(level.into())));
-        }
-    }
-
-    #[test]
-    fn an_unknown_level_or_a_malformed_wall_is_refused() {
-        assert_eq!(Confinement::parse(Some("strict"), None), Err(ConfineError::LevelUnknown("strict".into())));
-        assert_eq!(Confinement::parse(Some("Cell"), Some("wall_a")), Err(ConfineError::LevelUnknown("Cell".into())));
-        assert_eq!(Confinement::parse(Some("cell"), Some("work")), Err(ConfineError::WallMalformed("work".into())));
-    }
-
-    #[test]
-    fn the_levels_parse() {
-        assert_eq!(Confinement::parse(Some("off"), None), Ok(Confinement::Off));
-        assert_eq!(Confinement::parse(Some("vendor"), None), Ok(Confinement::Vendor));
-        assert!(matches!(Confinement::parse(Some("cell"), Some("wall_a")), Ok(Confinement::Cell { .. })));
+    fn a_malformed_wall_is_refused() {
+        assert_eq!(check_wall("work", "git:x"), Err(ConfineError::WallMalformed("work".into())));
+        assert_eq!(check_wall("", "git:x"), Err(ConfineError::WallMalformed(String::new())));
     }
 
     #[test]
     fn another_identitys_wall_is_refused() {
         let theirs = cell_for("github:github.com/other");
-        assert!(matches!(theirs.check_identity("github:github.com/nova"), Err(ConfineError::WallNotIdentitys { .. })));
+        assert!(matches!(check_wall(&theirs, "github:github.com/nova"), Err(ConfineError::WallNotIdentitys { .. })));
         let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
         let req = request(&theirs, "github:github.com/nova", work());
         assert!(matches!(plan(&fake, &req), Err(ConfineError::WallNotIdentitys { .. })));
@@ -588,8 +509,7 @@ mod tests {
     #[test]
     fn an_identitys_own_wall_passes() {
         let mine = cell_for("github:github.com/nova");
-        assert_eq!(mine.check_identity("github:github.com/nova"), Ok(()));
-        assert_eq!(Confinement::Off.check_identity("anything"), Ok(()));
+        assert_eq!(check_wall(&mine, "github:github.com/nova").map(|w| w.to_string()), Ok(mine));
     }
 
     #[test]
@@ -617,14 +537,6 @@ mod tests {
         }
         assert_eq!(wall_for_identity(""), Err(ConfineError::IdentityMissing));
         assert_eq!(wall_for_identity("  "), Err(ConfineError::IdentityMissing));
-    }
-
-    #[test]
-    fn a_start_at_off_or_vendor_is_not_sent_to_a_cell() {
-        let fake = Fake::with(&[("fake-agent", "/bin/sh")]);
-        for c in [Confinement::Off, Confinement::Vendor] {
-            assert_eq!(plan(&fake, &request(&c, "git:x", work())), Err(ConfineError::NotACellStart));
-        }
     }
 
     #[test]

@@ -115,7 +115,7 @@
 
 use crate::proof::VerifiedPresence;
 use crate::vocab::{
-    Act, Action, AnswerDecision, Attestation, DelegationId, DeviceId, IntentStep, NetworkId, Principal, ProjectId, Reaching, ReadScope, Request, Resource, StartMode,
+    Act, Action, AnswerDecision, Attestation, Confine, DelegationId, DeviceId, IntentStep, NetworkId, Principal, ProjectId, Reaching, ReadScope, Request, Resource, StartMode,
 };
 use crate::{DeviceKind, Door, Ground, Role, SpaceLevel, StandingGrant, StartSetting, Token, WakeSetting};
 use std::fmt;
@@ -628,7 +628,7 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
             if setting == StartSetting::Off {
                 return Err(Reason::new("settings", "this machine starts no runs: its start setting is off"));
             }
-            let Act::Start { mode, sandbox, .. } = request.act() else {
+            let Act::Start { mode, confine, .. } = request.act() else {
                 return Err(Reason::new("act", "a start's act is a start"));
             };
             let attestation = match principal {
@@ -644,10 +644,23 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
                 }
                 return Ok((authority, None));
             }
-            // Anyone but the person runs sandboxed. A start that leaves the
-            // field out (an older sender) is refused, not defaulted.
-            if sandbox.is_none() {
-                return Err(Reason::new("sandbox", "a run started by anyone but the person runs in its app's sandbox: this start asked for none"));
+            // Anyone but the person runs at vendor, in its app's own
+            // sandbox. A start that leaves the field out (an older sender)
+            // or says off is refused, not defaulted. A cell is the
+            // person's own: every wall shares one Adytum home and one SSH
+            // key today, so a wall keeps cells apart by name and network,
+            // not by key, and a guest doesn't get one yet.
+            match confine {
+                Some(Confine::Vendor { .. }) => {}
+                Some(Confine::Cell { .. }) => {
+                    return Err(Reason::new(
+                        "cell",
+                        "a run in a cell is the person's own to start: cells of different walls don't have keys of their own yet, so no one else starts one",
+                    ));
+                }
+                Some(Confine::Off) | None => {
+                    return Err(Reason::new("sandbox", "a run started by anyone but the person runs in its app's sandbox: this start asked for none"));
+                }
             }
             if attestation == Some(Attestation::Unchecked) {
                 return Err(Reason::new("attestation", "an unchecked agent never starts runs"));

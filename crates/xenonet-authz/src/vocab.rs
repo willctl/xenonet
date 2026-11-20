@@ -335,12 +335,39 @@ pub enum Resource {
     },
 }
 
-/// A run held to its app's own sandbox, and the domains it may reach
-/// besides its folder (none by default). Part of what the person signs, so
-/// nothing between the signature and the run can take it off.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Sandbox {
-    pub domains: Vec<String>,
+/// How much a started run is walled in, as the person signs it: nothing
+/// between the signature and the run can take it off. A start that says
+/// nothing (an older sender) is `None` on the act, never one of these.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Confine {
+    /// The app's own settings; no sandbox is asked for. Only the person's
+    /// own start may be this.
+    Off,
+    /// The app's own sandbox, and the domains the run may reach besides its
+    /// folder (none by default).
+    Vendor { domains: Vec<String> },
+    /// A sealed cell behind this wall, which is the person's own: the
+    /// receiving machine checks it against the identity that signed.
+    Cell { wall: String },
+}
+
+impl Confine {
+    /// The level as the surfaces and the wire name it.
+    pub fn level(&self) -> &'static str {
+        match self {
+            Confine::Off => "off",
+            Confine::Vendor { .. } => "vendor",
+            Confine::Cell { .. } => "cell",
+        }
+    }
+
+    /// The domains of a run held to its app's sandbox, None for any other.
+    pub fn domains(&self) -> Option<&[String]> {
+        match self {
+            Confine::Vendor { domains } => Some(domains),
+            _ => None,
+        }
+    }
 }
 
 /// How a started run's permission prompts are answered.
@@ -468,9 +495,9 @@ pub enum Act {
         app: AppId,
         folder: Folder,
         mode: StartMode,
-        /// None: the run is not sandboxed. Anyone but the person starts a
-        /// run only with one.
-        sandbox: Option<Sandbox>,
+        /// None: the sender said nothing (an older one). Anyone but the
+        /// person starts a run only at `vendor`.
+        confine: Option<Confine>,
     },
     Answer {
         ask: AskId,
@@ -754,21 +781,31 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
     match act {
         Act::Message | Act::Wake | Act::Handoff | Act::UseGateway => &mut c,
         Act::Claim { project } => c.field(project.as_str()),
-        Act::Start { app, folder, mode, sandbox } => {
+        Act::Start { app, folder, mode, confine } => {
             c.field(app.as_str()).field(folder.as_str()).field(match mode {
                 StartMode::Asks => "asks",
                 StartMode::Delegated => "delegated",
             });
-            // Nothing for a start that isn't sandboxed, so what an older
-            // sender signs still verifies (and is refused, unless it is the
-            // person's own).
-            if let Some(s) = sandbox {
-                c.field("sandbox");
-                let mut domains = s.domains.clone();
-                domains.sort();
-                domains.dedup();
-                for d in &domains {
-                    c.field(d);
+            // Nothing for a start that says nothing, and the same for `off`,
+            // which is no confinement at all: what an older sender signs
+            // still verifies, and both are refused unless the start is the
+            // person's own. Vendor's domains and a cell's wall are part of
+            // what is signed, after the level.
+            if let Some(confine) = confine.as_ref().filter(|c| **c != Confine::Off) {
+                c.field("confine").field(confine.level());
+                match confine {
+                    Confine::Off => {}
+                    Confine::Vendor { domains } => {
+                        let mut domains = domains.clone();
+                        domains.sort();
+                        domains.dedup();
+                        for d in &domains {
+                            c.field(d);
+                        }
+                    }
+                    Confine::Cell { wall } => {
+                        c.field(wall);
+                    }
                 }
             }
             &mut c

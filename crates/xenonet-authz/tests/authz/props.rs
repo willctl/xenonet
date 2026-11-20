@@ -35,7 +35,9 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
     let (resource, act) = match action {
         Action::Message => (m1(), Act::Message),
         Action::Wake => (Resource::Session(SessionId::new("s1").unwrap()), Act::Wake),
-        Action::Start => (run, Act::Start { app: AppId::new("claude").unwrap(), folder: Folder::new("/w").unwrap(), mode: StartMode::Asks, sandbox: Some(Sandbox::default()) }),
+        Action::Start => {
+            (run, Act::Start { app: AppId::new("claude").unwrap(), folder: Folder::new("/w").unwrap(), mode: StartMode::Asks, confine: Some(Confine::Vendor { domains: vec![] }) })
+        }
         Action::Answer => (run, Act::Answer { ask: AskId::new("q1").unwrap(), decision: AnswerDecision::Allow }),
         Action::Claim => (Resource::Project(project()), Act::Claim { project: project() }),
         Action::Handoff => (m1(), Act::Handoff),

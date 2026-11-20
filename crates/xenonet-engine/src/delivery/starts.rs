@@ -62,22 +62,26 @@ const HOUR_MS: f64 = 3600e3;
 /// is never kept for later.
 pub const FRESH_MS: f64 = 120e3;
 
-/// What a request says of the sandbox: nothing (`Unset`, which the sender
-/// fills in by who asks and where, and a receiver takes as off), off, or on
-/// with the domains the run may reach.
+/// What a request says of how confined the run is: nothing (`Unset`, which
+/// the sender fills in by who asks and where, and a receiver takes as
+/// nothing said), `off`, `vendor` with the domains the run may reach, or
+/// `cell`. It never holds a wall: a cell start runs behind the wall of the
+/// identity that signs it, which the machine that runs it works out from
+/// the verified act (`xenonet_authz::Confine` is what is signed).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum SandboxAsk {
+pub enum ConfineAsk {
     #[default]
     Unset,
     Off,
-    On(Vec<String>),
+    Vendor(Vec<String>),
+    Cell,
 }
 
-impl SandboxAsk {
-    /// The domains of a sandboxed run, None for one that isn't.
+impl ConfineAsk {
+    /// The domains of a run held to its app's sandbox, None for any other.
     pub fn domains(&self) -> Option<&[String]> {
         match self {
-            SandboxAsk::On(d) => Some(d),
+            ConfineAsk::Vendor(d) => Some(d),
             _ => None,
         }
     }
@@ -146,9 +150,9 @@ pub struct Request {
     /// Asked as delegated work: the machine starts it only when it's set to
     /// delegate (a session or actor asking; you asking is never refused).
     pub delegate: bool,
-    /// Whether the run is held to its app's own sandbox, and the domains it
+    /// How confined the run is: the level, and for `vendor` the domains it
     /// may reach.
-    pub sandbox: SandboxAsk,
+    pub confine: ConfineAsk,
 }
 
 impl Request {
@@ -157,10 +161,16 @@ impl Request {
         if self.delegate {
             v["delegate"] = json!(true);
         }
-        // Only a sandboxed run says so: a sender that says nothing is an
-        // older one, and a receiver takes nothing as off.
-        if let SandboxAsk::On(domains) = &self.sandbox {
-            v["sandbox"] = json!({ "domains": domains });
+        // A level is always said when it is known: a sender that says
+        // nothing is an older one, and a receiver takes nothing as off.
+        match &self.confine {
+            ConfineAsk::Unset => {}
+            ConfineAsk::Off => v["confine"] = json!("off"),
+            ConfineAsk::Vendor(domains) => {
+                v["confine"] = json!("vendor");
+                v["domains"] = json!(domains);
+            }
+            ConfineAsk::Cell => v["confine"] = json!("cell"),
         }
         v
     }
@@ -207,39 +217,54 @@ pub fn request(v: &Value) -> Result<Request, String> {
         return Err("that folder is too long to be one".into());
     }
     let delegate = v.get("delegate").and_then(Value::as_bool).unwrap_or(false);
-    let sandbox = sandbox_of(v)?;
-    Ok(Request { folder, app, mode, prompt, delegate, sandbox })
+    let confine = confine_of(v)?;
+    Ok(Request { folder, app, mode, prompt, delegate, confine })
 }
 
-/// A request's `sandbox` (true, false, or `{ domains }`) and its `domains`.
-fn sandbox_of(v: &Value) -> Result<SandboxAsk, String> {
-    let given = match v.get("domains") {
-        None | Some(Value::Null) => None,
-        Some(Value::Array(a)) => Some(a.iter().map(|d| d.as_str().ok_or("a domain is text".to_string()).and_then(domain)).collect::<Result<Vec<_>, _>>()?),
-        Some(_) => return Err("domains is a list of host names".into()),
-    };
-    let (on, inside) = match v.get("sandbox") {
-        None | Some(Value::Null) => (None, None),
-        Some(Value::Bool(b)) => (Some(*b), None),
-        Some(o @ Value::Object(_)) => {
-            let inside = match o.get("domains") {
-                None | Some(Value::Null) => None,
-                Some(Value::Array(a)) => Some(a.iter().map(|d| d.as_str().ok_or("a domain is text".to_string()).and_then(domain)).collect::<Result<Vec<_>, _>>()?),
-                Some(_) => return Err("domains is a list of host names".into()),
-            };
-            (Some(o.get("on").and_then(Value::as_bool).unwrap_or(true)), inside)
+/// A request's level: `confine` (`off`, `vendor` or `cell`), or the older
+/// `sandbox` (true for vendor, false for off, or `{ domains }`), and its
+/// `domains`. Domains alone ask for vendor. A request that names a wall is
+/// refused: the wall is the signer's, worked out where the start runs.
+fn confine_of(v: &Value) -> Result<ConfineAsk, String> {
+    if v.get("wall").is_some_and(|w| !w.is_null()) {
+        return Err("a start names no wall: a start in a cell runs behind the wall of the identity that signs it".into());
+    }
+    let list = |x: Option<&Value>| -> Result<Option<Vec<String>>, String> {
+        match x {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Array(a)) => a.iter().map(|d| d.as_str().ok_or("a domain is text".to_string()).and_then(domain)).collect::<Result<Vec<_>, _>>().map(Some),
+            Some(_) => Err("domains is a list of host names".into()),
         }
+    };
+    let given = list(v.get("domains"))?;
+    // The older words, kept: `sandbox` is true, false or `{ domains }`.
+    let (old, inside) = match v.get("sandbox") {
+        None | Some(Value::Null) => (None, None),
+        Some(Value::Bool(b)) => (Some(if *b { "vendor" } else { "off" }), None),
+        Some(o @ Value::Object(_)) => (Some(if o.get("on").and_then(Value::as_bool).unwrap_or(true) { "vendor" } else { "off" }), list(o.get("domains"))?),
         Some(_) => return Err("sandbox is true, false or an object with domains".into()),
     };
+    let level = match v.get("confine") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(l)) if ["off", "vendor", "cell"].contains(&l.as_str()) => Some(l.as_str()),
+        Some(other) => return Err(format!("{other} isn't a confinement level: use off, vendor or cell")),
+    };
+    if let (Some(a), Some(b)) = (level, old) {
+        if a != b {
+            return Err(format!("confine says {a} and sandbox says {b}: say it once, with confine"));
+        }
+    }
     let mut domains: Vec<String> = given.into_iter().chain(inside).flatten().collect();
     domains.sort();
     domains.dedup();
-    match (on, domains.is_empty()) {
-        (None, true) => Ok(SandboxAsk::Unset),
-        (Some(false), true) => Ok(SandboxAsk::Off),
-        (Some(false), false) => Err("domains are for a sandboxed run: they reach nothing with the sandbox off".into()),
+    match (level.or(old), domains.is_empty()) {
+        (None, true) => Ok(ConfineAsk::Unset),
+        (Some("off"), true) => Ok(ConfineAsk::Off),
+        (Some("off"), false) => Err("domains are for a run in its app's sandbox: they reach nothing with confinement off".into()),
+        (Some("cell"), true) => Ok(ConfineAsk::Cell),
+        (Some("cell"), false) => Err("a cell reaches no domain, so it takes none".into()),
         // Domains alone ask for the sandbox.
-        (_, _) => Ok(SandboxAsk::On(domains)),
+        (_, _) => Ok(ConfineAsk::Vendor(domains)),
     }
 }
 
@@ -543,7 +568,7 @@ mod tests {
     fn a_request_says_its_app_mode_folder_and_prompt() {
         xenonet_platforms::install();
         let r = request(&json!({ "prompt": "  Fix the login form  " })).unwrap();
-        assert_eq!(r, Request { folder: "~".into(), app: "claude".into(), mode: None, prompt: "Fix the login form".into(), delegate: false, sandbox: SandboxAsk::Unset });
+        assert_eq!(r, Request { folder: "~".into(), app: "claude".into(), mode: None, prompt: "Fix the login form".into(), delegate: false, confine: ConfineAsk::Unset });
         assert_eq!(request(&json!({ "app": "grok", "mode": "plan", "folder": "project:atlas", "prompt": "x" })).unwrap().mode.as_deref(), Some("plan"));
         assert_eq!(request(&json!({ "mode": "manual", "prompt": "x" })).unwrap().mode, None, "manual is the person's own settings");
         assert_eq!(request(&json!({ "mode": "bypassPermissions", "prompt": "x" })), Err("XenoNet never starts a session that bypasses its permission checks".into()));
@@ -572,33 +597,55 @@ mod tests {
     }
 
     #[test]
-    fn a_request_says_whether_the_run_is_sandboxed_and_where_it_may_reach() {
+    fn a_request_says_how_confined_the_run_is_and_where_it_may_reach() {
         xenonet_platforms::install();
-        let ask = |v: Value| request(&v).unwrap().sandbox;
-        assert_eq!(ask(json!({ "prompt": "x" })), SandboxAsk::Unset);
-        assert_eq!(ask(json!({ "prompt": "x", "sandbox": false })), SandboxAsk::Off);
-        assert_eq!(ask(json!({ "prompt": "x", "sandbox": true })), SandboxAsk::On(vec![]));
+        let ask = |v: Value| request(&v).unwrap().confine;
+        assert_eq!(ask(json!({ "prompt": "x" })), ConfineAsk::Unset);
+        assert_eq!(ask(json!({ "prompt": "x", "confine": "off" })), ConfineAsk::Off);
+        assert_eq!(ask(json!({ "prompt": "x", "confine": "vendor" })), ConfineAsk::Vendor(vec![]));
+        assert_eq!(ask(json!({ "prompt": "x", "confine": "cell" })), ConfineAsk::Cell);
         assert_eq!(
-            ask(json!({ "prompt": "x", "sandbox": { "domains": ["GitHub.com", "github.com", "*.npmjs.org"] } })),
-            SandboxAsk::On(vec!["*.npmjs.org".into(), "github.com".into()])
+            ask(json!({ "prompt": "x", "confine": "vendor", "domains": ["GitHub.com", "github.com", "*.npmjs.org"] })),
+            ConfineAsk::Vendor(vec!["*.npmjs.org".into(), "github.com".into()])
         );
-        assert_eq!(ask(json!({ "prompt": "x", "domains": ["github.com"] })), SandboxAsk::On(vec!["github.com".into()]), "domains alone ask for it");
+        assert_eq!(ask(json!({ "prompt": "x", "domains": ["github.com"] })), ConfineAsk::Vendor(vec!["github.com".into()]), "domains alone ask for it");
         for bad in ["localhost", "https://github.com", "a b.com", "-x.com", "git hub.com", ""] {
             assert!(request(&json!({ "prompt": "x", "domains": [bad] })).is_err(), "{bad}");
         }
+        for bad in [json!("strict"), json!("Cell"), json!(true), json!(["vendor"])] {
+            assert!(request(&json!({ "prompt": "x", "confine": bad })).is_err(), "{bad}");
+        }
+        assert!(request(&json!({ "prompt": "x", "confine": "off", "domains": ["github.com"] })).is_err());
+        assert!(request(&json!({ "prompt": "x", "confine": "cell", "domains": ["github.com"] })).is_err(), "a cell takes no domains");
+        // A request's own wall is never taken: the wall is the signer's.
+        for level in ["cell", "vendor", "off"] {
+            let why = request(&json!({ "prompt": "x", "confine": level, "wall": "wall_nova_0123456789abcdef" })).unwrap_err();
+            assert!(why.contains("names no wall"), "{why}");
+        }
+        // The older words still mean the same, and a clash is refused.
+        assert_eq!(ask(json!({ "prompt": "x", "sandbox": false })), ConfineAsk::Off);
+        assert_eq!(ask(json!({ "prompt": "x", "sandbox": true })), ConfineAsk::Vendor(vec![]));
+        assert_eq!(ask(json!({ "prompt": "x", "sandbox": { "domains": ["github.com"] } })), ConfineAsk::Vendor(vec!["github.com".into()]));
         assert!(request(&json!({ "prompt": "x", "sandbox": false, "domains": ["github.com"] })).is_err());
-        // Only a sandboxed run says so on the wire, and it comes back as it went.
-        let on = request(&json!({ "prompt": "x", "domains": ["github.com"] })).unwrap();
-        assert_eq!(on.to_json()["sandbox"], json!({ "domains": ["github.com"] }));
-        assert_eq!(request(&on.to_json()).unwrap(), on);
-        assert!(request(&json!({ "prompt": "x", "sandbox": false })).unwrap().to_json().get("sandbox").is_none());
+        assert!(request(&json!({ "prompt": "x", "sandbox": false, "confine": "vendor" })).is_err());
+        // What is known says so on the wire, and comes back as it went.
+        for (v, level) in [
+            (json!({ "prompt": "x", "domains": ["github.com"] }), "vendor"),
+            (json!({ "prompt": "x", "confine": "off" }), "off"),
+            (json!({ "prompt": "x", "confine": "cell" }), "cell"),
+        ] {
+            let r = request(&v).unwrap();
+            assert_eq!(r.to_json()["confine"], json!(level));
+            assert_eq!(request(&r.to_json()).unwrap(), r);
+        }
+        assert!(request(&json!({ "prompt": "x" })).unwrap().to_json().get("confine").is_none());
     }
 
     #[test]
     fn an_app_without_a_sandbox_refuses_a_sandboxed_start_in_words() {
         xenonet_platforms::install();
         let plan = |d: &'static [String]| xenonet_adapter::delivery::Plan { folder: "/w/atlas", home: "/h", domains: d, port: "47840", bin: "xenonet" };
-        let r = |app: &str| request(&json!({ "app": app, "prompt": "x", "sandbox": true })).unwrap();
+        let r = |app: &str| request(&json!({ "app": app, "prompt": "x", "confine": "vendor" })).unwrap();
         let none: &'static [String] = &[];
         assert!(sandbox_plan(&r("claude"), &plan(none), false).unwrap().contains("no network"));
         assert!(sandbox_plan(&r("claude"), &plan(none), true).unwrap_err().contains("WSL2"));
@@ -617,7 +664,7 @@ mod tests {
         xenonet_platforms::install();
         use xenonet_adapter::delivery::{Plan, SandboxFiles};
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
-        let r = |app: &str| Request { folder: "~".into(), app: app.into(), mode: None, prompt: "x".into(), delegate: false, sandbox: SandboxAsk::On(vec![]) };
+        let r = |app: &str| Request { folder: "~".into(), app: app.into(), mode: None, prompt: "x".into(), delegate: false, confine: ConfineAsk::Vendor(vec![]) };
         let plan = Plan { folder: "/w/atlas", home: "/h", domains: &[], port: "47840", bin: "xenonet" };
         let files = SandboxFiles { plan, settings: "/s/runs/a.settings.json", mcp: "/s/runs/a.mcp.json", server: "xenonet" };
         let (_, args) = command(&r("claude"), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
@@ -722,7 +769,7 @@ mod tests {
             mode: mode.map(str::to_string),
             prompt: "-rm -rf".into(),
             delegate: false,
-            sandbox: SandboxAsk::Unset,
+            confine: ConfineAsk::Unset,
         };
         let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
         assert_eq!(app, "claude");

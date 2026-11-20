@@ -12,7 +12,7 @@
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use xenonet_engine::confine::{run_confined, wall_for_identity, CellApp, CellRequest, Confinement};
+use xenonet_engine::confine::{run_confined, wall_for_identity, CellApp, CellRequest};
 use xenonet_service::cells::CellRunner;
 
 /// A folder removed at the end.
@@ -104,7 +104,7 @@ env | sort | cut -d= -f1 | tr '\n' ' '; echo
     std::fs::write(project.join(".env"), "SECRET=1\n").unwrap();
 
     let identity = "git:live-test";
-    let confinement = Confinement::Cell { wall: wall_for_identity(identity).unwrap() };
+    let wall = wall_for_identity(identity).unwrap().to_string();
     let runner = CellRunner::lima(home.0.clone(), vec![CellApp { app: "fake-agent".into(), program: "/bin/sh".into() }]).unwrap().with_prefix("adytum-test-").unwrap();
     let args = ["agent.sh".to_owned()];
     let host_home = std::env::var("HOME").unwrap_or_default();
@@ -112,7 +112,7 @@ env | sort | cut -d= -f1 | tr '\n' ' '; echo
     let run = run_confined(
         &runner,
         &CellRequest {
-            confinement: &confinement,
+            wall: &wall,
             identity_id: identity,
             app: "fake-agent",
             args: &args,

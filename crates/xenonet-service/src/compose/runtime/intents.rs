@@ -927,7 +927,7 @@ fn work_now(w: &Runtime, id: &str) -> Result<(), Worked> {
         mode: None,
         prompt: String::new(),
         delegate: true,
-        sandbox: xenonet_engine::delivery::starts::SandboxAsk::On(Vec::new()),
+        confine: xenonet_engine::delivery::starts::ConfineAsk::Vendor(Vec::new()),
     };
     let start = crate::compose::runtime::starts::Apart {
         request,

@@ -184,7 +184,7 @@ fn start_from_m2(w: &World, reaching: &[Reaching]) -> Decision {
     let app = AppId::new("claude").unwrap();
     let folder = Folder::new("/home/work/ledger").unwrap();
     let resource = Resource::Run { machine: machine("m1"), app: app.clone(), folder: folder.clone() };
-    from_m2(w, "agent", resource, Act::Start { app, folder, mode: StartMode::Asks, sandbox: Some(Sandbox::default()) }, reaching)
+    from_m2(w, "agent", resource, Act::Start { app, folder, mode: StartMode::Asks, confine: Some(Confine::Vendor { domains: vec![] }) }, reaching)
 }
 
 /// What a refused start says: words of its own, which don't claim a

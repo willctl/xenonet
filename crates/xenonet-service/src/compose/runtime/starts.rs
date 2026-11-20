@@ -421,16 +421,37 @@ fn apart(mut r: Request) -> Apart {
 }
 
 /// The run a start makes, and the act, as a request names them: on
-/// `machine`, from the request's own app, folder and mode.
-fn run_act(machine: &xenonet_authz::MachineId, r: &Request) -> Result<(xenonet_authz::Resource, xenonet_authz::Act), String> {
+/// `machine`, from the request's own app, folder and mode. `signer` is the
+/// identity that signs it (the person's id), whose wall a `cell` start runs
+/// behind: the request never names one, and the act is built with the
+/// wall the signer's id gives, so the signature covers that wall and no
+/// other.
+fn run_act(machine: &xenonet_authz::MachineId, r: &Request, signer: Option<&str>) -> Result<(xenonet_authz::Resource, xenonet_authz::Act), String> {
     let app = xenonet_authz::AppId::new(&r.app).map_err(|e| e.message)?;
     let folder = xenonet_authz::Folder::new(&r.folder).map_err(|e| e.message)?;
     let mode = if r.delegate { xenonet_authz::StartMode::Delegated } else { xenonet_authz::StartMode::Asks };
-    // What the request says: a request that says nothing, or off, asks for
-    // no sandbox, and xenonet-authz refuses that from anyone but the person.
-    let sandbox = r.sandbox.domains().map(|d| xenonet_authz::Sandbox { domains: d.to_vec() });
-    Ok((xenonet_authz::Resource::Run { machine: machine.clone(), app: app.clone(), folder: folder.clone() }, xenonet_authz::Act::Start { app, folder, mode, sandbox }))
+    // What the request says: a request that says nothing asks for no
+    // level, and xenonet-authz refuses that from anyone but the person.
+    let confine = match &r.confine {
+        starts::ConfineAsk::Unset => None,
+        starts::ConfineAsk::Off => Some(xenonet_authz::Confine::Off),
+        starts::ConfineAsk::Vendor(d) => Some(xenonet_authz::Confine::Vendor { domains: d.clone() }),
+        starts::ConfineAsk::Cell => {
+            let signer = signer.ok_or(CELL_NOT_YOURS)?;
+            Some(xenonet_authz::Confine::Cell { wall: xenonet_engine::confine::wall_for_identity(signer).map_err(|e| e.to_string())?.to_string() })
+        }
+    };
+    Ok((xenonet_authz::Resource::Run { machine: machine.clone(), app: app.clone(), folder: folder.clone() }, xenonet_authz::Act::Start { app, folder, mode, confine }))
 }
+
+/// Why a start in a cell is for the person alone.
+const CELL_NOT_YOURS: &str =
+    "a start in a cell is yours alone to make, from your own console: cells of different walls don't have keys of their own yet, so no session, actor or other machine starts one";
+
+/// What a `cell` start says when it is asked for: cells are not wired to
+/// session starts yet.
+const CELL_NOT_WIRED: &str =
+    "cell starts aren't wired yet: a cell has no way to carry the app's sign-in or bring its session back to the map, so nothing was started. Use vendor, the app's own sandbox";
 
 /// A plain UUID, for a new session's id.
 pub(crate) fn uuid() -> Result<String, String> {
@@ -502,9 +523,15 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         Err(Held::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
         Err(Held::Refused { why, .. } | Held::Error(why)) => return Err(format!("this machine's limits hold it: {why}")),
     }
-    // Anyone but the person starts a run sandboxed: xenonet-authz decided
+    // Anyone but the person starts a run at vendor: xenonet-authz decided
     // that at the door, and this holds it again, for whatever calls here.
-    let record = match (r.sandbox.domains(), kind) {
+    if r.confine == starts::ConfineAsk::Cell {
+        if kind != Kind::You {
+            return Err(CELL_NOT_YOURS.into());
+        }
+        return Err(CELL_NOT_WIRED.into());
+    }
+    let record = match (r.confine.domains(), kind) {
         (Some(domains), _) => Some(sandbox::Record { folder: cwd.clone(), domains: domains.to_vec() }),
         (None, Kind::You) => None,
         (None, _) => return Err("a run started by anyone but the person runs in its app's sandbox: this start asked for none".into()),
@@ -1163,24 +1190,30 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     let mine = net(w).networks();
     let machine = s(req, "machine").filter(|m| !m.is_empty() && mine.iter().all(|me| me.host != *m));
     let kind = kind_of(by.get("kind").and_then(Value::as_str).unwrap_or(""));
-    // Sandboxed unless the person's own console start on this machine says
-    // otherwise (its switch is off by default): a start for another machine,
+    // Vendor unless the person's own console start on this machine says
+    // otherwise (its level is off by default): a start for another machine,
     // under a delegation, or by a session or an actor says nothing of it
-    // only when its asker never thought of it, and runs sandboxed then.
-    if r.sandbox == starts::SandboxAsk::Unset {
-        r.sandbox = if kind != Kind::You || machine.is_some() || r.delegate { starts::SandboxAsk::On(Vec::new()) } else { starts::SandboxAsk::Off };
+    // only when its asker never thought of it, and runs at vendor then.
+    if r.confine == starts::ConfineAsk::Unset {
+        r.confine = if kind != Kind::You || machine.is_some() || r.delegate { starts::ConfineAsk::Vendor(Vec::new()) } else { starts::ConfineAsk::Off };
     }
-    // Only the person starts a run without the sandbox, and it is refused
-    // here as well as at the door: a start sent to another machine is
-    // decided there, and an older XenoNet would take "off" for no word.
-    if r.sandbox == starts::SandboxAsk::Off && kind != Kind::You {
+    // Only the person starts a run without the sandbox, or in a cell, and it
+    // is refused here as well as at the door: a start sent to another
+    // machine is decided there, and an older XenoNet would take "off" for no
+    // word.
+    if r.confine == starts::ConfineAsk::Off && kind != Kind::You {
         return Err((409, "a session or an actor can't start a run without its app's sandbox: only you can, from your own console".into()));
+    }
+    if r.confine == starts::ConfineAsk::Cell && kind != Kind::You {
+        return Err((409, CELL_NOT_YOURS.into()));
     }
     // An actor's own token, as it called with it: decided here, and never
     // kept with the start.
     let mut by = by;
     let token_text = by.as_object_mut().and_then(|o| o.remove("token")).and_then(|t| t.as_str().map(str::to_string));
     let Some(g) = crate::compose::runtime::ground::ground(w, None) else { return Err((503, "this machine's governance isn't plugged in, so it starts nothing".into())) };
+    // The identity that signs a start of yours, whose wall a cell runs behind.
+    let signer = (kind == Kind::You).then(|| g.facts.identity.person_id()).flatten();
     let token = match (kind, &token_text) {
         (Kind::Actor, Some(t)) => Some(xenonet_authz::Token::parse(t, xenonet_authz::ACTOR_PREFIX, &g, g.facts.now).map_err(|e| (403, e.message))?),
         (Kind::Actor, None) => return Err((403, "an actor starts a session with its token".into())),
@@ -1192,7 +1225,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         let start = apart(r);
         let r = &start.request;
         let id = s(&by, "id").unwrap_or_default();
-        let (resource, act) = run_act(&g.facts.machine, r).map_err(|why| (400, why))?;
+        let (resource, act) = run_act(&g.facts.machine, r, signer.as_deref()).map_err(|why| (400, why))?;
         let principal = match (&token, kind) {
             (_, Kind::You) => {
                 let auth =
@@ -1225,7 +1258,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         return Err((409, format!("{host}'s XenoNet is too old to start sessions: update it there")));
     }
     // An older XenoNet would take a sandboxed request as an unsandboxed one.
-    if r.sandbox.domains().is_some() && !net(w).host_can(&host, "sandbox") {
+    if r.confine != starts::ConfineAsk::Off && !net(w).host_can(&host, "sandbox") {
         return Err((
             409,
             format!("{host}'s XenoNet is too old to start sandboxed sessions, and nothing was started: update it there, or start without the sandbox from your own console"),
@@ -1257,7 +1290,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     // actor: a token minted for the start, once its own has the right.
     let authority = if kind == "you" {
         let there = crate::compose::runtime::ground::machine(&host).map_err(|why| (400, why))?;
-        let (resource, act) = run_act(&there, &r).map_err(|why| (400, why))?;
+        let (resource, act) = run_act(&there, &r, signer.as_deref()).map_err(|why| (400, why))?;
         crate::compose::runtime::ground::authority(&g.facts.identity, at_window, &resource, &act, &format!("start {} on {host} as you", r.app), g.facts.now)
             .map_err(|why| (403, why))?
     } else if let Some(t) = &token {
@@ -1378,7 +1411,11 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, ag
     // The folder it runs in, by the project it is in here: what the network
     // the request came in must be shown.
     let reaching = vec![folder_reach(w, &r.folder)];
-    let decided = run_act(&g.facts.machine, r).and_then(|(resource, act)| {
+    // The signer of a person's start, from the authority it came with: its
+    // wall is derived from that, never taken from the request. The
+    // signature is checked over the act built with it.
+    let signer = (k == Kind::You).then(|| authority.get("person").and_then(|p| p.get("person")).and_then(Value::as_str)).flatten();
+    let decided = run_act(&g.facts.machine, r, signer).and_then(|(resource, act)| {
         crate::compose::runtime::network::judge_remote_reaching(
             w,
             &mut g,

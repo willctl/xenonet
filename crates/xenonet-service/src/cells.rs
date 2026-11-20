@@ -375,7 +375,7 @@ mod tests {
     use adytum::testing::{failed, ok, Exec, FakeDriver, Leaves, Op};
     use adytum::{Arch, CellState, Listed};
     use std::sync::Mutex;
-    use xenonet_engine::confine::{plan, CellRequest, Confinement};
+    use xenonet_engine::confine::{plan, CellRequest};
 
     #[derive(Clone, Copy, Default)]
     struct Behave {
@@ -500,11 +500,10 @@ mod tests {
     }
 
     fn make_plan(r: &CellRunner, project: &Path, keep: bool, copy_out: bool) -> CellPlan {
-        let wall = xenonet_engine::confine::wall_for_identity("git:x").expect("wall");
-        let c = Confinement::Cell { wall };
+        let wall = xenonet_engine::confine::wall_for_identity("git:x").expect("wall").to_string();
         let args = ["agent.sh".to_owned()];
         let req = CellRequest {
-            confinement: &c,
+            wall: &wall,
             identity_id: "git:x",
             app: "fake-agent",
             args: &args,

@@ -459,3 +459,45 @@ async fn a_session_cannot_ask_for_no_sandbox_not_even_of_a_peer_that_would_not_k
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_cell_start_is_yours_alone_and_not_yet_wired() {
+    let root = root("confine-cell");
+    let t = two_networks(&root).await;
+    desk_takes_starts(&t).await;
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    // A session, here or on another machine, is refused in words that say why, and nothing goes out.
+    let (s, v) =
+        as_agent(&t.contractor, VM_ATLAS, "POST", "/api/start", json!({ "machine": "desk", "network": "work", "folder": atlas, "prompt": "tidy atlas", "confine": "cell" })).await;
+    assert!(s >= 400 && v["error"].as_str().is_some_and(|e| e.contains("cell") && e.contains("yours alone")), "{s} {v}");
+    let (s, v) = as_agent(&t.desk, DESK_ATLAS, "POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas", "confine": "cell" })).await;
+    assert!(s >= 400 && v["error"].as_str().is_some_and(|e| e.contains("cell") && e.contains("yours alone")), "{s} {v}");
+    // A frame that claims a cell, sent by a machine's session with no person's signature, is refused at desk's door.
+    let mid = "msg_00000000-0000-4000-8000-000000000031";
+    let request = json!({
+        "folder": atlas, "app": "claude", "mode": null, "prompt": "Tidy atlas", "request": mid, "confine": "cell",
+        "by": { "kind": "agent", "id": VM_ATLAS, "title": "Fix the login form" },
+    });
+    let frame = json!({
+        "schema": "network/send/v1", "mid": mid, "sender": VM_ATLAS, "senderKind": "agent", "agent": t.contractor.agt(VM_ATLAS),
+        "target": "xenonet:start", "body": request.to_string(), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now_ms() as i64,
+    });
+    t.contractor.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: frame }).unwrap();
+    until("desk logs the refusal", 20, || async { t.desk.logged("start").iter().any(|l| l.contains("was refused") && l.contains("cell")) }).await;
+    // The person's own, on this machine: cells aren't wired to session starts, and it says so.
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas", "confine": "cell" })).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("cell starts aren't wired yet")), "{v}");
+    // A request never names a wall.
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas", "confine": "cell", "wall": "wall_nova_0123456789abcdef" })).await;
+    assert_eq!(s, 400, "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("names no wall")), "{v}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 0, "nothing ran");
+    // The control: the person's own vendor start still runs.
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas once more", "confine": "vendor" })).await;
+    assert_eq!(s, 200, "{v}");
+    let _ = ran(&t.desk, 1).await;
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
