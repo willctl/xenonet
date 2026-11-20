@@ -639,13 +639,13 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let command = starts::command(r, &id, &cwd, resumes.settings.as_deref(), &server, prompt_file.as_deref());
     let sandboxed = command.and_then(|(app, args)| match &record {
-        Some(rec) => sandbox::turn(w, &r.app, rec, &id, args).map(|(args, _)| (app, args)),
-        None => Ok((app, args)),
+        Some(rec) => sandbox::turn(w, &r.app, rec, &id, args).map(|t| (app, t.args, t.env)),
+        None => Ok((app, args, Vec::new())),
     });
-    let (app, args) = match sandboxed {
-        Ok((app, mut args)) => {
+    let (app, args, own_env) = match sandboxed {
+        Ok((app, mut args, own_env)) => {
             args.extend(placed.deny.iter().cloned());
-            (app, args)
+            (app, args, own_env)
         }
         Err(why) => {
             if let Some(f) = &prompt_file {
@@ -657,6 +657,8 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // A sandboxed run gets the scrubbed environment an ACP agent gets, and
     // its sign-in; the service's own, without session marks, otherwise.
     let mut env: Vec<(String, String)> = if record.is_some() { sandbox::env(w) } else { xenonet_engine::delivery::resume::resume_env(w.starts.environment()) };
+    env.retain(|(k, _)| !own_env.iter().any(|(o, _)| o == k));
+    env.extend(own_env);
     xenonet_engine::delivery::resume::in_root(&mut env, &r.app, placed.root.as_deref());
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);

@@ -205,7 +205,14 @@ impl Platform for Adapter {
             finish: Some(finish),
             reported: Some(reported),
             plan_used: Some(plan_used),
-            sandbox: Some(delivery::SandboxWays { unavailable: sandbox_unavailable, files: None, words: sandbox_words, turn: sandbox_turn, reads_whole_disk: true }),
+            sandbox: Some(delivery::SandboxWays {
+                unavailable: sandbox_unavailable,
+                files: None,
+                words: sandbox_words,
+                turn: sandbox_turn,
+                reads_whole_disk: true,
+                temp_var: None,
+            }),
             ..Ways::default()
         })
     }

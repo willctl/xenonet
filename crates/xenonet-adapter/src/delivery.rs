@@ -92,6 +92,11 @@ pub struct SandboxWays {
     /// reads, so such a sandbox isn't enough for a run that isn't the
     /// person's own: those starts are refused.
     pub reads_whole_disk: bool,
+    /// The variable that names the app's temp folder, for an app whose
+    /// sandbox lets a command write in that folder when it is shared by
+    /// every session of the user: each sandboxed run is given one of its
+    /// own in it.
+    pub temp_var: Option<&'static str>,
 }
 
 /// The command that starts a new session with a first prompt: the program

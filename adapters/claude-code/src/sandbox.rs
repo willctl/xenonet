@@ -21,7 +21,10 @@ use xenonet_adapter::apps::app;
 use xenonet_adapter::delivery::{Plan, SandboxFiles, SandboxWays};
 
 pub fn ways() -> SandboxWays {
-    SandboxWays { unavailable, files: Some(files), words, turn, reads_whole_disk: false }
+    // Claude Code's sandbox lets a command write anywhere in its temp folder,
+    // `/tmp/claude-<uid>` unless CLAUDE_CODE_TMPDIR names another, which
+    // every session of the user shares (2.1.327).
+    SandboxWays { unavailable, files: Some(files), words, turn, reads_whole_disk: false, temp_var: Some("CLAUDE_CODE_TMPDIR") }
 }
 
 /// Native Windows has no sandbox in Claude Code: it runs commands
@@ -70,13 +73,19 @@ fn turn(f: &SandboxFiles<'_>, args: Vec<String>) -> Vec<String> {
     out
 }
 
-/// The paths a command of a run may not write inside its folder: any
+/// The paths a command of a run may not write: inside its folder, any
 /// `.claude` (commands, agents, skills, settings, plugins), the servers
-/// file, git's hooks and config. Claude Code's sandbox protects some of
-/// them by itself; this names them whatever its list.
+/// file, git's hooks and config, which Claude Code's sandbox protects some
+/// of by itself, and this names whatever its list; and the temp folder
+/// every Claude Code session of the user shares (`/tmp/claude-<uid>`),
+/// which the sandbox lets a command write. The run is told of a temp
+/// folder of its own (CLAUDE_CODE_TMPDIR); if a Claude Code ignored it, its
+/// commands would have no temp folder rather than the shared one.
 fn deny_write(folder: &str) -> Vec<String> {
     let mut v = vec![format!("{}/.claude", folder.trim_end_matches('/'))];
-    v.extend(["**/.claude", "**/.claude/**", "**/.mcp.json", "**/.claude.json", "**/.git/hooks/**", "**/.git/config"].map(str::to_string));
+    v.extend(
+        ["**/.claude", "**/.claude/**", "**/.mcp.json", "**/.claude.json", "**/.git/hooks/**", "**/.git/config", "/tmp/claude-*", "/private/tmp/claude-*"].map(str::to_string),
+    );
     v
 }
 

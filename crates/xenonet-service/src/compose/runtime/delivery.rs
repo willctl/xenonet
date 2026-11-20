@@ -433,11 +433,16 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     };
     let mut args = args;
     args.extend(placed.deny.iter().cloned());
-    let args = match &sandboxed {
-        Some(rec) => crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?.0,
-        None => args,
+    let (args, own_env) = match &sandboxed {
+        Some(rec) => {
+            let turn = crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?;
+            (turn.args, turn.env)
+        }
+        None => (args, Vec::new()),
     };
     let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env(w) } else { resume::resume_env(w.starts.environment()) };
+    env.retain(|(k, _)| !own_env.iter().any(|(o, _)| o == k));
+    env.extend(own_env);
     // A session found in a folder she named, or placed in one by a rule, runs
     // in that folder with its own sign-in, whether it is resumed, copied or
     // woken.

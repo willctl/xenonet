@@ -327,9 +327,17 @@ async fn a_sandboxed_run_has_a_temp_folder_of_its_own_and_no_other_sessions() {
         let meta = std::fs::symlink_metadata(&dir).unwrap_or_else(|e| panic!("run {n}'s temp folder {dir} exists: {e}"));
         assert!(meta.is_dir() && meta.permissions().mode() & 0o777 == 0o700, "run {n}'s temp folder is a private folder: {:o}", meta.permissions().mode());
         assert!(!std::path::Path::new(&dir).starts_with(&atlas), "and not in the folder the run works in");
+        assert!(dir.starts_with("/tmp/") && !dir.starts_with("/tmp/claude-"), "under /tmp, where Claude Code's sandbox honours it, and not the shared one: {dir}");
         seen.push(dir);
     }
     assert_ne!(seen[0], seen[1], "each run has its own");
+    let (settings, _) = files_ready(&t.desk, 3).await;
+    let settings: Value = serde_json::from_str(&settings.unwrap()).unwrap();
+    let deny = settings["sandbox"]["filesystem"]["denyWrite"].as_array().unwrap();
+    assert!(deny.contains(&json!("/tmp/claude-*")) && deny.contains(&json!("/private/tmp/claude-*")), "the shared one is denied besides: {deny:?}");
+    for d in &seen {
+        let _ = std::fs::remove_dir_all(d);
+    }
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

@@ -216,10 +216,18 @@ fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
     std::io::Write::write_all(&mut o.open(file)?, text.as_bytes())
 }
 
+/// A turn of a sandboxed run: its arguments, the app's words of what it may
+/// reach, and what its environment holds beyond `env`'s.
+#[derive(Debug)]
+pub struct Turn {
+    pub args: Vec<String>,
+    pub words: String,
+    pub env: Vec<(String, String)>,
+}
+
 /// The arguments of a turn of `app` in a sandboxed run `run`, made to run
 /// in its sandbox, with the files it is given written; or why it can't be.
-/// The app's words of what the run may reach come with them.
-pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) -> Result<(Vec<String>, String), String> {
+pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) -> Result<Turn, String> {
     let ways = apps::of(app).and_then(|x| x.sandbox).ok_or_else(|| format!("{app} has no sandbox XenoNet can drive"))?;
     let port = w.setup.port.to_string();
     let bin = crate::compose::connect::bin(&w.setup);
@@ -250,7 +258,67 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     let (settings, mcp) = (settings.to_string_lossy().into_owned(), mcp.to_string_lossy().into_owned());
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp, server: &server, not_own: rec.for_others.is_some() }, args)?;
-    Ok((args, (ways.words)(&plan)))
+    let env = match ways.temp_var {
+        Some(var) => vec![(var.to_string(), own_temp(&temp_root(), run)?)],
+        None => Vec::new(),
+    };
+    Ok(Turn { args, words: (ways.words)(&plan), env })
+}
+
+/// The temp folders of runs are named so.
+const TEMP_PREFIX: &str = "xenonet-run-";
+
+/// Where the runs' temp folders are made: `/tmp`, since Claude Code's
+/// sandbox gives a command the temp folder it was told of only when that is
+/// under `/tmp`, and otherwise the shared one (seen on 2.1.327 on macOS,
+/// where the system's own temp folder is under `/var/folders`).
+fn temp_root() -> PathBuf {
+    if cfg!(unix) {
+        PathBuf::from("/tmp")
+    } else {
+        std::env::temp_dir()
+    }
+}
+
+/// A temp folder for run `run` alone, in `under`: made new (one already
+/// there, or a link by its name, is refused, never reused), readable by
+/// the user alone. It is outside the home folder, which a sandboxed run
+/// can't read. Those of runs two days old go.
+fn own_temp(under: &Path, run: &str) -> Result<String, String> {
+    sweep_temps(under, 2.0 * 24.0 * 3600e3);
+    let dir = under.join(format!("{TEMP_PREFIX}{run}"));
+    let mut b = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(&dir).map_err(|e| format!("the run's temp folder couldn't be made: {e}"))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// Lets go of the runs' temp folders older than `older_than_ms`. A link
+/// named like one is left alone, and so is a folder of another user's,
+/// since `/tmp` is everyone's.
+fn sweep_temps(under: &Path, older_than_ms: f64) {
+    let Ok(entries) = std::fs::read_dir(under) else { return };
+    for e in entries.flatten() {
+        if !e.file_name().to_string_lossy().starts_with(TEMP_PREFIX) {
+            continue;
+        }
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else { continue };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if meta.uid() != xenonet_os::paths::own_uid() {
+                continue;
+            }
+        }
+        let old = meta.modified().ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_millis() as f64 > older_than_ms);
+        if meta.is_dir() && old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 /// Lets go of the run files older than `older_than_ms`: a run's settings
@@ -295,6 +363,25 @@ pub fn env_from(vars: Vec<(String, String)>) -> Vec<(String, String)> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_runs_temp_folder_is_new_private_and_never_one_already_there() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = std::env::temp_dir().join(format!("xenonet-sandbox-temps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let dir = own_temp(&d, "r1").unwrap();
+        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert!(own_temp(&d, "r1").is_err(), "one already there is refused");
+        std::os::unix::fs::symlink("/", d.join(format!("{TEMP_PREFIX}r2"))).unwrap();
+        assert!(own_temp(&d, "r2").is_err(), "and so is a link by its name");
+        std::thread::sleep(Duration::from_millis(50));
+        sweep_temps(&d, 10.0);
+        assert!(!Path::new(&dir).exists(), "an old one goes");
+        assert!(std::fs::symlink_metadata(d.join(format!("{TEMP_PREFIX}r2"))).is_ok(), "a link stays");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn a_sessions_name_is_a_safe_file_name() {
