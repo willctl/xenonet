@@ -830,8 +830,15 @@ pub fn run_token(w: &Runtime) -> Option<String> {
 /// token is in the variable the app's adapter names (Claude Code's
 /// CLAUDE_CODE_OAUTH_TOKEN) and nothing comes back.
 pub fn signed_env(w: &Runtime, s: &xenonet_adapter::delivery::SignIn, env: &mut Vec<(String, String)>) -> Option<String> {
-    let t = run_token(w)?;
+    sign_in_env(run_token(w), s, env)
+}
+
+/// `signed_env` with the token given. What the service itself had in the
+/// sign-in's variables never reaches a run, whether or not XenoNet holds a
+/// token: the run signs in with XenoNet's, or as it can on its own.
+fn sign_in_env(token: Option<String>, s: &xenonet_adapter::delivery::SignIn, env: &mut Vec<(String, String)>) -> Option<String> {
     env.retain(|(k, _)| k != s.variable && Some(k.as_str()) != s.fd_variable);
+    let t = token?;
     #[cfg(unix)]
     if let Some(fd) = s.fd_variable {
         env.push((fd.into(), crate::compose::runtime::runs::SIGN_IN_FD.to_string()));
@@ -1551,6 +1558,34 @@ mod tests {
         assert!(acp_for_sandboxed("Claude Code", true).is_none(), "its headless start takes it, sandboxed");
         let why = acp_for_sandboxed("Nova", false).unwrap().unwrap_err();
         assert!(why.contains("ACP") && why.contains("sandbox"), "{why}");
+    }
+
+    #[test]
+    fn a_run_never_keeps_a_sign_in_it_inherited_from_the_service() {
+        let ways = xenonet_adapter::delivery::SignIn { variable: "CLAUDE_CODE_OAUTH_TOKEN", fd_variable: Some("CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"), signed_out: |_| false };
+        let inherited = || {
+            vec![
+                ("PATH".to_string(), "/usr/bin".to_string()),
+                ("CLAUDE_CODE_OAUTH_TOKEN".to_string(), "inherited-token-nova".to_string()),
+                ("CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR".to_string(), "9".to_string()),
+            ]
+        };
+        // XenoNet holds no token: the run signs in as it can, with nothing of the service's.
+        let mut env = inherited();
+        assert_eq!(super::sign_in_env(None, &ways, &mut env), None);
+        assert_eq!(env, [("PATH".to_string(), "/usr/bin".to_string())], "{env:?}");
+        // XenoNet holds one: the run is told where to read it (on unix), or has it (elsewhere), and nothing inherited stays.
+        let mut env = inherited();
+        let handed = super::sign_in_env(Some("held-token-atlas".into()), &ways, &mut env);
+        assert!(!env.iter().any(|(_, v)| v.contains("inherited-token-nova")), "{env:?}");
+        if cfg!(unix) {
+            assert_eq!(handed.as_deref(), Some("held-token-atlas"));
+            assert!(env.iter().any(|(k, v)| k == "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" && v == "3"), "{env:?}");
+            assert!(!env.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
+        } else {
+            assert_eq!(handed, None);
+            assert!(env.iter().any(|(k, v)| k == "CLAUDE_CODE_OAUTH_TOKEN" && v == "held-token-atlas"), "{env:?}");
+        }
     }
 
     #[test]
