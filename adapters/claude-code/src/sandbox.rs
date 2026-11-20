@@ -6,6 +6,10 @@
 //!
 //! Keys, as Claude Code 2.1.327 has them: sandbox.enabled,
 //! sandbox.failIfUnavailable, sandbox.allowUnsandboxedCommands,
+//! sandbox.autoAllowBashIfSandboxed, sandbox.credentials.envVars (deny: the
+//! variable is unset for sandboxed commands; CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+//! is not used, since it also strips the environment of hooks and MCP
+//! servers),
 //! sandbox.filesystem.{allowWrite,denyRead,allowRead},
 //! sandbox.network.{allowedDomains,strictAllowlist},
 //! permissions.{blockReadsOutsideWorkingDirectories,
@@ -66,6 +70,12 @@ fn files(p: &Plan<'_>, listen: Option<&Value>, server: &str) -> (Value, Value) {
             "enabled": true,
             "failIfUnavailable": true,
             "allowUnsandboxedCommands": false,
+            // A sandboxed command still asks, as any other does: the person,
+            // or the delegation's rules, decide each one.
+            "autoAllowBashIfSandboxed": false,
+            // The sign-in is in the run's environment for Claude Code
+            // itself; a command it runs doesn't get it.
+            "credentials": { "envVars": [{ "name": crate::SIGN_IN_VARIABLE, "mode": "deny" }] },
             "filesystem": { "allowWrite": [p.folder], "denyRead": [p.home], "allowRead": [p.folder] },
             "network": { "allowedDomains": p.domains, "strictAllowlist": true },
         },
@@ -113,6 +123,18 @@ mod tests {
         let (none, _) = files(&plan(&[]), None, "xenonet");
         assert_eq!(none["permissions"]["deny"], json!(["WebSearch", "WebFetch"]));
         assert_eq!(none["sandbox"]["network"]["allowedDomains"], json!([]));
+    }
+
+    #[test]
+    fn a_command_in_the_sandbox_cannot_read_the_sign_in_and_bash_is_not_allowed_unasked() {
+        let (s, _) = files(&plan(&[]), None, "xenonet");
+        // The variable the app's runs sign in with, as its adapter names it.
+        let app = app("claude").expect("claude is an app");
+        let variable = xenonet_adapter::Platform::delivery(&crate::Adapter(app)).and_then(|w| w.sign_in).map(|s| s.variable).expect("claude's runs sign in");
+        assert_eq!(variable, "CLAUDE_CODE_OAUTH_TOKEN");
+        assert_eq!(s["sandbox"]["credentials"]["envVars"], json!([{ "name": variable, "mode": "deny" }]), "{s}");
+        // Without this, a sandboxed Bash runs without a question.
+        assert_eq!(s["sandbox"]["autoAllowBashIfSandboxed"], json!(false), "{s}");
     }
 
     #[test]

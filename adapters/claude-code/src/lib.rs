@@ -133,6 +133,10 @@ fn listen_command(file: &str) -> String {
     format!("claude --settings {file}")
 }
 
+/// The variable XenoNet's runs sign in with (`claude setup-token`), which a
+/// sandboxed run's commands must not be given.
+pub(crate) const SIGN_IN_VARIABLE: &str = "CLAUDE_CODE_OAUTH_TOKEN";
+
 mod asked;
 pub mod checks;
 pub mod connect;
@@ -179,7 +183,7 @@ impl Platform for Adapter {
             fork: Some(fork),
             permission_tool: Some(permission_tool),
             tool_timeout: Some("MCP_TOOL_TIMEOUT"),
-            sign_in: Some(SignIn { variable: "CLAUDE_CODE_OAUTH_TOKEN", signed_out }),
+            sign_in: Some(SignIn { variable: SIGN_IN_VARIABLE, signed_out }),
             session_of: Some(session_of),
             finish: Some(finish),
             reported: Some(delivery::reported_claude_style),
