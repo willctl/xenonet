@@ -386,12 +386,14 @@ mod tests {
         out_symlink: bool,
     }
 
-    /// Adytum's fake driver, and what its own copies don't do: it lists
-    /// what was copied in before the staged copy goes, and writes a file
-    /// (and maybe a link) into the result folder.
+    /// Adytum's fake driver, and what its own copies don't do: it keeps
+    /// the specs it was asked to create (the fake forgets a removed cell's),
+    /// lists what was copied in before the staged copy goes, and writes a
+    /// file (and maybe a link) into the result folder.
     #[derive(Clone)]
     struct Fake {
         inner: FakeDriver,
+        created: Arc<Mutex<Vec<CellSpec>>>,
         copied: Arc<Mutex<Vec<String>>>,
         #[cfg(unix)]
         out_symlink: bool,
@@ -416,6 +418,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Driver for Fake {
         async fn create(&self, spec: &CellSpec, id: &CellId) -> adytum::Result<()> {
+            self.created.lock().expect("lock").push(spec.clone());
             self.inner.create(spec, id).await
         }
         async fn start(&self, name: &CellName) -> adytum::Result<()> {
@@ -498,6 +501,7 @@ mod tests {
         }
         let driver = Arc::new(Fake {
             inner,
+            created: Arc::default(),
             copied: Arc::default(),
             #[cfg(unix)]
             out_symlink: behave.out_symlink,
@@ -546,7 +550,7 @@ mod tests {
         let verbs: Vec<&str> = calls.iter().map(|l| l.split(' ').next().unwrap_or("")).collect();
         assert_eq!(verbs, ["create", "start", "exec", "copy_in", "exec", "remove"], "{calls:?}");
         let name: CellName = run.cell.parse().expect("a name");
-        let spec = driver.inner.spec(&name).expect("the spec");
+        let spec = driver.created.lock().expect("lock").iter().find(|s| s.name == name).cloned().expect("the spec");
         assert!(spec.sealed && spec.mounts.is_empty() && spec.ports.is_empty() && spec.network.is_none());
         assert_eq!(spec.wall, xenonet_engine::confine::wall_for_identity("git:x").expect("wall"));
         let execs = execs.lock().expect("lock");

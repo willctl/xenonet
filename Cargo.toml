@@ -20,7 +20,7 @@ publish = false
 # one crate. Here with no features, its types and process runner alone; the
 # service and the doctor add lima, openshell and doctor themselves
 # (scripts/rust-layers.mjs).
-adytum = { git = "https://github.com/willctl/adytum", rev = "bdc1e3c49ac242ca19b7653f93f61cbaf22b4986", default-features = false }
+adytum = { git = "https://github.com/willctl/adytum", rev = "23b7d5aa0c7670f0abdabf1502212ba31388e80f", default-features = false }
 xenonet-actors = { path = "crates/xenonet-actors" }
 # The formats XenoNet writes: JSON, text, times, units, orderings.
 xenonet-text = { path = "crates/xenonet-text" }
