@@ -78,11 +78,23 @@ Scenario 1 needs no new code, only both machines on a current release.
   named; a rule's mode is `warn` unless she says `refuse`; a start into a
   project whose rule names an account no folder holds is refused in either
   mode, never run under another; a rule-bound or named-folder run signs in
-  with its folder's own sign-in and gets no shared runs token, so a sandboxed
-  start into such a project is refused; refuse mode passes Claude Code
-  `--disallowedTools` for `git commit`, `git push` and `gh`, which joins the
-  deny rules of the run's settings, so it holds for every confinement level;
-  a folder's keychain entry is not read for plan usage. Left: the page has
+  with its folder's own sign-in, gets no shared runs token and none of the
+  app's API-key variables, so a sandboxed start into such a project is
+  refused, and so is every start that is always sandboxed (another machine, a
+  delegation, an intent, a session, an actor); a start's placement (folder,
+  withheld token, deny arguments) is kept in the store per session and
+  carried to its copies, applied to every later turn after the rule is read
+  again, and a turn whose record can't be read is refused; refuse mode,
+  which needs no account in the rule, passes Claude Code `--disallowedTools`
+  for `git commit`, `git push` and `gh`, which joins the deny rules of the
+  run's settings. That blocks a command that starts with one of them, each
+  part of a command joined with `&&`, `;` or `|` included. It does not block
+  `git -C x push`, `git -c k=v commit`, `/usr/bin/git push`, `env git push`,
+  `sh -c`, aliases, scripts, `make` or `npm run`, a GitHub MCP server or
+  `curl` with a token; the pre-push hook (`xenonet identity hook install`) is
+  what stops a push from the repo. A folder's keychain entry is not read for
+  plan usage; a session id found in two named folders has no folder and is
+  refused; taking a folder away takes XenoNet's hooks out of it. Left: the page has
   no place to name folders yet, and the saved folders take effect only after
   the service starts again.
 

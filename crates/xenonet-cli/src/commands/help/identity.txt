@@ -14,9 +14,10 @@ project; a rule says which they should be, and warns when they aren't.
                                          account its sessions are to run as
   xenonet identity rule [<folder>] --mode warn|refuse
                                          warn (the default) only says. refuse
-                                         also keeps a Claude Code run XenoNet
-                                         starts here from committing, pushing
-                                         or running gh
+                                         also tells a Claude Code run XenoNet
+                                         starts here not to run commands that
+                                         start with git commit, git push or gh
+                                         (see below for what that misses)
   xenonet identity rule [<folder>] --clear
                                          take the rule away
   xenonet identity check [<folder>]      the check; exits 1 when the project
@@ -32,13 +33,25 @@ project; a rule says which they should be, and warns when they aren't.
   --json                                 the answer as JSON
 
 A rule's accounts are matched against the folders XenoNet reads for each app
-(xenonet folders). A start XenoNet makes in the project runs in the folder
-that is signed in to the account, with that folder's own sign-in, and is
-refused when none is, in either mode. A start in a sandbox is refused too,
-since a sandboxed run signs in with a token whose account XenoNet can't
-tell. What XenoNet can't see stays a warning: your
-own terminals, Claude desktop, a /login inside a running session, pushes over
-SSH, and Codex threads.
+(xenonet folders). A start of your own, from your console or terminal, runs
+in the folder that is signed in to the account, with that folder's own
+sign-in, and is refused when none is, in either mode. A start from another
+machine, a delegation, an intent, a session or an actor is always sandboxed,
+and a sandboxed run signs in with a token whose account XenoNet can't tell,
+so in a project whose rule names an account all of those are refused. Every
+later turn of a session (a wake, a copy) is placed as its start was, and is
+refused if the rule now names another account.
+
+What refuse mode blocks: Claude Code is given --disallowedTools for
+git commit, git push and gh, which blocks a command that starts with one of
+them, including each part of a command joined with &&, ; or |. It does not
+block git -C x push, git -c k=v commit, /usr/bin/git push, env git push,
+sh -c "git push", an alias, a script, make or npm run, a GitHub MCP server, or
+curl with a token. It is a guard against a slip, not a wall. What actually
+stops a push from the repo is the pre-push hook above (xenonet identity hook
+install), whatever program pushes. What XenoNet can't see stays a warning:
+your own terminals, Claude desktop, a /login inside a running session, pushes
+over SSH, and Codex threads.
 
 Setting or clearing a rule is yours, so it works from your own terminal and
 is refused from a session's.
