@@ -30,13 +30,16 @@ pub struct ClaudeSession {
     pub size_bytes: Value,
     pub parent: Option<Parent>,
     pub claude_account: Value,
+    /// The app that runs Claude Code for the person, when it isn't the CLI
+    /// or Claude desktop: `t3-code`.
+    pub runs_in: Value,
 }
 
 impl ClaudeSession {
     /// The session in Claude Code's order: id, app, rawId, desktopId,
     /// inDesktop, title, preview, cwd, worktree, createdAt, updatedAt,
     /// archived, starred, model, effort, permissionMode, branch, tag,
-    /// sizeBytes, parentId, parentKind, claudeAccount.
+    /// sizeBytes, parentId, parentKind, claudeAccount, runsIn.
     pub fn record(self) -> Obj {
         let (parent_id, parent_kind) = parent_fields(self.parent);
         vec![
@@ -62,6 +65,7 @@ impl ClaudeSession {
             ("parentId", parent_id),
             ("parentKind", parent_kind),
             ("claudeAccount", F::V(self.claude_account)),
+            ("runsIn", F::V(self.runs_in)),
         ]
     }
 }
@@ -98,9 +102,10 @@ mod tests {
             size_bytes: Value::Null,
             parent: Some(Parent { id: "claude:c0".into(), kind: ParentKind::Spawn }),
             claude_account: Value::Null,
+            runs_in: Value::Null,
         }
         .record();
-        assert_eq!(keys(&claude), "id app rawId desktopId inDesktop title preview cwd worktree createdAt updatedAt archived starred model effort permissionMode branch tag sizeBytes parentId parentKind claudeAccount");
+        assert_eq!(keys(&claude), "id app rawId desktopId inDesktop title preview cwd worktree createdAt updatedAt archived starred model effort permissionMode branch tag sizeBytes parentId parentKind claudeAccount runsIn");
         assert_eq!((&claude[0].1, &claude[19].1, &claude[20].1), (&F::s("claude:c1"), &F::s("claude:c0"), &F::s("spawn")));
     }
 }

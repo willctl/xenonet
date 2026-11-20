@@ -206,6 +206,13 @@
       "description": "The Claude account and organization Claude desktop filed it under",
       "additionalProperties": {}
     },
+    "runsIn": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The app that runs Claude Code for the person, when it isn't the CLI or Claude desktop: `t3-code`"
+    },
     "status": {
       "type": [
         "string",

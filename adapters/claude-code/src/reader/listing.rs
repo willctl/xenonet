@@ -219,11 +219,22 @@ pub fn sessions(listed: &[Value], desktop: &[Value]) -> Result<Vec<Obj>, TypeErr
                 size_bytes: or_null(get("fileSize")?),
                 parent: parent_cli.map(|p| Parent { id: format!("claude:{}", display(p)), kind: ParentKind::Spawn }),
                 claude_account: or_null(dp("account")),
+                runs_in: runs_in(get("entrypoint")?),
             }
             .record(),
         );
     }
     Ok(out)
+}
+
+/// The app that runs Claude Code for the person, from the entrypoint its
+/// transcript names. Only the apps the map shows are named; the CLI and
+/// the SDK's other callers are not.
+fn runs_in(entrypoint: Js<'_>) -> Value {
+    match entrypoint.and_then(Value::as_str) {
+        Some("t3-code") => json!("t3-code"),
+        _ => Value::Null,
+    }
 }
 
 #[cfg(test)]

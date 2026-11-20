@@ -512,7 +512,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("branch", mono(node.branch)) +
         row("folder", mono(shortPath(node.cwd, 40))) +
         row("worktree", mono(node.worktree && shortPath(node.worktree, 40))) +
-        row("origin", mono(node.originator ?? (node.observed || node.reader || node.network ? null : node.inDesktop ? "Claude desktop" : node.app === "claude" ? "CLI / SDK" : node.app === "grok" ? grokOrigin(node) : null))) +
+        row("origin", mono(node.originator ?? (node.observed || node.reader || node.network ? null : node.inDesktop ? "Claude desktop" : node.runsIn === "t3-code" ? "T3 Code" : node.app === "claude" ? "CLI / SDK" : node.app === "grok" ? grokOrigin(node) : null))) +
         row("seen", node.reader === "experimental" ? `read from ${h(APP_LABEL[node.app] ?? node.app)}'s own records (experimental)` : node.observed === "numbat" ? "observed through numbat's records" : node.observed === "gateway" ? `reported through the gateway${node.reportedBy ? ` by ${h(node.reportedBy)}` : ""}` : null) +
         row("parent", p ? `<a href="#" data-goto="${h(p.id)}">${h(p.title)}</a> <span class="dim">${h(node.parentKind ?? "")}</span>` : null) +
         row("id", `<code class="copy" data-copy="${h(node.rawId)}" title="copy">${h(node.rawId)}</code>`);
