@@ -419,12 +419,16 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
         None => args,
     };
     let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env(w) } else { resume::resume_env(w.starts.environment()) };
+    // A session found in a folder she named runs in that folder, with its
+    // own sign-in, whether it is resumed, copied or woken.
+    let root = crate::compose::runtime::accounts::session_root(w, agent);
+    resume::in_root(&mut env, &app, root.as_deref());
     // An app whose runs sign in (Claude Code) does with the token you gave
     // XenoNet's runs, and asks its permission prompts of you through this
     // XenoNet's server, waiting a minute past the hold for your answer, as
     // a start does.
     let ways = xenonet_engine::delivery::apps::of(&app).unwrap_or_default();
-    let sign_in = ways.sign_in.and_then(|s| crate::compose::runtime::starts::signed_env(w, &s, &mut env));
+    let sign_in = crate::compose::runtime::accounts::sign_in(w, ways.sign_in, root.is_some(), &mut env);
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);
         env.push((v.into(), crate::compose::runtime::starts::mcp_tool_timeout_ms(w).to_string()));
