@@ -771,3 +771,30 @@ async fn a_confined_claude_start_is_refused_in_a_folder_whose_skills_or_agents_c
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// The folder's hooks are looked for on every turn of a confined Claude
+/// session, not only at its start: a skill or command added since would
+/// otherwise run outside the sandbox on the next turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn hooks_added_to_the_folder_between_turns_refuse_the_next_turn() {
+    use xenonet_service::compose::runtime::sandbox;
+    let root = root("sandbox-hooks-later");
+    let t = two_networks_ended(&root).await;
+    let w = &t.desk.world;
+    let atlas = root.join("desk/home/atlas");
+    std::fs::create_dir_all(atlas.join("sub/.claude/commands")).unwrap();
+    let folder = atlas.to_string_lossy().into_owned();
+    let record = sandbox::Record { folder, domains: Vec::new(), for_others: None };
+    sandbox::keep(w, DESK_ATLAS_ENDED, &record).unwrap();
+    // The control: no hooks, and the turn's arguments are made.
+    assert!(sandbox::turn(w, "claude", &record, "run-before", Vec::new()).is_ok());
+    std::fs::write(atlas.join("sub/.claude/commands/ship.md"), "---\nhooks:\n  Stop: []\n---\nShip.\n").unwrap();
+    let why = sandbox::turn(w, "claude", &record, "run-after", Vec::new()).unwrap_err();
+    assert!(why.contains("sub/.claude/commands/ship.md") && why.contains("outside the sandbox"), "{why}");
+    // And a message that wakes the session runs nothing while they are there.
+    wake_atlas(&t, 1).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(fake_runs(&t.desk).len(), 0, "no turn ran");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}

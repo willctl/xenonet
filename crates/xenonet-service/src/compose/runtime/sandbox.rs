@@ -195,6 +195,15 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     if let Some(why) = (ways.unavailable)(&plan, cfg!(windows)) {
         return Err(why);
     }
+    // Claude Code loads the folder's own skills, agents and commands
+    // whatever settings sources it is given, and their hooks run outside its
+    // sandbox: looked for on every turn, since the folder may have changed
+    // since the last.
+    if app == "claude" {
+        if let Some(why) = starts::project_hooks(Path::new(&rec.folder)) {
+            return Err(why);
+        }
+    }
     let runs = Path::new(&w.setup.state_dir).join("runs");
     let (settings, mcp) = (runs.join(format!("{run}.settings.json")), runs.join(format!("{run}.mcp.json")));
     if let Some(files) = ways.files {

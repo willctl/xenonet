@@ -471,35 +471,126 @@ pub fn sandbox_folder(cwd: &str, home: &str, windows: bool) -> Result<(), String
     Ok(())
 }
 
-/// Why a Claude Code run mustn't be sandboxed in `dir`, if it holds skills,
-/// agents or commands of its own that carry hooks: Claude Code loads
-/// `.claude/skills`, `.claude/agents` and `.claude/commands` from the folder
-/// it starts in whatever `--setting-sources` leaves out, and a hook, or a
-/// skill that is a plugin, runs as Claude Code's own process, outside the
-/// sandbox that wraps its commands. Folders and files that don't read are
-/// taken as holding none, since the run can't read them either.
+/// The deepest a folder is looked into for `.claude` folders, and the most
+/// entries looked at: past either, the check says so and refuses.
+const HOOK_WALK_DEPTH: usize = 16;
+const HOOK_WALK_ENTRIES: usize = 50_000;
+
+/// Why a Claude Code run mustn't be sandboxed in `dir`, if a `.claude`
+/// folder in it, at any depth, holds skills, agents, commands or plugins
+/// that carry hooks: Claude Code loads what is in `.claude` (the folder it
+/// starts in, and any under it) whatever `--setting-sources` leaves out, and
+/// a hook, or a skill that is a plugin, runs as Claude Code's own process,
+/// outside the sandbox that wraps its commands. A `.claude` that is a link is
+/// read where it points, and one that points out of the folder is refused,
+/// as is a link inside one that does. Past what it will look at (too deep, or
+/// too many entries) it refuses in words. Files that don't read are taken as
+/// holding none, since the run can't read them either.
 pub fn project_hooks(dir: &std::path::Path) -> Option<String> {
-    let claude = dir.join(".claude");
-    let has_hooks_key = |f: &std::path::Path| -> bool {
+    project_hooks_within(dir, HOOK_WALK_DEPTH, HOOK_WALK_ENTRIES)
+}
+
+/// `project_hooks` with its limits given.
+fn project_hooks_within(dir: &std::path::Path, max_depth: usize, max_entries: usize) -> Option<String> {
+    use std::path::{Path, PathBuf};
+    let root = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let mut seen = 0usize;
+    let shown = |p: &Path| p.strip_prefix(dir).unwrap_or(p).to_string_lossy().into_owned();
+    let words = |what: String| {
+        format!("{what} carries hooks or is a plugin, which Claude Code runs outside the sandbox that holds its commands, so a sandboxed run isn't started in this folder: use another folder, or take them out")
+    };
+    let too_much = || {
+        format!("this folder has too much to check for hooks in its .claude folders (more than {max_entries} entries, or folders more than {max_depth} deep), so a sandboxed run isn't started in it: use a smaller folder")
+    };
+    let outside = |what: String| {
+        format!("{what} is a link that leads outside the folder, where it can't be checked for hooks, so a sandboxed run isn't started in this folder: take the link out")
+    };
+    let has_hooks_key = |f: &Path| -> bool {
         let Ok(text) = std::fs::read_to_string(f) else { return false };
         let mut lines = text.lines();
         lines.next().is_some_and(|l| l.trim() == "---") && lines.take_while(|l| l.trim() != "---").any(|l| l.starts_with("hooks:") || l.starts_with("\"hooks\":"))
     };
-    let entries = |d: &std::path::Path| std::fs::read_dir(d).map(|r| r.flatten().map(|e| e.path()).collect::<Vec<_>>()).unwrap_or_default();
-    let words = |what: String| {
-        format!("{what} carries hooks or is a plugin, which Claude Code runs outside the sandbox that holds its commands, so a sandboxed run isn't started in this folder: use another folder, or take them out")
+    let sorted = |d: &Path| -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(d).map(|r| r.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+        v.sort();
+        v
     };
-    for sub in ["agents", "commands"] {
-        for f in entries(&claude.join(sub)) {
-            if has_hooks_key(&f) {
-                return Some(words(format!(".claude/{sub}/{}", f.file_name()?.to_string_lossy())));
+    // What one `.claude` folder (read at `at`, shown as `shown_at`) holds.
+    let claude = |at: &Path, shown_at: &Path, seen: &mut usize| -> Option<String> {
+        let mut todo = vec![(at.to_path_buf(), shown_at.to_path_buf(), 0usize)];
+        let mut visited: Vec<PathBuf> = Vec::new();
+        while let Some((d, shown_d, depth)) = todo.pop() {
+            let real = d.canonicalize().unwrap_or_else(|_| d.clone());
+            if visited.contains(&real) {
+                continue;
+            }
+            visited.push(real);
+            for f in sorted(&d) {
+                *seen += 1;
+                if *seen > max_entries {
+                    return Some(too_much());
+                }
+                let name = f.file_name()?.to_string_lossy().into_owned();
+                let shown_f = shown_d.join(&name);
+                let linked = std::fs::symlink_metadata(&f).is_ok_and(|m| m.file_type().is_symlink());
+                if linked && !f.canonicalize().is_ok_and(|t| t.starts_with(&root)) {
+                    return Some(outside(shown(&shown_f)));
+                }
+                if matches!(name.as_str(), "hooks" | "hooks.json" | "plugin.json" | ".claude-plugin") {
+                    return Some(words(shown(&shown_f)));
+                }
+                if f.is_dir() {
+                    if depth + 1 > max_depth {
+                        return Some(too_much());
+                    }
+                    todo.push((f, shown_f, depth + 1));
+                } else if name.to_lowercase().ends_with(".md") && has_hooks_key(&f) {
+                    return Some(words(shown(&shown_f)));
+                }
             }
         }
-    }
-    for skill in entries(&claude.join("skills")) {
-        let name = skill.file_name()?.to_string_lossy().into_owned();
-        if has_hooks_key(&skill.join("SKILL.md")) || skill.join("hooks").exists() || skill.join("plugin.json").exists() || skill.join(".claude-plugin").exists() {
-            return Some(words(format!(".claude/skills/{name}")));
+        None
+    };
+    // Every folder under `dir` is looked into for `.claude`, links to
+    // folders aside, and node_modules only two levels down (a package, or a
+    // scope's package), which is where a package's own .claude is.
+    let mut todo = vec![(dir.to_path_buf(), 0usize, usize::MAX)];
+    while let Some((d, depth, nm)) = todo.pop() {
+        for f in sorted(&d) {
+            seen += 1;
+            if seen > max_entries {
+                return Some(too_much());
+            }
+            let name = f.file_name()?.to_string_lossy().into_owned();
+            let meta = std::fs::symlink_metadata(&f).ok()?;
+            if name == ".claude" {
+                let target = if meta.file_type().is_symlink() {
+                    let Ok(t) = f.canonicalize() else { continue };
+                    if !t.starts_with(&root) {
+                        return Some(outside(shown(&f)));
+                    }
+                    t
+                } else {
+                    f.clone()
+                };
+                if target.is_dir() {
+                    if let Some(why) = claude(&target, &f, &mut seen) {
+                        return Some(why);
+                    }
+                }
+                continue;
+            }
+            if !meta.is_dir() || name == ".git" {
+                continue;
+            }
+            if depth + 1 > max_depth {
+                return Some(too_much());
+            }
+            let nm = if name == "node_modules" { 2 } else { nm };
+            if nm == 0 {
+                continue;
+            }
+            todo.push((f, depth + 1, if nm == usize::MAX { nm } else { nm - 1 }));
         }
     }
     None
@@ -794,6 +885,74 @@ mod tests {
             assert!(why.contains("hooks") && why.contains("outside the sandbox"), "{name}: {why}");
         }
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn hooks_are_found_in_every_claude_folder_at_any_depth_and_in_a_linked_one() {
+        let base = std::env::temp_dir().join(format!("xenonet-hooks-deep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let write = |name: &str, text: &str| {
+            let f = base.join(name);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, text).unwrap();
+        };
+        let hooked = "---\nname: x\nhooks:\n  Stop: []\n---\nx\n";
+        let plain = "---\nname: x\n---\nx\n";
+        // Plain skills, nested and not, run.
+        write(".claude/skills/review/SKILL.md", plain);
+        write("pkg/web/.claude/skills/fmt/SKILL.md", plain);
+        write(".claude/skills/review/scripts/run.sh", "echo hi\n");
+        assert_eq!(project_hooks(&base), None, "plain skills in nested folders run");
+        for (name, text, shown) in [
+            (".claude/commands/sub/deeper/x.md", hooked, ".claude/commands/sub/deeper/x.md"),
+            ("pkg/web/.claude/skills/fmt/SKILL.md", hooked, "pkg/web/.claude/skills/fmt/SKILL.md"),
+            ("pkg/web/.claude/agents/team/guard.md", hooked, "pkg/web/.claude/agents/team/guard.md"),
+            (".claude/plugins/tools/plugin.json", "{}", ".claude/plugins/tools/plugin.json"),
+            (".claude/skills/review/refs/hooks/on-stop.sh", "echo\n", ".claude/skills/review/refs/hooks"),
+        ] {
+            write(name, text);
+            let why = project_hooks(&base).unwrap_or_default();
+            assert!(why.starts_with(shown) && why.contains("outside the sandbox"), "{name}: {why}");
+            let _ = std::fs::remove_file(base.join(name));
+            let _ = std::fs::remove_dir_all(base.join(".claude/skills/review/refs"));
+            let _ = std::fs::remove_dir_all(base.join(".claude/plugins"));
+            let _ = std::fs::remove_dir_all(base.join(".claude/commands"));
+            let _ = std::fs::remove_dir_all(base.join("pkg/web/.claude/agents"));
+            write("pkg/web/.claude/skills/fmt/SKILL.md", plain);
+            assert_eq!(project_hooks(&base), None, "{name}: back to plain");
+        }
+        // A `.claude` that is a link: to a folder outside is a refusal, to one inside is read.
+        let outside = std::env::temp_dir().join(format!("xenonet-hooks-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(outside.join("skills/ok")).unwrap();
+        std::fs::write(outside.join("skills/ok/SKILL.md"), plain).unwrap();
+        std::fs::create_dir_all(base.join("linked")).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("linked/.claude")).unwrap();
+        let why = project_hooks(&base).unwrap_or_default();
+        assert!(why.starts_with("linked/.claude") && why.contains("outside the folder"), "{why}");
+        std::fs::remove_file(base.join("linked/.claude")).unwrap();
+        write("shared/skills/ok/SKILL.md", plain);
+        std::os::unix::fs::symlink(base.join("shared"), base.join("linked/.claude")).unwrap();
+        assert_eq!(project_hooks(&base), None, "a link to a plain folder inside runs");
+        write("shared/commands/x.md", hooked);
+        let why = project_hooks(&base).unwrap_or_default();
+        assert!(why.starts_with("linked/.claude/commands/x.md"), "a link to a hooked folder inside is read: {why}");
+        // A link inside a `.claude` that leaves the folder is a refusal too.
+        std::fs::remove_dir_all(base.join("shared/commands")).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("shared/skills/away")).unwrap();
+        let why = project_hooks(&base).unwrap_or_default();
+        assert!(why.contains("away") && why.contains("outside the folder"), "{why}");
+        std::fs::remove_file(base.join("shared/skills/away")).unwrap();
+        assert_eq!(project_hooks(&base), None);
+        // Past what it will look at, it says so and refuses.
+        write("a/b/c/d/e/f/g.txt", "x");
+        let why = project_hooks_within(&base, 3, 100_000).unwrap_or_default();
+        assert!(why.contains("too much to check"), "deeper than it looks: {why}");
+        let why = project_hooks_within(&base, 16, 5).unwrap_or_default();
+        assert!(why.contains("too much to check"), "more files than it looks at: {why}");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
