@@ -4,19 +4,20 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use xenonet_adapter::check::{connected, folder, privacy_fix, s, Facts, Folder};
+use xenonet_adapter::check::{connected, folder, release, privacy_fix, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 use xenonet_text::text::{display, truthy};
 use xenonet_text::units::plural;
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
-    vec![Box::new(Cli), Box::new(Auth), Box::new(Sandbox), Box::new(Transcripts), Box::new(Usage), Box::new(Sessions)]
+    vec![Box::new(Cli), Box::new(Release), Box::new(Auth), Box::new(Sandbox), Box::new(Transcripts), Box::new(Usage), Box::new(Sessions)]
 }
 
 const GROUP: &str = "Claude Code";
 
 struct Cli;
+struct Release;
 struct Auth;
 struct Sandbox;
 struct Transcripts;
@@ -38,6 +39,16 @@ impl Check for Cli {
         let v = c.run(&bin, &["--version"], 4000.0).await?;
         let version = re!(r"\d+\.\d+\.\d+").find(&s(v.get("stdout"))).map(|m| m.as_str().to_string());
         Ok(Verdict::ok(format!("{}{}", version.map_or(String::new(), |v| format!("version {v}, ")), c.tilde(&bin))))
+    }
+}
+
+#[async_trait(?Send)]
+impl Check for Release {
+    fn row(&self) -> CheckRow {
+        CheckRow { id: "claude.release", group: GROUP, title: "Claude Code is a version XenoNet's reader was checked against", slot: Slot::App }
+    }
+    async fn run(&self, c: &dyn CheckCtx) -> Result<Verdict, Stop> {
+        release(c, "claude", c.which("claude").await?).await
     }
 }
 
@@ -197,6 +208,7 @@ mod tests {
             rows,
             [
                 ("claude.cli", Slot::App),
+                ("claude.release", Slot::App),
                 ("claude.auth", Slot::App),
                 ("claude.sandbox", Slot::App),
                 ("claude.transcripts", Slot::App),

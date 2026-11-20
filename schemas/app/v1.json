@@ -87,6 +87,11 @@
       "description": "The developer team that signs it, codesign's TeamIdentifier",
       "pattern": "^[A-Z0-9]{10}$"
     },
+    "checked": {
+      "type": "string",
+      "description": "The version of the app XenoNet's readers were last checked against; the doctor compares it with the installed one",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
     "connect": {
       "type": "object",
       "properties": {

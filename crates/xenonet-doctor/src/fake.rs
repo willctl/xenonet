@@ -47,7 +47,7 @@ impl DoctorHost for Fake {
         (!self.missing.contains(&cmd)).then(|| "/x/tool".into())
     }
     async fn exists(&self, path: &str) -> bool {
-        path == "/x/here"
+        path == "/x/here" || path == "/x/tool"
     }
     async fn run(&self, file: &str, args: &[&str], _ms: f64) -> Value {
         (self.run)(file, args)

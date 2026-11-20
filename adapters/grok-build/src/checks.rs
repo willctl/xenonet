@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use xenonet_adapter::check::{connected, folder, list, privacy_fix, s, Facts, Folder};
+use xenonet_adapter::check::{connected, folder, list, release, privacy_fix, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 use xenonet_os::nodepath::style_of;
 use xenonet_text::text::{display, truthy};
@@ -12,12 +12,13 @@ use xenonet_text::units::plural;
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
-    vec![Box::new(Cli), Box::new(Auth), Box::new(Sessions), Box::new(Hooks), Box::new(Connected)]
+    vec![Box::new(Cli), Box::new(Release), Box::new(Auth), Box::new(Sessions), Box::new(Hooks), Box::new(Connected)]
 }
 
 const GROUP: &str = "Grok Build";
 
 struct Cli;
+struct Release;
 struct Auth;
 struct Sessions;
 struct Hooks;
@@ -69,6 +70,16 @@ impl Check for Cli {
         let v = c.run(&bin, &["--version"], 4000.0).await?;
         let version = re!(r"\d+\.\d+\.\d+[A-Za-z0-9_.-]*").find(&s(v.get("stdout"))).map(|m| m.as_str().to_string());
         Ok(Verdict::ok(format!("{}{}", version.map_or(String::new(), |v| format!("version {v}, ")), c.tilde(&bin))))
+    }
+}
+
+#[async_trait(?Send)]
+impl Check for Release {
+    fn row(&self) -> CheckRow {
+        CheckRow { id: "grok.release", group: GROUP, title: "Grok Build is a version XenoNet's reader was checked against", slot: Slot::App }
+    }
+    async fn run(&self, c: &dyn CheckCtx) -> Result<Verdict, Stop> {
+        release(c, "grok", grok_bin(c).await?).await
     }
 }
 
@@ -183,7 +194,7 @@ mod tests {
     #[test]
     fn the_rows_are_the_apps_then_its_sessions() {
         let rows: Vec<(&str, Slot)> = all().iter().map(|c| (c.row().id, c.row().slot)).collect();
-        assert_eq!(rows, [("grok.cli", Slot::App), ("grok.auth", Slot::App), ("grok.sessions", Slot::App), ("grok.hooks", Slot::App), ("agents.grok", Slot::Sessions)]);
+        assert_eq!(rows, [("grok.cli", Slot::App), ("grok.release", Slot::App), ("grok.auth", Slot::App), ("grok.sessions", Slot::App), ("grok.hooks", Slot::App), ("agents.grok", Slot::Sessions)]);
     }
 
     #[test]

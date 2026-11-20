@@ -29,6 +29,9 @@ pub struct App {
     pub limits: Option<String>,
     /// The developer team that signs it (codesign's TeamIdentifier).
     pub team: Option<String>,
+    /// The version its readers were last checked against: what their golden
+    /// files and parsers were written and tested for.
+    pub checked: Option<String>,
     pub connect: Option<Connect>,
     /// For a native reader, the tools whose calls are edits.
     pub edit_tools: Vec<String>,
@@ -170,6 +173,7 @@ fn entry(v: &Value) -> Option<App> {
         identity: text(o.get("identity")),
         limits: text(o.get("limits")),
         team: text(o.get("team")),
+        checked: text(o.get("checked")),
         connect: o.get("connect").and_then(Value::as_object).map(connect),
         edit_tools: texts(o.get("editTools")),
         has: texts(o.get("has")),

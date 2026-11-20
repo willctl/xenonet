@@ -10,6 +10,9 @@
 //   identity   the kind of account it runs under (identity/v1)
 //   limits     its plan limits in live/snapshot/v1
 //   team       the developer team that signs it (codesign's TeamIdentifier)
+//   checked    the version of the app XenoNet's readers were last checked
+//              against, the one their golden files and parsers were written
+//              and tested for; the doctor compares it with what is installed
 //   connect    how XenoNet connects it: its config format, the hook
 //              events, each with a matcher when it takes one, and the
 //              events whose answers it passes over (unheard)
@@ -61,6 +64,8 @@ export const APPS = [
     identity: "claude",
     limits: "claude",
     team: "Q6L2SF6YDW",
+    // The sandbox settings and the sign-in descriptor are written for this version.
+    checked: "2.1.327",
     connect: {
       format: "claude-settings",
       events: [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "Edit|Write|MultiEdit|NotebookEdit"], ["PostToolUse"], ["Stop"], ["SessionEnd"], ["Notification"]],
@@ -81,6 +86,8 @@ export const APPS = [
     identity: "chatgpt",
     limits: "codex",
     team: "2DC432GLL2",
+    // The golden world's rollouts are from this version.
+    checked: "0.150.0",
     connect: {
       format: "codex-hooks",
       events: [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "apply_patch|Edit|Write"], ["PostToolUse"], ["Stop"], ["SessionEnd"]],
@@ -102,6 +109,8 @@ export const APPS = [
     roots: { env: "GROK_HOME", default: "~/.grok" },
     context: 256000,
     team: "5Y6N3AJ54S",
+    // Nothing in the tests pins a version: the one installed when this was set.
+    checked: "1.0.77",
     // Its matchers name tools exactly: Claude Code's edit tools stand for
     // its own too, which it names as well. It passes over what
     // SessionStart and UserPromptSubmit answer.
