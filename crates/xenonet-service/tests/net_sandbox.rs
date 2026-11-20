@@ -291,6 +291,49 @@ async fn a_sandbox_is_never_the_home_folder_whoever_asks_and_wherever_it_is_chec
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The temp folder the `n`th run of the fake on `h` was told to use
+/// (`CLAUDE_CODE_TMPDIR`), empty if none.
+fn run_tmpdir(h: &Host, n: usize) -> String {
+    std::fs::read_to_string(h.dir.join("bin").join(format!("tmpdir-{}", n - 1))).unwrap_or_default()
+}
+
+/// Claude Code lets a sandboxed command write anywhere in its temp folder,
+/// which is one for every session of the user (`/tmp/claude-<uid>`, seen
+/// on 2.1.327): other sessions' scratch files and scripts are there, and
+/// they run outside any sandbox. So each sandboxed run gets a temp folder
+/// of its own, private, made for it, whatever the service's environment
+/// says; a run that isn't sandboxed gets none made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_sandboxed_run_has_a_temp_folder_of_its_own_and_no_other_sessions() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = root("sandbox-tmp");
+    let t = two_networks(&root).await;
+    let mut env = service_env();
+    env.push(("CLAUDE_CODE_TMPDIR".into(), "/tmp/shared-by-every-session".into()));
+    t.desk.world.starts.set_environment(env);
+    let atlas = root.join("desk/home/atlas").to_string_lossy().into_owned();
+    let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": "tidy atlas" })).await;
+    assert_eq!(s, 200, "{v}");
+    let _ = files_ready(&t.desk, 1).await;
+    let own = run_tmpdir(&t.desk, 1);
+    assert!(own.is_empty() || own == "/tmp/shared-by-every-session", "an unsandboxed run gets no folder made for it: {own:?}");
+    let mut seen = Vec::new();
+    for n in [2, 3] {
+        let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": format!("tidy atlas {n}"), "sandbox": true })).await;
+        assert_eq!(s, 200, "{v}");
+        let _ = files_ready(&t.desk, n).await;
+        let dir = run_tmpdir(&t.desk, n);
+        assert!(!dir.is_empty() && dir != "/tmp/shared-by-every-session", "run {n} gets a temp folder of its own: {dir:?}");
+        let meta = std::fs::symlink_metadata(&dir).unwrap_or_else(|e| panic!("run {n}'s temp folder {dir} exists: {e}"));
+        assert!(meta.is_dir() && meta.permissions().mode() & 0o777 == 0o700, "run {n}'s temp folder is a private folder: {:o}", meta.permissions().mode());
+        assert!(!std::path::Path::new(&dir).starts_with(&atlas), "and not in the folder the run works in");
+        seen.push(dir);
+    }
+    assert_ne!(seen[0], seen[1], "each run has its own");
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A session that was started sandboxed is resumed sandboxed: the turn a
 /// message wakes it for loads the run's settings and none of the repo's, and
 /// has the scrubbed environment, never the bare turn a session without a
