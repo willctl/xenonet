@@ -342,6 +342,10 @@ async fn a_sandboxed_run_has_a_temp_folder_of_its_own_and_no_other_sessions() {
     for d in &seen {
         until("a run's temp folder goes once the run has ended", 20, || async { !std::path::Path::new(d).exists() }).await;
     }
+    let (_, names) = files_ready(&t.desk, 3).await;
+    for k in ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_2"] {
+        assert!(names.iter().any(|n| n == k), "git is told to run no fsmonitor or hooks and take no bare repository unnamed: {names:?}");
+    }
     let (settings, _) = files_ready(&t.desk, 3).await;
     let settings: Value = serde_json::from_str(&settings.unwrap()).unwrap();
     let deny = settings["sandbox"]["filesystem"]["denyWrite"].as_array().unwrap();
@@ -349,6 +353,35 @@ async fn a_sandboxed_run_has_a_temp_folder_of_its_own_and_no_other_sessions() {
     for d in &seen {
         let _ = std::fs::remove_dir_all(d);
     }
+    drop(t);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The sandbox matches its rules against real paths and reads `*?[]{}` as
+/// patterns: a folder reached through a link gets rules for where it
+/// really is, and one whose path has such a character isn't sandboxed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_sandboxed_runs_rules_name_its_folders_real_path_and_a_pattern_in_it_is_refused() {
+    use xenonet_service::compose::runtime::sandbox;
+    let root = root("sandbox-real");
+    let t = two_networks(&root).await;
+    let w = &t.desk.world;
+    let home = root.join("desk/home");
+    let atlas = home.join("atlas");
+    std::os::unix::fs::symlink(&atlas, home.join("atlas-link")).unwrap();
+    let record = sandbox::Record { folder: home.join("atlas-link").to_string_lossy().into_owned(), domains: Vec::new(), for_others: None };
+    let made = sandbox::turn(w, "claude", &record, &format!("run-real-{}", std::process::id()), Vec::new()).unwrap();
+    let file = made.args.iter().skip_while(|a| *a != "--settings").nth(1).expect("a settings file");
+    let settings: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    let real = atlas.to_string_lossy().into_owned();
+    assert_eq!(settings["sandbox"]["filesystem"]["allowWrite"], json!([real]), "{settings}");
+    assert!(settings["sandbox"]["filesystem"]["denyWrite"].as_array().unwrap().contains(&json!(format!("{real}/**/.claude"))), "{settings}");
+    drop(made);
+    let odd = home.join("at[las]");
+    std::fs::create_dir_all(&odd).unwrap();
+    let record = sandbox::Record { folder: odd.to_string_lossy().into_owned(), domains: Vec::new(), for_others: None };
+    let why = sandbox::turn(w, "claude", &record, &format!("run-odd-{}", std::process::id()), Vec::new()).unwrap_err();
+    assert!(why.contains("pattern"), "a folder with a pattern character isn't sandboxed, in words: {why}");
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }

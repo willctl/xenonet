@@ -225,8 +225,9 @@ pub struct Turn {
     pub args: Vec<String>,
     pub words: String,
     pub env: Vec<(String, String)>,
-    /// The temp folder made for it, which goes when it ends.
-    pub temp: Option<String>,
+    /// The temp folder made for it, which goes when this is dropped: when
+    /// the turn has ended, or when it never starts.
+    pub temp: Option<OwnTemp>,
 }
 
 /// The arguments of a turn of `app` in a sandboxed run `run`, made to run
@@ -235,10 +236,18 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     let ways = apps::of(app).and_then(|x| x.sandbox).ok_or_else(|| format!("{app} has no sandbox XenoNet can drive"))?;
     let port = w.setup.port.to_string();
     let bin = crate::compose::connect::bin(&w.setup);
-    let unmade = Plan { folder: &rec.folder, home: &w.setup.home, domains: &rec.domains, port: &port, bin: &bin, temp: None };
-    if let Some(why) = (ways.unavailable)(&unmade, cfg!(windows)) {
+    let given = Plan { folder: &rec.folder, home: &w.setup.home, domains: &rec.domains, port: &port, bin: &bin, temp: None };
+    if let Some(why) = (ways.unavailable)(&given, cfg!(windows)) {
         return Err(why);
     }
+    // The sandbox matches its rules against real paths (macOS's `/tmp` is
+    // `/private/tmp`, a folder may be reached through a link), and reads a
+    // `*`, `?`, `[` or `{` in a path as a pattern.
+    let real = std::fs::canonicalize(&rec.folder).map_err(|e| format!("{} can't be found for a sandboxed run: {e}", rec.folder))?.to_string_lossy().into_owned();
+    if real.contains(['*', '?', '[', ']', '{', '}']) {
+        return Err(format!("{real} has a character the sandbox reads as a pattern (* ? [ ] {{ }}), so a sandboxed run isn't made there"));
+    }
+    let unmade = Plan { folder: &real, ..given };
     // Claude Code loads the folder's own skills, agents and commands
     // whatever settings sources it is given, and their hooks run outside its
     // sandbox: looked for on every turn, since the folder may have changed
@@ -254,7 +263,7 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
         Some(_) => Some(own_temp(&temp_root(), run)?),
         None => None,
     };
-    let plan = Plan { temp: temp.as_deref(), ..unmade };
+    let plan = Plan { temp: temp.as_ref().map(OwnTemp::path), ..unmade };
     let runs = Path::new(&w.setup.state_dir).join("runs");
     let (settings, mcp) = (runs.join(format!("{run}.settings.json")), runs.join(format!("{run}.mcp.json")));
     if let Some(files) = ways.files {
@@ -269,10 +278,11 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     let (settings, mcp) = (settings.to_string_lossy().into_owned(), mcp.to_string_lossy().into_owned());
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp, server: &server, not_own: rec.for_others.is_some() }, args)?;
-    let env = match (ways.temp_var, &temp) {
-        (Some(var), Some(dir)) => vec![(var.to_string(), dir.clone())],
+    let mut env = match (ways.temp_var, &temp) {
+        (Some(var), Some(dir)) => vec![(var.to_string(), dir.path().to_string())],
         _ => Vec::new(),
     };
+    env.extend(git_guard());
     let words = (ways.words)(&plan);
     Ok(Turn { args, words, env, temp })
 }
@@ -292,11 +302,42 @@ fn temp_root() -> PathBuf {
     }
 }
 
+/// What git is told in a sandboxed run's environment, which comes before
+/// any config file: no fsmonitor command and no hooks, and a folder isn't
+/// taken for a bare repository unless named. Claude Code's own git calls
+/// run outside its sandbox, so a config a command of the run managed to
+/// plant can't make them run anything.
+fn git_guard() -> Vec<(String, String)> {
+    let set = [("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null"), ("safe.bareRepository", "explicit")];
+    let mut env = vec![("GIT_CONFIG_COUNT".to_string(), set.len().to_string())];
+    for (i, (k, v)) in set.iter().enumerate() {
+        env.push((format!("GIT_CONFIG_KEY_{i}"), (*k).to_string()));
+        env.push((format!("GIT_CONFIG_VALUE_{i}"), (*v).to_string()));
+    }
+    env
+}
+
+/// A run's own temp folder, removed when this is dropped.
+#[derive(Debug)]
+pub struct OwnTemp(String);
+
+impl OwnTemp {
+    pub fn path(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for OwnTemp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A temp folder for run `run` alone, in `under`: made new (one already
 /// there, or a link by its name, is refused, never reused), readable by
 /// the user alone. It is outside the home folder, which a sandboxed run
 /// can't read. Those of runs two days old go.
-fn own_temp(under: &Path, run: &str) -> Result<String, String> {
+fn own_temp(under: &Path, run: &str) -> Result<OwnTemp, String> {
     sweep_temps(under, 2.0 * 24.0 * 3600e3);
     let dir = under.join(format!("{TEMP_PREFIX}{run}"));
     let mut b = std::fs::DirBuilder::new();
@@ -306,7 +347,7 @@ fn own_temp(under: &Path, run: &str) -> Result<String, String> {
         b.mode(0o700);
     }
     b.create(&dir).map_err(|e| format!("the run's temp folder couldn't be made: {e}"))?;
-    Ok(dir.to_string_lossy().into_owned())
+    Ok(OwnTemp(dir.to_string_lossy().into_owned()))
 }
 
 /// Lets go of the runs' temp folders older than `older_than_ms`. A link
@@ -383,14 +424,19 @@ mod tests {
         let d = std::env::temp_dir().join(format!("xenonet-sandbox-temps-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        let dir = own_temp(&d, "r1").unwrap();
+        let made = own_temp(&d, "r1").unwrap();
+        let dir = made.path().to_string();
         assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
         assert!(own_temp(&d, "r1").is_err(), "one already there is refused");
+        drop(made);
+        assert!(!Path::new(&dir).exists(), "it goes when the run lets go of it");
         std::os::unix::fs::symlink("/", d.join(format!("{TEMP_PREFIX}r2"))).unwrap();
         assert!(own_temp(&d, "r2").is_err(), "and so is a link by its name");
+        let left = d.join(format!("{TEMP_PREFIX}r3"));
+        std::fs::create_dir(&left).unwrap();
         std::thread::sleep(Duration::from_millis(50));
         sweep_temps(&d, 10.0);
-        assert!(!Path::new(&dir).exists(), "an old one goes");
+        assert!(!left.exists(), "one left behind goes once old");
         assert!(std::fs::symlink_metadata(d.join(format!("{TEMP_PREFIX}r2"))).is_ok(), "a link stays");
         let _ = std::fs::remove_dir_all(&d);
     }

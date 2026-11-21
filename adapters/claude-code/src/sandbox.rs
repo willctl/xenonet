@@ -85,29 +85,43 @@ fn turn(f: &SandboxFiles<'_>, args: Vec<String>) -> Vec<String> {
 /// Every pattern is a full path: Claude Code's sandbox on macOS ignores one
 /// that isn't (`**/.claude` let a command make `deep/.claude`, 2.1.327), and
 /// a folder's path covers all under it. `<folder>/**/x` matches at the top
-/// of the folder too. A repository nested in the folder can't be made at
-/// all (`<folder>/*/**/.git`), since its config and hooks would run when git
-/// runs there; the folder's own `.git` stays writable but for what git runs
-/// or follows: hooks, config, submodules' repositories, and the files that
-/// point git at another repository.
+/// of the folder too. No folder or file named `.git` can be made under it
+/// (`<folder>/*/**/.git`), since a nested repository's config and hooks
+/// run when git runs there. The folder's own `.git` stays writable, when it
+/// is a folder, but for what git runs or follows: hooks, config,
+/// submodules' repositories, alternates and the files that point git
+/// elsewhere. When it is a file (a linked worktree's) or there is none, it
+/// can't be written, and nor can a `HEAD` at the top, which would make git
+/// take the folder itself for a repository. Codex's and Grok Build's own
+/// project settings are denied too, since a session of theirs started there
+/// later would load them outside any sandbox.
 fn deny_write(folder: &str) -> Vec<String> {
     let f = folder.trim_end_matches('/');
+    let git_is_folder = std::fs::symlink_metadata(format!("{f}/.git")).is_ok_and(|m| m.is_dir());
     let mut v: Vec<String> = [
         ".claude",
         "**/.claude",
         "**/.mcp.json",
         "**/.claude.json",
+        "**/.codex",
+        "**/.grok",
+        "HEAD",
         ".git/hooks",
         ".git/config",
         ".git/modules",
         ".git/commondir",
         ".git/config.worktree",
         ".git/worktrees",
+        ".git/objects/info/alternates",
+        ".git/objects/info/http-alternates",
         "*/**/.git",
     ]
     .iter()
     .map(|p| format!("{f}/{p}"))
     .collect();
+    if !git_is_folder {
+        v.push(format!("{f}/.git"));
+    }
     v.extend(SHARED_TEMP.map(str::to_string));
     v
 }
@@ -285,6 +299,10 @@ mod tests {
             "/home/me/atlas/.git/config.worktree",
             "/home/me/atlas/.git/worktrees",
             "/home/me/atlas/*/**/.git",
+            "/home/me/atlas/HEAD",
+            "/home/me/atlas/**/.codex",
+            "/home/me/atlas/**/.grok",
+            "/home/me/atlas/.git/objects/info/alternates",
             "/tmp/claude-*",
             "/private/tmp/claude-*",
         ] {
@@ -295,6 +313,26 @@ mod tests {
         assert!(deny.iter().all(|d| d.starts_with('/')), "every pattern is a full path: {deny:?}");
         // The folder stays writable: denyWrite wins over allowWrite for what it names only.
         assert_eq!(s["sandbox"]["filesystem"]["allowWrite"], json!(["/home/me/atlas"]));
+    }
+
+    #[test]
+    fn a_git_file_or_none_cannot_be_written_and_a_git_folder_stays_writable() {
+        let d = std::env::temp_dir().join(format!("xenonet-cc-gitfile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (wt, repo, none) = (d.join("wt"), d.join("repo"), d.join("none"));
+        for f in [&wt, &repo, &none] {
+            std::fs::create_dir_all(f).unwrap();
+        }
+        std::fs::write(wt.join(".git"), "gitdir: /elsewhere/.git/worktrees/wt\n").unwrap();
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let denies = |f: &std::path::Path| {
+            let f = f.to_string_lossy().into_owned();
+            deny_write(&f).contains(&format!("{f}/.git"))
+        };
+        assert!(denies(&wt), "a linked worktree's .git file");
+        assert!(denies(&none), "a folder with no .git yet");
+        assert!(!denies(&repo), "a .git folder stays writable, so a run can commit");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

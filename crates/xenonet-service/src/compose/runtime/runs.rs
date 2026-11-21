@@ -151,7 +151,7 @@ pub struct Turn<'a> {
     /// A folder made for this turn alone (a sandboxed run's temp folder),
     /// removed once the turn and everything it started have ended, or when
     /// it doesn't start.
-    pub temp: Option<String>,
+    pub temp: Option<crate::compose::runtime::sandbox::OwnTemp>,
 }
 
 /// The descriptor number a run reads its sign-in from.
@@ -410,11 +410,6 @@ impl Runner {
     /// One turn of `program`, once `admit` let it start.
     fn start(self: &Arc<Self>, t: Turn<'_>, program: &str) -> Result<u32, String> {
         let Turn { key, app, args, cwd, env, text, sign_in, temp } = t;
-        let let_go = move || {
-            if let Some(d) = &temp {
-                let _ = std::fs::remove_dir_all(d);
-            }
-        };
         let how = runs::launch(program, args, cfg!(windows))?;
         let id = xenonet_engine::network::new_id("run").map_err(|t| t.message)?;
         let logs = self.dir.as_ref().map(|d| d.join("runs"));
@@ -428,7 +423,7 @@ impl Runner {
         let mut child = match spawn(&how, cwd, env, sign_in) {
             Ok(c) => c,
             Err(e) => {
-                let_go();
+                drop(temp);
                 // No run, so no log of one.
                 if let Some(p) = &log_path {
                     drop(log);
@@ -508,7 +503,7 @@ impl Runner {
                     r.timed_out = timed_out;
                 }
             }
-            let_go();
+            drop(temp);
             // Saved before the session is let go, so whoever sees it free
             // (a restart, the next run) reads how this one ended.
             me.save();
