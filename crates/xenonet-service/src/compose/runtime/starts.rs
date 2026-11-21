@@ -581,7 +581,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     let sandbox_words = match &record {
         Some(rec) => {
             let (port, bin) = (w.setup.port.to_string(), crate::compose::connect::bin(&w.setup));
-            let plan = xenonet_adapter::delivery::Plan { folder: &rec.folder, home: &w.setup.home, domains: &rec.domains, port: &port, bin: &bin };
+            let plan = xenonet_adapter::delivery::Plan { folder: &rec.folder, home: &w.setup.home, domains: &rec.domains, port: &port, bin: &bin, temp: None };
             Some(starts::sandbox_plan(r, &plan, cfg!(windows))?)
         }
         None => None,
@@ -639,13 +639,13 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let command = starts::command(r, &id, &cwd, resumes.settings.as_deref(), &server, prompt_file.as_deref());
     let sandboxed = command.and_then(|(app, args)| match &record {
-        Some(rec) => sandbox::turn(w, &r.app, rec, &id, args).map(|t| (app, t.args, t.env)),
-        None => Ok((app, args, Vec::new())),
+        Some(rec) => sandbox::turn(w, &r.app, rec, &id, args).map(|t| (app, t.args, t.env, t.temp)),
+        None => Ok((app, args, Vec::new(), None)),
     });
-    let (app, args, own_env) = match sandboxed {
-        Ok((app, mut args, own_env)) => {
+    let (app, args, own_env, temp) = match sandboxed {
+        Ok((app, mut args, own_env, temp)) => {
             args.extend(placed.deny.iter().cloned());
-            (app, args, own_env)
+            (app, args, own_env, temp)
         }
         Err(why) => {
             if let Some(f) = &prompt_file {
@@ -685,7 +685,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         }
         return Err(why);
     }
-    let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text }, sign_in: sign_in.as_deref() };
+    let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text }, sign_in: sign_in.as_deref(), temp };
     let pid = match run_turn(w, &resumes.runner, turn) {
         Ok(pid) => pid,
         Err(why) => {

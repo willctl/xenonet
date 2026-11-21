@@ -179,7 +179,7 @@ async fn a_sandboxed_start_from_another_machine_runs_in_the_folder_and_nowhere_e
     assert_eq!(sandbox["autoAllowBashIfSandboxed"], json!(false), "and a command still asks");
     assert_eq!((&sandbox["network"]["allowUnixSockets"], &sandbox["network"]["allowAllUnixSockets"]), (&json!([]), &json!(false)));
     assert_eq!(sandbox["filesystem"]["allowWrite"], json!([atlas]), "it writes only in the folder");
-    assert_eq!(sandbox["filesystem"]["denyRead"], json!([desk_home.to_string_lossy()]), "it reads none of the home folder");
+    assert_eq!(sandbox["filesystem"]["denyRead"][0], json!(desk_home.to_string_lossy()), "it reads none of the home folder");
     assert!(sandbox["filesystem"]["allowRead"].as_array().unwrap().contains(&json!(atlas)), "but the folder");
     assert_eq!(sandbox["network"]["allowedDomains"], json!(["github.com"]));
     assert_eq!(settings["permissions"]["blockReadsOutsideWorkingDirectories"], true);
@@ -294,7 +294,14 @@ async fn a_sandbox_is_never_the_home_folder_whoever_asks_and_wherever_it_is_chec
 /// The temp folder the `n`th run of the fake on `h` was told to use
 /// (`CLAUDE_CODE_TMPDIR`), empty if none.
 fn run_tmpdir(h: &Host, n: usize) -> String {
-    std::fs::read_to_string(h.dir.join("bin").join(format!("tmpdir-{}", n - 1))).unwrap_or_default()
+    run_tmpdir_seen(h, n).0
+}
+
+/// That folder, and its mode as `ls -l` showed it while the run ran.
+fn run_tmpdir_seen(h: &Host, n: usize) -> (String, String) {
+    let text = std::fs::read_to_string(h.dir.join("bin").join(format!("tmpdir-{}", n - 1))).unwrap_or_default();
+    let mut lines = text.lines();
+    (lines.next().unwrap_or_default().to_string(), lines.next().unwrap_or_default().to_string())
 }
 
 /// Claude Code lets a sandboxed command write anywhere in its temp folder,
@@ -305,7 +312,6 @@ fn run_tmpdir(h: &Host, n: usize) -> String {
 /// says; a run that isn't sandboxed gets none made.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_sandboxed_run_has_a_temp_folder_of_its_own_and_no_other_sessions() {
-    use std::os::unix::fs::PermissionsExt;
     let root = root("sandbox-tmp");
     let t = two_networks(&root).await;
     let mut env = service_env();
@@ -322,15 +328,20 @@ async fn a_sandboxed_run_has_a_temp_folder_of_its_own_and_no_other_sessions() {
         let (s, v) = t.desk.window("POST", "/api/start", json!({ "folder": atlas, "prompt": format!("tidy atlas {n}"), "sandbox": true })).await;
         assert_eq!(s, 200, "{v}");
         let _ = files_ready(&t.desk, n).await;
-        let dir = run_tmpdir(&t.desk, n);
+        let (dir, mode) = run_tmpdir_seen(&t.desk, n);
         assert!(!dir.is_empty() && dir != "/tmp/shared-by-every-session", "run {n} gets a temp folder of its own: {dir:?}");
-        let meta = std::fs::symlink_metadata(&dir).unwrap_or_else(|e| panic!("run {n}'s temp folder {dir} exists: {e}"));
-        assert!(meta.is_dir() && meta.permissions().mode() & 0o777 == 0o700, "run {n}'s temp folder is a private folder: {:o}", meta.permissions().mode());
+        assert_eq!(mode, "drwx------", "run {n}'s temp folder is a private folder while it runs");
         assert!(!std::path::Path::new(&dir).starts_with(&atlas), "and not in the folder the run works in");
         assert!(dir.starts_with("/tmp/") && !dir.starts_with("/tmp/claude-"), "under /tmp, where Claude Code's sandbox honours it, and not the shared one: {dir}");
+        let (settings, _) = files_ready(&t.desk, n).await;
+        let settings: Value = serde_json::from_str(&settings.unwrap()).unwrap();
+        assert!(settings["sandbox"]["filesystem"]["allowRead"].as_array().unwrap().contains(&json!(dir)), "run {n} may read its own: {settings}");
         seen.push(dir);
     }
     assert_ne!(seen[0], seen[1], "each run has its own");
+    for d in &seen {
+        until("a run's temp folder goes once the run has ended", 20, || async { !std::path::Path::new(d).exists() }).await;
+    }
     let (settings, _) = files_ready(&t.desk, 3).await;
     let settings: Value = serde_json::from_str(&settings.unwrap()).unwrap();
     let deny = settings["sandbox"]["filesystem"]["denyWrite"].as_array().unwrap();
@@ -369,6 +380,10 @@ async fn a_turn_resumed_for_a_sandboxed_session_is_sandboxed_too() {
     let settings: Value = serde_json::from_str(&settings.expect("a settings file")).unwrap();
     assert_eq!(settings["sandbox"]["filesystem"]["allowWrite"], json!([atlas]));
     assert_unreachable_from_the_run(&names);
+    let dir = run_tmpdir(&t.desk, 1);
+    assert!(dir.starts_with("/tmp/xenonet-run-"), "a resumed turn has a temp folder of its own too: {dir:?}");
+    assert!(settings["sandbox"]["filesystem"]["allowRead"].as_array().unwrap().contains(&json!(dir)), "which it may read: {settings}");
+    let _ = std::fs::remove_dir_all(&dir);
     drop(t);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -846,9 +861,13 @@ async fn hooks_added_to_the_folder_between_turns_refuse_the_next_turn() {
     let record = sandbox::Record { folder, domains: Vec::new(), for_others: None };
     sandbox::keep(w, DESK_ATLAS_ENDED, &record).unwrap();
     // The control: no hooks, and the turn's arguments are made.
-    assert!(sandbox::turn(w, "claude", &record, "run-before", Vec::new()).is_ok());
+    let before = format!("run-before-{}", std::process::id());
+    let made = sandbox::turn(w, "claude", &record, &before, Vec::new()).unwrap();
+    for (_, dir) in &made.env {
+        let _ = std::fs::remove_dir_all(dir);
+    }
     std::fs::write(atlas.join("sub/.claude/commands/ship.md"), "---\nhooks:\n  Stop: []\n---\nShip.\n").unwrap();
-    let why = sandbox::turn(w, "claude", &record, "run-after", Vec::new()).unwrap_err();
+    let why = sandbox::turn(w, "claude", &record, &format!("run-after-{}", std::process::id()), Vec::new()).unwrap_err();
     assert!(why.contains("sub/.claude/commands/ship.md") && why.contains("outside the sandbox"), "{why}");
     // And a message that wakes the session runs nothing while they are there.
     wake_atlas(&t, 1).await;

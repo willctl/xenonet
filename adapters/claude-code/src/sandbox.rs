@@ -81,12 +81,51 @@ fn turn(f: &SandboxFiles<'_>, args: Vec<String>) -> Vec<String> {
 /// which the sandbox lets a command write. The run is told of a temp
 /// folder of its own (CLAUDE_CODE_TMPDIR); if a Claude Code ignored it, its
 /// commands would have no temp folder rather than the shared one.
+///
+/// Every pattern is a full path: Claude Code's sandbox on macOS ignores one
+/// that isn't (`**/.claude` let a command make `deep/.claude`, 2.1.327), and
+/// a folder's path covers all under it. `<folder>/**/x` matches at the top
+/// of the folder too. A repository nested in the folder can't be made at
+/// all (`<folder>/*/**/.git`), since its config and hooks would run when git
+/// runs there; the folder's own `.git` stays writable but for what git runs
+/// or follows: hooks, config, submodules' repositories, and the files that
+/// point git at another repository.
 fn deny_write(folder: &str) -> Vec<String> {
-    let mut v = vec![format!("{}/.claude", folder.trim_end_matches('/'))];
-    v.extend(
-        ["**/.claude", "**/.claude/**", "**/.mcp.json", "**/.claude.json", "**/.git/hooks/**", "**/.git/config", "/tmp/claude-*", "/private/tmp/claude-*"].map(str::to_string),
-    );
+    let f = folder.trim_end_matches('/');
+    let mut v: Vec<String> = [
+        ".claude",
+        "**/.claude",
+        "**/.mcp.json",
+        "**/.claude.json",
+        ".git/hooks",
+        ".git/config",
+        ".git/modules",
+        ".git/commondir",
+        ".git/config.worktree",
+        ".git/worktrees",
+        "*/**/.git",
+    ]
+    .iter()
+    .map(|p| format!("{f}/{p}"))
+    .collect();
+    v.extend(SHARED_TEMP.map(str::to_string));
     v
+}
+
+/// The temp folder every Claude Code session of the user shares
+/// (`/tmp/claude-<uid>`, by its real path too on macOS).
+const SHARED_TEMP: [&str; 2] = ["/tmp/claude-*", "/private/tmp/claude-*"];
+
+/// The temp folders XenoNet gives sandboxed runs, each its own: a run reads
+/// its own and no other run's.
+const RUN_TEMPS: [&str; 2] = ["/tmp/xenonet-run-*", "/private/tmp/xenonet-run-*"];
+
+fn deny_read(home: &str) -> Vec<String> {
+    std::iter::once(home).chain(SHARED_TEMP).chain(RUN_TEMPS).map(str::to_string).collect()
+}
+
+fn allow_read(p: &Plan<'_>) -> Vec<String> {
+    std::iter::once(p.folder).chain(p.temp).map(str::to_string).collect()
 }
 
 /// The settings file and the MCP configuration of one run.
@@ -115,7 +154,10 @@ fn files(p: &Plan<'_>, listen: Option<&Value>, server: &str) -> (Value, Value) {
             // folder, the servers file, git's hooks and config), can't be
             // written by a command of this run: denyWrite wins over the
             // folder's allowWrite for what it names (2.1.327).
-            "filesystem": { "allowWrite": [p.folder], "denyWrite": deny_write(p.folder), "denyRead": [p.home], "allowRead": [p.folder] },
+            // Nor can one read the home folder, the temp folder other
+            // sessions share or other runs' own: only the run's folder and
+            // its own temp folder.
+            "filesystem": { "allowWrite": [p.folder], "denyWrite": deny_write(p.folder), "denyRead": deny_read(p.home), "allowRead": allow_read(p) },
             // No Unix socket (the SSH agent's, Docker's): on macOS none is
             // allowed by path, and on Linux the seccomp filter that blocks
             // them is not switched off.
@@ -146,7 +188,7 @@ mod tests {
     use super::*;
 
     fn plan(domains: &[String]) -> Plan<'_> {
-        Plan { folder: "/home/me/atlas", home: "/home/me", domains, port: "47840", bin: "/usr/bin/xenonet" }
+        Plan { folder: "/home/me/atlas", home: "/home/me", domains, port: "47840", bin: "/usr/bin/xenonet", temp: Some("/tmp/xenonet-run-r1") }
     }
 
     #[test]
@@ -155,7 +197,12 @@ mod tests {
         let (s, mcp) = files(&plan(&domains), Some(&json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "http", "url": "http://x/listen" }] }] } })), "xenonet");
         assert_eq!((&s["sandbox"]["enabled"], &s["sandbox"]["failIfUnavailable"], &s["sandbox"]["allowUnsandboxedCommands"]), (&json!(true), &json!(true), &json!(false)));
         assert_eq!(s["sandbox"]["filesystem"]["allowWrite"], json!(["/home/me/atlas"]));
-        assert_eq!(s["sandbox"]["filesystem"]["denyRead"], json!(["/home/me"]));
+        assert_eq!(
+            s["sandbox"]["filesystem"]["denyRead"],
+            json!(["/home/me", "/tmp/claude-*", "/private/tmp/claude-*", "/tmp/xenonet-run-*", "/private/tmp/xenonet-run-*"]),
+            "nor the temp folder every session shares, nor other runs' own"
+        );
+        assert_eq!(s["sandbox"]["filesystem"]["allowRead"], json!(["/home/me/atlas", "/tmp/xenonet-run-r1"]), "but its folder and its own temp folder");
         assert_eq!(s["sandbox"]["network"]["allowedDomains"], json!(["github.com"]));
         assert_eq!((&s["sandbox"]["network"]["allowUnixSockets"], &s["sandbox"]["network"]["allowAllUnixSockets"]), (&json!([]), &json!(false)), "no Unix socket: {s}");
         assert_eq!(s["permissions"]["allow"], json!(["WebFetch(domain:github.com)"]));
@@ -226,9 +273,26 @@ mod tests {
     fn a_command_in_the_sandbox_cannot_write_what_claude_code_loads_later() {
         let (s, _) = files(&plan(&[]), None, "xenonet");
         let deny: Vec<&str> = s["sandbox"]["filesystem"]["denyWrite"].as_array().expect("denyWrite is set").iter().filter_map(Value::as_str).collect();
-        for want in ["/home/me/atlas/.claude", "**/.claude", "**/.claude/**", "**/.mcp.json", "**/.git/hooks/**", "**/.git/config"] {
+        for want in [
+            "/home/me/atlas/.claude",
+            "/home/me/atlas/**/.claude",
+            "/home/me/atlas/**/.mcp.json",
+            "/home/me/atlas/**/.claude.json",
+            "/home/me/atlas/.git/hooks",
+            "/home/me/atlas/.git/config",
+            "/home/me/atlas/.git/modules",
+            "/home/me/atlas/.git/commondir",
+            "/home/me/atlas/.git/config.worktree",
+            "/home/me/atlas/.git/worktrees",
+            "/home/me/atlas/*/**/.git",
+            "/tmp/claude-*",
+            "/private/tmp/claude-*",
+        ] {
             assert!(deny.contains(&want), "{want} is denied: {deny:?}");
         }
+        // Claude Code's sandbox on macOS ignores a pattern that isn't a full
+        // path (seen on 2.1.327: `**/.claude` let `deep/.claude` be made).
+        assert!(deny.iter().all(|d| d.starts_with('/')), "every pattern is a full path: {deny:?}");
         // The folder stays writable: denyWrite wins over allowWrite for what it names only.
         assert_eq!(s["sandbox"]["filesystem"]["allowWrite"], json!(["/home/me/atlas"]));
     }

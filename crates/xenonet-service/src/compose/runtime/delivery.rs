@@ -433,12 +433,12 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     };
     let mut args = args;
     args.extend(placed.deny.iter().cloned());
-    let (args, own_env) = match &sandboxed {
+    let (args, own_env, temp) = match &sandboxed {
         Some(rec) => {
             let turn = crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?;
-            (turn.args, turn.env)
+            (turn.args, turn.env, turn.temp)
         }
-        None => (args, Vec::new()),
+        None => (args, Vec::new(), None),
     };
     let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env(w) } else { resume::resume_env(w.starts.environment()) };
     env.retain(|(k, _)| !own_env.iter().any(|(o, _)| o == k));
@@ -471,7 +471,7 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     } else {
         None
     };
-    let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input, sign_in: sign_in.as_deref() };
+    let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input, sign_in: sign_in.as_deref(), temp };
     match crate::compose::runtime::starts::run_turn(w, &r.runner, turn) {
         Ok(pid) => {
             crate::compose::runtime::starts::after_resume(w, &r.runner, &app, &key, pid, fork.then_some(agent), prompt_file, sandboxed);

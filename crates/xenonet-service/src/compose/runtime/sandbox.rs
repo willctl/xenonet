@@ -14,7 +14,9 @@
 //! A sandboxed run's environment is the one an ACP agent gets
 //! (`xenonet_acp::agent_env`): the service's without XenoNet's own
 //! variables, session marks and anything named for a secret, plus the
-//! sign-in the app's runs use. Its files are private, in the runs folder.
+//! sign-in the app's runs use. Its settings are private, in the runs
+//! folder; a Claude Code turn also has a private temp folder of its own
+//! under `/tmp`, removed when the turn ends.
 
 use crate::compose::runtime::Runtime;
 use serde_json::{json, Value};
@@ -223,6 +225,8 @@ pub struct Turn {
     pub args: Vec<String>,
     pub words: String,
     pub env: Vec<(String, String)>,
+    /// The temp folder made for it, which goes when it ends.
+    pub temp: Option<String>,
 }
 
 /// The arguments of a turn of `app` in a sandboxed run `run`, made to run
@@ -231,8 +235,8 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     let ways = apps::of(app).and_then(|x| x.sandbox).ok_or_else(|| format!("{app} has no sandbox XenoNet can drive"))?;
     let port = w.setup.port.to_string();
     let bin = crate::compose::connect::bin(&w.setup);
-    let plan = Plan { folder: &rec.folder, home: &w.setup.home, domains: &rec.domains, port: &port, bin: &bin };
-    if let Some(why) = (ways.unavailable)(&plan, cfg!(windows)) {
+    let unmade = Plan { folder: &rec.folder, home: &w.setup.home, domains: &rec.domains, port: &port, bin: &bin, temp: None };
+    if let Some(why) = (ways.unavailable)(&unmade, cfg!(windows)) {
         return Err(why);
     }
     // Claude Code loads the folder's own skills, agents and commands
@@ -244,6 +248,13 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
             return Err(why);
         }
     }
+    // The run's own temp folder, made before its settings, which let it
+    // read that folder and no other run's.
+    let temp = match ways.temp_var {
+        Some(_) => Some(own_temp(&temp_root(), run)?),
+        None => None,
+    };
+    let plan = Plan { temp: temp.as_deref(), ..unmade };
     let runs = Path::new(&w.setup.state_dir).join("runs");
     let (settings, mcp) = (runs.join(format!("{run}.settings.json")), runs.join(format!("{run}.mcp.json")));
     if let Some(files) = ways.files {
@@ -258,11 +269,12 @@ pub fn turn(w: &Runtime, app: &str, rec: &Record, run: &str, args: Vec<String>) 
     let (settings, mcp) = (settings.to_string_lossy().into_owned(), mcp.to_string_lossy().into_owned());
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let args = starts::sandboxed(app, &SandboxFiles { plan, settings: &settings, mcp: &mcp, server: &server, not_own: rec.for_others.is_some() }, args)?;
-    let env = match ways.temp_var {
-        Some(var) => vec![(var.to_string(), own_temp(&temp_root(), run)?)],
-        None => Vec::new(),
+    let env = match (ways.temp_var, &temp) {
+        (Some(var), Some(dir)) => vec![(var.to_string(), dir.clone())],
+        _ => Vec::new(),
     };
-    Ok(Turn { args, words: (ways.words)(&plan), env })
+    let words = (ways.words)(&plan);
+    Ok(Turn { args, words, env, temp })
 }
 
 /// The temp folders of runs are named so.

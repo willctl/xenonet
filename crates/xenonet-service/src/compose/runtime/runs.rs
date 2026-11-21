@@ -148,6 +148,10 @@ pub struct Turn<'a> {
     /// then names as 3). It is written into a pipe the run gets the read end
     /// of, so it is in no environment a command could read.
     pub sign_in: Option<&'a str>,
+    /// A folder made for this turn alone (a sandboxed run's temp folder),
+    /// removed once the turn and everything it started have ended, or when
+    /// it doesn't start.
+    pub temp: Option<String>,
 }
 
 /// The descriptor number a run reads its sign-in from.
@@ -405,7 +409,12 @@ impl Runner {
 
     /// One turn of `program`, once `admit` let it start.
     fn start(self: &Arc<Self>, t: Turn<'_>, program: &str) -> Result<u32, String> {
-        let Turn { key, app, args, cwd, env, text, sign_in } = t;
+        let Turn { key, app, args, cwd, env, text, sign_in, temp } = t;
+        let let_go = move || {
+            if let Some(d) = &temp {
+                let _ = std::fs::remove_dir_all(d);
+            }
+        };
         let how = runs::launch(program, args, cfg!(windows))?;
         let id = xenonet_engine::network::new_id("run").map_err(|t| t.message)?;
         let logs = self.dir.as_ref().map(|d| d.join("runs"));
@@ -419,6 +428,7 @@ impl Runner {
         let mut child = match spawn(&how, cwd, env, sign_in) {
             Ok(c) => c,
             Err(e) => {
+                let_go();
                 // No run, so no log of one.
                 if let Some(p) = &log_path {
                     drop(log);
@@ -498,6 +508,7 @@ impl Runner {
                     r.timed_out = timed_out;
                 }
             }
+            let_go();
             // Saved before the session is let go, so whoever sees it free
             // (a restart, the next run) reads how this one ended.
             me.save();
@@ -534,7 +545,7 @@ mod tests {
         let db = Arc::new(Db::memory().unwrap());
         let r = Runner::new(Some(dir.clone()), Some(db.clone()));
         let env = [("PATH".to_string(), "/usr/bin:/bin".to_string()), ("GO".to_string(), go.to_string_lossy().into_owned())];
-        let turn = |key| Turn { key, app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into(), sign_in: None };
+        let turn = |key| Turn { key, app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into(), sign_in: None, temp: None };
         // Admitted is counted at once: a second message to the session, or
         // a fifth run, can't start one beside it before it has started.
         r.admit("claude:a").unwrap();
@@ -596,7 +607,7 @@ mod tests {
         let r = Runner::new(Some(dir.clone()), None);
         let env = [("PATH".to_string(), "/usr/bin:/bin".to_string()), ("CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR".to_string(), "3".to_string())];
         r.admit("claude:fd").unwrap();
-        let turn = Turn { key: "claude:fd", app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into(), sign_in: Some("made-up-token-0123") };
+        let turn = Turn { key: "claude:fd", app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into(), sign_in: Some("made-up-token-0123"), temp: None };
         let pid = r.start(turn, &bin.to_string_lossy()).unwrap();
         let end = Instant::now() + Duration::from_secs(10);
         while r.running("claude:fd") {

@@ -42,6 +42,9 @@ pub struct Plan<'a> {
     /// server in the run go through.
     pub port: &'a str,
     pub bin: &'a str,
+    /// The run's own temp folder, for an app that is given one
+    /// (`SandboxWays::temp_var`).
+    pub temp: Option<&'a str>,
 }
 
 /// The files a sandboxed run is started with, for an app whose sandbox is

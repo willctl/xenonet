@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn an_app_without_a_sandbox_refuses_a_sandboxed_start_in_words() {
         xenonet_platforms::install();
-        let plan = |d: &'static [String]| xenonet_adapter::delivery::Plan { folder: "/w/atlas", home: "/h", domains: d, port: "47840", bin: "xenonet" };
+        let plan = |d: &'static [String]| xenonet_adapter::delivery::Plan { folder: "/w/atlas", home: "/h", domains: d, port: "47840", bin: "xenonet", temp: None };
         let r = |app: &str| request(&json!({ "app": app, "prompt": "x", "confine": "vendor" })).unwrap();
         let none: &'static [String] = &[];
         assert!(sandbox_plan(&r("claude"), &plan(none), false).unwrap().contains("no network"));
@@ -699,7 +699,7 @@ mod tests {
         use xenonet_adapter::delivery::{Plan, SandboxFiles};
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
         let r = |app: &str| Request { folder: "~".into(), app: app.into(), mode: None, prompt: "x".into(), delegate: false, confine: ConfineAsk::Vendor(vec![]) };
-        let plan = Plan { folder: "/w/atlas", home: "/h", domains: &[], port: "47840", bin: "xenonet" };
+        let plan = Plan { folder: "/w/atlas", home: "/h", domains: &[], port: "47840", bin: "xenonet", temp: None };
         let files = SandboxFiles { plan, settings: "/s/runs/a.settings.json", mcp: "/s/runs/a.mcp.json", server: "xenonet", not_own: false };
         let (_, args) = command(&r("claude"), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
         let args = sandboxed("claude", &files, args).unwrap();

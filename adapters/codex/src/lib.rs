@@ -311,7 +311,13 @@ mod tests {
     use xenonet_adapter::delivery::{Plan, SandboxFiles};
 
     fn files(domains: &[String]) -> SandboxFiles<'_> {
-        SandboxFiles { plan: Plan { folder: "/w/atlas", home: "/h", domains, port: "47840", bin: "/usr/bin/xenonet" }, settings: "", mcp: "", server: "xenonet", not_own: false }
+        SandboxFiles {
+            plan: Plan { folder: "/w/atlas", home: "/h", domains, port: "47840", bin: "/usr/bin/xenonet", temp: None },
+            settings: "",
+            mcp: "",
+            server: "xenonet",
+            not_own: false,
+        }
     }
 
     fn has(args: &[String], flags: &[&str]) -> bool {
@@ -361,7 +367,7 @@ mod tests {
     #[test]
     fn codex_has_no_sandbox_for_native_windows_and_none_that_names_domains() {
         let some = vec!["github.com".to_string()];
-        let plan = |d| Plan { folder: "/w", home: "/h", domains: d, port: "1", bin: "x" };
+        let plan = |d| Plan { folder: "/w", home: "/h", domains: d, port: "1", bin: "x", temp: None };
         assert!(sandbox_unavailable(&plan(&[]), true).is_some_and(|w| w.contains("WSL2")));
         assert!(sandbox_unavailable(&plan(&some), false).is_some_and(|w| w.contains("named domains")));
         assert!(sandbox_unavailable(&plan(&[]), false).is_none());

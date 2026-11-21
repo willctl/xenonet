@@ -181,7 +181,8 @@ impl State for Map {
 /// reads both), without the ones its own shell adds. When it is told to
 /// read its sign-in from a descriptor it does, and keeps only the token's
 /// length and its cksum, as `fdtoken-N` (`fake_fd_token` reads it). The
-/// temp folder Claude Code is told to use is kept as `tmpdir-N`.
+/// temp folder Claude Code is told to use is kept as `tmpdir-N`, with its
+/// mode as `ls -l` shows it while the run runs.
 pub fn fake_cli(dir: &Path) -> String {
     let bin = dir.join("bin").join("fake-cli");
     std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
@@ -201,7 +202,7 @@ n=$(ls "$here" | grep -c '^args-')
 printf '%s\n' "$@" > "$here/args-$n"
 printf '%s' "$prompt" > "$here/prompt-$n"
 printf '%s' "$MCP_TOOL_TIMEOUT" > "$here/timeout-$n"
-printf '%s' "$CLAUDE_CODE_TMPDIR" > "$here/tmpdir-$n"
+printf '%s\n%s' "$CLAUDE_CODE_TMPDIR" "$([ -n "$CLAUDE_CODE_TMPDIR" ] && ls -ld "$CLAUDE_CODE_TMPDIR" | cut -c1-10)" > "$here/tmpdir-$n"
 [ -n "$settings" ] && cat "$settings" > "$here/settings-$n"
 if [ -n "$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" ]; then
   IFS= read -r tok <&"$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"
