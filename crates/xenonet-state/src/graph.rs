@@ -138,6 +138,51 @@ fn items(v: Option<&Value>) -> &[Value] {
     v.and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
 
+/// A session that ran in a linked git worktree sits where the worktree's
+/// main checkout does, wherever the worktree folder is (T3 Code's, `git
+/// worktree add ../x`, any tool's), when that checkout is a project the map
+/// has: its folder becomes the main checkout's and its worktree the
+/// worktree's, as Claude desktop's and Grok Build's worktree sessions give
+/// them. The worktree keeps the exact folder the session ran in, since a
+/// resumed turn runs there and Claude Code finds its transcript by it. A
+/// worktree of a folder that isn't a project, one that doesn't share the
+/// main checkout's git folder, and a session that already names its
+/// worktree stay as they are.
+fn in_main_checkouts(sessions: &[Value], project_keys: &HashSet<String>) -> Vec<Value> {
+    let checkouts = xenonet_adapter::repo::checkouts();
+    // Sessions often share a folder, and each lookup reads the disk.
+    let mut seen: HashMap<String, Option<(String, String)>> = HashMap::new();
+    sessions
+        .iter()
+        .map(|s| {
+            let local = get(s, "host").is_none_or(Value::is_null) && str_of(s, "observed").is_none();
+            let cwd = get(s, "cwd").filter(|c| c.is_string()).map(display).filter(|c| !c.is_empty());
+            let (true, None, Some(cwd)) = (local, get(s, "worktree").filter(|w| truthy(Some(w))), cwd) else { return s.clone() };
+            let moved = seen
+                .entry(cwd.clone())
+                .or_insert_with(|| {
+                    let here = checkouts.find(std::path::Path::new(&cwd))?;
+                    let main = here.worktree_of.clone()?;
+                    let main_s = main.to_string_lossy().into_owned();
+                    if !path_key(&main_s).is_some_and(|k| project_keys.contains(&k)) || checkouts.open(&main).is_none_or(|m| m.common != here.common) {
+                        return None;
+                    }
+                    let inside = std::path::Path::new(&cwd).strip_prefix(&here.top).ok().filter(|r| !r.as_os_str().is_empty());
+                    let folder = inside.map_or_else(|| main_s.clone(), |r| main.join(r).to_string_lossy().into_owned());
+                    Some((folder, cwd.clone()))
+                })
+                .clone();
+            let Some((folder, worktree)) = moved else { return s.clone() };
+            let mut s = s.clone();
+            if let Some(m) = s.as_object_mut() {
+                m.insert("cwd".into(), Value::String(folder));
+                m.insert("worktree".into(), Value::String(worktree));
+            }
+            s
+        })
+        .collect()
+}
+
 /// buildGraph(input), with `parent_of` (a project's key → the key of the
 /// project it orbits) from projectRelations. `input` holds what buildGraph
 /// takes, with `repos` as [[key, status], …].
@@ -146,7 +191,9 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     let projects_dir = field("projectsDir").map(display).unwrap_or_default();
     let home_dir = field("homeDir").filter(|v| truthy(Some(v))).map(display);
     let projects = items(field("projects"));
-    let sessions = items(field("sessions"));
+    let project_keys: HashSet<String> = projects.iter().filter_map(|p| get(p, "key").map(display)).collect();
+    let placed = in_main_checkouts(items(field("sessions")), &project_keys);
+    let sessions = &placed[..];
     let native_projects = items(field("nativeProjects"));
     let resources = items(field("resources"));
     let wiki = field("wiki");
@@ -536,5 +583,73 @@ mod tests {
         assert_eq!(node("project:/home/me/projects/atlas")["sessionCount"], 2);
         assert_eq!(node("project:/home/me/projects/atlas")["active"], true);
         assert_eq!(g["stats"]["sessions"], 3);
+    }
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.name=XenoNet Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn repo_with_commit(dir: &std::path::Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        git_in(dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+        git_in(dir, &["add", "a.txt"]);
+        git_in(dir, &["commit", "-q", "-m", "first"]);
+    }
+
+    // A session in a linked worktree belongs to the project the worktree is
+    // of, wherever the worktree folder is, when that project is one the map
+    // has. The worktree shows as its worktree and the project's folder as
+    // where it ran, as Claude desktop's worktree sessions do.
+    #[test]
+    fn a_session_in_a_linked_worktree_is_in_its_main_checkouts_project() {
+        xenonet_platforms::install();
+        let base = std::env::temp_dir().join(format!("xenonet-graph-worktree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let base = std::path::PathBuf::from(xenonet_os::fs::realpath_native(&base.to_string_lossy()).unwrap());
+        let projects_dir = base.join("Projects");
+        let (atlas, ledger) = (projects_dir.join("atlas"), base.join("elsewhere/ledger"));
+        repo_with_commit(&atlas);
+        repo_with_commit(&ledger);
+        // Worktrees outside the projects folder, as T3 Code and `git worktree add ../x` make.
+        let (atlas_wt, ledger_wt) = (base.join(".t3/worktrees/atlas/probe"), base.join("elsewhere/ledger-wt"));
+        std::fs::create_dir_all(atlas_wt.parent().unwrap()).unwrap();
+        git_in(&atlas, &["worktree", "add", "-q", "-b", "probe", &atlas_wt.to_string_lossy()]);
+        git_in(&ledger, &["worktree", "add", "-q", "-b", "side", &ledger_wt.to_string_lossy()]);
+        let (atlas_s, atlas_wt_s, ledger_wt_s) = (atlas.to_string_lossy(), atlas_wt.to_string_lossy(), ledger_wt.to_string_lossy());
+        let key = |p: &str| path_key(p).unwrap();
+        let input = json!({
+            "projectsDir": projects_dir.to_string_lossy(),
+            "projects": [{ "key": key(&atlas_s), "name": "atlas", "path": atlas_s }],
+            "sessions": [
+                { "id": "claude:t3", "app": "claude", "cwd": atlas_wt_s, "updatedAt": 10 },
+                { "id": "claude:sub", "app": "claude", "cwd": format!("{atlas_wt_s}/src"), "updatedAt": 10 },
+                { "id": "claude:other", "app": "claude", "cwd": ledger_wt_s, "updatedAt": 10 },
+            ],
+            "now": 1000,
+        });
+        let g = build_graph(&input, &HashMap::new());
+        let node = |id: &str| g["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();
+        let home = |id: &str| g["links"].as_array().unwrap().iter().find(|l| l["target"] == id && l["kind"] == "session").map(|l| l["source"].as_str().unwrap().to_string());
+        let project = format!("project:{}", key(&atlas_s));
+        assert_eq!(home("claude:t3"), Some(project.clone()));
+        assert_eq!((node("claude:t3")["cwd"].as_str(), node("claude:t3")["worktree"].as_str()), (Some(&*atlas_s), Some(&*atlas_wt_s)));
+        assert_eq!(home("claude:sub"), Some(project), "a folder inside the worktree too");
+        assert_eq!(node("claude:sub")["worktree"].as_str(), Some(&*format!("{atlas_wt_s}/src")), "the folder it ran in, where a resumed turn runs");
+        // A worktree of a folder that isn't a project stays where it was.
+        assert!(home("claude:other").is_some_and(|h| h.starts_with("zone:")), "{:?}", home("claude:other"));
+        assert!(node("claude:other")["worktree"].is_null());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

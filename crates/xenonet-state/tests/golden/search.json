@@ -1,7 +1,7 @@
 {
  "status": {
-  "files": 26,
-  "docs": 44,
+  "files": 27,
+  "docs": 46,
   "errors": 0
  },
  "docs": [
@@ -137,6 +137,20 @@
    "role": "assistant",
    "ts": 1791014350000,
    "text": "Keep geofence and route-sim. Snippets is turning into a tool of its own."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000018",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791025650000,
+   "text": "The checkout total is a cent off when a coupon applies. Find out why."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000018",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791025750000,
+   "text": "The coupon is applied per line and rounded each time. Rounding once on the sum fixes it."
   },
   {
    "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
@@ -319,7 +333,7 @@
    {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
-    "score": -1.92701893871,
+    "score": -2.01358635046,
     "hits": 5,
     "snippets": [
      {
@@ -342,7 +356,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-000000000006",
     "app": "codex",
-    "score": -1.56603589789,
+    "score": -1.63878039436,
     "hits": 1,
     "snippets": [
      {
@@ -355,7 +369,7 @@
    {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000011",
     "app": "claude",
-    "score": -1.50467031145,
+    "score": -1.57847765528,
     "hits": 2,
     "snippets": [
      {
@@ -376,7 +390,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
     "app": "codex",
-    "score": -4.19249005634,
+    "score": -4.27759482162,
     "hits": 1,
     "snippets": [
      {
@@ -391,7 +405,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e3",
     "app": "codex",
-    "score": -3.52752456932,
+    "score": -3.60936462837,
     "hits": 2,
     "snippets": [
      {
@@ -411,7 +425,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
     "app": "codex",
-    "score": -10.4556953765,
+    "score": -9.73012865453,
     "hits": 1,
     "snippets": [
      {

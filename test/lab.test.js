@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { BASES, VMS, LAB_INSTANCES, HOST_ID, LAN_DEV, labPaths, envFileText, guestScript, shq, sha512crypt, randomSalt, newPassword } from "../scripts/lab/config.mjs";
+import { BASES, VMS, LAB_INSTANCES, HOST_ID, LAN_DEV, MAC_DEV, fitSets, labPaths, envFileText, guestScript, shq, sha512crypt, randomSalt, newPassword } from "../scripts/lab/config.mjs";
 import { CHECKS, LANDS, OWNER, RELAY_CHECKS, metric, missing, relayRow, runCheck, rules, addrsOf, networksOf, sharedNetwork } from "../scripts/lab/transport.mjs";
 import { REPOS, reposFor, reposScript } from "../scripts/lab/fixtures.mjs";
 import { XCHECKS, XLANDS, XOWNER, NAMES, OLD_TAG, REHEARSAL, SPACE, folderPath, rehearsalVerdict, runXCheck, xenolithOps, xmissing } from "../scripts/lab/xenolith.mjs";
@@ -68,9 +68,11 @@ test("a VM's settings file and guest.sh's values are quoted for the shell", { sk
   assert.throws(() => envFileText({ X: "a\nB=c" }), /bad setting/);
   assert.throws(() => envFileText({ "lower": "x" }), /bad setting/);
   const script = guestScript("vm", { HOST_ID: "vm1", LINE: `it's "quoted" $HOME` }, "echo body\n");
-  assert.equal(script, `STEP='vm'\nHOST_ID='vm1'\nLINE='it'\\''s "quoted" $HOME'\necho body\n`);
+  assert.equal(script, `export STEP='vm'\nexport HOST_ID='vm1'\nexport LINE='it'\\''s "quoted" $HOME'\necho body\n`);
   const r = runBash( ["-c", `${script.replace("echo body", 'printf "%s|%s" "$STEP" "$LINE"')}`], { encoding: "utf8" });
   assert.equal(r.stdout, `vm|it's "quoted" $HOME`);
+  // The Node scripts inside guest.sh read the values from their environment.
+  assert.equal(runBash(["-c", guestScript("vm", { HOST_ID: "vm1" }, "node -p process.env.HOST_ID")], { encoding: "utf8" }).stdout.trim(), "vm1");
   assert.throws(() => guestScript("rm -rf", {}, ""), /bad step/);
   assert.throws(() => guestScript("vm", { "A;B": 1 }, ""), /bad variable/);
   assert.equal(shq("a'b"), `'a'\\''b'`);
@@ -95,14 +97,17 @@ test("the templates: plain mode, no mounts, a made-up user, no agent forwarding,
   // New TCP connections and UDP to the Mac's loopback are dropped by flags,
   // not conntrack's state, which would drop replies on an SSH connection
   // that was open before the rules loaded.
-  assert.match(shared, /ip daddr 192\.168\.5\.2 tcp flags & \(syn \| ack\) == syn drop/);
-  assert.match(shared, /ip daddr 192\.168\.5\.2 meta l4proto udp drop/);
+  // user-v2's gateway, host.lima.internal, is what forwards to it.
+  assert.match(shared, /ip daddr 192\.168\.104\.2 tcp flags & \(syn \| ack\) == syn drop/);
+  assert.match(shared, /ip daddr 192\.168\.104\.2 meta l4proto udp drop/);
+  assert.ok(!/192\.168\.5\.2/.test(shared), "Lima's user network isn't in the VM");
   assert.ok(!/ct state/.test(shared));
   assert.match(shared, /ssh_deletekeys: false/);
-  // A second interface on Apple's shared NAT, for UDP and multicast between
-  // the VMs and the Mac.
-  assert.match(shared, /^networks:\n- vzNAT: true$/m);
-  assert.equal(LAN_DEV, "lima0");
+  // user-v2 (eth0) for the VMs to reach each other, and Apple's shared NAT
+  // (lima0) for the Mac to reach them.
+  assert.match(shared, /^networks:\n- vzNAT: true\n- lima: user-v2$/m);
+  assert.equal(LAN_DEV, "eth0");
+  assert.equal(MAC_DEV, "lima0");
   assert.match(shared, /PasswordAuthentication no/);
   assert.match(shared, /will ALL=\(ALL\) ALL\n/);
   assert.match(shared, /loginctl enable-linger will/);
@@ -196,7 +201,9 @@ function fakeLab({ subjects = [...BEFORE, ...PLANNED], network = true, relays = 
   return {
     lab,
     both: true,
-    lanDev: "lima0",
+    lanDev: "eth0",
+    macDev: "lima0",
+    hostAddr: async () => ["192.168.104.2"],
     sleep: async () => {},
     session: () => `s-${Math.random().toString(16).slice(2)}`,
     subjects: async () => subjects,
@@ -299,13 +306,35 @@ test("the checks' firewall rules: UDP to a peer dropped, or a VM cut off its LAN
   assert.match(udp, /^table inet xenonet_lab_check\ndelete table inet xenonet_lab_check\n/);
   assert.match(udp, /hook output priority -10; policy accept;\n {4}ip daddr \{ 192\.168\.64\.3 \} meta l4proto udp drop\n {4}ip6 daddr \{ fe80::2 \} meta l4proto udp drop/);
   assert.match(udp, /hook input .*\n {4}ip saddr \{ 192\.168\.64\.3 \} meta l4proto udp drop/);
-  const cut = rules({ isolate: "lima0", allow: ["192.168.64.2"] });
-  assert.match(cut, /oifname "lima0" ip daddr \{ 192\.168\.64\.2 \} accept\n {4}oifname "lima0" drop/);
-  assert.match(cut, /iifname "lima0" ip saddr \{ 192\.168\.64\.2 \} accept\n {4}iifname "lima0" drop/);
-  assert.match(rules({ isolate: "lima0" }), /oifname "lima0" drop/);
+  const cut = rules({ isolate: "eth0", allow: ["192.168.104.1"] });
+  assert.match(cut, /oifname "eth0" ip daddr \{ 192\.168\.104\.1 \} accept\n {4}oifname "eth0" drop/);
+  assert.match(cut, /iifname "eth0" ip saddr \{ 192\.168\.104\.1 \} accept\n {4}iifname "eth0" drop/);
+  // Both interfaces at once, keeping the gateway that carries the Mac's SSH.
+  const both = rules({ isolate: ["eth0", "lima0"], allow: ["192.168.104.2", "192.168.104.1"] });
+  assert.match(both, /oifname \{ "eth0", "lima0" \} ip daddr \{ 192\.168\.104\.2, 192\.168\.104\.1 \} accept\n {4}oifname \{ "eth0", "lima0" \} drop/);
+  assert.match(both, /iifname \{ "eth0", "lima0" \} drop/);
+  assert.match(rules({ isolate: "eth0" }), /oifname "eth0" drop/);
   assert.throws(() => rules({ udpTo: ["1.2.3.4; drop"] }), /not an address/);
-  assert.throws(() => rules({ isolate: "lima0 drop" }), /not an interface/);
+  assert.throws(() => rules({ isolate: "eth0 drop" }), /not an interface/);
+  assert.throws(() => rules({ isolate: ["eth0", "lima0; drop"] }), /not an interface/);
   assert.throws(() => rules({}), /no rules/);
+});
+
+test("a VM made from an older golden copy gets the template's networks and firewall", () => {
+  const sets = fitSets(fs.readFileSync(lab("lima", "lab.yaml"), "utf8"));
+  assert.equal(sets.length, 2);
+  assert.equal(sets[0], '.networks = [{"vzNAT":true},{"lima":"user-v2"}]');
+  assert.match(sets[1], /^\(\.provision\[\] \| select\(\.path == "\/etc\/xenonet-lab\/nftables\.nft"\)\)\.content = "# The XenoNet lab's firewall[^"]*\\ntable inet xenonet_lab\\n/);
+  assert.match(sets[1], /ip daddr 192\.168\.104\.2 meta l4proto udp drop/);
+  assert.throws(() => fitSets("networks: []\nprovision: []\n"), /no networks or no firewall/);
+});
+
+test("lan-multicast: a datagram that crosses is ok, and one that can't on user-v2 is the owner's to fix, never a failure", async () => {
+  const check = CHECKS.find((c) => c.id === "lan-multicast");
+  assert.equal((await runCheck(check, { ...fakeLab({}), udp: async () => true })).status, "ok");
+  const r = await runCheck(check, { ...fakeLab({}), udp: async () => false });
+  assert.equal(r.status, "owner");
+  assert.match(r.detail, /multicast doesn't cross user-v2/);
 });
 
 test("a VM's networks and addresses, as its XenoNet and ip give them", () => {
@@ -333,7 +362,7 @@ test("guest.sh parses, and so does each Node script it runs in a VM", { skip: !b
     assert.equal(r.status, 0, r.stderr);
   });
   // The steps lab.mjs runs are all there.
-  for (const step of ["vm", "facts", "subjects", "lanaddrs", "netstate", "standin", "relay", "relayoff", "relayca", "trustca", "ownrelay", "relaymetrics", "udpsend", "udplisten", "answering"]) assert.match(text, new RegExp(`^${step}\\(\\) \\{`, "m"), step);
+  for (const step of ["vm", "facts", "subjects", "lanaddrs", "macaddrs", "hostaddr", "macgateways", "netstate", "standin", "relay", "relayoff", "relayca", "trustca", "ownrelay", "relaymetrics", "udpsend", "udplisten", "answering"]) assert.match(text, new RegExp(`^${step}\\(\\) \\{`, "m"), step);
   assert.ok(!/authorized_keys\.new|hosts self|relay --port/.test(text), "nothing of the retired SSH hosts");
   assert.ok(!/iroh-relay"? --dev/.test(text), "the lab's relays are real ones, with TLS, never --dev");
 });
@@ -502,7 +531,7 @@ test("a Xenolith check skips without its VMs, waits on missing code, and says wh
   assert.deepEqual(await shared({ shared: false }), { status: "owner", detail: XOWNER.share });
   // The invite needs the owner key the service left: without it, the owner's own steps.
   assert.deepEqual(await runXCheck(xcheck("xenolith-join"), fakeXenolith({ inviteRefused: true })), { status: "owner", detail: XOWNER.join });
-  assert.match(XOWNER.join, /invite project:atlas-api --level write; in vm2, .* join <the invite> --at <vm1's lima0 address>:47851, and type the code/);
+  assert.match(XOWNER.join, /invite project:atlas-api --level write; in vm2, .* join <the invite> --at <vm1's LAN address>:47851, and type the code/);
   // No 1.10.0 here: how to get it.
   assert.deepEqual(await runXCheck(xcheck("xenolith-rehearsal"), fakeXenolith({ tag: false })), { status: "owner", detail: XOWNER.old });
   // A check that throws fails, with why.

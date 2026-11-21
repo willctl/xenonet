@@ -331,11 +331,12 @@ impl Shared {
         self.network().filter(|n| n.id == network)
     }
 
-    /// What the person shares into `network`: what they said, or
-    /// everything. A network joined or founded after the first is given
-    /// "nothing" when it's adopted, so no row means the first.
+    /// What the person shares into `network`: what they said, or nothing.
+    /// Every network has a row from the moment it is adopted (or opened
+    /// from a store older than that), so a row that is missing or can't be
+    /// read means something is wrong, and a network is then shown nothing.
     pub fn sharing(&self, network: &str) -> crate::share::Sharing {
-        self.opts.persist.sharing(network).ok().flatten().unwrap_or(crate::share::Sharing::All)
+        self.opts.persist.sharing(network).ok().flatten().unwrap_or_else(|| crate::share::Sharing::default_for(false))
     }
 
     /// What each network `host` (a member of this one) is in with this
@@ -392,7 +393,14 @@ impl Shared {
         let net = self.network();
         let machine = net.as_ref().map_or(crate::ground::LOCAL.to_string(), |n| n.host.clone());
         let machine = xenonet_authz::MachineId::new(&machine).unwrap_or_else(|_| xenonet_authz::MachineId::new(crate::ground::LOCAL).expect("a word"));
-        Facts { machine, view: net.and_then(|_| self.roster().view_ref().cloned()), identity: self.identity.clone(), synced_at: self.synced_at(), now: self.now() as i64 }
+        Facts {
+            machine,
+            view: net.and_then(|_| self.roster().view_ref().cloned()),
+            identity: self.identity.clone(),
+            synced_at: self.synced_at(),
+            now: self.now() as i64,
+            narrowed: None,
+        }
     }
 
     /// The network's owner's chain, as roster frames, answers and joins
@@ -803,7 +811,9 @@ impl Shared {
     fn decide(&self, from: &str, resource: xenonet_authz::Resource, act: xenonet_authz::Act) -> Result<(), String> {
         let facts = self.facts();
         let id = xenonet_authz::MachineId::new(from).map_err(|e| e.message)?;
-        let request = xenonet_authz::Request::new(xenonet_authz::Principal::Machine { id }, resource, act, xenonet_authz::Door::Network, facts.now, facts.network());
+        // A membership check: it reaches nothing that sharing governs.
+        let request = xenonet_authz::Request::new(xenonet_authz::Principal::Machine { id }, resource, act, xenonet_authz::Door::Network, facts.now, facts.network())
+            .reaching(xenonet_authz::Reaching::Nothing);
         match xenonet_authz::decide(None, &request, &facts, None) {
             xenonet_authz::Decision::Allow(_) => Ok(()),
             d => Err(d.reason().map(|r| r.text().to_string()).unwrap_or_default()),
@@ -1199,6 +1209,34 @@ impl Net for Shared {
         self.network().map(|n| Me { network: n.id, name: n.name, host: n.host }).into_iter().collect()
     }
 
+    fn live_networks(&self) -> Vec<Me> {
+        if self.is_removed() {
+            return Vec::new();
+        }
+        Net::networks(self)
+    }
+
+    fn networks_with(&self, host: &str) -> Vec<String> {
+        match self.network() {
+            Some(n) if !self.is_removed() && self.roster().view_ref().is_some_and(|v| v.member(host).is_some()) => vec![n.id],
+            _ => Vec::new(),
+        }
+    }
+
+    fn networks_for(&self, project: Option<&str>) -> Vec<String> {
+        let Some(n) = self.network().filter(|_| !self.is_removed()) else { return Vec::new() };
+        let sharing = self.sharing(&n.id);
+        let shown = match project {
+            Some(p) => sharing.shows_project(p),
+            None => sharing == crate::share::Sharing::All,
+        };
+        if shown {
+            vec![n.id]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn roster_head(&self) -> Option<String> {
         self.network()?;
         self.roster().head()
@@ -1256,6 +1294,14 @@ impl Net for Shared {
                 Host { id: m.id.clone(), window: view.is_window(&m.id), online: p.is_some_and(|p| p.online), seen: p.and_then(|p| p.seen) }
             })
             .collect()
+    }
+
+    fn hosts_in(&self, network: &str) -> Vec<Host> {
+        if self.network().is_some_and(|n| n.id == network) {
+            Net::hosts(self)
+        } else {
+            Vec::new()
+        }
     }
 
     fn send(&self, out: Outgoing) -> Result<(), String> {
@@ -1391,9 +1437,11 @@ impl Node {
         n.dir.write_roster(&net.id, &roster)?;
         // The first network this machine is in sees all of it; every one
         // after starts with nothing, until the person shares projects
-        // into it at the window (`share`).
-        if n.common.shareds().iter().any(|s| s.network().is_some_and(|o| o.id != net.id)) && n.opts.persist.sharing(&net.id)?.is_none() {
-            n.opts.persist.put_sharing(&net.id, &crate::share::Sharing::default_for(false))?;
+        // into it at the window (`share`). Either way the row is written
+        // now, since a network with no row is shown nothing.
+        if n.opts.persist.sharing(&net.id)?.is_none() {
+            let first = !n.common.shareds().iter().any(|s| s.network().is_some_and(|o| o.id != net.id));
+            n.opts.persist.put_sharing(&net.id, &crate::share::Sharing::default_for(first))?;
         }
         *n.writer.locked() = None;
         *n.key.writing() = Some(Arc::new(key));

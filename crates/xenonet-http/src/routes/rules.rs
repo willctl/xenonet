@@ -220,6 +220,8 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/workspace/check", LOCAL, Nothing),
     r("GET",    "/api/workspace/roots", LOCAL, Nothing),
     r("PUT",    "/api/workspace/roots", YOU, Nothing),
+    r("GET",    "/api/workspace/app-roots", LOCAL, Nothing),
+    r("PUT",    "/api/workspace/app-roots", YOU, Nothing),
     // This machine's checkouts; a candidate joins its project only by your
     // word, at the window (a folder that copies a repo's remote mustn't
     // take its project's claims, grants or intents).
@@ -233,9 +235,11 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/projects/codex", YOU, Nothing),
     r("DELETE", "/api/projects/codex", YOU, Nothing),
     r("GET",    "/api/identities", LOCAL, Nothing),
+    r("GET",    "/api/identities/project", LOCAL, Nothing),
     r("POST",   "/api/identities/name", YOU, Nothing),
     r("POST",   "/api/identities/hidden", YOU, Nothing),
     r("POST",   "/api/identities/pin", YOU, Nothing),
+    r("POST",   "/api/identities/rule", YOU, Nothing),
     r("POST",   "/api/identities/rescan", LOCAL, Nothing),
     r("GET",    "/api/spotify", LOCAL, Nothing),
     r("POST",   "/api/spotify/disconnect", YOU, Nothing),
@@ -291,6 +295,9 @@ pub const RULES: &[Rule] = &[
     r("GET",    "/api/runs/sign-in", YOU, Nothing),
     r("POST",   "/api/runs/sign-in", YOU, Nothing),
     r("DELETE", "/api/runs/sign-in", YOU, Nothing),
+    r("GET",    "/api/runs/sandbox-domains", YOU, Nothing),
+    r("PUT",    "/api/runs/sandbox-domains", YOU, Nothing),
+    r("DELETE", "/api/runs/sandbox-domains", YOU, Nothing),
 
     // ---- delivery's controls ----
     r("POST",   "/api/delivery/pause", YOU, Nothing),

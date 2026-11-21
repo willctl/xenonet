@@ -20,6 +20,9 @@
 //!   Allow asks you once, a Deny not at all), or an actor's on this
 //!   machine with its token and the answer-prompts capability (a Deny, or
 //!   an Allow inside its grant's allow scope).
+//! - `GET`, `PUT` and `DELETE /api/runs/sandbox-domains`: the domains a
+//!   sandboxed run that isn't the person's own may reach (none by default),
+//!   which only the person sets; a run they start themselves names any.
 //! - `GET /api/runs/forks`: the copies of sessions XenoNet forked to answer
 //!   a message while the session was open elsewhere, each with the session
 //!   it came from, which the console links them to.
@@ -52,6 +55,10 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
     // never given back.
     if req.path == "/api/runs/sign-in" {
         return Some(Ok(sign_in(ctx, req).await));
+    }
+    // The domains a run the person didn't start may reach: theirs to set.
+    if req.path == "/api/runs/sandbox-domains" {
+        return Some(Ok(sandbox_domains(ctx, req).await));
     }
     match (req.method.as_str(), req.path.as_str()) {
         ("POST", "/api/runs/permission") => return Some(Ok(permission(ctx, req).await)),
@@ -200,6 +207,26 @@ async fn sign_in(ctx: &Ctx, req: &mut Req) -> Reply {
         _ => return Reply::error(404, "not found"),
     };
     match ctx.cores.engine.runs_sign_in(action, &token).await {
+        Ok(v) => Reply::json(200, v),
+        Err(e) if e.is_pending() => pending_reply(&e),
+        Err(e) => Reply::coded(e.status.unwrap_or(400), "refused", e.message),
+    }
+}
+
+async fn sandbox_domains(ctx: &Ctx, req: &mut Req) -> Reply {
+    let (action, domains) = match req.method.as_str() {
+        "GET" => ("status", Vec::new()),
+        "DELETE" => ("clear", Vec::new()),
+        "PUT" => match req.json(4 << 10).await {
+            Ok(b) => {
+                let Some(list) = b.get("domains").and_then(Value::as_array) else { return Reply::error(400, "domains is a list of host names") };
+                ("set", list.iter().filter_map(|d| d.as_str().map(str::to_string)).collect())
+            }
+            Err(e) => return Reply::error(e.status, e.message),
+        },
+        _ => return Reply::error(404, "not found"),
+    };
+    match ctx.cores.engine.runs_sandbox_domains(action, domains).await {
         Ok(v) => Reply::json(200, v),
         Err(e) if e.is_pending() => pending_reply(&e),
         Err(e) => Reply::coded(e.status.unwrap_or(400), "refused", e.message),

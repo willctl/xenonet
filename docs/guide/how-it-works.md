@@ -37,7 +37,9 @@ The doctor warns about drift that's new since you last looked. `xenonet drift` l
 
 ## Checking the adapters after an update
 
-After you update Claude Code or Codex, the doctor warns about drift the new version brought, and `xenonet drift` lists it, by source.
+After you update Claude Code, Codex or Grok Build, the doctor compares the installed version with the one XenoNet's readers were last checked against (the app registry's `checked`). It runs the app's own `--version`, with a short timeout and no network call. A newer version is a warning that names both versions: if the map shows something wrong for that app's sessions, the new version is the first suspect. An older version is a note. An app that isn't installed is skipped, and a `--version` that doesn't answer or prints no version is said plainly. The doctor's warning about drift names the version a change was first seen with, and `xenonet drift` lists the changes, by source.
+
+XenoNet doesn't ask the vendors what their latest version is.
 
 ## Where XenoNet keeps files
 

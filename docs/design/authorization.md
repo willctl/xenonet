@@ -465,6 +465,49 @@ answer:
    person. From the network, a member of the network the envelope names,
    never this machine itself. At the gateway and A2A, only this machine's
    actors.
+   A frame from another machine also reaches only what the network it came
+   in is shown (`Ground::sees(network, project)`, answered from what the
+   person shares into that network). A message or wake reaches the project
+   its session is in, a claim its project, a handoff and an accept of one
+   the project it names (an accept: the one the stored handoff names) or
+   the session it is handed to, and a start the project its folder is in
+   through a checkout the person confirmed. Whatever is in no confirmed
+   project is placed nowhere, and only a network shown everything reaches
+   it: a session in none, an actor (an actor is in no project, so one
+   is reached only from a network shown everything), a handoff that names
+   no project, a folder in no project, and a folder that isn't there. A
+   network with no sharing row is shown nothing. The signed act is for the
+   machine, so what else a frame reaches is added by the receiver
+   (`Request::reaching`, asked on its own as `shown`), outside the
+   signature. A frame that carries content (a message, wake, start, claim,
+   handoff, intent or report) and adds nothing is placed nowhere, so a
+   caller that forgets to say fails closed; one that reaches nothing
+   sharing governs says so (`Reaching::Nothing`: a membership check, a
+   prompt of a run this machine started, a handoff passed by for another
+   machine, and what carries nothing of a project and only narrows: the
+   person's cancel of an intent, a handoff's taken or lapsed). An intent reaches the project its act names, and a report on
+   one the intent's project. A refusal has
+   the code `shared`. For a session or an actor it has the words of an id
+   nobody has ("no session or actor here has that id"); for a start, "that
+   folder isn't in a project this network is shown", which is also what a
+   folder that doesn't exist gets. Both come before the sender is checked
+   (a message asks `shown` before it looks at a signature or a token), so
+   neither tells a member which sessions or folders exist, whoever sends.
+   What this machine sends is held to the same sharing: an intent, a
+   handoff, a claim and a message go only into networks shown the project
+   they are about (a message, and a start: the project of the session sending
+   or asking, else it is refused here in words; the project of the session
+   it is for is the receiver's to hold to its own sharing, since what a
+   machine shares is its own content). What a run says of its project
+   (a note, an outcome) is told only while the intent's network is shown it,
+   and a run whose project is no longer shared into its network is stopped. A handoff's accept and answers say which handoff
+   and who, never what the work was, and are told in each network the
+   offer went to. A stored claim is held to what is shared now, in the warning before an edit and in the reply to a claim alike. A message already stored, waiting for its session to read it, is not recalled when its project is unshared afterwards.
+   This machine's own door isn't limited by what any network is shown. It does read the settings: a call in no frame, from a machine in several networks, is decided on the narrowest start and wake of those networks (`Facts::narrowed`), never the defaults.
+   What a member can read of this machine as an admin (`Act::Read` of the
+   machine's transcripts and stats) is not limited by it either: the
+   sharing narrows what a network reaches and is shown, not what its
+   admins read.
 3. **Who.** The person's device signature is for this act, from an
    unrevoked device of this machine's person. An actor holds a token for
    exactly them, whose root is still held and certified, with no id

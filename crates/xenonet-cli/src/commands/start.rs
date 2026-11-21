@@ -19,10 +19,40 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     }
     let mut body = Map::new();
     body.insert("prompt".into(), json!(prompt));
-    for (flag, key) in [("on", "machine"), ("in", "folder"), ("app", "app"), ("mode", "mode")] {
+    for (flag, key) in [("on", "machine"), ("in", "folder"), ("app", "app"), ("mode", "mode"), ("network", "network")] {
         if let Some(v) = flags.text(flag) {
             body.insert(key.into(), json!(v));
         }
+    }
+    // How confined the run is: --confine off, vendor or cell, and --allow
+    // for the domains vendor may reach (comma-separated; none by default).
+    // --sandbox says vendor and --no-sandbox says off. Left out, a start on
+    // this machine is yours and off, and any other is vendor.
+    let older = if flags.is_true("sandbox") {
+        Some("vendor")
+    } else if flags.is_false("sandbox") {
+        Some("off")
+    } else {
+        None
+    };
+    let level = flags.text("confine");
+    if let Some(l) = &level {
+        if !["off", "vendor", "cell"].contains(&l.as_str()) {
+            return Err(Fail::new(format!("--confine is off, vendor or cell, not {l}"), 2));
+        }
+    }
+    match (level.as_deref(), older) {
+        (Some(a), Some(b)) if a != b => {
+            return Err(Fail::new(format!("--confine {a} and {} say different things: use --confine alone", if b == "vendor" { "--sandbox" } else { "--no-sandbox" }), 2))
+        }
+        (Some(l), _) | (None, Some(l)) => {
+            body.insert("confine".into(), json!(l));
+        }
+        (None, None) => {}
+    }
+    if let Some(d) = flags.text("allow") {
+        let domains: Vec<&str> = d.split(',').map(str::trim).filter(|x| !x.is_empty()).collect();
+        body.insert("domains".into(), json!(domains));
     }
     let s = need(flags)?;
     let v: Value = s.request("POST", "/api/start", Some(&Value::Object(body)), &[]).map_err(|r| Fail::new(r.message, 1))?;
@@ -34,7 +64,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         print(format!("{} sent to {}: XenoNet says here when it starts, or why it didn't, and again when it ends", c::green("✓"), t(&v, "host")));
         return Ok(0);
     }
+    let sandboxed = v.get("sandbox").and_then(|s| s.get("words")).and_then(Value::as_str).map(|w| format!(". {w}")).unwrap_or_default();
     let session = str(&v, "session").map_or_else(|| "a Codex session (its id comes when Codex names it)".to_string(), str::to_string);
-    print(format!("{} started {session} in {}, pid {}", c::green("✓"), t(&v, "folder"), t(&v, "pid")));
+    print(format!("{} started {session} in {}, pid {}{sandboxed}", c::green("✓"), t(&v, "folder"), t(&v, "pid")));
     Ok(0)
 }

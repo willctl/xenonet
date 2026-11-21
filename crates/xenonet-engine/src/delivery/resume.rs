@@ -50,6 +50,36 @@ pub fn resume_env<V>(env: Vec<(String, V)>) -> Vec<(String, V)> {
     env.into_iter().filter(|(k, _)| keep.contains(&k.as_str()) || !marks.iter().any(|m| k.starts_with(m))).collect()
 }
 
+/// `resume_env` for a session found in a folder she named (`root`): that
+/// folder is where the app keeps its sessions and sign-in, so the turn runs
+/// with it (CLAUDE_CONFIG_DIR, CODEX_HOME: the app's roots.env) in place of
+/// the service's own. A session of the app's default folder (`root` None),
+/// or of an app that keeps one folder only, runs as it did.
+pub fn resume_env_in(env: Vec<(String, String)>, app: &str, root: Option<&str>) -> Vec<(String, String)> {
+    let mut env = resume_env(env);
+    in_root(&mut env, app, root);
+    env
+}
+
+/// `env` with the app's folder variable set to `root`, a folder she named,
+/// in place of any it had; nothing for no root, or an app that keeps one
+/// folder only.
+pub fn in_root(env: &mut Vec<(String, String)>, app: &str, root: Option<&str>) {
+    let Some(root) = root.filter(|r| xenonet_adapter::platforms().get(app).is_some_and(|p| p.root_paths(r).is_some())) else { return };
+    let Some(var) = xenonet_adapter::apps::app(app).and_then(|a| a.roots.as_ref()).map(|r| r.env.clone()) else { return };
+    env.retain(|(k, _)| *k != var);
+    env.push((var, root.to_string()));
+}
+
+/// `env` without the variables that sign `app` in by some other way than its
+/// folder's own sign-in (its adapter's `sign_in_vars`): for a run placed in a
+/// folder by an account, or found in one she named, which must sign in with
+/// that folder's.
+pub fn without_sign_in_vars(env: &mut Vec<(String, String)>, app: &str) {
+    let vars = xenonet_adapter::platforms().get(app).map(|p| p.sign_in_vars()).unwrap_or_default();
+    env.retain(|(k, _)| !vars.contains(&k.as_str()));
+}
+
 /// The command for one resumed turn, or None for an app or id it can't
 /// resume. `settings` is the listen settings file a Claude Code turn runs
 /// with.
@@ -75,6 +105,15 @@ pub fn fork_command(agent: &str, settings: Option<&str>) -> Option<Command> {
     let (app, id) = agent.split_once(':')?;
     let fork = apps::of(app)?.fork.filter(|_| is_uuid(id))?;
     Some(fork(id, settings))
+}
+
+/// A fork's arguments with the copy's own id chosen, which the app takes
+/// beside `--fork-session` (Claude Code's `--session-id`): the copy is known
+/// before it runs, so what must hold it (a sandbox, a mark) is kept first.
+pub fn with_session_id(mut args: Vec<String>, id: &str) -> Vec<String> {
+    let at = args.iter().position(|a| a == "--fork-session").map_or(args.len(), |i| i + 1);
+    args.splice(at..at, ["--session-id".to_string(), id.to_string()]);
+    args
 }
 
 /// A turn XenoNet runs of an app that takes a permission prompt tool
@@ -144,6 +183,45 @@ mod tests {
     }
 
     #[test]
+    fn a_session_found_in_a_named_root_resumes_in_that_root() {
+        xenonet_platforms::install();
+        // The service's own folder is the first root's, and was always kept: a session from a second root ran under it.
+        let own = vec![("PATH".to_string(), "/bin".to_string()), ("CLAUDE_CONFIG_DIR".to_string(), "/h/.claude".to_string())];
+        let named = resume_env_in(own.clone(), "claude", Some("/h/.claude-work"));
+        assert_eq!(named, [("PATH".into(), "/bin".into()), ("CLAUDE_CONFIG_DIR".into(), "/h/.claude-work".into())]);
+        // A session of the default root, or of an app with one folder, is as it was.
+        assert_eq!(resume_env_in(own.clone(), "claude", None), resume_env(own.clone()));
+        let codex = resume_env_in(own.clone(), "codex", Some("/h/.codex-work"));
+        assert!(codex.contains(&("CODEX_HOME".into(), "/h/.codex-work".into())) && codex.contains(&("CLAUDE_CONFIG_DIR".into(), "/h/.claude".into())), "{codex:?}");
+        // Without a variable of its own in the environment, the root is still set.
+        assert!(resume_env_in(vec![("PATH".into(), "/bin".into())], "claude", Some("/r")).contains(&("CLAUDE_CONFIG_DIR".into(), "/r".into())));
+        assert!(!resume_env_in(own, "grok", Some("/g")).iter().any(|(k, _)| k == "GROK_HOME"), "an app that keeps one folder takes none");
+    }
+
+    #[test]
+    fn a_run_in_a_folders_own_sign_in_keeps_no_provider_key() {
+        xenonet_platforms::install();
+        let mut env: Vec<(String, String)> =
+            ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "OPENAI_API_KEY", "CODEX_API_KEY", "HOME"]
+                .iter()
+                .map(|k| ((*k).to_string(), "x".to_string()))
+                .collect();
+        let mut claude = env.clone();
+        without_sign_in_vars(&mut claude, "claude");
+        assert_eq!(claude.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["PATH", "OPENAI_API_KEY", "CODEX_API_KEY", "HOME"]);
+        let mut codex = env.clone();
+        without_sign_in_vars(&mut codex, "codex");
+        assert_eq!(
+            codex.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            ["PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "HOME"]
+        );
+        // An app with no such variables, or none known, keeps its environment.
+        let before = env.clone();
+        without_sign_in_vars(&mut env, "grok");
+        assert_eq!(env, before);
+    }
+
+    #[test]
     fn a_copy_forks_only_from_a_claude_code_session() {
         xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
@@ -154,6 +232,16 @@ mod tests {
         );
         assert!(fork_command(&format!("codex:{id}"), None).is_none());
         assert!(fork_command("claude:abc", None).is_none());
+    }
+
+    #[test]
+    fn a_forks_own_id_comes_after_fork_session() {
+        xenonet_platforms::install();
+        let id = "0190d3e0-0000-7000-8000-00000000ab01";
+        let (_, fork) = fork_command(&format!("claude:{id}"), Some("/s/listen.json")).unwrap();
+        let args = with_session_id(fork, "0190d3e0-0000-7000-8000-0000000c0c01");
+        assert_eq!(&args[..5], ["-p", "--resume", id, "--fork-session", "--session-id"], "{args:?}");
+        assert_eq!(args[5], "0190d3e0-0000-7000-8000-0000000c0c01");
     }
 
     #[test]

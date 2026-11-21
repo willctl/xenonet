@@ -100,7 +100,7 @@ impl Map {
     pub fn node(&self, id: &str) -> xenonet_engine::engine::Result<Option<Value>> {
         let Some(n) = engine(self.node_value(id))? else { return Ok(None) };
         let identities: Vec<Value> = n.get("identities").and_then(Value::as_array).map(|l| l.iter().map(|i| pick(i, &["id"])).collect()).unwrap_or_default();
-        let mut out = pick(&n, &["id", "kind", "title", "name", "worktree", "cwd", "updatedAt", "branch", "reader", "observed", "path", "archived"]);
+        let mut out = pick(&n, &["id", "kind", "title", "name", "worktree", "cwd", "updatedAt", "branch", "reader", "observed", "path", "archived", "identityRule"]);
         out["identities"] = Value::Array(identities);
         Ok(Some(out))
     }

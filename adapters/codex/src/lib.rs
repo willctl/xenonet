@@ -43,6 +43,71 @@ fn start(s: &Start<'_>) -> (String, Vec<String>) {
     ("codex".into(), ["exec", "--json", "-C", s.cwd, "-"].into_iter().map(str::to_string).collect())
 }
 
+// Sandboxed, a turn (a start or a resume) is
+//   codex exec --sandbox workspace-write --ignore-user-config --ignore-rules
+//     -c sandbox_mode="workspace-write" -c approval_policy="never"
+//     -c sandbox_workspace_write.network_access=false
+//     -c sandbox_workspace_write.writable_roots=[] -c notify=[]
+//     -c sandbox_workspace_write.exclude_slash_tmp=true
+//     -c sandbox_workspace_write.exclude_tmpdir_env_var=true
+//     -c mcp_servers.<xenonet>={...} ...
+// Commands write only in the folder and have no network, and nothing is
+// asked of anyone. The user's config.toml is not loaded (its notify command
+// and MCP servers would run outside the sandbox, and what makes a
+// repository's own .codex/config.toml, hooks and rules count is a trust the
+// config keeps), nor are execpolicy rules; XenoNet's own MCP server is
+// given in its place. `codex exec resume` takes no --sandbox of its own, so
+// the sandbox is also given through -c, which it takes, after `resume`.
+// Codex's workspace-write sandbox reads the whole disk.
+fn sandbox_turn(f: &delivery::SandboxFiles<'_>, args: Vec<String>) -> Vec<String> {
+    // TOML strings are JSON strings for the characters a path has.
+    let text = |s: &str| serde_json::to_string(s).unwrap_or_default();
+    let server = format!("mcp_servers.{}={{command={},args=[\"mcp\"],env={{XENONET_PORT={}}}}}", f.server, text(f.plan.bin), text(f.plan.port));
+    let overrides = [
+        "sandbox_mode=\"workspace-write\"",
+        "approval_policy=\"never\"",
+        "sandbox_workspace_write.network_access=false",
+        "sandbox_workspace_write.writable_roots=[]",
+        "sandbox_workspace_write.exclude_slash_tmp=true",
+        "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+        "notify=[]",
+        server.as_str(),
+    ];
+    let common: Vec<String> =
+        ["--ignore-user-config", "--ignore-rules"].into_iter().map(str::to_string).chain(overrides.iter().flat_map(|o| ["-c".to_string(), (*o).to_string()])).collect();
+    let mut out = args;
+    // After `exec`, before its subcommand or the prompt.
+    let at = 1.min(out.len());
+    let resumes = out.get(at).map(String::as_str) == Some("resume");
+    let mut parent = vec!["--sandbox".to_string(), "workspace-write".to_string()];
+    parent.extend(common.iter().cloned());
+    out.splice(at..at, parent);
+    if resumes {
+        // Right after `resume`, whose own options these are.
+        let after = out.iter().position(|a| a == "resume").map_or(out.len(), |i| i + 1);
+        out.splice(after..after, common);
+    }
+    out
+}
+
+// Codex's sandbox can't name the domains a command may reach: with some,
+// the start is refused, and with none its network is off. Its sandbox on
+// native Windows isn't one XenoNet has checked, so there it is not asked
+// for.
+fn sandbox_unavailable(p: &delivery::Plan<'_>, windows: bool) -> Option<String> {
+    if windows {
+        return Some(
+            "Codex's sandbox on native Windows isn't one XenoNet has checked, so a sandboxed Codex start isn't made there: run Codex under WSL2, or use Claude Code under WSL2"
+                .to_string(),
+        );
+    }
+    (!p.domains.is_empty()).then(|| "Codex's sandbox can't limit the network to named domains: start it with none (no network at all) or use Claude Code".to_string())
+}
+
+fn sandbox_words(p: &delivery::Plan<'_>) -> String {
+    format!("It runs in Codex's workspace-write sandbox: its commands write only in {} and have no network. Codex's sandbox lets them read the rest of the disk.", p.folder)
+}
+
 // Codex names the new thread in thread.started's thread_id.
 fn session_of(log: &str) -> Option<String> {
     delivery::id_under("thread_id", log)
@@ -140,6 +205,14 @@ impl Platform for Adapter {
             finish: Some(finish),
             reported: Some(reported),
             plan_used: Some(plan_used),
+            sandbox: Some(delivery::SandboxWays {
+                unavailable: sandbox_unavailable,
+                files: None,
+                words: sandbox_words,
+                turn: sandbox_turn,
+                reads_whole_disk: true,
+                temp_var: None,
+            }),
             ..Ways::default()
         })
     }
@@ -195,6 +268,18 @@ impl Platform for Adapter {
         ["sessions", "archived_sessions"].map(|d| std::path::Path::new(folder).join(d).to_string_lossy().into_owned()).to_vec()
     }
 
+    fn sign_in_vars(&self) -> Vec<&'static str> {
+        ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION"].to_vec()
+    }
+
+    fn root_paths(&self, root: &str) -> Option<xenonet_adapter::platform::RootPaths> {
+        Some(xenonet_adapter::platform::RootPaths { folder: root.to_string(), signin: xenonet_os::paths::join(root, "auth.json") })
+    }
+
+    fn root_candidates(&self, home: &str, look: &mut dyn xenonet_adapter::dirs::Look) -> Vec<String> {
+        xenonet_adapter::platform::sibling_roots(home, ".codex", &["sessions", "auth.json", "config.toml"], look)
+    }
+
     fn session_files(&self) -> Option<Box<dyn xenonet_adapter::platform::SessionFiles>> {
         Some(Box::<map::Files>::default())
     }
@@ -217,5 +302,74 @@ impl Platform for Adapter {
 
     fn signin(&self) -> Option<xenonet_adapter::platform::Signin> {
         Some(map::signin())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xenonet_adapter::delivery::{Plan, SandboxFiles};
+
+    fn files(domains: &[String]) -> SandboxFiles<'_> {
+        SandboxFiles {
+            plan: Plan { folder: "/w/atlas", home: "/h", domains, port: "47840", bin: "/usr/bin/xenonet", temp: None },
+            settings: "",
+            mcp: "",
+            server: "xenonet",
+            not_own: false,
+        }
+    }
+
+    fn has(args: &[String], flags: &[&str]) -> bool {
+        flags.iter().all(|f| args.iter().any(|a| a == f))
+    }
+
+    #[test]
+    fn a_sandboxed_start_closes_what_would_run_outside_the_sandbox_or_widen_it() {
+        let args = sandbox_turn(&files(&[]), ["exec", "--json", "-C", "/w/atlas", "-"].map(str::to_string).to_vec());
+        assert_eq!(args[..3], ["exec", "--sandbox", "workspace-write"]);
+        assert_eq!(args.last().map(String::as_str), Some("-"));
+        assert!(
+            has(
+                &args,
+                &[
+                    "--ignore-user-config",
+                    "--ignore-rules",
+                    "sandbox_mode=\"workspace-write\"",
+                    "approval_policy=\"never\"",
+                    "notify=[]",
+                    "sandbox_workspace_write.writable_roots=[]"
+                ]
+            ),
+            "{args:?}"
+        );
+        assert!(has(&args, &["sandbox_workspace_write.network_access=false", "sandbox_workspace_write.exclude_slash_tmp=true"]), "{args:?}");
+        // The user's servers are not loaded; XenoNet's own is given.
+        assert!(has(&args, &["mcp_servers.xenonet={command=\"/usr/bin/xenonet\",args=[\"mcp\"],env={XENONET_PORT=\"47840\"}}"]), "{args:?}");
+        // No override widens what it was given, and `-c` always has a value.
+        assert!(!args.iter().any(|a| a.contains("danger") || a.contains("full-access")), "{args:?}");
+        assert!(args.iter().enumerate().all(|(i, a)| a != "-c" || args.get(i + 1).is_some_and(|v| !v.starts_with('-'))));
+    }
+
+    #[test]
+    fn a_sandboxed_resume_carries_the_sandbox_where_resume_takes_it() {
+        let args = sandbox_turn(&files(&[]), ["exec", "resume", "0190d3e0-0000-7000-8000-0000000d0001", "-"].map(str::to_string).to_vec());
+        let at = args.iter().position(|a| a == "resume").unwrap();
+        // `codex exec resume` has no --sandbox: the sandbox is in -c after it too.
+        assert!(!args[at..].iter().any(|a| a == "--sandbox"), "{args:?}");
+        assert!(args[at..].windows(2).any(|w| w[0] == "-c" && w[1] == "sandbox_mode=\"workspace-write\""), "{args:?}");
+        assert!(args[at..].windows(2).any(|w| w[0] == "-c" && w[1] == "sandbox_workspace_write.network_access=false"), "{args:?}");
+        assert!(args[at..].iter().any(|a| a == "--ignore-user-config") && args[at..].iter().any(|a| a == "--ignore-rules"), "{args:?}");
+        assert_eq!(args[args.len() - 2..], ["0190d3e0-0000-7000-8000-0000000d0001", "-"]);
+        assert_eq!(args[..3], ["exec", "--sandbox", "workspace-write"]);
+    }
+
+    #[test]
+    fn codex_has_no_sandbox_for_native_windows_and_none_that_names_domains() {
+        let some = vec!["github.com".to_string()];
+        let plan = |d| Plan { folder: "/w", home: "/h", domains: d, port: "1", bin: "x", temp: None };
+        assert!(sandbox_unavailable(&plan(&[]), true).is_some_and(|w| w.contains("WSL2")));
+        assert!(sandbox_unavailable(&plan(&some), false).is_some_and(|w| w.contains("named domains")));
+        assert!(sandbox_unavailable(&plan(&[]), false).is_none());
     }
 }

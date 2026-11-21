@@ -15,9 +15,20 @@ fn limits_of(app: &str) -> Option<&'static str> {
 /// `limits` is the live snapshot's `limits`; `app` the session's app. The
 /// shape of the app's own reading is its adapter's (`plan_used`).
 pub fn plan_usage(limits: &Value, app: &str, now: f64) -> Option<f64> {
+    plan_usage_in(limits, app, None, now)
+}
+
+/// The same for a session in a folder she named (`root`): that folder's own
+/// reading (`<limits>@<folder>`), never the default folder's. None while
+/// there is none.
+pub fn plan_usage_in(limits: &Value, app: &str, root: Option<&str>, now: f64) -> Option<f64> {
     let name = limits_of(app)?;
     let read = super::apps::of(app)?.plan_used?;
-    let pcts = read(limits.get(name), now)?;
+    let at = match root {
+        Some(r) => limits.get(format!("{name}@{r}"))?,
+        None => limits.get(name)?,
+    };
+    let pcts = read(Some(at), now)?;
     if pcts.is_empty() {
         return None;
     }
@@ -40,6 +51,11 @@ mod tests {
         assert_eq!(plan_usage(&limits, "codex", 150.0), Some(0.8));
         assert_eq!(plan_usage(&limits, "codex", 100.0 + 7.0 * 3600e3), None, "a reading six hours old");
         assert_eq!(plan_usage(&json!({ "claude": { "fiveHour": 50, "stale": true } }), "claude", 1.0), None);
+        // A session in a named folder is read by that folder's own limits.
+        let named = json!({ "claude": { "fiveHour": 40 }, "claude@/h/.claude-work": { "fiveHour": 92 } });
+        assert_eq!(plan_usage_in(&named, "claude", Some("/h/.claude-work"), 100.0), Some(0.92));
+        assert_eq!(plan_usage_in(&named, "claude", Some("/h/.claude-other"), 100.0), None, "never the default's number");
+        assert_eq!(plan_usage_in(&named, "claude", None, 100.0), Some(0.4));
         assert_eq!(plan_usage(&limits, "grok", 100.0), None, "no limits read");
     }
 }

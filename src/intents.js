@@ -14,7 +14,7 @@ import "./intents.css";
 const APPS = [["claude", "Claude Code"], ["codex", "Codex"], ["grok", "Grok Build"]];
 const OPEN = new Set(["made", "assigned", "running"]);
 const ANY = "any";
-const blank = () => ({ goal: "", target: "", arbiter: "", project: "", app: "claude", hours: 24 });
+const blank = () => ({ goal: "", target: "", arbiter: "", network: "", project: "", app: "claude", hours: 24 });
 const stamp = (at) => (Number.isFinite(at) ? new Date(at).toLocaleString() : "");
 
 export function createIntentsPanel({ modals, calls }) {
@@ -26,7 +26,7 @@ export function createIntentsPanel({ modals, calls }) {
     id: i.id, state: i.state, maker: i.maker, target: i.target, arbiter: i.arbiter ?? null, workedOn: i.workedOn ?? null, takes: i.takes ?? [], waiting: i.waiting ?? null,
     project: i.project, app: i.app, goal: i.goal, note: i.note ?? null, outcome: i.outcome ?? null, here: !!i.here,
   });
-  const state = () => ({ open: !!panel, intents: data?.intents.map(brief) ?? [], machines: data?.machines ?? [], projects: (data?.projects ?? []).map((p) => p.id), selected, draft: { ...draft }, error: said ?? error });
+  const state = () => ({ open: !!panel, intents: data?.intents.map(brief) ?? [], machines: data?.machines ?? [], networks: (data?.networks ?? []).map((n) => n.id), projects: (data?.projects ?? []).map((p) => p.id), selected, draft: { ...draft }, error: said ?? error });
 
   async function load() {
     const r = await calls.call("GET", "/api/intents");
@@ -51,6 +51,12 @@ export function createIntentsPanel({ modals, calls }) {
     if (!draft.target && data?.machines?.length) draft.target = data.machines[0];
     if (!draft.arbiter && data?.machines?.length) draft.arbiter = data.machines[0];
     if (!draft.project && data?.projects?.length) draft.project = data.projects[0].id;
+    // An intent belongs to one network, so a machine in several asks which;
+    // nothing is chosen for the person.
+    const networks = data?.networks ?? [];
+    if (!networks.some((n) => n.id === draft.network)) draft.network = "";
+    el("[data-in-network-field]").hidden = networks.length < 2;
+    el("[data-in-network]").innerHTML = `<option value="">Choose a network</option>${options(networks, draft.network, (n) => n.name)}`;
     const here = (m) => (m === data?.here ? `${m} (this machine)` : m);
     el("[data-in-target]").innerHTML = options([...(data?.machines ?? []), ANY], draft.target, (m) => (m === ANY ? "any machine your delegation names" : here(m)));
     el("[data-in-arbiter]").innerHTML = options(data?.machines ?? [], draft.arbiter, here);
@@ -94,16 +100,21 @@ export function createIntentsPanel({ modals, calls }) {
 
   // What the form says now, as typed.
   function read() {
-    draft = { goal: el("[data-in-goal]").value, target: el("[data-in-target]").value, arbiter: el("[data-in-arbiter]").value, project: el("[data-in-project]").value, app: el("[data-in-app]").value, hours: Number(el("[data-in-hours]").value) || 24 };
+    draft = { goal: el("[data-in-goal]").value, target: el("[data-in-target]").value, arbiter: el("[data-in-arbiter]").value, network: el("[data-in-network]").value, project: el("[data-in-project]").value, app: el("[data-in-app]").value, hours: Number(el("[data-in-hours]").value) || 24 };
   }
 
   async function make() {
     read();
     busy = true; render();
-    const r = await calls.call("POST", "/api/intents", { goal: draft.goal, target: draft.target, arbiter: draft.arbiter, project: draft.project, app: draft.app, hours: draft.hours });
+    if ((data?.networks ?? []).length > 1 && !draft.network) {
+      busy = false;
+      said = "This machine is in more than one network: choose the one this intent belongs to.";
+      return render();
+    }
+    const r = await calls.call("POST", "/api/intents", { goal: draft.goal, target: draft.target, arbiter: draft.arbiter, ...(draft.network ? { network: draft.network } : {}), project: draft.project, app: draft.app, hours: draft.hours });
     busy = false;
     if (!r.ok) said = r.error || "XenoNet didn't make the intent";
-    else { said = null; draft = { ...blank(), target: draft.target, arbiter: draft.arbiter, project: draft.project }; selected = r.data.id; }
+    else { said = null; draft = { ...blank(), target: draft.target, arbiter: draft.arbiter, network: draft.network, project: draft.project }; selected = r.data.id; }
     await load();
   }
 
@@ -133,6 +144,7 @@ export function createIntentsPanel({ modals, calls }) {
         <form class="in-form" data-in-form>
           <label class="in-wide">Goal<textarea data-in-goal rows="3" placeholder="What should be done, and what done looks like"></textarea></label>
           <label>Machine<select data-in-target aria-label="Machine"></select></label>
+          <label data-in-network-field hidden>Network<select data-in-network aria-label="Network"></select></label>
           <label>Arbiter<select data-in-arbiter aria-label="Arbiter" title="The machine that gives it out"></select></label>
           <label>Project<select data-in-project aria-label="Project"></select></label>
           <label>App<select data-in-app aria-label="App">${APPS.map(([v, n]) => `<option value="${v}">${n}</option>`).join("")}</select></label>

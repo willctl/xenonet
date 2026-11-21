@@ -10,6 +10,12 @@ has only Claude desktop's Claude Code, give XenoNet a long-lived token.
                           runs alone, as CLAUDE_CODE_OAUTH_TOKEN; nothing shows
                           it again
   xenonet runs forget     takes it out of the credential store
+  xenonet runs domains [set <domain>… | clear]
+                          the domains a sandboxed run that isn't yours may
+                          reach: a session's, an actor's, another machine's
+                          or a delegation's (none until you set some, e.g.
+                          xenonet runs domains set github.com '*.npmjs.org').
+                          A run you start yourself names any
 
   claude setup-token
   xenonet runs sign-in

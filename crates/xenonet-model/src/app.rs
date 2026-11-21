@@ -171,6 +171,10 @@ pub struct App {
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     #[schemars(regex(pattern = r"^[A-Z0-9]{10}$"))]
     pub team: Opt<String>,
+    /// The version of the app XenoNet's readers were last checked against; the doctor compares it with the installed one
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    #[schemars(regex(pattern = r"^\d+\.\d+\.\d+"))]
+    pub checked: Opt<String>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub connect: Opt<Connect>,
     /// For a native reader, the tools whose calls are edits

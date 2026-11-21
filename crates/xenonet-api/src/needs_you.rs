@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use xenonet_text::text::{display, truthy};
 use xenonet_text::utf16::cmp_units;
 
-pub const KINDS: [&str; 8] = ["question", "permission", "actor", "request", "gateway", "requests", "ask", "sign-in"];
+pub const KINDS: [&str; 9] = ["question", "permission", "actor", "request", "gateway", "requests", "ask", "sign-in", "identity"];
 
 fn s(v: &Value) -> Option<&str> {
     v.as_str()
@@ -30,6 +30,7 @@ pub fn waits_words(it: &Value) -> &'static str {
         Some("gateway") => "is asked for a gateway token",
         Some("ask") => "wants to run a tool",
         Some("sign-in") => "needs a sign-in for XenoNet's runs",
+        Some("identity") => "would commit or push as the wrong identity",
         Some("requests") => {
             if it.get("count").and_then(Value::as_f64) == Some(1.0) {
                 "asks to join XenoNet"
@@ -78,7 +79,8 @@ fn items(v: Option<&Value>) -> &[Value] {
 /// canDecide, waiting, asks, hints }, as needsYouQueue takes it. `asks` are
 /// the permission prompts of the runs XenoNet started, here or on another
 /// machine, which only the window answers; `hints` the machines whose
-/// Claude Code needs a sign-in for XenoNet's runs.
+/// Claude Code needs a sign-in for XenoNet's runs; `identities` the
+/// projects whose rule doesn't match (`{ id, title, text }`).
 pub fn needs_you_queue(input: &Value) -> Vec<Value> {
     let get = |k: &str| input.get(k);
     let can_decide = truthy(get("canDecide"));
@@ -146,6 +148,20 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
         m.insert("text".into(), str_of(h.get("fix")));
         m.insert("since".into(), num(h.get("since")));
         m.insert("actions".into(), strings(&["dismiss"]));
+        out.push(Value::Object(m));
+    }
+    // A project whose rule for its git identity and push account doesn't
+    // match what git here would use.
+    for p in items(get("identities")) {
+        let Some(id) = p.get("id").and_then(Value::as_str) else { continue };
+        let mut m = Map::new();
+        m.insert("key".into(), Value::String(format!("identity:{id}")));
+        m.insert("kind".into(), Value::String("identity".into()));
+        m.insert("id".into(), Value::String(id.into()));
+        m.insert("title".into(), or_id(str_of(p.get("title")), &Value::String(id.into())));
+        m.insert("text".into(), str_of(p.get("text")));
+        m.insert("since".into(), Value::Null);
+        m.insert("actions".into(), strings(&["show"]));
         out.push(Value::Object(m));
     }
     if can_decide {
@@ -249,6 +265,7 @@ pub fn queue_of_summary(summary: Option<&Value>) -> Vec<Value> {
     input.insert("sessions".into(), field("needsYou").cloned().unwrap_or(Value::Array(Vec::new())));
     input.insert("actors".into(), Value::Array(actors));
     input.insert("waiting".into(), field("requests").cloned().unwrap_or(Value::from(0)));
+    input.insert("identities".into(), field("identityWarnings").cloned().unwrap_or(Value::Array(Vec::new())));
     needs_you_queue(&Value::Object(input))
 }
 
@@ -288,6 +305,23 @@ mod tests {
         assert_eq!(q[0]["text"], "Waiting for you");
         assert_eq!(waits_words(&q[0]), "is ready for review");
         assert_eq!(count_of(&q), 5.0);
+    }
+
+    #[test]
+    fn a_project_whose_rule_does_not_match_waits_on_you() {
+        let q = needs_you_queue(&json!({
+            "sessions": [{ "id": "claude:a", "kind": "question", "since": 5 }],
+            "identities": [{ "id": "project:atlas", "title": "atlas", "text": "Commits here don't use the git identity this project's rule names." }, { "title": "no id" }],
+        }));
+        let it = q.iter().find(|i| i["kind"] == "identity").expect("an identity item");
+        assert_eq!(
+            *it,
+            json!({ "key": "identity:project:atlas", "kind": "identity", "id": "project:atlas", "title": "atlas", "text": "Commits here don't use the git identity this project's rule names.", "since": null, "actions": ["show"] })
+        );
+        assert_eq!(waits_words(it), "would commit or push as the wrong identity");
+        assert_eq!(q.len(), 2, "one item per project, and the dated wait first");
+        let from_summary = queue_of_summary(Some(&json!({ "identityWarnings": [{ "id": "project:ledger", "title": "ledger", "text": "x" }] })));
+        assert_eq!(from_summary.len(), 1);
     }
 
     #[test]

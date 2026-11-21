@@ -46,6 +46,45 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
             return Ok(Reply::json(200, state.set_roots(roots.clone()).await?));
         }
     }
+    if req.path == "/api/workspace/app-roots" {
+        if req.method == "GET" {
+            return Ok(Reply::json(200, state.app_roots()?));
+        }
+        if req.method == "PUT" {
+            let body = req.json_body().await?;
+            let (Some(app), Some(roots)) = (body.get("app").filter(|a| a.is_string()), body.get("roots").filter(|r| r.is_array())) else {
+                return Ok(Reply::error(400, "say which app and its folders: { app, roots: [path] }"));
+            };
+            // The folders she had named for the app, to tell which this takes away.
+            let named = |v: &Value| -> Vec<String> {
+                let of = v.get("apps").and_then(Value::as_array).into_iter().flatten().find(|a| a.get("app") == Some(app));
+                of.and_then(|a| a.get("roots"))
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|r| r.get("named") == Some(&Value::Bool(true)))
+                    .filter_map(|r| r.get("root")?.as_str().map(str::to_string))
+                    .collect()
+            };
+            let before = named(&state.app_roots()?);
+            let mut after = state.set_app_roots(app.clone(), roots.clone()).await?;
+            // A folder taken away keeps no hooks of XenoNet's: they would go on
+            // reporting its sessions, and XenoNet would no longer read it.
+            let kept = named(&after);
+            let mut taken = Vec::new();
+            for root in before.iter().filter(|r| !kept.contains(r)) {
+                taken.push(match ctx.cores.connect.remove_root_hooks(app.as_str().unwrap_or_default(), root).await {
+                    Ok(done) => done,
+                    Err(e) if e.is_pending() => continue,
+                    Err(e) => serde_json::json!({ "app": app, "root": root, "hooks": "kept", "why": e.message }),
+                });
+            }
+            if !taken.is_empty() {
+                after["hooks"] = Value::Array(taken);
+            }
+            return Ok(Reply::json(200, after));
+        }
+    }
     if req.method == "POST" && req.path == "/api/workspace/check" {
         let path = req.json_body().await?.get("path").cloned().unwrap_or(Value::Null);
         return Ok(Reply::json(200, state.check_root(path).await?));

@@ -335,6 +335,41 @@ pub enum Resource {
     },
 }
 
+/// How much a started run is walled in, as the person signs it: nothing
+/// between the signature and the run can take it off. A start that says
+/// nothing (an older sender) is `None` on the act, never one of these.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Confine {
+    /// The app's own settings; no sandbox is asked for. Only the person's
+    /// own start may be this.
+    Off,
+    /// The app's own sandbox, and the domains the run may reach besides its
+    /// folder (none by default).
+    Vendor { domains: Vec<String> },
+    /// A sealed cell behind this wall, which is the person's own: the
+    /// receiving machine checks it against the identity that signed.
+    Cell { wall: String },
+}
+
+impl Confine {
+    /// The level as the surfaces and the wire name it.
+    pub fn level(&self) -> &'static str {
+        match self {
+            Confine::Off => "off",
+            Confine::Vendor { .. } => "vendor",
+            Confine::Cell { .. } => "cell",
+        }
+    }
+
+    /// The domains of a run held to its app's sandbox, None for any other.
+    pub fn domains(&self) -> Option<&[String]> {
+        match self {
+            Confine::Vendor { domains } => Some(domains),
+            _ => None,
+        }
+    }
+}
+
 /// How a started run's permission prompts are answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StartMode {
@@ -460,6 +495,9 @@ pub enum Act {
         app: AppId,
         folder: Folder,
         mode: StartMode,
+        /// None: the sender said nothing (an older one). Anyone but the
+        /// person starts a run only at `vendor`.
+        confine: Option<Confine>,
     },
     Answer {
         ask: AskId,
@@ -630,11 +668,45 @@ pub struct Request {
     door: Door,
     at: i64,
     network: Option<NetworkId>,
+    reaching: Vec<Reaching>,
+}
+
+/// What a frame from another machine reaches besides the machine the
+/// request names: the receiver's own reading of the frame, never signed
+/// and never the sender's word. A network reaches only what it is shown,
+/// so each of these must be shown in the network the frame came in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reaching {
+    /// A session of this machine, by the project the receiver finds it in.
+    Session(SessionId),
+    /// A project, as a handoff names the one it is for.
+    Project(ProjectId),
+    /// Whatever takes it, no project named: shown only where everything is.
+    Unplaced,
+    /// Nothing that sharing governs: a membership check, a frame passed by
+    /// that was meant for another machine, an answer to a prompt this
+    /// machine itself asked in that network. It has to be said, since a
+    /// frame that says nothing is placed nowhere (`Unplaced`) and fails
+    /// closed.
+    Nothing,
 }
 
 impl Request {
     pub fn new(principal: Principal, resource: Resource, act: Act, door: Door, at: i64, network: Option<NetworkId>) -> Request {
-        Request { principal, action: act.action(), resource, act, door, at, network }
+        Request { principal, action: act.action(), resource, act, door, at, network, reaching: Vec::new() }
+    }
+
+    /// This request, also reaching `what`. A message and a handoff are
+    /// signed for a machine, so what else they reach is added here by the
+    /// receiver, outside the signed act.
+    #[must_use]
+    pub fn reaching(mut self, what: Reaching) -> Request {
+        self.reaching.push(what);
+        self
+    }
+
+    pub fn reaches(&self) -> &[Reaching] {
+        &self.reaching
     }
 
     pub fn principal(&self) -> &Principal {
@@ -709,10 +781,35 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
     match act {
         Act::Message | Act::Wake | Act::Handoff | Act::UseGateway => &mut c,
         Act::Claim { project } => c.field(project.as_str()),
-        Act::Start { app, folder, mode } => c.field(app.as_str()).field(folder.as_str()).field(match mode {
-            StartMode::Asks => "asks",
-            StartMode::Delegated => "delegated",
-        }),
+        Act::Start { app, folder, mode, confine } => {
+            c.field(app.as_str()).field(folder.as_str()).field(match mode {
+                StartMode::Asks => "asks",
+                StartMode::Delegated => "delegated",
+            });
+            // Nothing for a start that says nothing, and the same for `off`,
+            // which is no confinement at all: what an older sender signs
+            // still verifies, and both are refused unless the start is the
+            // person's own. Vendor's domains and a cell's wall are part of
+            // what is signed, after the level.
+            if let Some(confine) = confine.as_ref().filter(|c| **c != Confine::Off) {
+                c.field("confine").field(confine.level());
+                match confine {
+                    Confine::Off => {}
+                    Confine::Vendor { domains } => {
+                        let mut domains = domains.clone();
+                        domains.sort();
+                        domains.dedup();
+                        for d in &domains {
+                            c.field(d);
+                        }
+                    }
+                    Confine::Cell { wall } => {
+                        c.field(wall);
+                    }
+                }
+            }
+            &mut c
+        }
         Act::Answer { ask, decision } => c.field(ask.as_str()).field(match decision {
             AnswerDecision::Allow => "allow",
             AnswerDecision::Deny => "deny",

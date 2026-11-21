@@ -70,6 +70,14 @@ pub trait Store: Send + Sync {
     fn set_roots(&self, _roots: &[String]) -> R<()> {
         pending(STORE)
     }
+    /// The other folders you named for an app's sessions and sign-in, beside
+    /// the one it keeps by default: `{ app: [path] }`.
+    fn app_roots(&self) -> R<Value> {
+        pending(STORE)
+    }
+    fn set_app_roots(&self, _roots: &Value) -> R<()> {
+        pending(STORE)
+    }
     /// What the map found on this machine (`[{ path, why }]`, why `repo`,
     /// `folder` or `session`) diffed into the checkouts the store keeps:
     /// `{ checkouts: [checkout], fixes: [words] }`, every checkout of this
@@ -123,9 +131,9 @@ pub trait Store: Send + Sync {
         pending(STORE)
     }
     /// `store.getIdentities()`: the names you gave identities, the ones
-    /// you hid, the ones you pinned to a node, what XenoNet knows of each
-    /// and the sign-ins it has seen (`{ names, hidden, pins, known,
-    /// signins }`), which a hub's merged map applies to other hosts'
+    /// you hid, the ones you pinned to a node, the rules for projects, what XenoNet
+    /// knows of each and the sign-ins it has seen (`{ names, hidden, pins,
+    /// rules, known, signins }`), which a hub's merged map applies to other hosts'
     /// identities too.
     fn identities(&self) -> R<Value> {
         pending(STORE)
@@ -138,6 +146,11 @@ pub trait Store: Send + Sync {
     }
     /// The identity pinned to a node, now, or (None) no pin.
     fn set_identity_pin(&self, _node: &str, _identity: Option<&str>) -> R<()> {
+        pending(STORE)
+    }
+    /// The rule for a project (its git email and push account), or (None)
+    /// none.
+    fn set_identity_rule(&self, _project: &str, _rule: Option<&Value>) -> R<()> {
         pending(STORE)
     }
     /// What XenoNet knows of an identity, in place of what it knew.

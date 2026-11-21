@@ -57,6 +57,10 @@ pub struct Facts {
     pub synced_at: Option<i64>,
     /// Now, by the network's clock: what a request is timed by.
     pub now: i64,
+    /// For a call in no network from a machine in several: the narrowest
+    /// settings of those networks, which `settings` answers in place of
+    /// this machine's own entry in a chain, since it has none.
+    pub narrowed: Option<Settings>,
 }
 
 impl Facts {
@@ -67,6 +71,25 @@ impl Facts {
 
     fn own(&self) -> Option<&network::Member> {
         self.view.as_ref()?.member(self.machine.as_str())
+    }
+}
+
+/// What several networks together allow: the narrowest start and the
+/// narrowest wake of them.
+pub fn narrowest(all: &[Settings]) -> Settings {
+    let start = |s: &Settings| match s.start {
+        StartSetting::Off => 0,
+        StartSetting::You => 1,
+        StartSetting::Network => 2,
+        StartSetting::Delegate => 3,
+    };
+    let wake = |s: &Settings| match s.wake {
+        WakeSetting::Consent => 0,
+        WakeSetting::Network => 1,
+    };
+    Settings {
+        start: all.iter().min_by_key(|s| start(s)).map_or_else(Default::default, |s| s.start),
+        wake: all.iter().min_by_key(|s| wake(s)).map_or_else(Default::default, |s| s.wake),
     }
 }
 
@@ -86,6 +109,13 @@ pub fn settings_of(s: &network::Settings) -> Settings {
 }
 
 impl Ground for Facts {
+    /// What is shared into a network is the person's choice, kept beside
+    /// the chain (`Governance::sharing`), not in it: the runtime's ground
+    /// answers, and this one, which holds none, shows nothing.
+    fn sees(&self, _network: &NetworkId, _project: Option<&xenonet_authz::ProjectId>) -> bool {
+        false
+    }
+
     fn own_machine(&self) -> &MachineId {
         &self.machine
     }
@@ -104,6 +134,9 @@ impl Ground for Facts {
 
     fn settings(&self, network: Option<&NetworkId>) -> Settings {
         let _ = network;
+        if let Some(n) = self.narrowed {
+            return n;
+        }
         self.own().map(|m| settings_of(&m.settings)).unwrap_or_default()
     }
 
@@ -194,8 +227,23 @@ pub fn grant_of(d: &person::Delegation) -> Option<StandingGrant> {
 pub trait Governance: Send + Sync {
     fn facts(&self) -> Facts;
     fn identity(&self) -> Arc<Identity>;
+    /// What the person shares into `network`. The default is nothing: a
+    /// governance that can't say what is shared shows no network anything.
+    fn sharing(&self, network: &str) -> crate::share::Sharing {
+        let _ = network;
+        crate::share::Sharing::default_for(false)
+    }
     /// `host` sent a newer head of `person`'s chain than this machine holds.
     fn want_person(&self, host: &str, person: &str);
+    /// The host id the machine with signing key id `machine` goes by: in
+    /// the network the call is in, else in the first network that has it.
+    /// A machine is named by the roster of whichever network it is in, so
+    /// a lookup in one network's chain would miss one that is only in
+    /// another.
+    fn host_of_machine(&self, machine: &str) -> Option<String> {
+        let _ = machine;
+        None
+    }
 }
 
 impl Governance for crate::node::Shared {
@@ -204,6 +252,9 @@ impl Governance for crate::node::Shared {
     }
     fn identity(&self) -> Arc<Identity> {
         crate::node::Shared::identity(self).clone()
+    }
+    fn sharing(&self, network: &str) -> crate::share::Sharing {
+        crate::node::Shared::sharing(self, network)
     }
     fn want_person(&self, host: &str, person: &str) {
         crate::node::Shared::want_person(self, host, person);

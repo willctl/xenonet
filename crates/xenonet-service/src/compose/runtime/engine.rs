@@ -406,6 +406,9 @@ impl host::Net for Side<'_> {
     fn claim_hits(&self, me: &str, files: &[String]) -> xenonet_engine::engine::Result<Vec<Value>> {
         crate::compose::runtime::network::claim_hits(self.w, me, files)
     }
+    fn claim_shown(&self, host: &str, project: &str) -> bool {
+        crate::compose::runtime::network::project_shown_with(self.w, host, project)
+    }
     fn handoffs(&self, view: &Value) -> xenonet_engine::engine::Result<Vec<Value>> {
         crate::compose::runtime::network::offers(self.w, view)
     }
@@ -616,6 +619,12 @@ impl Engine for EngineDriver {
     async fn runs_sign_in(&self, action: &str, token: &str) -> R<Value> {
         let (w, action, token) = (self.0.clone(), action.to_string(), token.to_string());
         let out = tokio::task::spawn_blocking(move || crate::compose::runtime::starts::sign_in(&w, &action, &token)).await.map_err(|e| CoreError::new(e.to_string()))?;
+        out.map_err(|(status, why)| CoreError::status(status, why))
+    }
+    async fn runs_sandbox_domains(&self, action: &str, domains: Vec<String>) -> R<Value> {
+        let (w, action) = (self.0.clone(), action.to_string());
+        let out =
+            tokio::task::spawn_blocking(move || crate::compose::runtime::starts::sandbox_domains_for(&w, &action, &domains)).await.map_err(|e| CoreError::new(e.to_string()))?;
         out.map_err(|(status, why)| CoreError::status(status, why))
     }
     async fn permission(&self, me: &str, title: Option<String>, body: Value, by: xenonet_api::cores::door::Attestation) -> R<Value> {

@@ -23,13 +23,12 @@ The engine reaches a cell through a trait, as it reaches platforms.
 
 ## The `cell` level
 
-A start can be confined at one of three levels:
+A start can be confined at one of three levels, which `xenonet_authz::Confine` names and the person signs:
 - `off`;
-- `vendor`, the harness's own sandbox (the daily-use plan's slice 4);
+- `vendor`, the harness's own sandbox ([sandboxed starts](../guide/sandbox.md));
 - `cell`, a sealed Adytum cell behind the start's wall.
 
-The engine's rules are in `crates/xenonet-engine/src/confine.rs`. Each refusal has its test.
-- A missing level is refused, never defaulted. A `cell` start needs a wall, and only a `cell` start may name one.
+A missing level is refused, never defaulted, and only a `cell` start has a wall. The engine's rules for a cell are in `crates/xenonet-engine/src/confine.rs`. Each refusal has its test.
 - The wall is the starting identity's own: `wall_`, a slug of the identity id, `_`, then the first 16 hex digits of the id's SHA-256.
 - The cell gets `PATH` and `HOME` (guest values) plus `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM`, `TZ` and `NO_COLOR`, and nothing else. A value or argument holding the host's home path is refused.
 - The project folder's path is resolved before any check:
@@ -53,11 +52,16 @@ Inside a Lima cell, Adytum's boot-time provisioning keeps the wall:
 
 The live test `crates/xenonet-service/tests/cells_live.rs` (`ADYTUM_LIVE=1`) checks each of these against a real VM.
 
-## Not wired yet
+## What is wired
 
-Nothing sets the level yet. Slice 4 of the daily-use work adds it to the start request and the signed act. When it does:
-- the identity comes from the verified act, never the request;
-- the level and the wall are on the signed act;
+The level is on the start request and on the signed `Act::Start`. `xenonet_authz::Confine` is the one type for it: `Off`, `Vendor { domains }` or `Cell { wall }`. The act's hash covers the level, the domains and the wall. `Off` hashes as no field at all, so what an older sender signs still verifies, and both are refused for anyone but the person. The engine's `ConfineAsk` is what a request says, which never holds a wall.
+
+- A start from anyone but the person needs `vendor`. `off`, `cell` and a missing level are refused by `xenonet-authz`, and the service holds the same rule again.
+- A `cell` start from anyone but the person is refused in words until walls have keys of their own (below). Domains for a start that isn't the person's stay limited to the list the person sets with `xenonet runs domains`.
+- The wall of a `cell` start comes from the identity that signs it, never from the request: a request that names a wall is refused. The machine that runs the start builds the act with `wall_for_identity` of the signer's id taken from the authority the start carried, so the signature covers that wall and no other, and `check_wall` holds a cell plan to it.
+- A `cell` start from the person is refused in words ("cell starts aren't wired yet") and nothing runs. The runner takes a program and its arguments and brings plain files back. A session start needs the app's sign-in inside the cell, which the cell's environment never carries, and the session's transcript and its prompts back on the map, which the cell's one-way copy-out doesn't give. That is a design of its own, not a change to the runner.
+
+Still to come before a `cell` start runs:
 - `keep` is the owner's choice, and a kept cell is bound to its wall;
 - the arguments come from the adapter.
 

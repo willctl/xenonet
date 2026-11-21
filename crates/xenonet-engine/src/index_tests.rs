@@ -27,6 +27,8 @@ struct World {
     actors: Vec<(String, f64)>,
     known: Vec<String>,
     index_reads: u64,
+    // The check of "project:p"'s identity rule, when it has one.
+    rule: Option<Value>,
 }
 
 struct Fake {
@@ -105,10 +107,13 @@ impl MapReader for Fake {
     }
     fn node(&self, id: &str) -> Result<Option<Value>> {
         let w = self.w.locked();
-        Ok(w.nodes
-            .iter()
-            .find(|n| n.id == id)
-            .map(|n| json!({ "id": n.id, "kind": n.kind, "title": format!("T {}", n.id), "cwd": "/w/p", "updatedAt": n.updated_at, "archived": n.archived })))
+        Ok(w.nodes.iter().find(|n| n.id == id).map(|n| {
+            let mut v = json!({ "id": n.id, "kind": n.kind, "title": format!("T {}", n.id), "cwd": "/w/p", "updatedAt": n.updated_at, "archived": n.archived });
+            if let (Some(rule), "project:p") = (&w.rule, n.id.as_str()) {
+                v["identityRule"] = rule.clone();
+            }
+            v
+        }))
     }
     fn live(&self, id: &str, _now: f64) -> Result<Option<Value>> {
         let w = self.w.locked();
@@ -118,7 +123,8 @@ impl MapReader for Fake {
         Ok(false)
     }
     fn home_of(&self, _id: &str) -> Result<Option<Value>> {
-        Ok(None)
+        // The made-up sessions live in "project:p" only once it has a rule.
+        Ok(self.w.locked().rule.as_ref().map(|_| json!("project:p")))
     }
     fn identities(&self) -> Result<Vec<Value>> {
         Ok(Vec::new())
@@ -450,4 +456,49 @@ fn measure_a_thousand_sessions() {
     let agents = t.elapsed() / runs;
     println!("1000 sessions, 100 active: candidates {indexed:?} with the index, {scanned:?} by the scan; agents() {agents:?}");
     println!("map reads {}, rebuilds {}", f.reads(), e.index.stats().rebuilds);
+}
+
+#[test]
+fn a_session_is_told_at_its_start_when_its_projects_rule_does_not_match() {
+    let f = Fake::new(true);
+    let e = Engine::default();
+    let now = f.now();
+    f.map(|n| {
+        n.push(node("project:p", "project", Some(now), false));
+        n.push(node(&session(1), "session", Some(now), false));
+    });
+    touch(&e, &f, &session(1));
+    let brief = |f: &Fake| e.briefing(&f.c(), &session(1)).unwrap();
+    assert_eq!(brief(&f), "", "no rule, nothing to say");
+    let rule = json!({ "git": "nova@example.com", "push": { "login": "nova-dev", "host": "github.com" } });
+    // What XenoNet could not read is not a mismatch.
+    f.w.locked().rule =
+        Some(json!({ "rule": rule, "git": { "state": "unknown", "uses": null }, "push": { "state": "ok", "uses": "nova-dev/github.com" }, "mismatch": false, "unknown": true }));
+    assert_eq!(brief(&f), "");
+    f.w.locked().rule = Some(json!({
+        "rule": rule,
+        "git": { "state": "differs", "uses": "ada@acme.example" },
+        "push": { "state": "differs", "uses": "ledger-bot/github.com" },
+        "mismatch": true,
+        "unknown": false,
+    }));
+    let said = brief(&f);
+    assert!(said.starts_with("XenoNet: this project has an identity rule that doesn't match"), "{said}");
+    assert!(said.contains("commits should carry nova@example.com, but git here would use ada@acme.example"), "{said}");
+    assert!(said.contains("pushes should sign in as nova-dev on github.com, but a push from here would sign in as ledger-bot/github.com"), "{said}");
+    assert!(said.ends_with("Don't commit or push until this is fixed, and tell your user."), "{said}");
+    // The account a session ran as is told too.
+    f.w.locked().rule = Some(json!({
+        "rule": { "claude": "nova-work@example.com" },
+        "claude": { "state": "differs", "uses": "nova@example.com" },
+        "mismatch": true,
+        "unknown": false,
+    }));
+    let said = brief(&f);
+    assert!(said.contains("Claude Code should run as nova-work@example.com, but the last session here ran as nova@example.com"), "{said}");
+    // Only the part that differs is named.
+    f.w.locked().rule =
+        Some(json!({ "rule": rule, "git": { "state": "ok", "uses": "nova@example.com" }, "push": { "state": "differs", "uses": null }, "mismatch": true, "unknown": false }));
+    let said = brief(&f);
+    assert!(!said.contains("commits should carry") && said.contains("would sign in as another account"), "{said}");
 }

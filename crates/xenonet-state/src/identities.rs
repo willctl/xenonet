@@ -553,6 +553,214 @@ pub fn empty_saved() -> Value {
     json!({ "names": {}, "hidden": {}, "pins": {}, "known": {}, "signins": {} })
 }
 
+// ---------- a project's rule ----------
+
+/// A rule as it's kept, from what a person sent: `git` is the email the
+/// project commits with, `push` the GitHub account (`login`, and `host`,
+/// github.com unless it says another) a push signs in as. Either may be
+/// left out; with neither, there is no rule (Ok(None)).
+pub fn clean_rule(body: &Value) -> Result<Option<Value>, &'static str> {
+    let text = |v: Option<&Value>| match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(trim(s).to_string()).filter(|s| !s.is_empty())),
+        Some(_) => Err("A rule's names are text"),
+    };
+    let one_line = |s: &str| !s.chars().any(|c| c.is_control() || c.is_whitespace());
+    let mut rule = Map::new();
+    if let Some(git) = text(body.get("git"))? {
+        if !one_line(&git) || !git.contains('@') {
+            return Err("A rule's git identity is an email address");
+        }
+        rule.insert("git".into(), Value::String(git));
+    }
+    match body.get("push") {
+        None | Some(Value::Null) => {}
+        Some(p @ Value::Object(_)) => {
+            if let Some(login) = text(p.get("login"))? {
+                let host = text(p.get("host"))?.unwrap_or_else(|| "github.com".into()).to_lowercase();
+                if !one_line(&login) || !one_line(&host) {
+                    return Err("A rule's push account is a login and a host");
+                }
+                rule.insert("push".into(), json!({ "login": login, "host": host }));
+            }
+        }
+        Some(_) => return Err("A rule's push account is a login and a host"),
+    }
+    // The accounts the project's sessions are to run as.
+    // Each kind of account the apps run under (the registry's `identity`).
+    for (key, _) in xenonet_adapter::apps::identities() {
+        if let Some(email) = text(body.get(key))? {
+            if !one_line(&email) || !email.contains('@') {
+                return Err("A rule's Claude Code or ChatGPT account is an email address");
+            }
+            rule.insert(key.into(), Value::String(email));
+        }
+    }
+    // What to do about a mismatch XenoNet can stop: warn unless it says
+    // refuse. It means nothing without a part to hold to.
+    let mode = match text(body.get("mode"))?.as_deref() {
+        None | Some("warn") => None,
+        Some("refuse") => Some("refuse"),
+        Some(_) => return Err("A rule's mode is warn or refuse"),
+    };
+    if let (Some(mode), false) = (mode, rule.is_empty()) {
+        rule.insert("mode".into(), Value::String(mode.into()));
+    }
+    Ok((!rule.is_empty()).then_some(Value::Object(rule)))
+}
+
+/// A project's rule against what XenoNet read of it: who its commits carry
+/// (`commits-as`) and who a push signs in as (`pushes-as`) among its
+/// identity `links`, with `list` (the map's identities) to name them.
+/// A part is "ok" when it's the one the rule names, "differs" when XenoNet
+/// read another, and "unknown" when it read none: that is not a mismatch.
+/// `mismatch` is any part that differs.
+pub fn check_rule(rule: &Value, links: &[Value], list: &[Value]) -> Value {
+    check_rule_with(rule, links, list, &[])
+}
+
+/// An account a session of the project ran as (an identity's id) and when
+/// it last ran.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RanAs {
+    pub id: String,
+    pub at: f64,
+}
+
+/// `check_rule`, and for a rule that names a Claude or ChatGPT account
+/// (`claude`, `chatgpt`): the account the project's newest session of that
+/// kind ran as (`ran`). Not having one is unknown, never a mismatch.
+pub fn check_rule_with(rule: &Value, links: &[Value], list: &[Value], ran: &[RanAs]) -> Value {
+    let of = |role: &str| links.iter().find(|l| l.get("role").and_then(Value::as_str) == Some(role)).and_then(|l| l.get("id")).and_then(Value::as_str);
+    let rec = |id: &str| list.iter().find(|i| i.get("id").and_then(Value::as_str) == Some(id));
+    let part = |wants: String, found: Option<&str>, uses: &dyn Fn(&str) -> Option<String>| match found {
+        None => json!({ "state": "unknown", "uses": null }),
+        Some(id) => json!({ "state": if id == wants { "ok" } else { "differs" }, "uses": uses(id) }),
+    };
+    let mut out = Map::new();
+    out.insert("rule".into(), rule.clone());
+    if let Some(email) = rule.get("git").and_then(Value::as_str) {
+        out.insert("git".into(), part(git_id(email), of("commits-as"), &|id| rec(id).and_then(|r| r.get("handle")).and_then(Value::as_str).map(str::to_string)));
+    }
+    if let Some(push) = rule.get("push") {
+        let host = push.get("host").and_then(Value::as_str).unwrap_or("github.com");
+        let login = push.get("login").and_then(Value::as_str).unwrap_or("");
+        let uses = |id: &str| {
+            let r = rec(id)?;
+            let host = r.get("detail").and_then(|d| d.get("host")).and_then(Value::as_str).unwrap_or("github.com");
+            Some(format!("{}/{host}", r.get("handle").and_then(Value::as_str)?))
+        };
+        out.insert("push".into(), part(github_id(host, login), of("pushes-as"), &uses));
+    }
+    for (kind, _) in xenonet_adapter::apps::identities() {
+        let Some(wanted) = rule.get(kind).and_then(Value::as_str) else { continue };
+        let newest = ran.iter().filter(|r| r.id.split(':').next() == Some(kind)).max_by(|a, b| a.at.total_cmp(&b.at));
+        let handle = newest.and_then(|r| rec(&r.id)).and_then(|r| r.get("handle")).and_then(Value::as_str);
+        out.insert(
+            kind.into(),
+            match (newest, handle) {
+                (None, _) | (Some(_), None) => json!({ "state": "unknown", "uses": null }),
+                (Some(_), Some(h)) => json!({ "state": if h.eq_ignore_ascii_case(wanted) { "ok" } else { "differs" }, "uses": h }),
+            },
+        );
+    }
+    let state = |k: &str| out.get(k).and_then(|p| p.get("state")).and_then(Value::as_str);
+    let differs = |k: &str| state(k) == Some("differs");
+    let kinds: Vec<&str> = xenonet_adapter::apps::identities().map(|(k, _)| k).collect();
+    let accounts_differ = kinds.iter().any(|k| differs(k));
+    let mismatch = differs("git") || differs("push") || accounts_differ;
+    let unknown = ["git", "push"].iter().chain(kinds.iter()).any(|k| state(k) == Some("unknown"));
+    if mismatch {
+        // In words that name no account, so the Needs you queue can show
+        // them with identities masked.
+        let mut words = match (differs("git"), differs("push")) {
+            (true, true) => "Commits and pushes here don't use the identity this project's rule names.",
+            (true, false) => "Commits here don't use the git identity this project's rule names.",
+            (false, true) => "A push from here doesn't sign in as the account this project's rule names.",
+            _ => "",
+        }
+        .to_string();
+        if accounts_differ {
+            if !words.is_empty() {
+                words.push(' ');
+            }
+            words.push_str("A session here ran as another Claude or ChatGPT account than this project's rule names.");
+        }
+        out.insert("words".into(), words.into());
+    }
+    if let Some(mode) = rule.get("mode").and_then(Value::as_str) {
+        out.insert("mode".into(), mode.into());
+    }
+    out.insert("mismatch".into(), Value::Bool(mismatch));
+    out.insert("unknown".into(), Value::Bool(unknown));
+    Value::Object(out)
+}
+
+/// The root of an app that holds the account a rule names: each root
+/// (None for the app's default one) with the email it is signed in to. The
+/// first root that holds it, as the person wrote it in any case; none is a
+/// refusal in words, never another account. `app` is the app's name.
+pub fn pick_root(app: &str, roots: &[(Option<String>, Option<String>)], wanted: &str) -> Result<Option<String>, String> {
+    roots
+        .iter()
+        .find(|(_, email)| email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(wanted)))
+        .map(|(root, _)| root.clone())
+        .ok_or_else(|| {
+            format!(
+                "This project's rule says {app} runs as {wanted}, and no folder XenoNet reads for {app} is signed in to that account. Sign in to it in a folder, then name the folder with xenonet folders add, or change the rule."
+            )
+        })
+}
+
+/// The projects whose rule doesn't match, one `{ id, title, text }` each,
+/// for the Needs you queue: from the nodes as `apply_rules` left them.
+pub fn identity_warnings(nodes: &[Value]) -> Vec<Value> {
+    nodes
+        .iter()
+        .filter(|n| n.get("identityRule").and_then(|r| r.get("mismatch")) == Some(&Value::Bool(true)))
+        .map(|n| {
+            let id = n.get("id").cloned().unwrap_or(Value::Null);
+            let title = n.get("name").or_else(|| n.get("title")).cloned().unwrap_or_else(|| id.clone());
+            json!({ "id": id, "title": title, "text": n["identityRule"].get("words").cloned().unwrap_or(Value::Null) })
+        })
+        .collect()
+}
+
+/// Puts each rule's check on its project's node (`identityRule`), given
+/// the nodes as the map has them with their identity links, and the
+/// identities list. A project with no rule gets nothing.
+pub fn apply_rules(nodes: &mut [Value], rules: &Value, list: &[Value], map_links: &[(Value, Value, Value)]) {
+    // What each session ran as and when, by session.
+    let ran: HashMap<String, RanAs> = nodes
+        .iter()
+        .filter(|n| n.get("kind").and_then(Value::as_str) == Some("session"))
+        .filter_map(|n| {
+            let id = n.get("id")?.as_str()?;
+            let account = n.get("ranAs")?.get("id")?.as_str()?;
+            let at = n.get("updatedAt").or_else(|| n.get("createdAt")).and_then(Value::as_f64).unwrap_or(0.0);
+            Some((id.to_string(), RanAs { id: account.to_string(), at }))
+        })
+        .collect();
+    for n in nodes {
+        let Some(id) = n.get("id").and_then(Value::as_str) else { continue };
+        let Some(rule) = rules.get(id).filter(|r| r.is_object()) else { continue };
+        if n.get("kind").and_then(Value::as_str) != Some("project") {
+            continue;
+        }
+        let links = n.get("identities").and_then(Value::as_array).cloned().unwrap_or_default();
+        // The project's own sessions.
+        let mine: Vec<RanAs> = map_links
+            .iter()
+            .filter(|(src, _, kind)| src.as_str() == Some(id) && kind.as_str() == Some("session"))
+            .filter_map(|(_, tgt, _)| ran.get(tgt.as_str()?).cloned())
+            .collect();
+        let check = check_rule_with(rule, &links, list, &mine);
+        if let Some(o) = n.as_object_mut() {
+            o.insert("identityRule".into(), check);
+        }
+    }
+}
+
 pub fn github_id(host: &str, login: &str) -> String {
     format!("github:{host}/{}", login.to_lowercase())
 }
@@ -572,12 +780,31 @@ pub fn claude_id(account: &str, org: &str) -> String {
     format!("claude:{account}:{org}")
 }
 
+/// A named root's sign-in: the key its account and file have in the
+/// accounts (`<kind>@<root>`), the root, and the kind of account (the
+/// registry's `identity`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootedSignin {
+    pub key: String,
+    pub root: String,
+    pub kind: &'static str,
+}
+
+impl RootedSignin {
+    pub fn new(kind: &'static str, root: &str) -> RootedSignin {
+        RootedSignin { key: format!("{kind}@{root}"), root: root.to_string(), kind }
+    }
+}
+
 /// What linkIdentities works from: the map's nodes (each with id, kind,
 /// app, claudeAccount, provider, updatedAt, createdAt, origin, key, group
 /// and name), its links (source, target, kind), the accounts signed in now,
 /// ssh aliases, each repo's git identity and each session's transcript
 /// owner (by key, as Maps keep them), the saved state, home, and now.
 pub struct LinkInput<'a> {
+    /// The roots the person named, each with its own sign-in: its key in
+    /// `accounts` (and the timelines), the root and the kind of account.
+    pub rooted: &'a [RootedSignin],
     pub nodes: &'a [Value],
     pub links: &'a [(Value, Value, Value)],
     pub accounts: &'a Value,
@@ -599,7 +826,7 @@ pub struct LinkOutput {
     pub ran_as: Vec<(usize, Value)>,
     pub identities: Vec<(usize, Value)>,
     pub list: Vec<Value>,
-    pub signins: Vec<(&'static str, Signin)>,
+    pub signins: Vec<(String, Signin)>,
     pub known: Vec<(String, bool, Value)>,
     pub dirty: bool,
 }
@@ -689,7 +916,7 @@ fn owner_of(links: &[Value]) -> Option<&Value> {
 /// Puts identity links on the map (linkIdentities): which account each
 /// session ran as, and each project's owner, who pushes and who commits.
 pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
-    let LinkInput { nodes, links, accounts, ssh, repos, owners, saved, home, now } = input;
+    let LinkInput { rooted, nodes, links, accounts, ssh, repos, owners, saved, home, now } = input;
     let mut out = LinkOutput::default();
     let mut recs = Records { order: Vec::new(), recs: HashMap::new() };
     let acc = |k: &str| opt_prop(Some(accounts), k);
@@ -710,6 +937,12 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     for (kind, _) in &kinds {
         if let Some(a) = acc(kind).filter(|v| truthy(Some(v))) {
             let file = nn(acc(&format!("{kind}File"))).map(|f| source(display(f)));
+            recs.record(a, file.as_deref(), &[("signedIn", Value::Bool(true))]);
+        }
+    }
+    for r in rooted {
+        if let Some(a) = acc(&r.key).filter(|v| truthy(Some(v))) {
+            let file = nn(acc(&format!("{}File", r.key))).map(|f| source(display(f)));
             recs.record(a, file.as_deref(), &[("signedIn", Value::Bool(true))]);
         }
     }
@@ -744,27 +977,28 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     // The sign-in timelines.
     let empty = Value::Object(Map::new());
     let saved_signins = nn(opt_prop(Some(saved), "signins")).unwrap_or(&empty);
-    let mut signins: HashMap<&'static str, Vec<Value>> = HashMap::new();
-    for &(app, _) in &kinds {
-        let spans = match nn(opt_prop(Some(saved_signins), app)) {
+    let mut signins: HashMap<String, Vec<Value>> = HashMap::new();
+    let timeline_keys: Vec<(String, &'static str)> = kinds.iter().map(|&(k, _)| (k.to_string(), k)).chain(rooted.iter().map(|r| (r.key.clone(), r.kind))).collect();
+    for (key, _) in &timeline_keys {
+        let spans = match nn(opt_prop(Some(saved_signins), key)) {
             None => Vec::new(),
             Some(Value::Array(a)) => a.clone(),
             Some(_) => return Err(TypeError("spans.push is not a function".into())),
         };
-        signins.insert(app, spans);
+        signins.insert(key.clone(), spans);
     }
-    for &(app, _) in &kinds {
-        let a = acc(app);
+    for (key, _) in &timeline_keys {
+        let a = acc(key);
         if !truthy(a) {
             continue;
         }
-        let spans = signins.get_mut(app).expect("every kind's timeline is read above");
+        let spans = signins.get_mut(key).expect("every kind's timeline is read above");
         let op = note_signin(spans, a.and_then(|x| x.get("id")).unwrap_or(&Value::Null), now, opt_prop(a, "since"));
         if op != Signin::Same {
             out.dirty = true;
         }
         apply_signin(spans, &op);
-        out.signins.push((app, op));
+        out.signins.push((key.clone(), op));
     }
 
     // Sessions: the account each ran as.
@@ -823,6 +1057,27 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
             Value::Null
         }
     };
+    // Which account a root holds: the only one it has had, by its folder, for
+    // a session that started after XenoNet first read the folder's sign-in;
+    // an older one may have run under a sign-in XenoNet never saw, so it is
+    // placed by when it ran, as likely at best.
+    let by_folder = |spans: &[Value], a: Js<'_>, when: Js<'_>, started: Js<'_>| -> Value {
+        let mut ids: Vec<&Value> = spans.iter().filter_map(|s| s.get("id")).collect();
+        if let Some(id) = a.and_then(|a| a.get("id")) {
+            ids.push(id);
+        }
+        ids.dedup();
+        ids.sort_by_key(|v| key_of(Some(v)));
+        ids.dedup();
+        let first_read =
+            spans.iter().filter_map(|s| s.get("from").and_then(Value::as_f64)).chain(a.and_then(|a| a.get("since")).and_then(Value::as_f64)).fold(f64::INFINITY, f64::min);
+        let after = nn(started).and_then(Value::as_f64).is_some_and(|t| t >= first_read);
+        match ids.as_slice() {
+            [one] if after => link((*one).clone(), "exact", "its folder"),
+            [one] => link((*one).clone(), "likely", "its folder, read after the session ran"),
+            _ => account_at(spans, Some(&current(a)), when, &[]),
+        }
+    };
     let mut ran: HashMap<usize, Value> = HashMap::new();
     for (i, n) in nodes.iter().enumerate() {
         if !is(n, "kind", "session") {
@@ -841,7 +1096,13 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
             } else if let Some(o) = owners_by.get(&key_of(n.get("id"))).filter(|o| truthy(Some(o))) {
                 link(Value::String(claude_of(o)?), "exact", "its transcript")
             } else if provider.is_none_or(|p| !truthy(n.get("provider")) || is(n, "provider", p)) {
-                account_at(&signins[kind], Some(&current(acc(kind))), when, &known[kind])
+                // A session of a root she named is placed by that root's
+                // own sign-in and timeline.
+                let root = n.get("root").and_then(Value::as_str).and_then(|r| rooted.iter().find(|x| x.kind == kind && x.root == r));
+                match root {
+                    Some(r) => by_folder(&signins[&r.key], acc(&r.key), when, nn(n.get("createdAt"))),
+                    None => account_at(&signins[kind], Some(&current(acc(kind))), when, &known[kind]),
+                }
             } else {
                 Value::Null
             }
@@ -1227,7 +1488,7 @@ pub fn git_env(env: &Map<String, Value>, home: &str, your_home: &str) -> Option<
 /// Remote Control session names in its transcript's first lines.
 #[derive(Default)]
 pub struct TranscriptOwners {
-    dir: String,
+    dirs: Vec<String>,
     index: Option<HashMap<String, String>>,
     at: f64,
     owners: HashMap<String, (Value, f64)>,
@@ -1235,7 +1496,12 @@ pub struct TranscriptOwners {
 
 impl TranscriptOwners {
     pub fn new(dir: &str) -> Self {
-        TranscriptOwners { dir: dir.to_string(), ..Default::default() }
+        TranscriptOwners::over(&[dir.to_string()])
+    }
+
+    /// Over the projects folders of every root the app is read from.
+    pub fn over(dirs: &[String]) -> Self {
+        TranscriptOwners { dirs: dirs.to_vec(), ..Default::default() }
     }
 
     // Where a session's transcript is: the folder is listed again when
@@ -1244,14 +1510,16 @@ impl TranscriptOwners {
         if !self.index.as_ref().is_some_and(|ix| ix.contains_key(id)) && now - self.at > 60e3 {
             let mut ix = HashMap::new();
             self.at = now;
-            if let Ok(dirs) = paths::read_dir_sorted(std::path::Path::new(&self.dir)) {
-                for d in dirs {
-                    let sub = paths::join(&self.dir, &d.file_name().to_string_lossy());
-                    let Ok(files) = paths::read_dir_sorted(std::path::Path::new(&sub)) else { continue };
-                    for f in files {
-                        let name = f.file_name().to_string_lossy().into_owned();
-                        if let Some(stem) = name.strip_suffix(".jsonl") {
-                            ix.insert(format!("claude:{stem}"), paths::join(&sub, &name));
+            for dir in &self.dirs {
+                if let Ok(dirs) = paths::read_dir_sorted(std::path::Path::new(dir)) {
+                    for d in dirs {
+                        let sub = paths::join(dir, &d.file_name().to_string_lossy());
+                        let Ok(files) = paths::read_dir_sorted(std::path::Path::new(&sub)) else { continue };
+                        for f in files {
+                            let name = f.file_name().to_string_lossy().into_owned();
+                            if let Some(stem) = name.strip_suffix(".jsonl") {
+                                ix.insert(format!("claude:{stem}"), paths::join(&sub, &name));
+                            }
                         }
                     }
                 }
@@ -1349,6 +1617,57 @@ mod tests {
         assert_eq!(parse_remote("../elsewhere", &[]), None);
     }
 
+    fn claude_account(id: &str, email: &str) -> Value {
+        json!({ "id": id, "kind": "claude", "handle": email, "detail": {} })
+    }
+
+    fn ran_as(nodes: &[Value], accounts: &Value, saved: &Value, rooted: &[RootedSignin]) -> Vec<Value> {
+        xenonet_platforms::install();
+        let out = link_identities(LinkInput { rooted, nodes, links: &[], accounts, ssh: &[], repos: &[], owners: &[], saved, home: None, now: 5000.0 }).unwrap();
+        let mut by: Vec<(usize, Value)> = out.ran_as;
+        by.sort_by_key(|(i, _)| *i);
+        by.into_iter().map(|(_, l)| l).collect()
+    }
+
+    #[test]
+    fn a_session_in_a_named_root_is_linked_by_its_folder() {
+        let root = "/h/.claude-work";
+        let rooted = [RootedSignin::new("claude", root)];
+        let nodes = [
+            json!({ "id": "claude:s1", "kind": "session", "app": "claude", "updatedAt": 1000 }),
+            json!({ "id": "claude:s2", "kind": "session", "app": "claude", "root": root, "createdAt": 900, "updatedAt": 1000 }),
+            // One that ran before XenoNet first read the folder's sign-in (at 500) may have run under another.
+            json!({ "id": "claude:s3", "kind": "session", "app": "claude", "root": root, "createdAt": 100, "updatedAt": 200 }),
+            // One that doesn't say when it started can't be told to have started after, whenever it last ran.
+            json!({ "id": "claude:s4", "kind": "session", "app": "claude", "root": root, "updatedAt": 1000 }),
+        ];
+        let accounts = json!({
+            "claude": claude_account("claude:a:o", "nova@example.com"), "claudeFile": "/h/.claude.json",
+            "claude@/h/.claude-work": json!({ "id": "claude:b:p", "kind": "claude", "handle": "nova-work@example.com", "detail": {}, "since": 500 }),
+            "claude@/h/.claude-workFile": "/h/.claude-work/.claude.json",
+            "chatgpt": null, "chatgptFile": "/h/.codex/auth.json", "gh": [], "ssh": [],
+        });
+        let links = ran_as(&nodes, &accounts, &empty_saved(), &rooted);
+        // The default root's session is placed by the timeline, as before: the only account seen.
+        assert_eq!((links[0]["id"].as_str(), links[0]["confidence"].as_str()), (Some("claude:a:o"), Some("assumed")));
+        // The named root's holds one account, so it is recorded by its folder, above likely.
+        assert_eq!((links[1]["id"].as_str(), links[1]["confidence"].as_str(), links[1]["via"].as_str()), (Some("claude:b:p"), Some("exact"), Some("its folder")));
+        assert_eq!((links[2]["id"].as_str(), links[2]["confidence"].as_str()), (Some("claude:b:p"), Some("likely")), "{}", links[2]);
+        assert_eq!((links[3]["id"].as_str(), links[3]["confidence"].as_str()), (Some("claude:b:p"), Some("likely")), "{}", links[3]);
+    }
+
+    #[test]
+    fn a_root_that_held_two_accounts_falls_back_to_when_it_ran() {
+        let root = "/h/.claude-work";
+        let rooted = [RootedSignin::new("claude", root)];
+        let nodes = [json!({ "id": "claude:s2", "kind": "session", "app": "claude", "root": root, "updatedAt": 1500 })];
+        let accounts = json!({ "claude@/h/.claude-work": claude_account("claude:c:q", "nova-b@example.com"), "gh": [], "ssh": [] });
+        let mut saved = empty_saved();
+        saved["signins"] = json!({ "claude@/h/.claude-work": [{ "id": "claude:b:p", "from": 0, "to": 2000 }] });
+        let links = ran_as(&nodes, &accounts, &saved, &rooted);
+        assert_eq!((links[0]["id"].as_str(), links[0]["confidence"].as_str()), (Some("claude:b:p"), Some("likely")));
+    }
+
     #[test]
     fn says_who_pushes() {
         let cfg = parse_git_config(
@@ -1361,6 +1680,129 @@ mod tests {
         let cleared = parse_git_config("credential.helper !gh auth git-credential\ncredential.helper\ncredential.https://gitlab.example.helper !gh auth git-credential");
         assert_eq!(push_account(Some(&json!("https://github.com/a/b")), Some(&cleared), &[]).unwrap(), Value::Null);
         assert!(git_id("Nova@Example.com ").starts_with("git:") && git_id("x").len() == 20);
+    }
+
+    // A project read as: commits as `email`, pushes as `login` at `host`.
+    fn read_as(email: Option<&str>, push: Option<(&str, &str)>) -> (Vec<Value>, Vec<Value>) {
+        let (mut links, mut list) = (Vec::new(), Vec::new());
+        if let Some(e) = email {
+            links.push(json!({ "id": git_id(e), "role": "commits-as", "confidence": "exact" }));
+            list.push(json!({ "id": git_id(e), "kind": "git", "handle": e }));
+        }
+        if let Some((h, l)) = push {
+            links.push(json!({ "id": github_id(h, l), "role": "pushes-as", "confidence": "exact" }));
+            list.push(json!({ "id": github_id(h, l), "kind": "github", "handle": l, "detail": { "host": h } }));
+        }
+        (links, list)
+    }
+
+    #[test]
+    fn checks_a_rule_against_what_was_read() {
+        let rule = clean_rule(&json!({ "git": "Nova@Example.com ", "push": { "login": "Nova-Dev" } })).unwrap().unwrap();
+        assert_eq!(rule, json!({ "git": "Nova@Example.com", "push": { "login": "Nova-Dev", "host": "github.com" } }));
+        let check = |email, push| {
+            let (links, list) = read_as(email, push);
+            check_rule(&rule, &links, &list)
+        };
+        // Both as the rule says.
+        let ok = check(Some("nova@example.com"), Some(("github.com", "nova-dev")));
+        assert_eq!(
+            (ok["git"]["state"].as_str(), ok["push"]["state"].as_str(), ok["mismatch"].as_bool(), ok["unknown"].as_bool()),
+            (Some("ok"), Some("ok"), Some(false), Some(false))
+        );
+        // Git differs.
+        let git = check(Some("ada@acme.example"), Some(("github.com", "nova-dev")));
+        assert_eq!(
+            (git["git"]["state"].as_str(), git["git"]["uses"].as_str(), git["push"]["state"].as_str(), git["mismatch"].as_bool()),
+            (Some("differs"), Some("ada@acme.example"), Some("ok"), Some(true))
+        );
+        // Push differs, even on the same login at another host.
+        let push = check(Some("nova@example.com"), Some(("ghe.acme.example", "nova-dev")));
+        assert_eq!(
+            (push["git"]["state"].as_str(), push["push"]["state"].as_str(), push["push"]["uses"].as_str(), push["mismatch"].as_bool()),
+            (Some("ok"), Some("differs"), Some("nova-dev/ghe.acme.example"), Some(true))
+        );
+        // Both differ.
+        let both = check(Some("ada@acme.example"), Some(("github.com", "ledger-bot")));
+        assert_eq!((both["git"]["state"].as_str(), both["push"]["state"].as_str(), both["mismatch"].as_bool()), (Some("differs"), Some("differs"), Some(true)));
+        // What wasn't read is not a mismatch.
+        let unknown = check(None, None);
+        assert_eq!(
+            (unknown["git"]["state"].as_str(), unknown["push"]["state"].as_str(), unknown["mismatch"].as_bool(), unknown["unknown"].as_bool()),
+            (Some("unknown"), Some("unknown"), Some(false), Some(true))
+        );
+        let half = check(Some("ada@acme.example"), None);
+        assert_eq!((half["mismatch"].as_bool(), half["unknown"].as_bool()), (Some(true), Some(true)), "a part that differs is a mismatch even when another is unknown");
+        // A rule that names one part checks that part.
+        let git_only = check_rule(&json!({ "git": "nova@example.com" }), &read_as(Some("nova@example.com"), None).0, &[]);
+        assert!(git_only.get("push").is_none() && git_only["mismatch"] == false && git_only["unknown"] == false);
+    }
+
+    #[test]
+    fn a_rule_names_the_claude_and_chatgpt_account_and_what_to_do_about_a_mismatch() {
+        let rule = clean_rule(&json!({ "claude": " Nova-Work@Example.com ", "chatgpt": "nova@example.com", "mode": "refuse" })).unwrap().unwrap();
+        assert_eq!(rule, json!({ "claude": "Nova-Work@Example.com", "chatgpt": "nova@example.com", "mode": "refuse" }));
+        // A mode is warn unless it says refuse, and says nothing alone.
+        assert_eq!(clean_rule(&json!({ "claude": "a@b.example", "mode": "warn" })).unwrap().unwrap(), json!({ "claude": "a@b.example" }));
+        assert_eq!(clean_rule(&json!({ "mode": "refuse" })).unwrap(), None);
+        assert!(clean_rule(&json!({ "claude": "not an email" })).is_err());
+        assert!(clean_rule(&json!({ "claude": "a@b.example", "mode": "stop" })).is_err());
+        // Checked against the accounts the project's sessions ran as, the newest first.
+        let list =
+            [json!({ "id": "claude:a:o", "kind": "claude", "handle": "nova@example.com" }), json!({ "id": "claude:b:p", "kind": "claude", "handle": "nova-work@example.com" })];
+        let ran = |id: &str, at: f64| RanAs { id: id.into(), at };
+        let ok = check_rule_with(&rule, &[], &list, &[ran("claude:a:o", 1.0), ran("claude:b:p", 2.0)]);
+        assert_eq!((ok["claude"]["state"].as_str(), ok["mismatch"].as_bool()), (Some("ok"), Some(false)));
+        let differs = check_rule_with(&rule, &[], &list, &[ran("claude:b:p", 1.0), ran("claude:a:o", 2.0)]);
+        assert_eq!(
+            (differs["claude"]["state"].as_str(), differs["claude"]["uses"].as_str(), differs["mismatch"].as_bool()),
+            (Some("differs"), Some("nova@example.com"), Some(true))
+        );
+        assert!(!differs["words"].as_str().unwrap().contains("example.com"), "the words name no account");
+        let unknown = check_rule_with(&rule, &[], &list, &[]);
+        assert_eq!((unknown["claude"]["state"].as_str(), unknown["mismatch"].as_bool()), (Some("unknown"), Some(false)));
+        assert_eq!(unknown["mode"], "refuse");
+    }
+
+    #[test]
+    fn a_start_picks_the_root_that_holds_the_account_or_is_refused() {
+        // The default root and one she named, each signed in to one account.
+        let roots = [(None, Some("nova@example.com".to_string())), (Some("/h/.claude-work".to_string()), Some("nova-work@example.com".to_string()))];
+        assert_eq!(pick_root("Claude Code", &roots, "nova-work@example.com").unwrap(), Some("/h/.claude-work".to_string()));
+        assert_eq!(pick_root("Claude Code", &roots, "Nova@Example.com").unwrap(), None, "the default root, in any case");
+        // No root holds it: refused, in words, and never run under another.
+        let why = pick_root("Claude Code", &roots, "ada@acme.example").unwrap_err();
+        assert!(why.contains("no folder") && why.contains("ada@acme.example") && why.contains("xenonet folders"), "{why}");
+        // A root nobody is signed in to holds nothing.
+        assert!(pick_root("Claude Code", &[(None, None)], "nova@example.com").is_err());
+    }
+
+    #[test]
+    fn puts_a_rules_check_only_on_its_project() {
+        let (links, list) = read_as(Some("ada@acme.example"), None);
+        let mut nodes = vec![
+            json!({ "id": "project:atlas", "kind": "project", "identities": links }),
+            json!({ "id": "project:ledger", "kind": "project", "identities": [] }),
+            json!({ "id": "claude:s1", "kind": "session" }),
+        ];
+        apply_rules(&mut nodes, &json!({ "project:atlas": { "git": "nova@example.com" }, "claude:s1": { "git": "nova@example.com" } }), &list, &[]);
+        assert_eq!(nodes[0]["identityRule"]["mismatch"], true);
+        assert_eq!(
+            identity_warnings(&nodes),
+            vec![json!({ "id": "project:atlas", "title": "project:atlas", "text": "Commits here don't use the git identity this project's rule names." })]
+        );
+        assert!(nodes[1].get("identityRule").is_none(), "no rule, no check");
+        assert!(nodes[2].get("identityRule").is_none(), "only a project has one");
+    }
+
+    #[test]
+    fn cleans_a_rule() {
+        assert_eq!(clean_rule(&json!({})).unwrap(), None);
+        assert_eq!(clean_rule(&json!({ "git": "  ", "push": { "login": "" } })).unwrap(), None);
+        assert_eq!(clean_rule(&json!({ "push": { "login": "nova", "host": "GHE.acme.example" } })).unwrap().unwrap()["push"]["host"], "ghe.acme.example");
+        assert!(clean_rule(&json!({ "git": "nova" })).is_err());
+        assert!(clean_rule(&json!({ "git": 3 })).is_err());
+        assert!(clean_rule(&json!({ "push": "nova" })).is_err());
     }
 
     #[test]

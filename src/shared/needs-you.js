@@ -19,12 +19,15 @@
 // A window without the key (a browser tab) knows only how many programs
 // ask, never who: one `requests` item says how many, with nothing to press.
 //
+// A project whose identity rule doesn't match waits too: nothing answers it
+// here but looking at it, and fixing the repo's git config or gh account.
+//
 // Ready-for-review sessions, collisions, stuck loops and the doctor's
 // problems stay in the attention strip: they ask you to look, not to answer.
 //
 // No Node here: the page imports it too.
 
-export const KINDS = ["question", "permission", "actor", "request", "gateway", "requests", "ask", "sign-in"];
+export const KINDS = ["question", "permission", "actor", "request", "gateway", "requests", "ask", "sign-in", "identity"];
 
 // What each kind of item waits for, in a few words after its name.
 const ACTOR_WAITS = { question: "asks", permission: "needs permission", review: "is ready for review" };
@@ -36,6 +39,7 @@ export function waitsWords(it) {
   if (it.kind === "gateway") return "is asked for a gateway token";
   if (it.kind === "ask") return "wants to run a tool";
   if (it.kind === "sign-in") return "needs a sign-in for XenoNet's runs";
+  if (it.kind === "identity") return "would commit or push as the wrong identity";
   if (it.kind === "requests") return it.count === 1 ? "asks to join XenoNet" : "ask to join XenoNet";
   return "waits for you";
 }
@@ -55,7 +59,10 @@ const str = (v) => (typeof v === "string" ? v : v == null ? null : String(v));
 //           at, until }), which only the window answers
 // hints:    machines whose Claude Code needs a sign-in for XenoNet's runs
 //           ({ host, fix, since })
-export function needsYouQueue({ sessions = [], actors = [], requests = [], gatewayAsks = [], canDecide = false, waiting = 0, asks = [], hints = [] } = {}) {
+// identities: projects whose rule for a git identity and push account
+//           doesn't match what git there would use ({ id, title, text }),
+//           from the map's identityRule or /api/summary's identityWarnings
+export function needsYouQueue({ sessions = [], actors = [], requests = [], gatewayAsks = [], canDecide = false, waiting = 0, asks = [], hints = [], identities = [] } = {}) {
   const items = [];
   for (const s of sessions ?? []) {
     if (!s?.id || (s.kind !== "question" && s.kind !== "permission")) continue;
@@ -93,6 +100,10 @@ export function needsYouQueue({ sessions = [], actors = [], requests = [], gatew
     if (typeof h?.host !== "string") continue;
     items.push({ key: `sign-in:${h.host}`, kind: "sign-in", id: h.host, title: `Claude Code on ${h.host}`, host: h.host, text: str(h.fix), since: num(h.since), actions: ["dismiss"] });
   }
+  for (const p of identities ?? []) {
+    if (typeof p?.id !== "string") continue;
+    items.push({ key: `identity:${p.id}`, kind: "identity", id: p.id, title: str(p.title) ?? p.id, text: str(p.text), since: null, actions: ["show"] });
+  }
   if (canDecide) {
     for (const a of asks ?? []) {
       if (!a?.id) continue;
@@ -117,7 +128,7 @@ export function order(a, b) {
 // The queue from /api/summary (state.summary with the server's additions):
 // its sessions, the actors that wait and how many programs ask.
 export function queueOfSummary(summary) {
-  return needsYouQueue({ sessions: summary?.needsYou ?? [], actors: (summary?.actorsNeedYou ?? []).map((a) => ({ id: a.id, name: a.name, needsYou: { kind: a.kind, text: a.text, since: a.since } })), waiting: summary?.requests ?? 0 });
+  return needsYouQueue({ sessions: summary?.needsYou ?? [], actors: (summary?.actorsNeedYou ?? []).map((a) => ({ id: a.id, name: a.name, needsYou: { kind: a.kind, text: a.text, since: a.since } })), waiting: summary?.requests ?? 0, identities: summary?.identityWarnings ?? [] });
 }
 
 // How many wait on you: every program that asks counts, though a window

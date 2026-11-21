@@ -189,6 +189,39 @@ pub trait Platform: Send + Sync {
         None
     }
 
+    /// Where a root the person named keeps what the map reads: the folder
+    /// `folder_setting` names and the sign-in's file, for a root that is
+    /// the folder its environment variable names (`CLAUDE_CONFIG_DIR`,
+    /// `CODEX_HOME`). None for an app that has one folder only.
+    fn root_paths(&self, _root: &str) -> Option<RootPaths> {
+        None
+    }
+
+    /// Folders under `home` that look like another root of the app's
+    /// (a sibling of its default folder that holds what the app keeps
+    /// there), for the person to name or not. Nothing is read from them
+    /// until she does.
+    fn root_candidates(&self, _home: &str, _look: &mut dyn dirs::Look) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The environment variables that sign the app in some other way than
+    /// its folder's own sign-in and outrank it (a provider's API key, a
+    /// token, a base URL). A run placed in a folder by an account does not
+    /// keep them, since they would run it under another.
+    fn sign_in_vars(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
+    /// The arguments that keep a run it starts from committing, pushing or
+    /// running gh, for a project whose rule refuses (empty for an app with
+    /// no such switch). A prefix rule, so a command written another way
+    /// (`git -C x commit`, a script) isn't caught: the guard is a warning
+    /// beyond it.
+    fn refuse_args(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// The folders its transcripts are in, under its folder (`folder`):
     /// where it writes them now first, which the live tailer follows, then
     /// where it archives them, which search and stats read too.
@@ -275,6 +308,29 @@ pub struct Signin {
     /// Whether its transcripts name the account each session ran as
     /// (Claude Code's), read under its folder.
     pub owners: bool,
+}
+
+/// What a named root of an app holds: the folder the map's setting for the
+/// app names (`folder_setting`), and the file of its sign-in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootPaths {
+    pub folder: String,
+    pub signin: String,
+}
+
+/// The folders in `home` named `<prefix>…` (not `prefix` itself, and not a
+/// file) that hold one of `markers`: what the adapters offer as the other
+/// roots of their app.
+pub fn sibling_roots(home: &str, prefix: &str, markers: &[&str], look: &mut dyn dirs::Look) -> Vec<String> {
+    let Ok(names) = look.readdir(home) else { return Vec::new() };
+    let mut out: Vec<String> = names
+        .into_iter()
+        .filter(|n| n.starts_with(prefix) && n != prefix && !n.to_ascii_lowercase().contains(".json"))
+        .map(|n| xenonet_os::paths::join(home, &n))
+        .filter(|dir| markers.iter().any(|m| look.exists(&xenonet_os::paths::join(dir, m))))
+        .collect();
+    out.sort();
+    out
 }
 
 /// What `xenonet diagnose --ask` gives the app it starts: the model
@@ -429,6 +485,25 @@ pub fn platforms() -> &'static Registry {
 
 #[cfg(test)]
 mod tests {
+    struct Home(Vec<&'static str>);
+    impl dirs::Look for Home {
+        fn exists(&mut self, p: &str) -> bool {
+            self.0.contains(&p)
+        }
+        fn readdir(&mut self, _p: &str) -> Result<Vec<String>, dirs::Unreadable> {
+            Ok(vec![".claude".into(), ".claude-work".into(), ".claude-empty".into(), ".claude.json".into(), ".claude.json.backup".into(), ".config".into()])
+        }
+        fn mtime(&mut self, _p: &str) -> f64 {
+            0.0
+        }
+    }
+
+    #[test]
+    fn sibling_roots_are_folders_that_hold_what_the_app_keeps() {
+        let mut look = Home(vec!["/h/.claude-work/projects", "/h/.claude/projects", "/h/.claude.json"]);
+        assert_eq!(sibling_roots("/h", ".claude", &["projects", ".credentials.json"], &mut look), ["/h/.claude-work"]);
+    }
+
     use super::*;
     use serde_json::json;
 

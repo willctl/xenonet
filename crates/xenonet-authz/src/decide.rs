@@ -16,6 +16,10 @@
 //!    the person; from the network, a member of the network the envelope
 //!    names, never this machine itself; at the gateway and A2A, only this
 //!    machine's actors.
+//!    A frame from another machine also reaches only what that network is
+//!    shown: a message or wake the project its session is in, a claim its
+//!    project, a handoff the project it names, each checked with
+//!    `Ground::sees` before the sender is.
 //! 3. **Who**: the person's device signature is for this act, from an
 //!    unrevoked device of this machine's person; an actor (a bot or a cloud
 //!    assistant too) holds a token for exactly them, whose root is still certified, with
@@ -110,12 +114,24 @@
 //!    Deny, which only narrows.
 
 use crate::proof::VerifiedPresence;
-use crate::vocab::{Act, Action, AnswerDecision, Attestation, DelegationId, DeviceId, IntentStep, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
+use crate::vocab::{
+    Act, Action, AnswerDecision, Attestation, Confine, DelegationId, DeviceId, IntentStep, NetworkId, Principal, ProjectId, Reaching, ReadScope, Request, Resource, StartMode,
+};
 use crate::{DeviceKind, Door, Ground, Role, SpaceLevel, StandingGrant, StartSetting, Token, WakeSetting};
 use std::fmt;
 
 /// How stale governance may be before acts for another machine hold.
 pub const HOLD_AFTER_MS: i64 = 10 * 60_000;
+
+/// The words of a refusal because a network isn't shown what a frame
+/// reaches. They are the words of "that session isn't here", so a member
+/// can't learn which ids exist among what it isn't shown.
+pub const NOT_SEEN: &str = "no session or actor here has that id";
+
+/// The same for a start whose folder is in a project the network isn't
+/// shown, or in none. It is the answer for a folder that doesn't exist
+/// too, so it never says whether the folder is there.
+pub const NOT_SEEN_FOLDER: &str = "that folder isn't in a project this network is shown";
 
 /// Why a request was held or refused: a short code and words for a person.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +321,7 @@ pub fn decide(token: Option<&Token>, request: &Request, ground: &dyn Ground, pre
     let judged = (|| -> Step<(Arrival, Authority, Option<&'static str>)> {
         resource(request, ground)?;
         let arrival = arrival(request, ground)?;
+        seen(request, ground, &arrival)?;
         let authority = who(token, request, ground, &arrival)?;
         let (authority, note) = row(request, ground, presence, &arrival, authority)?;
         Ok((arrival, authority, note))
@@ -427,6 +444,88 @@ fn arrival(request: &Request, ground: &dyn Ground) -> Step<Arrival> {
     }
 }
 
+// Step 2b: a frame from another machine reaches only what the network it
+// came in is shown. A message or wake reaches a session, a claim a project,
+// an intent its project, and a message, handoff or report whatever the
+// receiver found it to reach (`Request::reaching`). A session in no confirmed project is placed
+// nowhere, which only a network shown everything sees. This comes before
+// the sender is checked, so the answer can't depend on who is asking.
+fn seen(request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<()> {
+    match request.network().filter(|_| !arrival.own) {
+        Some(network) => {
+            // An intent reaches the project its act names.
+            let mut reaching = request.reaches().to_vec();
+            if let Act::Intend { project, .. } = request.act() {
+                reaching.push(Reaching::Project(project.clone()));
+            }
+            shown(ground, network, request.action(), request.resource(), &reaching)
+        }
+        None => Ok(()),
+    }
+}
+
+/// Whether `network` is shown everything an act of `action` on `resource`
+/// reaches, with `reaching` besides: the question `decide` asks of a frame
+/// from another machine, askable before anything about its sender is, so a
+/// receiver can answer a frame for what isn't shown without checking who
+/// sent it. A start that names no place reaches none, which only a network
+/// shown everything sees.
+pub fn shown(ground: &dyn Ground, network: &NetworkId, action: Action, resource: &Resource, reaching: &[Reaching]) -> Result<(), Reason> {
+    let by_session = |s| ground.session_project(s);
+    let mut reached: Vec<Option<ProjectId>> = Vec::new();
+    match (action, resource) {
+        (Action::Message | Action::Wake, Resource::Session(s)) => reached.push(by_session(s)),
+        (Action::Claim, Resource::Project(p)) => reached.push(Some(p.clone())),
+        _ => {}
+    }
+    // A frame that carries content reaches what the receiver says it
+    // reaches (a start, the folder it runs in, by what it finds the folder
+    // in). One that says nothing at all (no `Reaching`) is placed nowhere,
+    // so a caller that forgot to look fails closed; one that says it reaches
+    // nothing sharing governs (`Reaching::Nothing`) is not held to it.
+    if reaching.is_empty() && reached.is_empty() && carries_content(action) {
+        reached.push(None);
+    }
+    for r in reaching {
+        reached.push(match r {
+            Reaching::Session(s) => by_session(s),
+            Reaching::Project(p) => Some(p.clone()),
+            Reaching::Unplaced => None,
+            Reaching::Nothing => continue,
+        });
+    }
+    if reached.iter().all(|p| ground.sees(network, p.as_ref())) {
+        Ok(())
+    } else {
+        // A start has words of its own: a folder is not a session id.
+        Err(Reason::new("shared", if action == Action::Start { NOT_SEEN_FOLDER } else { NOT_SEEN }))
+    }
+}
+
+/// Whether an act from another machine puts a session's, a project's or a
+/// folder's content into a network, so that the network must be shown what
+/// it reaches. The rest are the network's own business: who is in it, what
+/// it publishes, what is read of it, how a prompt is answered. Written out
+/// for every action, so a new one has to be put on one side.
+fn carries_content(action: Action) -> bool {
+    match action {
+        Action::Message | Action::Wake | Action::Start | Action::Claim | Action::Handoff | Action::Intend | Action::Report => true,
+        Action::Answer
+        | Action::Read
+        | Action::Admit
+        | Action::Widen
+        | Action::Publish
+        | Action::RegisterActor
+        | Action::UseGateway
+        | Action::Revoke
+        | Action::Delegate
+        | Action::CtxRead
+        | Action::CtxAppend
+        | Action::CtxWrite
+        | Action::CtxAdmin => false,
+    }
+}
+
 // Step 3: the principal is who it says, by its own proof.
 fn who(token: Option<&Token>, request: &Request, ground: &dyn Ground, arrival: &Arrival) -> Step<Authority> {
     let membership = || Authority::Membership { network: request.network().cloned(), role: arrival.role };
@@ -529,7 +628,7 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
             if setting == StartSetting::Off {
                 return Err(Reason::new("settings", "this machine starts no runs: its start setting is off"));
             }
-            let Act::Start { mode, .. } = request.act() else {
+            let Act::Start { mode, confine, .. } = request.act() else {
                 return Err(Reason::new("act", "a start's act is a start"));
             };
             let attestation = match principal {
@@ -544,6 +643,24 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
                     return Err(no_grant());
                 }
                 return Ok((authority, None));
+            }
+            // Anyone but the person runs at vendor, in its app's own
+            // sandbox. A start that leaves the field out (an older sender)
+            // or says off is refused, not defaulted. A cell is the
+            // person's own: every wall shares one Adytum home and one SSH
+            // key today, so a wall keeps cells apart by name and network,
+            // not by key, and a guest doesn't get one yet.
+            match confine {
+                Some(Confine::Vendor { .. }) => {}
+                Some(Confine::Cell { .. }) => {
+                    return Err(Reason::new(
+                        "cell",
+                        "a run in a cell is the person's own to start: cells of different walls don't have keys of their own yet, so no one else starts one",
+                    ));
+                }
+                Some(Confine::Off) | None => {
+                    return Err(Reason::new("sandbox", "a run started by anyone but the person runs in its app's sandbox: this start asked for none"));
+                }
             }
             if attestation == Some(Attestation::Unchecked) {
                 return Err(Reason::new("attestation", "an unchecked agent never starts runs"));

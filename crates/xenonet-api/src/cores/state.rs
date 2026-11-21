@@ -113,7 +113,17 @@ pub trait State: Send + Sync {
     async fn pin_identity(&self, _node: Value, _identity: Value) -> R<Value> {
         pending(M)
     }
+    /// The rule for a project: which git email and GitHub push account it
+    /// uses (`{ git, push: { login, host } }`); with neither, no rule.
+    async fn set_identity_rule(&self, _project: Value, _rule: Value) -> R<Value> {
+        pending(M)
+    }
     async fn rescan_identities(&self) -> R<Value> {
+        pending(M)
+    }
+    /// The project a folder is in, with its rule and the rule's check
+    /// (`{ project: { id, name, path } | null, rule, check }`).
+    fn identity_project(&self, _path: &str) -> R<Value> {
         pending(M)
     }
     fn summary(&self) -> R<Value> {
@@ -152,6 +162,30 @@ pub trait State: Send + Sync {
     /// The roots you name, in place of those before; each a folder that
     /// can be read. What they are then, and the map made again.
     async fn set_roots(&self, _roots: Value) -> R<Value> {
+        pending(M)
+    }
+    /// The folder she named that a session was found in (`claude:<id>`), or
+    /// None for the app's default folder or a session XenoNet doesn't know.
+    /// Err for a session id found in more than one such folder.
+    fn session_root(&self, _session: &str) -> R<Option<String>> {
+        Ok(None)
+    }
+    /// Each folder an app is read from, its default one first (None), with
+    /// the email its sign-in holds now, when it holds one.
+    fn app_account_roots(&self, _app: &str) -> Vec<(Option<String>, Option<String>)> {
+        Vec::new()
+    }
+    /// The folders each app is read from: its default one, those you named
+    /// (`xenonet apps folders`), and the ones its adapter proposes, which
+    /// nothing reads until you name them. `restart` says the saved folders
+    /// are not the ones this service started with.
+    fn app_roots(&self) -> R<Value> {
+        pending(M)
+    }
+    /// The folders you name for one app, in place of those before; each a
+    /// folder that can be read, laid out as that app lays one out. The
+    /// service reads them when it starts.
+    async fn set_app_roots(&self, _app: Value, _roots: Value) -> R<Value> {
         pending(M)
     }
     async fn check_root(&self, _path: Value) -> R<Value> {

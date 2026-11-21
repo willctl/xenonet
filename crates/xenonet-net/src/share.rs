@@ -5,7 +5,9 @@
 //! The first network a person founds or joins on a machine shares all of
 //! it, as the one network did before. Every network after that starts with
 //! none: the person shares projects into it from the window (phase 5's
-//! commit 13). Sessions carry no network of their own, so the project a
+//! commit 13). Each gets its row when it is adopted, and a network with no
+//! row is shown nothing. What comes in is held to the same sharing (the
+//! authz crate's `Ground::sees`). Sessions carry no network of their own, so the project a
 //! session's folder is a confirmed checkout of (presence's `projectKey`,
 //! a `prj_…`) is what decides.
 //!

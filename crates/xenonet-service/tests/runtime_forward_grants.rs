@@ -38,7 +38,14 @@ struct Alone(Arc<xenonet_net::identity::Identity>);
 impl xenonet_net::ground::Governance for Alone {
     fn facts(&self) -> xenonet_net::ground::Facts {
         let now = xenonet_text::time::now_ms() as i64;
-        xenonet_net::ground::Facts { machine: xenonet_authz::MachineId::new("local").expect("a machine's id"), view: None, identity: self.0.clone(), synced_at: None, now }
+        xenonet_net::ground::Facts {
+            machine: xenonet_authz::MachineId::new("local").expect("a machine's id"),
+            view: None,
+            identity: self.0.clone(),
+            synced_at: None,
+            now,
+            narrowed: None,
+        }
     }
     fn identity(&self) -> Arc<xenonet_net::identity::Identity> {
         self.0.clone()

@@ -568,6 +568,38 @@ test("Start a session on a made-up machine: the box, Start once it's armed, and 
   assert.ok(JSON.stringify(feed).includes("Started claude:"), JSON.stringify(feed));
 }));
 
+test("a start on a machine in two of this machine's networks asks which, and one in a single network doesn't", { timeout: limit(60000) }, shoot("network-start-networks", async () => {
+  await simulate("net-founder", { b: "networks-shared" }, (n) => n.networks?.length === 2);
+  const raw = await served();
+  const [home, work] = raw.networks.map((x) => x.id);
+  const { network: opened } = await s.driver("network", "open");
+  assert.ok(opened.at.startSession.laptop, "laptop takes starts");
+  // laptop is in home and work: the box asks which, and chooses none.
+  let { network: n } = await s.driver("network", "start", { host: "laptop", prompt: "Tidy the billing tests" });
+  assert.deepEqual([n.session.networks, n.session.network], [[home, work], null]);
+  assert.match(n.text, /Network.*home.*work.*laptop is in more than one/i);
+  const armed = await until(async () => ((await network()).session?.armed ? await network() : null));
+  assert.ok(armed, "Start is armed");
+  // Start with none chosen sends nothing, and says why.
+  const before = (await network()).lastStart?.at ?? null;
+  await clickAt(armed.session.at.send, "Start");
+  const refused = await until(async () => (await network()).error);
+  assert.match(refused, /more than one of your networks/);
+  assert.equal((await network()).lastStart?.at ?? null, before, "nothing was sent");
+  // Choosing work sends it through work.
+  await clickAt((await network()).session.at.networks[work], "work");
+  assert.equal((await network()).session.network, work);
+  await clickAt((await network()).session.at.send, "Start");
+  const sent = await until(async () => ((await network()).lastStart?.at !== before ? (await network()).lastStart : null));
+  assert.deepEqual([sent?.state, sent?.host], ["sent", "laptop"], JSON.stringify(sent));
+  // The same machine in one network has no choice to make.
+  await simulate("net-founder", { b: "networks" }, (x) => x.networks?.length === 2);
+  await s.driver("network", "close");
+  ({ network: n } = await s.driver("network", "start", { host: "laptop" }));
+  assert.deepEqual([n.session.networks, n.session.network], [[], null]);
+  assert.equal(await s.eval('return document.querySelector("[data-net-start-network]") === null'), true);
+}));
+
 test("a run's permission prompt from another machine: in Needs you with Deny, and Allow once it's armed", { timeout: limit(60000) }, shoot("network-ask", async () => {
   const centerOf = (selector) =>
     s.eval(`return (() => {

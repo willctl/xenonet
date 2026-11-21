@@ -12,7 +12,7 @@
     "fy": null,
     "fz": null,
     "pinned": false,
-    "sessionCount": 17,
+    "sessionCount": 18,
     "activeCount": 8,
     "lastActivity": 1791028804000,
     "lastSessionAt": 1791028804000,
@@ -817,7 +817,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_3o7famqybpcx22q32wgcwrbk3ewoqjkl",
+    "agent": "agt_mqqzt77gzxxbgjbql446jujl3vrxreqs",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -877,7 +877,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_py2pbabpadcclwl5waoru2lwfjy7yukn",
+    "agent": "agt_rwscswy44ygdrge22lieyw4kjvxlppoe",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -937,7 +937,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_mqqzt77gzxxbgjbql446jujl3vrxreqs",
+    "agent": "agt_gk5nepg7xp6iyv5dlrlrephiymutddfn",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -997,7 +997,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_rwscswy44ygdrge22lieyw4kjvxlppoe",
+    "agent": "agt_642nwzp6ptzb277mvxcobltal5e2lsv3",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1057,7 +1057,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_gk5nepg7xp6iyv5dlrlrephiymutddfn",
+    "agent": "agt_3iallf2xcdknhfwwlnuozv3z4qzjie5j",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1117,7 +1117,7 @@
     "parentId": "claude:0190d3e0-0000-7000-8000-000000000005",
     "parentKind": "subagent",
     "claudeAccount": null,
-    "agent": "agt_642nwzp6ptzb277mvxcobltal5e2lsv3",
+    "agent": "agt_i2yqvlpo2rfbabxr7ngp3tzwnm44xezb",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1177,7 +1177,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_3iallf2xcdknhfwwlnuozv3z4qzjie5j",
+    "agent": "agt_kx562gjq2phhwkdh6vzqddx2jwasgjo5",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1240,7 +1240,7 @@
      "account": "0190d3e0-0000-7000-a000-000000000002",
      "org": "0190d3e0-0000-7000-b000-000000000002"
     },
-    "agent": "agt_i2yqvlpo2rfbabxr7ngp3tzwnm44xezb",
+    "agent": "agt_3kdz73olr2lpijard3pebhuswvtvg4uw",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -1303,7 +1303,7 @@
      "account": "0190d3e0-0000-7000-a000-000000000002",
      "org": "0190d3e0-0000-7000-b000-000000000002"
     },
-    "agent": "agt_kx562gjq2phhwkdh6vzqddx2jwasgjo5",
+    "agent": "agt_dnk772asdtezrjvieocwed6aylia5twj",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -1366,7 +1366,7 @@
      "account": "0190d3e0-0000-7000-a000-000000000001",
      "org": "0190d3e0-0000-7000-b000-000000000001"
     },
-    "agent": "agt_3kdz73olr2lpijard3pebhuswvtvg4uw",
+    "agent": "agt_s4wiyhrdegrwv2fgqdaumfpmmzjhzjzd",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -1429,7 +1429,7 @@
      "account": "0190d3e0-0000-7000-a000-000000000002",
      "org": "0190d3e0-0000-7000-b000-000000000002"
     },
-    "agent": "agt_dnk772asdtezrjvieocwed6aylia5twj",
+    "agent": "agt_mkq4qdaqellkvt76o6ioey2scytrpqfs",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1489,7 +1489,8 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_s4wiyhrdegrwv2fgqdaumfpmmzjhzjzd",
+    "root": "<world>/home/.claude-work",
+    "agent": "agt_al6m4abxwvxhqmgaym3tljxxznl5tquj",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1522,9 +1523,9 @@
      }
     ],
     "ranAs": {
-     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
      "confidence": "likely",
-     "via": "signed in when it ran"
+     "via": "its folder, read after the session ran"
     }
    },
    {
@@ -1552,7 +1553,7 @@
      "account": "0190d3e0-0000-7000-a000-000000000002",
      "org": "0190d3e0-0000-7000-b000-000000000002"
     },
-    "agent": "agt_mkq4qdaqellkvt76o6ioey2scytrpqfs",
+    "agent": "agt_je6plcyf3elxnbc2qjthpycl7mu7hu3i",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1612,7 +1613,68 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_al6m4abxwvxhqmgaym3tljxxznl5tquj",
+    "agent": "agt_glalcdtatecss2pepxqw5osyvimou4l6",
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Import into Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000018",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000018",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Fix the rounding in the checkout total",
+    "preview": "The checkout total is a cent off when a coupon applies. Find out why.",
+    "cwd": "<world>/home/.t3/worktrees/atlas/checkout-v3",
+    "worktree": null,
+    "createdAt": 1791014950000,
+    "updatedAt": 1791025750000,
+    "archived": false,
+    "starred": false,
+    "model": "claude-sonnet-4-5",
+    "branch": "checkout-v3",
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "runsIn": "t3-code",
+    "agent": "agt_gwd3vyvfpxtvmjlmp7z224ep5v77zp6e",
     "kind": "session",
     "activity": "recent",
     "fx": null,
@@ -1672,7 +1734,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_je6plcyf3elxnbc2qjthpycl7mu7hu3i",
+    "agent": "agt_kadn42spuvfzegp4rq3qsydwtzce5yut",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -1725,7 +1787,7 @@
     "parentKind": "subagent",
     "claudeAccount": null,
     "agentKind": "explore",
-    "agent": "agt_glalcdtatecss2pepxqw5osyvimou4l6",
+    "agent": "agt_y36xonp3lzwm5sstnggftr7cwvrmhow4",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -1777,7 +1839,7 @@
     "parentId": null,
     "parentKind": null,
     "claudeAccount": null,
-    "agent": "agt_gwd3vyvfpxtvmjlmp7z224ep5v77zp6e",
+    "agent": "agt_v7ufytyd4hkzlmhkothk2sv4ysqgidix",
     "kind": "session",
     "activity": "active",
     "fx": null,
@@ -1824,6 +1886,29 @@
     "lastSessionAt": 1791020350000,
     "active": false,
     "actions": []
+   },
+   {
+    "id": "zone:<world>/home/.t3/worktrees/atlas/checkout-v3",
+    "kind": "zone",
+    "name": "checkout-v3",
+    "path": "<world>/home/.t3/worktrees/atlas/checkout-v3",
+    "app": null,
+    "external": true,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 1,
+    "activeCount": 0,
+    "lastActivity": 1791025750000,
+    "lastSessionAt": 1791025750000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ]
    },
    {
     "id": "resource:xenolith",
@@ -2092,6 +2177,11 @@
     "kind": "zone"
    },
    {
+    "source": "core",
+    "target": "zone:<world>/home/.t3/worktrees/atlas/checkout-v3",
+    "kind": "zone"
+   },
+   {
     "source": "native:codex:demo-atlas",
     "target": "codex:0190d3e0-0000-7000-8000-000000000002",
     "kind": "session"
@@ -2159,6 +2249,11 @@
    {
     "source": "project:chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
     "target": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "kind": "session"
+   },
+   {
+    "source": "zone:<world>/home/.t3/worktrees/atlas/checkout-v3",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000018",
     "kind": "session"
    },
    {
@@ -2254,8 +2349,8 @@
    "dirtyRepos": 3,
    "projects": 9,
    "groups": 1,
-   "sessions": 17,
-   "claude": 7,
+   "sessions": 18,
+   "claude": 8,
    "codex": 7,
    "active": 8,
    "archived": 0
@@ -2360,6 +2455,27 @@
     "projects": 4
    },
    {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+    "kind": "claude",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "plan": "Team",
+     "org": "Atlas"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.claude-work/.claude.json",
+     "Claude desktop"
+    ],
+    "firstSeen": 1788436800000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 5,
+    "projects": 0
+   },
+   {
     "id": "git:8bed4c8b3ce0bd80",
     "kind": "git",
     "handle": "hello@orbitworks.example",
@@ -2377,26 +2493,6 @@
     "hidden": false,
     "sessions": 4,
     "projects": 3
-   },
-   {
-    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
-    "kind": "claude",
-    "handle": "nova@atlas.example",
-    "detail": {
-     "plan": "Team",
-     "org": "Atlas"
-    },
-    "signedIn": false,
-    "active": false,
-    "sources": [
-     "Claude desktop"
-    ],
-    "firstSeen": 1788436800000,
-    "seenAt": 1791028830000,
-    "name": "work",
-    "hidden": false,
-    "sessions": 4,
-    "projects": 0
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
@@ -2465,7 +2561,7 @@
     "name": "claude",
     "ok": true,
     "ms": 0,
-    "count": 7
+    "count": 8
    },
    {
     "name": "grok",
@@ -2601,6 +2697,27 @@
     "projects": 4
    },
    {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+    "kind": "claude",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "plan": "Team",
+     "org": "Atlas"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.claude-work/.claude.json",
+     "Claude desktop"
+    ],
+    "firstSeen": 1788436800000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 5,
+    "projects": 0
+   },
+   {
     "id": "git:8bed4c8b3ce0bd80",
     "kind": "git",
     "handle": "hello@orbitworks.example",
@@ -2618,26 +2735,6 @@
     "hidden": false,
     "sessions": 4,
     "projects": 3
-   },
-   {
-    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
-    "kind": "claude",
-    "handle": "nova@atlas.example",
-    "detail": {
-     "plan": "Team",
-     "org": "Atlas"
-    },
-    "signedIn": false,
-    "active": false,
-    "sources": [
-     "Claude desktop"
-    ],
-    "firstSeen": 1788436800000,
-    "seenAt": 1791028830000,
-    "name": "work",
-    "hidden": false,
-    "sessions": 4,
-    "projects": 0
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
@@ -2698,6 +2795,13 @@
     {
      "id": "chatgpt:demo-workspace",
      "from": 1789300800000,
+     "to": 1791028830000
+    }
+   ],
+   "claude@<world>/home/.claude-work": [
+    {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "from": 1791028830000,
      "to": 1791028830000
     }
    ]
@@ -2917,6 +3021,13 @@
      {
       "id": "chatgpt:demo-workspace",
       "from": 1789300800000,
+      "to": 1791028830000
+     }
+    ],
+    "claude@<world>/home/.claude-work": [
+     {
+      "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+      "from": 1791028830000,
       "to": 1791028830000
      }
     ]

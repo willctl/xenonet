@@ -112,6 +112,9 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
       // machine words it. Deny is safe; Allow waits a moment.
       lines = `<div class="ny-text" title="${h(it.text ?? "")}"><code>${h(it.tool ?? "a tool")}</code> ${h(gist(it.text ?? ""))}</div>${it.warning ? `<div class="ny-warn" data-ny-warn>${h(it.warning)}</div>` : ""}<div class="ny-asker">${h([it.host ? `on ${it.host}` : "here", it.session, it.run ? `run ${it.run}` : null].filter(Boolean).join(" · "))}</div>`;
       acts = btn(`data-ny-deny="${key}"`, "Deny", "It doesn't run, and the session hears why") + btn(`data-ny-allow="${key}"`, "Allow", "It runs this once", { primary: true, yours: true });
+    } else if (it.kind === "identity") {
+      lines = `<div class="ny-text">${h(it.text ?? "")}</div>`;
+      acts = btn(`data-ny-show="${key}"`, "Show", "Select the project on the map, where its inspector says what it would use", { primary: true });
     } else if (it.kind === "sign-in") {
       lines = `<div class="ny-text">${h(it.text ?? "")}</div>`;
       acts = btn(`data-ny-dismiss="${key}"`, "✓", "Dismiss");

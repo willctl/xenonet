@@ -2,19 +2,20 @@
 //! sign-in, the sessions folder, and whether its threads are connected.
 
 use async_trait::async_trait;
-use xenonet_adapter::check::{connected, folder, privacy_fix, s, Facts, Folder};
+use xenonet_adapter::check::{connected, folder, privacy_fix, release, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 use xenonet_os::nodepath::{style_of, NATIVE};
 use xenonet_text::text::{display, truthy};
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
-    vec![Box::new(Cli), Box::new(Auth), Box::new(Sessions), Box::new(Threads)]
+    vec![Box::new(Cli), Box::new(Release), Box::new(Auth), Box::new(Sessions), Box::new(Threads)]
 }
 
 const GROUP: &str = "Codex";
 
 struct Cli;
+struct Release;
 struct Auth;
 struct Sessions;
 struct Threads;
@@ -56,6 +57,16 @@ impl Check for Cli {
         let v = c.run(&bin, &["--version"], 4000.0).await?;
         let version = re!(r"\d+\.\d+\.\d+[A-Za-z0-9_.-]*").find(&s(v.get("stdout"))).map(|m| m.as_str().to_string());
         Ok(Verdict::ok(format!("{}{}", version.map_or(String::new(), |v| format!("version {v}, ")), c.tilde(&bin))))
+    }
+}
+
+#[async_trait(?Send)]
+impl Check for Release {
+    fn row(&self) -> CheckRow {
+        CheckRow { id: "codex.release", group: GROUP, title: "Codex is a version XenoNet's reader was checked against", slot: Slot::App }
+    }
+    async fn run(&self, c: &dyn CheckCtx) -> Result<Verdict, Stop> {
+        release(c, "codex", codex_bin(c).await?).await
     }
 }
 
@@ -132,7 +143,7 @@ mod tests {
     #[test]
     fn the_rows_are_the_apps_then_its_sessions() {
         let rows: Vec<(&str, Slot)> = all().iter().map(|c| (c.row().id, c.row().slot)).collect();
-        assert_eq!(rows, [("codex.cli", Slot::App), ("codex.auth", Slot::App), ("codex.sessions", Slot::App), ("agents.codex", Slot::Sessions)]);
+        assert_eq!(rows, [("codex.cli", Slot::App), ("codex.release", Slot::App), ("codex.auth", Slot::App), ("codex.sessions", Slot::App), ("agents.codex", Slot::Sessions)]);
     }
 
     #[test]

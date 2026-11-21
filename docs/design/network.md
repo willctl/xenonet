@@ -429,7 +429,28 @@ person, one endpoint with one connection per peer, and the HLC.
   entry came in) goes to that node alone. A machine in one network needs
   no name; one in several answers 409 `which-network` when none is named.
   Presence goes into every network, each shown what is shared into it, and
-  a claim into each network its project is shared into.
+  a claim or a handoff into each network its project is shared into.
+- **A call is in one network.** The network of a call is the one the body
+  in hand arrived in (`ground::within`, carried to any thread that answers
+  for it: a start's receipts name the network their request came in), else
+  the one network this machine is in (a network it was removed from does not
+  count: not for a start, an intent, a read of the settings or the page's
+  choice of network). A call in no frame from a machine in several networks
+  is in none: it decides on the facts of no network and reads the narrowest
+  of their settings, in what it is decided on too (`Facts::narrowed`: the
+  lowest start and wake, so with every network's start off even your own
+  start here is refused) and in what is read (`Reach::narrowest`: titles
+  only if any network asks, load shared only if all do, no roster head, a
+  delegation only if the networks agree on who gave it), and a body for everyone (`To::All`) is refused in words
+  unless it names its network. `Net::me` still names this machine by the
+  first network, for labels only. A message to a host that is in two of this
+  machine's networks goes through the first that has it and is shown the
+  project of its sender (the network of the frame in hand, when that
+  fits); the reply, a receipt or an answer goes back into the network it
+  came in. A start names its network (`network` in the request) and is
+  refused without one that has the machine and is shown the project of
+  the session asking, and an intent is made in a named network and
+  everything done for it runs in it.
 - **What each network sees** (`share.rs`). A network's presence carries
   only the sessions in confirmed checkouts of the projects the person
   shares into it. The first network a machine is in shares all; each one
@@ -438,6 +459,32 @@ person, one endpoint with one connection per peer, and the HLC.
   window's). A peer in two networks with this machine sees the union. A
   session it stops seeing goes out as removed, and a delta names only
   sessions the peer was shown.
+- **A network reaches only what it sees.** What comes in is held to the
+  same sharing as what goes out. A message to a session or an actor, a
+  wake, a claim, a handoff (and an accept of one) and a start from a member
+  are decided in the network they came in (`decide`'s step 2): the project
+  of the session, the one named, the one the stored handoff names or the one
+  the start's folder is in must be shared into that network, or the frame is
+  refused. An actor, a session in no confirmed project, a handoff that names
+  no project and a folder in no project are placed nowhere, which only a
+  network shown everything reaches. The refusal is asked before the sender
+  is checked, in the words of an id nobody has (for a start, "that folder
+  isn't in a project this network is shown", which a folder that doesn't
+  exist also gets), so a member can't tell what exists, whoever sends. A
+  message's wake is decided in that network too: its wake setting, and
+  whether it is shown the session. Every network has a sharing row from the
+  moment it is adopted (the first shares all, the rest none; a store opened
+  with a network that has no row writes "all" for the first network only and
+  "none" for the others, which is what a missing row meant only for the
+  first); a network with no row is shown nothing. What goes out is held to it the same way: a
+  claim or a handoff goes into each network its project is shared into, in
+  the network of the frame in hand too, and a handoff that names no project
+  only into a network shown everything. What comes in is held to it too: a
+  remote session in a project this machine doesn't show any network it
+  shares with that host warns of no edit collision, is not among the
+  sessions this machine shows and is not named as the claim that stands in
+  the reply to a claim. An admin's read of this machine (transcripts,
+  stats) is not narrowed by sharing.
 - **Grants name a network.** An actor's grant is minted with a network
   fact, and one with none or another network is refused, so a second
   network never widens an existing grant.
@@ -871,7 +918,28 @@ whose presence lists `start`, and one over two minutes old is refused.
 `mcp__xenonet__permission`. The ask crosses as a message entry to
 `xenonet:ask`, one to each window host, and a second one takes it back. An
 Allow carries the person's presence block; a Deny needs none. The run's
-machine decides it, and holds the call ten minutes.
+machine decides it, and holds the call ten minutes. A machine takes an ask
+only for a run it asked that machine to start: the request records the
+network it went through, and the started receipts name the run (its
+session, or its agent). The start report of an intent this machine made or
+arbitrates names the run of the machine it is worked on the same way, in the
+intent's network. A copy forked from a run asks under its own session, so
+its ask also carries the run it was forked from (followed back through
+copies of copies), which the receiver checks for the sending machine in
+place of the copy. An ask is taken when it arrives in that network from a
+machine that has such a run named. A run stays named for a day after it was
+last named or last asked from (each ask taken renews it, to a week from the
+start at most), so a turn resumed by a later message is taken after its
+request is over. The runs named, and the network each run started here for
+another machine came through (where its asks go), are kept in the store as
+settings (`named-runs`, `run-networks`), so a restart of the service forgets
+neither; age drops them, and a full table drops the one longest unused. Any
+other ask is dropped and logged, so a member that may message a machine
+can't put prompts in its Needs you, and a window host shows the prompts of
+the runs it asked for. A run's ask is sent to every window host of its
+network, and each one that didn't ask for the run drops it. An ask is
+answered by its id alone, so the first machine to send an ask under an id
+holds it: another machine's ask under it is dropped.
 
 **Intents** for any machine the delegation names are given out once by
 the arbiter the intent names, from takes that carry the person's signed
@@ -1084,9 +1152,11 @@ in several.
   address record a connection sends.
 - **Past 50 machines.** Connections are kept to every member up to 50;
   the lazy dial past that isn't built.
-- **The engine in several networks.** The engine still takes the first
-  network as its own, so a peer in two networks with this machine shows
-  twice.
+- **The engine in several networks.** Presence is one body for every
+  network, carrying the narrowest settings of them (a per-network presence
+  is not built), prompts go to the window hosts of the network their run was started through, and the
+  engine's views name this machine by the first network, so a peer in two
+  networks with this machine shows twice.
 - **Concurrent admin writes** can take the same place in the chain. The
   members then hold different heads, which `rosterMismatch` and the
   doctor show, and an admin writes again from one window.

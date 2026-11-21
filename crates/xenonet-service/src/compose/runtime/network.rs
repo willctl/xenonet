@@ -51,7 +51,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 use xenonet_adapter::apps::is_session_id;
 use xenonet_api::From;
-use xenonet_authz::Information;
+use xenonet_authz::{Information, Reaching};
 use xenonet_engine::delivery::policy::Guard;
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Engine, Fail, Result, ACTIVE_MS};
 use xenonet_engine::host::Collaborators;
@@ -257,7 +257,14 @@ pub(crate) fn send(w: &Runtime, to: To, kind: Kind, body: Value) {
 /// A body with the authority its act rests on, which goes beside its feed
 /// entry for its one recipient.
 pub(crate) fn send_with(w: &Runtime, to: To, kind: Kind, body: Value, authority: Option<Value>) {
-    if let Err(e) = net(w).send(Outgoing { network: None, to, kind, body, authority }) {
+    send_in(w, None, to, kind, body, authority);
+}
+
+/// A body into `network`, named: the network a request came in, for an
+/// answer made on another thread; or the one a request was sent through.
+/// None is the network of the frame in hand, else the only one.
+pub(crate) fn send_in(w: &Runtime, network: Option<String>, to: To, kind: Kind, body: Value, authority: Option<Value>) {
+    if let Err(e) = net(w).send(Outgoing { network, to, kind, body, authority }) {
         w.log("warn", "net.send", &format!("a {} for the network wasn't queued: {e}", kind.as_str()));
     }
 }
@@ -347,6 +354,14 @@ fn project_key(w: &Runtime, cwd: Option<&Value>) -> Option<String> {
     cwd.and_then(Value::as_str).filter(|c| !c.is_empty()).and_then(|c| crate::compose::runtime::checkouts::project_of(db, c))
 }
 
+/// The project one of this machine's sessions is in (`local` is its own id
+/// for it), through a checkout the person confirmed; None for a session in
+/// none, or one this machine doesn't know.
+pub(crate) fn project_of_session(w: &Runtime, local: &str) -> Option<xenonet_authz::ProjectId> {
+    let view = engine(w, |e, c| e.view(c, local)).ok()?;
+    project_key(w, view.get("cwd")).and_then(|p| xenonet_authz::ProjectId::new(&p).ok())
+}
+
 // ---------- from the link ----------
 
 /// The link came up, or went down. On the way up this host sends its full
@@ -426,6 +441,8 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
     }
     let Some(db) = w.setup.db.clone() else { return };
     let _one = w.net.taking.locked();
+    // What names a run is written once the transaction is over, rolled back or not.
+    let _writes = w.starts.hold_writes();
     let Arrived { host, entry, authority, .. } = a;
     let (author, network, kind, at) = (entry.author.clone(), entry.group.clone(), entry.kind, entry.pos());
     let copy = entry.body.clone();
@@ -500,6 +517,7 @@ pub fn compacted_in(w: &Runtime, a: CompactedIn) {
     }
     let Some(db) = w.setup.db.clone() else { return };
     let _one = w.net.taking.locked();
+    let _writes = w.starts.hold_writes();
     let CompactedIn { host, compacted, .. } = a;
     let (author, network) = (compacted.compact().author.clone(), compacted.compact().group.clone());
     let mut after = Vec::new();
@@ -962,9 +980,42 @@ fn view_of(host: &Host, a: &Value, detail: bool) -> Value {
     v
 }
 
+/// Whether this machine holds `project` in a checkout the person confirmed
+/// here: what its own sharing is about.
+fn held_here(w: &Runtime, project: &str) -> bool {
+    let Some(db) = w.setup.db.as_ref() else { return false };
+    let Ok(id) = xenonet_model::ids::ProjectId::parse(project) else { return false };
+    let id = db.resolve(&id).ok().flatten().unwrap_or(id);
+    db.checkouts().unwrap_or_default().iter().any(|c| c.confirmed && c.gone_at.is_none() && c.project == id)
+}
+
+/// Whether an agent `host` reports (its presence entry `agent`) is shown
+/// here. What this machine shares is its own content, so only a project it
+/// holds itself (in a confirmed checkout) is held to its sharing: one it
+/// shares into no network it has in common with `host` is none of this
+/// machine's business, and the member's work in it collides with nothing.
+/// A project only `host` holds is its own, whatever this machine shares,
+/// and `host` decides what of it reaches here. An agent in no project is
+/// shown only where everything is.
+fn shown_with(w: &Runtime, host: &str, agent: &Value) -> bool {
+    let Some(g) = crate::compose::runtime::ground::governance(w) else { return false };
+    let networks = net(w).networks_with(host);
+    match agent.get("projectKey").and_then(Value::as_str) {
+        Some(k) if !held_here(w, k) => !networks.is_empty(),
+        _ => networks.iter().any(|n| g.sharing(n).shows(agent)),
+    }
+}
+
+/// Whether `project` is shown a network this machine shares with `host`.
+pub(crate) fn project_shown_with(w: &Runtime, host: &str, project: &str) -> bool {
+    let Some(g) = crate::compose::runtime::ground::governance(w) else { return false };
+    net(w).networks_with(host).iter().any(|n| g.sharing(n).shows_project(project))
+}
+
 /// Every other host's agents, by the presence each last sent: only hosts
 /// in the roster, each host's working agents first. With `detail`, for the
-/// console's state, never for an agent.
+/// console's state, never for an agent. Only those of a project this
+/// machine shows a network it shares with the host (`shown_with`).
 pub fn remote_views(w: &Runtime, detail: bool) -> Vec<Value> {
     let net = net(w);
     if net.me().is_none() {
@@ -976,7 +1027,7 @@ pub fn remote_views(w: &Runtime, detail: bool) -> Vec<Value> {
     for r in rows {
         let Some(host) = r.text("host").and_then(|h| hosts.iter().find(|x| x.id == h)) else { continue };
         let agents: Vec<Value> = r.text("agents").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
-        let mut views: Vec<Value> = agents.iter().map(|a| view_of(host, a, detail)).collect();
+        let mut views: Vec<Value> = agents.iter().filter(|a| shown_with(w, &host.id, a)).map(|a| view_of(host, a, detail)).collect();
         views.sort_by(|a, b| {
             let w = |x: &Value| u8::from(x["status"] == "working");
             w(b).cmp(&w(a)).then_with(|| n(b, "lastActive").unwrap_or(0.0).partial_cmp(&n(a, "lastActive").unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal))
@@ -1044,9 +1095,10 @@ pub(crate) fn host_of_agent(w: &Runtime, id: &str) -> Option<String> {
     if row.machine == xenonet_store::projects::LOCAL {
         return None;
     }
-    let g = crate::compose::runtime::ground::governance(w)?;
-    let view = g.facts().view?;
-    view.members.values().find(|m| m.machine.id() == row.machine).map(|m| m.id.clone())
+    // Whichever network the machine is in names it: a call outside a frame
+    // is in none, so the chain of one network would miss a machine that
+    // is only in another.
+    crate::compose::runtime::ground::governance(w)?.host_of_machine(&row.machine)
 }
 
 // ---------- messages out ----------
@@ -1088,6 +1140,10 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
     // receiver keeps as this machine's agent and names it by.
     let agent = (me != YOU).then(|| wire_id(w, &me)).filter(|a| AgentId::parse(a).is_ok());
     let mut signed: BTreeMap<String, Value> = BTreeMap::new();
+    // The person is nobody's project; a session is in its own, if any; an
+    // actor is in none.
+    let sender = if me == YOU { Sender::You } else { Sender::Placed(project_of_session(w, &me).map(|p| p.as_str().to_string())) };
+    let named = s(a, "network");
     // An actor's message carries a token minted for it here, once, whatever
     // machines it goes to: its own token was decided when it sent it.
     let mut minted: Option<Value> = None;
@@ -1097,6 +1153,16 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             continue;
         }
         let Some(host) = host_of_agent(w, &rid) else { continue };
+        // Through a network shown what it is from and what it is for, else
+        // told so here and not sent.
+        let network = match route(w, &host, &sender, named.as_deref()) {
+            Ok(n) => n,
+            Err(why) => {
+                let _ = store(w, |s| s.set_receipt(id, &rid, "refused", now_ms()));
+                w.emit(From::Engine, "receipt", json!({ "id": id, "agent": rid, "host": host, "state": "refused", "reason": why }));
+                continue;
+            }
+        };
         let authority = match parse_actor_id(&me) {
             _ if me == YOU => signed.entry(host.clone()).or_insert_with(|| person_authority(w, &host, at_window)).clone(),
             Some(slug) => minted.get_or_insert_with(|| actor_authority(w, slug)).clone(),
@@ -1116,11 +1182,64 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             "hops": num_of(a, "hops").max(0.0),
             "at": ms(num_of(a, "at")),
         });
-        let kept = json!({ "body": body, "authority": authority });
+        let kept = json!({ "body": body, "authority": authority, "network": network });
         store(w, |s| s.set_delivery_net(id, &rid, &host, &kept.to_string()))?;
-        send_with(w, To::Host(host), Kind::Message, body, Some(authority));
+        send_in(w, Some(network), To::Host(host), Kind::Message, body, Some(authority));
     }
     Ok(())
+}
+
+/// Whom a message is from, for the networks it may go through.
+enum Sender {
+    /// The person, from their window: nobody's project.
+    You,
+    /// A session in a project, or one in none (an actor is in none): a
+    /// network that isn't shown the project isn't one it goes through.
+    Placed(Option<String>),
+}
+
+/// The network a message from `sender` to an agent on `host` goes through:
+/// one `host` is in that is shown the project the sender is in (the
+/// caller's pick, which must fit, or the frame's, or the first that does).
+/// A message carries its sender and its text, so it never goes into a
+/// network that isn't shown what it is from. What it is for is the
+/// receiver's to hold to its own sharing: what this machine shares is its
+/// own content, not another machine's projects. Why not, in words.
+fn route(w: &Runtime, host: &str, sender: &Sender, named: Option<&str>) -> std::result::Result<String, String> {
+    let net = net(w);
+    let holding = net.networks_with(host);
+    if holding.is_empty() {
+        return Err(format!("{host} isn't in a network this machine is in"));
+    }
+    let for_sender = match sender {
+        Sender::You => None,
+        Sender::Placed(p) => Some(net.networks_for(p.as_deref())),
+    };
+    let fit: Vec<String> = holding.into_iter().filter(|n| for_sender.as_ref().is_none_or(|f| f.contains(n))).collect();
+    let no_fit = || {
+        format!("no network this machine shares with {host} is shown the project of the session sending, so it isn't sent: share the project into one, or send from a session in a project one is shown")
+    };
+    // A network the caller names is the one or none: another is not
+    // guessed at.
+    if let Some(name) = named {
+        let n = net.networks().into_iter().find(|m| m.network == name || m.name == name).map(|m| m.network);
+        return n.filter(|n| fit.contains(n)).ok_or_else(no_fit);
+    }
+    match xenonet_net::ground::current() {
+        Some(n) if fit.contains(&n) => Ok(n),
+        _ => fit.into_iter().next().ok_or_else(no_fit),
+    }
+}
+
+/// The network a receipt for a message from `host` to this machine's
+/// `agent` goes through: one `host` is in that is shown the project the
+/// agent is in, which the message came through, else the first that is.
+fn receipt_network(w: &Runtime, host: &str, agent: &str, came: Option<&str>) -> Option<String> {
+    let net = net(w);
+    let project = project_of_session(w, agent);
+    let shown = net.networks_for(project.as_ref().map(xenonet_authz::ProjectId::as_str));
+    let holding: Vec<String> = net.networks_with(host).into_iter().filter(|n| shown.contains(n)).collect();
+    came.filter(|c| holding.iter().any(|n| n == c)).map(str::to_string).or_else(|| holding.into_iter().next())
 }
 
 /// The person's authority for a message to `host`: their device's
@@ -1149,21 +1268,59 @@ fn actor_authority(w: &Runtime, slug: &str) -> Value {
     })
 }
 
-/// Sends again what has no stored receipt, oldest first.
+/// Sends again what has no stored receipt, oldest first. A message is held
+/// to what is shared now, as when it was first sent: the sender's project
+/// is routed again, and one that no network fits any more (or whose own
+/// network doesn't) is refused here, not sent because it once could be.
+/// One kept before its network was recorded is routed as a new one.
 pub fn resend(w: &Runtime) {
     let rows = store(w, |s| s.outbox(now_ms() - OUTBOX_MS)).unwrap_or_default();
     for r in rows {
-        let (Some(host), Some(frame)) = (r.text("host"), r.text("frame")) else { continue };
-        let Ok(kept) = serde_json::from_str::<Value>(frame) else { continue };
-        send_with(w, To::Host(host.to_string()), Kind::Message, kept["body"].clone(), kept.get("authority").cloned());
+        let (Some(host), Some(frame), Some(id), Some(rid)) = (r.text("host"), r.text("frame"), r.num("message_id"), r.text("agent")) else { continue };
+        let Ok(mut kept) = serde_json::from_str::<Value>(frame) else { continue };
+        let kept_in = s(&kept, "network");
+        let me = s(&kept["body"], "sender").unwrap_or_default();
+        let sender = if me == YOU { Sender::You } else { Sender::Placed(project_of_session(w, &me).map(|p| p.as_str().to_string())) };
+        // Where it went first is preferred, and the only place it may go
+        // again when it is still shown what the message is from and for.
+        let routed = match &kept_in {
+            Some(n) => xenonet_net::ground::within(n, || route(w, host, &sender, None)).and_then(|got| {
+                if got == *n {
+                    Ok(got)
+                } else {
+                    Err(format!("{n} isn't shown what the message is from and for any more"))
+                }
+            }),
+            None => route(w, host, &sender, None),
+        };
+        match routed {
+            Ok(network) => {
+                if kept_in.as_deref() != Some(network.as_str()) {
+                    kept["network"] = json!(network);
+                    let _ = store(w, |s| s.set_delivery_net(id, rid, host, &kept.to_string()));
+                }
+                send_in(w, Some(network), To::Host(host.to_string()), Kind::Message, kept["body"].clone(), kept.get("authority").cloned());
+            }
+            Err(why) => {
+                if store(w, |s| s.set_receipt(id, rid, "refused", now_ms())).unwrap_or(false) {
+                    w.emit(From::Engine, "receipt", json!({ "id": id, "agent": rid, "host": host, "state": "refused", "reason": why }));
+                }
+            }
+        }
     }
 }
 
 // ---------- messages in ----------
 
+/// A receipt for a message that came in the network of the frame in hand.
 fn receipt(w: &Runtime, to: &str, mid: &str, agent: &str, state: &str, reason: Option<&str>) {
+    receipt_in_network(w, None, to, mid, agent, state, reason);
+}
+
+/// A receipt into `network`: the one the message came in, or the frame's.
+fn receipt_in_network(w: &Runtime, network: Option<String>, to: &str, mid: &str, agent: &str, state: &str, reason: Option<&str>) {
     let body = json!({ "schema": "network/receipt/v1", "mid": mid, "agent": agent, "state": state, "reason": reason.map(|r| clip(r, 280)), "at": ms(now_ms()) });
-    send(w, To::Host(to.to_string()), Kind::Receipt, body);
+    send_in(w, network, To::Host(to.to_string()), Kind::Receipt, body, None);
 }
 
 /// How XenoNet knows who sent a message from another host: that host's
@@ -1262,7 +1419,9 @@ pub(crate) fn principal_of(
     }
 }
 
-/// `principal_of`, then the request it makes from another machine, judged.
+/// `principal_of`, then the request it makes from another machine, judged:
+/// for an act that reaches nothing sharing governs (a prompt of a run this
+/// machine started).
 pub(crate) fn judge_remote(
     w: &Runtime,
     g: &mut crate::compose::runtime::ground::EngineGround,
@@ -1270,8 +1429,29 @@ pub(crate) fn judge_remote(
     resource: xenonet_authz::Resource,
     act: xenonet_authz::Act,
 ) -> std::result::Result<(), String> {
+    judge_remote_reaching(w, g, from, resource, act, vec![Reaching::Nothing])
+}
+
+/// `judge_remote` for a frame that also reaches something the act it is
+/// signed for doesn't name (a session, a handoff's project): the network
+/// it came in must be shown that too.
+pub(crate) fn judge_remote_reaching(
+    w: &Runtime,
+    g: &mut crate::compose::runtime::ground::EngineGround,
+    from: &SentBy<'_>,
+    resource: xenonet_authz::Resource,
+    act: xenonet_authz::Act,
+    reaching: Vec<Reaching>,
+) -> std::result::Result<(), String> {
+    // What the network the frame came in isn't shown is refused first,
+    // before the sender is looked at, so what comes back can't tell which
+    // ids exist by whether the sender's proof was the problem.
+    if let Some(n) = g.facts.network() {
+        xenonet_authz::shown(g, &n, act.action(), &resource, &reaching).map_err(|r| r.text().to_string())?;
+    }
     let (p, token) = principal_of(w, g, from, &resource, &act)?;
-    crate::compose::runtime::ground::judge_by(g, &crate::compose::runtime::ground::remote(g, p, resource, act), token.as_ref(), None)
+    let request = reaching.into_iter().fold(crate::compose::runtime::ground::remote(g, p, resource, act), xenonet_authz::Request::reaching);
+    crate::compose::runtime::ground::judge_by(g, &request, token.as_ref(), None)
 }
 
 fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) -> Result<()> {
@@ -1310,7 +1490,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         let own = xenonet_authz::Resource::Machine(g.facts.machine.clone());
         let decided = judge_remote(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, own, xenonet_authz::Act::Message);
         match decided {
-            Ok(()) => crate::compose::runtime::asks::ask_in(w, from, &body),
+            Ok(()) => crate::compose::runtime::asks::ask_in(w, from, agent.as_deref(), &body),
             Err(why) => w.log("info", "net.ask", &format!("an ask from {from} was refused: {why}")),
         }
         return Ok(());
@@ -1318,13 +1498,28 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
     // The target by its agt_: one of this machine's sessions or actors.
     let local = here_id(w, &target);
     if !(is_agent_id(&local) || is_actor_agent(&local)) {
-        receipt(w, from, &mid, &target, "refused", Some("no session or actor here has that id"));
+        receipt(w, from, &mid, &target, "refused", Some(xenonet_authz::NOT_SEEN));
         return Ok(());
     }
     // Decided here: who sent it, on this machine's own facts. A message as
-    // you carries your device's signature, bound to this machine.
+    // you carries your device's signature, bound to this machine. A session
+    // is reached only if the network it came in is shown its project, and
+    // a session that isn't is refused in the words of one that isn't here.
     let resource = xenonet_authz::Resource::Machine(g.facts.machine.clone());
-    let decided = judge_remote(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, resource, xenonet_authz::Act::Message);
+    let mut reaching = Vec::new();
+    if is_agent_id(&local) {
+        let Ok(session) = xenonet_authz::SessionId::new(&local) else {
+            receipt(w, from, &mid, &target, "refused", Some(xenonet_authz::NOT_SEEN));
+            return Ok(());
+        };
+        g.place(w, &local);
+        reaching.push(Reaching::Session(session));
+    } else {
+        // An actor is in no project: only a network shown everything
+        // reaches one, and a hidden one is refused as an unknown one is.
+        reaching.push(Reaching::Unplaced);
+    }
+    let decided = judge_remote_reaching(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, resource, xenonet_authz::Act::Message, reaching);
     if let Err(why) = decided {
         receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());
@@ -1397,6 +1592,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) ->
         ("verified", env["line"].clone()),
         ("attestation", env["auth"]["attestation"].clone()),
         ("host", json!(from)),
+        ("network", json!(xenonet_net::ground::current())),
         ("mid", json!(mid)),
     ]);
     if let Some(name) = name {
@@ -1452,7 +1648,11 @@ pub fn seen(w: &Runtime, agent: &str, ids: &[Value]) {
     for id in ids {
         let Ok(Some(m)) = store(w, |s| s.message(xenonet_text::text::to_number(Some(id)))) else { continue };
         if let (Some(host), Some(mid)) = (m.text("host"), m.text("mid")) {
-            receipt(w, host, mid, &wire_id(w, agent), "seen", None);
+            // Through a network that has the sender's machine and is shown
+            // the project this session is in; none, none.
+            if let Some(network) = receipt_network(w, host, agent, None) {
+                receipt_in_network(w, Some(network), host, mid, &wire_id(w, agent), "seen", None);
+            }
         }
     }
 }
@@ -1466,7 +1666,10 @@ pub fn delivered(w: &Runtime, m: &Value) {
         let Some(agent) = agent.as_str() else { continue };
         let live = w.router.core.list(200).iter().any(|r| r.get("message").and_then(Value::as_f64) == id && r["agent"] == agent && r["state"] == "live");
         if live {
-            receipt(w, &host, &mid, &wire_id(w, agent), "delivered", None);
+            // Into the network the message came in.
+            if let Some(network) = receipt_network(w, &host, agent, s(m, "network").as_deref()) {
+                receipt_in_network(w, Some(network), &host, &mid, &wire_id(w, agent), "delivered", None);
+            }
         }
     }
 }
@@ -1487,11 +1690,62 @@ pub(crate) fn claimed(w: &Runtime, mut body: Value) {
 
 /// `from`'s machine-level act here (a handoff), decided: a member of the
 /// network.
-fn member_act(w: &Runtime, from: &str, act: xenonet_authz::Act) -> Result<()> {
-    let Some(g) = crate::compose::runtime::ground::ground(w, None) else { return Err(fail("this machine's governance isn't plugged in")) };
+fn member_act(w: &Runtime, from: &str, act: xenonet_authz::Act, reaching: &[Reaching]) -> Result<()> {
+    let Some(mut g) = crate::compose::runtime::ground::ground(w, None) else { return Err(fail("this machine's governance isn't plugged in")) };
     let id = crate::compose::runtime::ground::machine(from).map_err(fail)?;
-    let request = crate::compose::runtime::ground::remote(&g, xenonet_authz::Principal::Machine { id }, xenonet_authz::Resource::Machine(g.facts.machine.clone()), act);
+    let mut request = crate::compose::runtime::ground::remote(&g, xenonet_authz::Principal::Machine { id }, xenonet_authz::Resource::Machine(g.facts.machine.clone()), act);
+    for r in reaching {
+        if let Reaching::Session(s) = r {
+            g.place(w, s.as_str());
+        }
+        request = request.reaching(r.clone());
+    }
     crate::compose::runtime::ground::judge(&g, &request, None).map_err(fail)
+}
+
+/// What an offer from `from` reaches here, beyond the machine: the session
+/// it is handed to, if one of this machine's, and the project it names; or
+/// no project at all, which only a network shown everything reaches. An
+/// offer meant for another machine is only passed by, so reaches nothing.
+fn offered_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
+    let to = b.get("to").cloned().unwrap_or(Value::Null);
+    let mut out = Vec::new();
+    if let Some(a) = s(&to, "agent").filter(|a| a.chars().count() <= 200) {
+        let local = here_id(w, &a);
+        // Any session not here is placed nowhere.
+        out.push(xenonet_authz::SessionId::new(&local).map_or(Reaching::Unplaced, Reaching::Session));
+    }
+    if let Some(p) = s(&to, "projectKey").and_then(|k| xenonet_authz::ProjectId::new(&k).ok()) {
+        out.push(Reaching::Project(p));
+    }
+    if out.is_empty() {
+        out.push(Reaching::Unplaced);
+    }
+    out
+}
+
+/// What an accept of a handoff made here reaches: the handoff's own
+/// project and session, as its row keeps them, never what the accepting
+/// machine says it is. A handoff made here that names no project is
+/// placed nowhere; one made elsewhere is only passed by.
+fn accepted_reach(w: &Runtime, b: &Value) -> Vec<Reaching> {
+    let Some(row) = s(b, "id").and_then(|id| store(w, |st| st.handoff(&id)).ok().flatten()).filter(|r| r.text("host").is_none()) else { return vec![Reaching::Nothing] };
+    row_reach(w, &row)
+}
+
+fn row_reach(w: &Runtime, row: &Row) -> Vec<Reaching> {
+    let mut out = Vec::new();
+    if let Some(local) = row.text("to_agent").map(|a| here_id(w, a)) {
+        // A session of another machine is no reach of this one's.
+        out.extend(xenonet_authz::SessionId::new(&local).ok().filter(|_| is_agent_id(&local)).map(Reaching::Session));
+    }
+    if let Some(p) = row.text("to_repo").and_then(|k| xenonet_authz::ProjectId::new(k).ok()) {
+        out.push(Reaching::Project(p));
+    }
+    if out.is_empty() {
+        out.push(Reaching::Unplaced);
+    }
+    out
 }
 
 /// A claim entry of `from`'s feed (its author's key id `author`): decided
@@ -1563,7 +1817,10 @@ pub(crate) fn claim_hits(w: &Runtime, me: &str, files: &[String]) -> Result<Vec<
         }
         for r in store(w, |s| s.claims_in(&at.project, now))? {
             let (Some(host), Some(path)) = (r.text("host"), r.text("path")) else { continue };
-            if !xenonet_engine::engine::matches(path, &at.rel) {
+            // Held to what is shared now: a claim kept from before the
+            // project was unshared from every network shared with its host
+            // means nothing, as its host's presence doesn't.
+            if !project_shown_with(w, host, &at.project) || !xenonet_engine::engine::matches(path, &at.rel) {
                 continue;
             }
             out.push(obj(vec![
@@ -1578,7 +1835,7 @@ pub(crate) fn claim_hits(w: &Runtime, me: &str, files: &[String]) -> Result<Vec<
         for p in &presences {
             let host = p.text("host").unwrap_or("");
             let agents: Vec<Value> = p.text("agents").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
-            for a in agents.iter().filter(|a| s(a, "projectKey").as_deref() == Some(at.project.as_str())) {
+            for a in agents.iter().filter(|a| s(a, "projectKey").as_deref() == Some(at.project.as_str()) && shown_with(w, host, a)) {
                 if a.get("edits").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).any(|e| e == at.rel) {
                     out.push(obj(vec![
                         ("host", json!(host)),
@@ -1799,7 +2056,10 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
             (None, None) => key.as_ref().map(|_| None),
         };
         if let Some(d) = dest {
-            send_handoff(w, d.as_deref(), body);
+            // Where it goes is kept, so that it is told to be gone there and
+            // nowhere else, whatever is shared by then.
+            offer_went_to(w, &id, key.as_deref(), d.as_deref());
+            send_handoff(w, None, d.as_deref(), body);
         }
     }
     Ok(
@@ -1808,10 +2068,16 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
 }
 
 /// A handoff, as an entry of this machine's feed: kept, so every member
-/// gets it in order, and it names the one machine it's for, if one.
-fn send_handoff(w: &Runtime, for_host: Option<&str>, mut body: Value) {
+/// gets it in order, and it names the one machine it's for, if one. Only
+/// an offer says what the work is: an accept or an answer says which
+/// handoff and who, so what one network's offer holds never goes into
+/// another with it.
+fn send_handoff(w: &Runtime, network: Option<String>, for_host: Option<&str>, mut body: Value) {
     if let Some(h) = for_host {
         body["for"] = json!(h);
+    }
+    if body["op"] != "offer" {
+        body = bare(body);
     }
     // Its agents by their agt_.
     for at in ["/from", "/by", "/to/agent"] {
@@ -1821,7 +2087,71 @@ fn send_handoff(w: &Runtime, for_host: Option<&str>, mut body: Value) {
             }
         }
     }
-    send(w, To::All, Kind::Handoff, body);
+    send_in(w, network, To::All, Kind::Handoff, body, None);
+}
+
+/// `body` without what the work is: the project it is about stays, since
+/// that is what decides where it may go.
+fn bare(mut body: Value) -> Value {
+    for k in ["goal", "done", "next", "branch", "commit"] {
+        body[k] = Value::Null;
+    }
+    body["files"] = json!([]);
+    body["from"] = json!("");
+    body["to"] = json!({ "agent": null, "projectKey": body["to"]["projectKey"].clone(), "host": null });
+    body
+}
+
+/// A handoff made here was taken or lapsed: told in every network its
+/// offer went to (the networks shown its project, with the machine it was
+/// for, if one), whichever network the one who took it came in, or none.
+/// Who took it goes only into a network that taker is known in.
+fn settled(w: &Runtime, r: &Row, op: &str, by: Option<&str>) {
+    let to_host = r.text("to_host");
+    // Where the offer went, as it was kept when it was made; an offer from
+    // before that was kept is told where it would go now.
+    let went = r.text("id").and_then(|id| went_to(w, id));
+    for network in went.unwrap_or_else(|| net(w).networks_for(r.text("to_repo"))) {
+        if to_host.is_some_and(|h| !net(w).networks_with(h).contains(&network)) {
+            continue;
+        }
+        let mut body = body_of(r, op, by);
+        if by.is_some_and(|b| !known_in(w, b, &network)) {
+            body["by"] = Value::Null;
+        }
+        send_handoff(w, Some(network), None, body);
+    }
+    // Settled: where it went isn't needed again.
+    if let (Some(db), Some(id)) = (w.setup.db.as_ref(), r.text("id")) {
+        let _ = db.set_setting(&format!("handoff-nets:{id}"), None);
+    }
+}
+
+/// The networks an offer of `id` made here goes into: those shown its
+/// project, with the machine it is for (if one) in them. Kept with the
+/// store's settings until it is settled.
+fn offer_went_to(w: &Runtime, id: &str, project: Option<&str>, host: Option<&str>) {
+    let Some(db) = w.setup.db.as_ref() else { return };
+    let nets: Vec<String> = net(w).networks_for(project).into_iter().filter(|n| host.is_none_or(|h| net(w).networks_with(h).contains(n))).collect();
+    let _ = db.set_setting(&format!("handoff-nets:{id}"), Some(&json!(nets)));
+}
+
+/// What `offer_went_to` kept for `id`, or None for an offer made before it
+/// was kept.
+fn went_to(w: &Runtime, id: &str) -> Option<Vec<String>> {
+    let kept = w.setup.db.as_ref()?.setting(&format!("handoff-nets:{id}")).ok()?;
+    kept.as_array().map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect())
+}
+
+/// Whether `network` knows `agent`: a session of another machine, if that
+/// machine is in it; one of this machine's, if the network is shown the
+/// project it is in.
+fn known_in(w: &Runtime, agent: &str, network: &str) -> bool {
+    if is_remote(agent) {
+        return host_of_agent(w, agent).is_some_and(|h| net(w).networks_with(&h).iter().any(|n| n == network));
+    }
+    let project = project_of_session(w, agent);
+    net(w).networks_for(project.as_ref().map(xenonet_authz::ProjectId::as_str)).iter().any(|n| n == network)
 }
 
 /// A handoff's body, from its row here.
@@ -1938,7 +2268,7 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
                 let _ = send_from(w, me, &maker, &format!("I took your handoff {id}."), envelope);
             }
             if me_net.is_some() {
-                send_handoff(w, None, body_of(&r, "taken", Some(me)));
+                settled(w, &r, "taken", Some(me));
             }
             Ok(json!({ "taken": true, "handoff": shown(&r, me_net.as_ref().map(|m| m.host.as_str())), "words": details(&r) }))
         }
@@ -1947,8 +2277,18 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
             let Some(m) = &me_net else {
                 return Err(fail(format!("{id} was made on {h}, and this machine isn't in a XenoNet network now")));
             };
+            // The accept names the session that accepts, so it goes into a
+            // network that is shown the offer's project, has the machine
+            // that made it, and knows that session: not into one that
+            // would learn of a session it isn't shown.
+            let shown_in = net(w).networks_for(r.text("to_repo"));
+            let Some(network) = net(w).networks_with(h).into_iter().find(|n| shown_in.contains(n) && known_in(w, me, n)) else {
+                return Err(fail(format!(
+                    "no network this machine shares with {h} is shown the project you are in, so your accept can't be sent: accept it from a session in a project one is shown"
+                )));
+            };
             store(w, |s| s.ask_handoff(id, me))?;
-            send_handoff(w, Some(h), body_of(&r, "accept", Some(me)));
+            send_handoff(w, Some(network), Some(h), body_of(&r, "accept", Some(me)));
             let away = !net(w).hosts().iter().any(|x| x.id == h && x.online);
             Ok(json!({
                 "taken": false,
@@ -1965,7 +2305,22 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
 }
 
 fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
-    member_act(w, from, xenonet_authz::Act::Handoff)?;
+    let meant_here = s(b, "for").is_none_or(|h| net(w).me().is_some_and(|me| me.host == h));
+    // One meant for another machine is only passed by, so reaches nothing
+    // here; a frame that is none of these says nothing, and is placed
+    // nowhere.
+    let reaching = match s(b, "op").as_deref() {
+        _ if !meant_here => vec![Reaching::Nothing],
+        Some("offer") => offered_reach(w, b),
+        Some("accept") => accepted_reach(w, b),
+        // That it was taken or has lapsed carries nothing of the project
+        // and only closes an offer, so it is heard however sharing stands
+        // now: a network that stopped being shown the project must not
+        // keep offering a handoff that is gone.
+        Some("taken" | "lapsed") => vec![Reaching::Nothing],
+        _ => Vec::new(),
+    };
+    member_act(w, from, xenonet_authz::Act::Handoff, &reaching)?;
     let (Some(id), Some(op)) = (s(b, "id"), s(b, "op")) else { return Err(fail("a handoff without its id or op")) };
     if !id.starts_with("hof_") {
         return Err(fail("a handoff that isn't network/handoff/v1"));
@@ -2036,12 +2391,17 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
             if store(w, |s| s.take_handoff(&id, &by, now))? {
                 let maker = r.text("maker").unwrap_or("");
                 note(w, &by, maker, &format!("I took your handoff {id}."), Some(from));
-                send_handoff(w, None, body_of(&r, "taken", Some(&by)));
+                settled(w, &r, "taken", Some(&by));
             } else if let Some(now_row) = store(w, |s| s.handoff(&id))? {
                 // Taken already: the asking host hears by whom.
                 let taker = now_row.text("taken_by").unwrap_or("");
                 let state = now_row.text("state").unwrap_or("taken").to_string();
-                send_handoff(w, Some(from), body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(taker)));
+                // Who took it, only if the network it is told in knows them.
+                let mut body = body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(taker));
+                if xenonet_net::ground::current().is_none_or(|n| !known_in(w, taker, &n)) {
+                    body["by"] = Value::Null;
+                }
+                send_handoff(w, None, Some(from), body);
             }
         }
         // The making host decided.
@@ -2083,7 +2443,7 @@ fn lapse(w: &Runtime) {
             let maker = r.text("maker").unwrap_or("");
             note(w, maker, maker, &format!("No one took your handoff {id} in a week, so it lapsed."), None);
             if net(w).me().is_some() {
-                send_handoff(w, None, body_of(&r, "lapsed", None));
+                settled(w, &r, "lapsed", None);
             }
         }
     }

@@ -224,6 +224,9 @@ pub struct Client {
     bin: String,
     version: String,
     handle: Handle,
+    /// The folder its app-server keeps its threads in (CODEX_HOME), when
+    /// it isn't the one the service's own environment names.
+    home: Option<String>,
     inner: Mutex<Inner>,
     starting: tokio::sync::Mutex<()>,
 }
@@ -238,6 +241,11 @@ impl Client {
     /// A client of the app-server `bin` runs, which says it is XenoNet
     /// `version`.
     pub fn new(bin: String, version: String, handle: Handle) -> Arc<Client> {
+        Client::new_in(bin, version, handle, None)
+    }
+
+    /// A client of an app-server that keeps its threads in `home`.
+    pub fn new_in(bin: String, version: String, handle: Handle, home: Option<String>) -> Arc<Client> {
         let mut life = Lifecycle::new(now_ms());
         for c in ["starts", "requests", "timeouts"] {
             life.counters.set(c, 0.0);
@@ -247,6 +255,7 @@ impl Client {
             bin,
             version,
             handle,
+            home,
             inner: Mutex::new(Inner { life, proc: None, ready: false, next_id: 1, serial: 0, stderr: Arc::default(), version: None, no_items: Vec::new() }),
             starting: tokio::sync::Mutex::new(()),
         })
@@ -258,6 +267,9 @@ impl Client {
         lock(&self.inner).life.count("starts", 1.0);
         let mut cmd = Command::new(&self.bin);
         xenonet_os::process::Background::no_window(cmd.as_std_mut());
+        if let Some(home) = &self.home {
+            cmd.env("CODEX_HOME", home);
+        }
         let spawned =
             cmd.arg("app-server").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn();
         let mut child = match spawned {
@@ -511,7 +523,9 @@ pub struct Codex {
 
 impl Codex {
     pub fn new(env: &ListerEnv<'_>) -> Codex {
-        Codex { client: Client::new(binary(env), env.version.to_string(), env.handle.clone()), rollouts: Rollouts::default(), home: env.root.to_string() }
+        // Its app-server keeps the threads of the folder it is made for.
+        let home = Some(env.root.to_string()).filter(|h| !h.is_empty());
+        Codex { client: Client::new_in(binary(env), env.version.to_string(), env.handle.clone(), home), rollouts: Rollouts::default(), home: env.root.to_string() }
     }
 
     /// Over a client already made (a test's).

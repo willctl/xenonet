@@ -107,3 +107,14 @@ test("a run's permission prompt, from this machine or another, with Allow and De
   );
   assert.equal(countOf(q), 2);
 });
+
+test("a project whose rule for its git identity and push account doesn't match: one item each, shown on the map, from the page or the summary", () => {
+  const warn = { id: "project:atlas", title: "atlas", text: "Commits here don't use the git identity this project's rule names." };
+  const q = needsYouQueue({ sessions: [session(1, "question", T)], identities: [warn, { id: "project:ledger", title: "ledger", text: null }, { title: "no id" }] });
+  assert.deepEqual(q.map((it) => [it.kind, it.key]), [["question", `session:${session(1).id}`], ["identity", "identity:project:atlas"], ["identity", "identity:project:ledger"]], "undated after dated, by key");
+  assert.deepEqual([q[1].title, q[1].text, q[1].actions, q[1].since], ["atlas", warn.text, ["show"], null]);
+  assert.equal(waitsWords(q[1]), "would commit or push as the wrong identity");
+  assert.equal(countOf(q), 3);
+  assert.deepEqual(queueOfSummary({ identityWarnings: [warn] }).map((it) => it.key), ["identity:project:atlas"]);
+  assert.deepEqual(queueOfSummary({ needsYou: [] }), [], "an older XenoNet's summary has none");
+});

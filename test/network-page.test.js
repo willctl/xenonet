@@ -5,7 +5,7 @@
 // sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, hostLine, hostTags, inviteWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, frozenWords, reachOf, hostCan, widenWords, delegationWords, STARTS, START_WORDS, ALONE, INVITE_MS, AWAY_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, hostLine, hostTags, inviteWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, frozenWords, reachOf, hostCan, widenWords, delegationWords, STARTS, START_WORDS, networksWith, ALONE, INVITE_MS, AWAY_MS } from "../src/network-model.js";
 import { parse } from "./harness/schema.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
@@ -210,4 +210,16 @@ test("who may start and wake sessions on each machine, and what its XenoNet take
   assert.equal(reachOf(old), null);
   assert.equal(hostCan(old, "start"), false);
   assert.deepEqual(reachOf(host("x", { reach: { start: "everyone", wake: 3 } })), { start: "you", wake: "consent", pending: [], delegated: null }, "read leniently");
+});
+
+test("a start must choose its network only on a machine that is in several of this machine's networks", () => {
+  const home = { id: `net_${"0".repeat(32)}`, name: "home", hosts: [host("studio"), host("laptop"), host("rack")] };
+  const work = { id: `net_${"e".repeat(32)}`, name: "work", hosts: [host("studio-w"), host("lab"), host("laptop")] };
+  assert.deepEqual(networksWith([home, work], "laptop"), [{ id: home.id, name: "home" }, { id: work.id, name: "work" }], "laptop is in both");
+  assert.deepEqual(networksWith([home, work], "lab"), [{ id: work.id, name: "work" }]);
+  assert.deepEqual(networksWith([home, work], "nobody"), []);
+  assert.deepEqual(networksWith(undefined, "laptop"), []);
+  const gone = { ...work, link: { state: "removed" } };
+  assert.deepEqual(networksWith([home, gone], "laptop"), [{ id: home.id, name: "home" }], "a network this machine was removed from isn't one it is in");
+  assert.deepEqual(networksWith([{ name: "no id", hosts: [host("laptop")] }, { id: "net_x", hosts: "nope" }], "laptop"), [], "a network with no id, or a host list that isn't one, has no machine");
 });

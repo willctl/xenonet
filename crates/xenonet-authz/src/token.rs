@@ -677,6 +677,9 @@ mod tests {
         fn own_machine(&self) -> &MachineId {
             &self.machine
         }
+        fn sees(&self, _: &NetworkId, _: Option<&crate::ProjectId>) -> bool {
+            false
+        }
         fn role(&self, _: &NetworkId, _: &MachineId) -> Option<crate::Role> {
             None
         }
@@ -791,7 +794,7 @@ mod tests {
         assert_eq!(parsed.rights(), &[Action::Message]);
         let actor = crate::Principal::Actor { slug: ActorSlug::new("muse").unwrap(), machine: MachineId::new("m1").unwrap() };
         let run = crate::Resource::Run { machine: MachineId::new("m1").unwrap(), app: crate::AppId::new("claude").unwrap(), folder: crate::Folder::new("/w").unwrap() };
-        let start = Act::Start { app: crate::AppId::new("claude").unwrap(), folder: crate::Folder::new("/w").unwrap(), mode: crate::StartMode::Asks };
+        let start = Act::Start { app: crate::AppId::new("claude").unwrap(), folder: crate::Folder::new("/w").unwrap(), mode: crate::StartMode::Asks, confine: None };
         let r = Request::new(actor.clone(), run, start, Door::Local, NOW, None);
         assert!(parsed.authorize(&r).is_err());
         let r = Request::new(actor, crate::Resource::Machine(MachineId::new("m1").unwrap()), Act::Message, Door::Gateway, NOW, None);

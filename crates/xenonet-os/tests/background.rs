@@ -13,11 +13,13 @@ const NEAR: usize = 40;
 const HIDES: [&str; 4] = ["no_window", "NO_WINDOW", "0x0800_0000", "hide_window"];
 
 /// Commands that never run on Windows, by file and what they start.
-const UNIX_ONLY: [(&str, &str); 4] = [
+const UNIX_ONLY: [(&str, &str); 5] = [
     ("xenonet-mcp/src/process.rs", "\"ps\""),
     ("xenonet-state/src/runtime/git.rs", "xcode-select"),
     ("xenonet-state/src/runtime/live.rs", "\"security\""),
     ("xenonet-cli/src/commands/runs.rs", "\"stty\""),
+    // A run that gets its sign-in on a descriptor (runs.rs, spawn_held, unix only).
+    ("xenonet-service/src/compose/runtime/runs.rs", "Command::new(&how.program)"),
 ];
 
 /// Programs started for you to use in your own terminal, by file and what

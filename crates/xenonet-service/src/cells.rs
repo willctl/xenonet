@@ -374,7 +374,7 @@ mod tests {
     use adytum::testing::{failed, ok, Exec, FakeDriver, Leaves, Op};
     use adytum::{Arch, CellId, CellState, Driver, Host, ImagePin, KindName, Listed};
     use std::sync::Mutex;
-    use xenonet_engine::confine::{plan, CellRequest, Confinement};
+    use xenonet_engine::confine::{plan, CellRequest};
 
     #[derive(Clone, Copy, Default)]
     struct Behave {
@@ -513,12 +513,11 @@ mod tests {
     }
 
     fn make_plan(r: &CellRunner, project: &Path, keep: bool, copy_out: bool) -> CellPlan {
-        let wall = xenonet_engine::confine::wall_for_identity("git:x").expect("wall");
-        let c = Confinement::Cell { wall };
+        let wall = xenonet_engine::confine::wall_for_identity(&xenonet_authz::PersonId::new("git:x").unwrap()).expect("wall").to_string();
         let args = ["agent.sh".to_owned()];
         let req = CellRequest {
-            confinement: &c,
-            identity_id: "git:x",
+            wall: &wall,
+            signer_id: &xenonet_authz::PersonId::new("git:x").unwrap(),
             app: "fake-agent",
             args: &args,
             stdin: Some(b"prompt"),
@@ -552,7 +551,7 @@ mod tests {
         let name: CellName = run.cell.parse().expect("a name");
         let spec = driver.created.lock().expect("lock").iter().find(|s| s.name == name).cloned().expect("the spec");
         assert!(spec.sealed && spec.mounts.is_empty() && spec.ports.is_empty() && spec.network.is_none());
-        assert_eq!(spec.wall, xenonet_engine::confine::wall_for_identity("git:x").expect("wall"));
+        assert_eq!(spec.wall, xenonet_engine::confine::wall_for_identity(&xenonet_authz::PersonId::new("git:x").unwrap()).expect("wall"));
         let execs = execs.lock().expect("lock");
         assert_eq!(execs[0].argv, ["mkdir", "-p", "--", "/tmp/xn-home"], "the cell's user makes its home");
         let ran = execs[1].argv.join(" ");

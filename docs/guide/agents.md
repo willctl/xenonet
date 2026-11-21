@@ -47,6 +47,18 @@ Grok Build records each turn's tokens in the session's `usage.json`, and what th
 
 XenoNet writes its MCP servers into `~/.grok/config.toml` itself, as `[mcp_servers.xenonet]` tables, and leaves the rest of the file as it was, comments included. Its hooks go in a file of their own, `~/.grok/hooks/xenonet.json`. `GROK_HOME` moves both. [Grok Build in XenoNet](../design/grok-build.md) has the details.
 
+## T3 Code
+
+T3 Code runs Claude Code through the Agent SDK with your own Claude Code settings, so `xenonet connect claude` is all it needs: XenoNet's hooks fire and its MCP server connects in T3 Code's threads like in any other session. A thread's session shows on the map with T3 Code as its origin in the inspector, and the thread's title as its name.
+
+A thread started in a worktree runs in a folder under `~/.t3/worktrees`. XenoNet puts its session in the project that worktree belongs to, with the worktree as the session's worktree, as it does for any [linked worktree](projects.md#worktrees).
+
+What to know:
+
+- T3 Code's threads default to full access with no operating-system sandbox. XenoNet's [confined starts](sandbox.md) cover sessions XenoNet starts, not threads started in T3 Code.
+- Under T3 Code the hooks' environment has `T3CODE_THREAD_ID`, the thread's id. XenoNet doesn't use it yet.
+- XenoNet reads T3 Code's Claude Code sessions only. It doesn't read T3 Code's own database. Codex under T3 Code is unchecked: Codex threads in a T3 Code worktree are placed by the same worktree rule, but nothing else about them has been tried.
+
 ## From a terminal
 
 `xenonet connect` and `xenonet disconnect` do the same as the panel. `xenonet agents`, `xenonet who <path>` and `xenonet messages` show what the engine sees. [The xenonet command](cli.md) lists them all.

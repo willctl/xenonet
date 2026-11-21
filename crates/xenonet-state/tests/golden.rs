@@ -728,6 +728,9 @@ async fn map(w: &World, c: &mut Check) {
     let mut cfg = MapConfig::new(true, false, Map::new(), &w.dir("home"), Some(&world));
     cfg.clock = clock.clone();
     cfg.git = Git::new(FixtureGit { home: w.dir("home") });
+    // The folders the made-up Nova has named for an app: a second Claude folder, signed in to her work account.
+    let named = std::collections::BTreeMap::from([("claude".to_string(), vec![format!("{}/.claude-work", w.dir("home"))])]);
+    cfg.name_roots(&named);
     let vendor = vendor();
     let db = Arc::new(xenonet_store::Db::memory().expect("a store in memory"));
     // The ids it mints, the same every run.

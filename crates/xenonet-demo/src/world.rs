@@ -231,7 +231,7 @@ fn sessions(today: &str) -> Vec<Value> {
         ] }),
         json!({ "app": "claude", "project": "infra", "title": "Move staging to the new cluster", "ago": 190, "desktop": true, "turns": [{ "prompt": "Move staging to the new cluster.", "steps": [["run", "terraform plan -var-file=staging.tfvars", true]], "reply": "Staging runs on the new cluster. The old one can go after a week." }] }),
         json!({ "app": "codex", "project": "atlas-web", "title": "Add product image zoom", "ago": 300, "native": true, "turns": [{ "prompt": "Add zoom on product images.", "steps": [["edit", "app/product/zoom.tsx", "", "export function Zoom() {}"]], "reply": "Product images zoom on hover and pinch." }] }),
-        json!({ "app": "claude", "project": "ledger", "title": "Draft the Q4 close checklist", "ago": 420, "turns": [{ "prompt": "Draft a checklist for the Q4 close.", "steps": [["read", "ledger/reconcile.py"]], "reply": "The checklist has 14 steps, grouped by team." }] }),
+        json!({ "app": "claude", "project": "ledger", "title": "Draft the Q4 close checklist", "ago": 420, "workRoot": true, "turns": [{ "prompt": "Draft a checklist for the Q4 close.", "steps": [["read", "ledger/reconcile.py"]], "reply": "The checklist has 14 steps, grouped by team." }] }),
         json!({ "app": "codex", "cwd": ["Documents", "Codex", today, "regex-help"], "title": "Explain this regex", "ago": 140, "turns": [{ "prompt": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?", "steps": [], "reply": "It matches strings of eight or more characters with at least one digit and one lowercase letter." }] }),
         json!({ "app": "claude", "project": "atlas-api", "title": "Review the partial refunds change", "ago": 25, "desktop": true, "parent": 0, "turns": [{ "prompt": "Review the partial refunds change before I open a PR.", "steps": [["read", "src/orders/refunds.ts"]], "reply": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund." }] }),
         json!({ "app": "codex", "project": "pathfinder", "title": "Benchmark solver variants", "ago": 60, "parent": 4, "subagent": true, "turns": [{ "prompt": "Benchmark the cached solver against the old one.", "steps": [["run", "cargo bench", true]], "reply": "The cached solver is 10.5 times faster on 500 stops." }] }),
@@ -245,6 +245,10 @@ fn sessions(today: &str) -> Vec<Value> {
         ] }),
         json!({ "app": "grok", "project": "atlas-web", "title": "Check contrast on every page", "ago": 3, "parent": 14, "subagent": true, "turns": [{ "prompt": "Check contrast on every page in dark mode.", "steps": [["run", "npm run test:contrast", true]], "reply": "All 23 pages pass. The sale badge was closest, at 4.6 to 1." }] }),
         json!({ "app": "grok", "project": "pathfinder", "title": "Map the depot loading rules", "ago": 75, "turns": [{ "prompt": "Write down the depot's loading rules as constraints the solver can use.", "steps": [["read", "src/solver.rs"], ["mcp", "xenolith", "context_log", { "pages": ["pathfinder"] }]], "reply": "The loading rules are on the pathfinder context page as seven constraints. Two need data the depot doesn't send yet." }] }),
+        // T3 Code's, last again: a Claude Code session it runs in a
+        // worktree of atlas-web under its own folder, which the map puts in
+        // atlas-web.
+        json!({ "app": "claude", "project": "atlas-web", "cwd": [".t3", "worktrees", "atlas", "checkout-v3"], "title": "Fix the rounding in the checkout total", "branch": "checkout-v3", "ago": 50, "t3": true, "turns": [{ "prompt": "The checkout total is a cent off when a coupon applies. Find out why.", "steps": [["read", "app/checkout/page.tsx"]], "reply": "The coupon is applied per line and rounded each time. Rounding once on the sum fixes it." }] }),
     ]
 }
 
@@ -281,6 +285,9 @@ pub struct World {
     pub projects_dir: String,
     pub clients_dir: String,
     pub claude_root: String,
+    /// A second Claude Code folder, for the work account: Nova keeps her
+    /// accounts apart with CLAUDE_CONFIG_DIR.
+    pub claude_work: String,
     pub claude_desktop_dir: String,
     pub codex_home: String,
     pub grok_home: String,
@@ -297,6 +304,7 @@ impl World {
             projects_dir: NATIVE.join(&[&home, "Projects"]),
             clients_dir: NATIVE.join(&[&home, "Clients"]),
             claude_root: NATIVE.join(&[&home, ".claude", "projects"]),
+            claude_work: NATIVE.join(&[&home, ".claude-work"]),
             claude_desktop_dir: NATIVE.join(&[&home, "claude-desktop"]),
             codex_home: NATIVE.join(&[&home, ".codex"]),
             grok_home: NATIVE.join(&[&home, ".grok"]),
@@ -435,6 +443,10 @@ impl Writer {
     fn prompt(&mut self, text: &str, ts: f64, a: &mut dyn Around) {
         self.entries.push(json!({ "id": a.uuid(), "ts": n(ts), "role": "user", "text": text }));
         if self.app == "claude" {
+            // T3 Code's sessions say so on their lines, as its transcripts do.
+            if flag(&self.s, "t3") {
+                return self.write(&[json!({ "type": "user", "entrypoint": "t3-code", "timestamp": iso(ts), "message": { "role": "user", "content": text } })]);
+            }
             return self.write(&[json!({ "type": "user", "timestamp": iso(ts), "message": { "role": "user", "content": text } })]);
         }
         if self.app == "grok" {
@@ -807,6 +819,14 @@ impl Demo {
                 }
             }
         }
+        // The worktree T3 Code made for one of the sessions, where it keeps
+        // them: atlas-web's, in a folder outside Projects.
+        if git_ok {
+            let wt = NATIVE.join(&[&home, ".t3", "worktrees", "atlas", "checkout-v3"]);
+            if files::mkdir_p(&NATIVE.dirname(&wt), None).is_ok() {
+                git(&projects("atlas-web"), &["worktree", "add", "-q", "-b", "checkout-v3", &wt]);
+            }
+        }
         let clients = |rel: &str| NATIVE.join(&[&home, "Clients", rel]);
         self.client_repos = Self::write_files(CLIENTS, &clients, git_ok)?;
         self.sessions = sessions(&self.today);
@@ -911,6 +931,15 @@ impl Demo {
                 0,
             ),
         )?;
+        // The work account's own Claude folder, with its sign-in.
+        files::mkdir_p(&NATIVE.join(&[&self.world.claude_work, "projects"]), None)?;
+        home_file(
+            &NATIVE.join(&[".claude-work", ".claude.json"]),
+            &stringify(
+                &json!({ "oauthAccount": { "accountUuid": CLAUDE_WORK.0, "organizationUuid": CLAUDE_WORK.1, "emailAddress": "nova@atlas.example", "organizationName": "Atlas", "organizationType": "claude_team" } }),
+                0,
+            ),
+        )?;
         // An ID token in the shape Codex keeps, unsigned, and no real tokens.
         let jwt = |claims: &Value| format!("e30.{}.demo", xenonet_text::utf16::base64url(stringify(claims, 0).as_bytes()));
         let signed_in = ((now - 20.0 * 86400e3) / 1000.0).floor();
@@ -955,11 +984,25 @@ impl Demo {
         known.insert(work.clone(), json!({ "kind": "claude", "handle": "nova@atlas.example", "detail": { "plan": "Team", "org": "Atlas" }, "firstSeen": n(now - 30.0 * 86400e3), "lastSeen": n(now - 8.0 * 3600e3) }));
         let signins = json!({ "claude": [{ "id": work, "from": n(now - 30.0 * 86400e3), "to": n(now - 8.0 * 3600e3) }, { "id": personal, "from": n(now - 8.0 * 3600e3), "to": n(now - 3600e3) }] });
         files::mkdir_p(&self.world.state_dir, None)?;
-        Ok(json!({ "names": names, "known": known, "signins": signins }))
+        // Nova's rule for pathfinder: Orbit's email and Orbit's account.
+        // Its commits carry the email, but a push signs in as nova-dev, so
+        // the rule doesn't match and XenoNet warns.
+        // A project's id is made when it is first scanned, so the rule is
+        // kept by folder until the service has one.
+        // And for ledger: Claude Code runs as the personal account, but its
+        // newest session ran in the work folder, so that one doesn't match
+        // either.
+        let rules = json!({
+            self.p("pathfinder"): { "git": "hello@orbitworks.example", "push": { "login": "orbitworks", "host": "github.com" } },
+            self.p("ledger"): { "claude": "nova@example.com" },
+        });
+        // The folders Nova named, which the service saves as it starts.
+        let app_roots = json!({ "claude": [self.world.claude_work] });
+        Ok(json!({ "names": names, "known": known, "signins": signins, "rulesByPath": rules, "appRoots": app_roots }))
     }
 
     /// What XenoNet would remember of the made-up identities, once the
-    /// world is made: `{ names, known, signins }`.
+    /// world is made: `{ names, known, signins, rulesByPath }`.
     pub fn remembered(&self) -> Option<&Value> {
         self.remembered.as_ref()
     }
@@ -1001,6 +1044,14 @@ impl Demo {
                 "parentKind": parent.as_ref().map(|_| if subagent { "subagent" } else { "spawn" }),
                 "claudeAccount": if app == "claude" && desktop { demo_claude_account(s.get("project").and_then(Value::as_str)) } else { Value::Null },
             });
+            // The app that runs it, for the sessions T3 Code does.
+            if flag(s, "t3") {
+                session["runsIn"] = json!("t3-code");
+            }
+            // A session of the second Claude folder carries it.
+            if flag(s, "workRoot") {
+                session["root"] = json!(self.world.claude_work);
+            }
             // A Grok Build subagent's type, as its parent's folder says it.
             if app == "grok" && subagent {
                 session["agentKind"] = json!("explore");
@@ -1143,6 +1194,12 @@ mod tests {
         assert_eq!((summary["parent_session_id"].as_str(), summary["session_kind"].as_str()), (Some(id_of(14).as_str()), Some("subagent")));
         let first: Value = serde_json::from_str(std::fs::read_to_string(folder.join("updates.jsonl")).unwrap().lines().next().unwrap()).unwrap();
         assert_eq!(first["params"]["update"]["sessionUpdate"], "user_message_chunk");
+        // T3 Code's session, in a worktree of atlas-web under its own folder.
+        let t3 = claude.last().unwrap();
+        assert_eq!(t3["runsIn"], "t3-code");
+        assert_eq!(claude.iter().filter(|s| s.get("runsIn").is_some()).count(), 1);
+        let cwd = t3["cwd"].as_str().unwrap();
+        assert!(cwd.replace('\\', "/").ends_with(".t3/worktrees/atlas/checkout-v3"), "{cwd}");
         assert!(demo.transcript("nope").is_err());
         assert_eq!(demo_picks(&json!([{ "path": "labs/snippets", "xenonet": "folder" }]))[0]["as"], "project");
         std::fs::remove_dir_all(&tmp).unwrap();

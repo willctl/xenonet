@@ -17,6 +17,7 @@
 // failed with what it wrote (exec::Failed): both are passed on whole.
 #![expect(clippy::result_large_err, reason = "the service's traits return its CoreError, and a failed command keeps its output")]
 
+pub mod accounts;
 pub mod acp;
 pub mod actors;
 pub mod asks;
@@ -35,6 +36,7 @@ pub mod procs;
 pub mod registration;
 pub mod reports;
 pub mod runs;
+pub mod sandbox;
 pub mod scrub;
 pub mod spend;
 pub mod starts;
@@ -180,6 +182,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
     let state_dir = Path::new(&state_dir);
     let policy_store = store.clone();
     let runs_db = setup.db.clone();
+    let runs_store = setup.db.clone();
     let w = Arc::new(Runtime {
         setup,
         env: env.clone(),
@@ -201,12 +204,18 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         observers: OnceLock::new(),
         me: OnceLock::new(),
         net: network::NetState::default(),
-        starts: starts::StartSide::default(),
+        starts: starts::StartSide::open(runs_store),
         asks: asks::AskSide::default(),
         intents: intents::IntentSide::default(),
         acp: OnceLock::new(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
+    if !demo {
+        let marked = sandbox::backfill_marks(&w);
+        if marked > 0 {
+            w.log("info", "sandbox.backfill", &format!("{marked} sandboxed sessions kept before marks existed are marked as not yours, so none is resumed bare"));
+        }
+    }
     if let Some(db) = &w.setup.db {
         checkouts::own(db, Arc::downgrade(&w));
     }

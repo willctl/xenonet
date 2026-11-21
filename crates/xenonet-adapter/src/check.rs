@@ -162,6 +162,54 @@ pub fn privacy_fix(c: &dyn CheckCtx, what: &str) -> String {
     }
 }
 
+/// The numbers at the start of a version as the apps print it ("2.1.340
+/// (Claude Code)", "codex-cli 0.150.0-alpha.1", "grok 1.0.77 (abc) [stable]").
+fn version_in(text: &str) -> Option<(String, [u64; 3])> {
+    let m = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)").ok()?.captures(text)?;
+    let n = |i: usize| m[i].parse::<u64>().ok();
+    Some((m[0].to_string(), [n(1)?, n(2)?, n(3)?]))
+}
+
+/// Whether the installed version of an app is one XenoNet's readers were
+/// checked against (the registry's `checked`). `bin` is the app's command,
+/// when it was found; the probe is the app's own `--version`, with a short
+/// timeout, and asks nothing of the network. A newer version is a warning
+/// naming both, an older one a note.
+pub async fn release(c: &dyn CheckCtx, app: &str, bin: Option<String>) -> Result<Verdict, Stop> {
+    let Some(a) = crate::apps::app(app) else { return Ok(Verdict::skip(format!("{app} isn't in the app registry"))) };
+    let name = &a.name;
+    let Some(bin) = bin else { return Ok(Verdict::skip(format!("{name} isn't installed"))) };
+    let Some(checked) = a.checked.as_deref() else { return Ok(Verdict::skip(format!("XenoNet hasn't recorded a version of {name} its reader was checked against"))) };
+    let Some((_, want)) = version_in(checked) else { return Ok(Verdict::skip(format!("XenoNet's record of {name}'s checked version isn't a version"))) };
+    let r = c.run(&bin, &["--version"], PROBE_MS).await?;
+    if truthy(r.get("timedOut")) {
+        return Ok(Verdict::warn(
+            format!("{} --version didn't answer in {} seconds, so which {name} is installed isn't known", c.tilde(&bin), PROBE_MS / 1000.0),
+            Some(&format!("Run it yourself to see why. XenoNet's reader was last checked against {name} {checked}.")),
+        ));
+    }
+    let Some((have, got)) = version_in(&s(r.get("stdout"))) else {
+        return Ok(Verdict::info(
+            format!("couldn't read a version from {} --version, so XenoNet can't say whether its reader has been checked against this {name}", c.tilde(&bin)),
+            None,
+        ));
+    };
+    Ok(match got.cmp(&want) {
+        std::cmp::Ordering::Equal => Verdict::ok(format!("{name} {have} is the version XenoNet's reader was last checked against")),
+        std::cmp::Ordering::Greater => Verdict::warn(
+            format!("XenoNet's reader was last checked against {name} {checked}; {have} is installed. If the map shows something wrong for its sessions, that version is the first suspect."),
+            Some("xenonet drift lists what differs from the shapes XenoNet expects. The doctor's check of the apps' data names the version a change came with."),
+        ),
+        std::cmp::Ordering::Less => Verdict::info(
+            format!("{name} {have} is installed, older than {checked}, the version XenoNet's reader was last checked against. It may lack things the reader expects."),
+            None,
+        ),
+    })
+}
+
+/// How long an app's `--version` may take, in ms.
+pub const PROBE_MS: f64 = 4000.0;
+
 /// Whether an app's sessions are connected to XenoNet, from what a running
 /// XenoNet says of connect for the app (`app` its registry id, `name` as
 /// the verdict names it).

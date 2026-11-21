@@ -30,7 +30,7 @@ This machine is now the founder. Add `--relay https://relay.example.net` to name
 
 The form also asks whether this machine finds the network's machines on your LAN by mDNS, which is off unless you pick it: with it on, the machine announces its network key on every LAN it joins, the same key each time, so anyone there can tell it's the same machine (they can't connect with it). In a terminal, add `--mdns on` or `--mdns off`. It's the machine's own setting, for all its networks: change it later in **Network settings › This machine** (**Find machines on this LAN**), or with `xenonet net set --mdns on|off`.
 
-A machine already in a network can start another one beside it: **Start another network…** in Network settings, or `xenonet net create` again. Everything that acts on one network then takes `--network <id|name>`, and without it the command asks which.
+A machine already in a network can start another one beside it: **Start another network…** in Network settings, or `xenonet net create` again. Everything that acts on one network then takes `--network <id|name>`, and without it the command asks which. What goes to "everyone" has to name its network too: an intent made on a machine in several networks says which, and a start on a machine that is in two of them says which it goes through. The console asks when there is a choice, `xenonet start` and `xenonet intent make` take `--network <id|name>`, and the `start_session` and `delegate` tools take `network`. A network this machine was removed from no longer counts as one it is in.
 
 ### The firewall
 
@@ -87,6 +87,8 @@ xenonet net share prj_1a2b…,prj_3c4d… --network work
 
 A project counts once you've confirmed its checkout on this machine ([Projects](projects.md)). Claims and warnings go only to the networks the project is shared into.
 
+A network also reaches only what it sees. A machine that knows the id of a session in a project you didn't share into its network can't message it, hand work to it, post claims in that project or wake it: the answer is the one for an id that doesn't exist. The same holds for starts and intents: a machine can start a session only in a folder of a project its network is shown, and an intent travels only into a network shown its project. A machine that is in several networks, asked for something that names none, uses the narrowest of their settings. A session outside any confirmed project, and a handoff that names no project, are reachable only from a network that sees everything.
+
 ## Mailboxes
 
 A mailbox is a machine in the network that keeps what's sent to a machine that's away, sealed, and hands it over when that machine is back. It can't read what it keeps. It keeps a week at most, and up to 10,000 items or 50 MB for each machine, and it tells the sender what it took: the sender's `xenonet net status` and doctor show what's held, not delivered yet. A message that carries your presence (an Allow, say) never waits at a mailbox: it goes only to a machine that's connected.
@@ -140,10 +142,13 @@ What changes one machine's own setup stays on it: connecting its sessions, insta
 You, a session or an actor can start a Claude Code, Codex, Grok Build or Hermes Agent session on any machine in the network, in a folder there, with a first prompt. Claude Code and Codex run headless, through XenoNet's runner. Grok Build and Hermes Agent run over ACP (the Agent Client Protocol): XenoNet starts the agent with no window and none of its own credentials, opens a session in the folder, and holds it open for half an hour after each turn, so a message to it is its next turn. A Grok Build start with a permission mode runs headless, since ACP has no word for XenoNet's modes. A session's permission prompts over ACP come to Needs you, and an Allow covers that one call only. Each session shows on the map like any other, so you can message it and follow it.
 
 - **In the console:** **Start a session…** on a machine's row in the Network panel, on its card in the Machines view, or in its node's panel on the map. Pick the machine, the app, the permissions (your own settings, or plan, accept edits, auto or don't ask), a folder from that machine's projects or its home, and write the prompt. **Start** is yours, and works a moment after the box opens.
+- **On a machine in several of your networks:** the box asks which network the start goes through, only when that machine is in more than one of them.
 - **Not in a terminal.** A start as you is signed by your key, which asks you (Touch ID on a Mac), so it's made in XenoNet's window. `xenonet start` in a terminal refuses and says so.
 - **From a session or an actor:** the xenonet MCP server's `start_session` tool. An actor needs the spawn-sessions capability, and calls from its own machine (see [Actors](actors.md)). For a machine you set to take delegated work, `delegate` hands it a task instead, and the work runs on your standing delegation (see [Delegating work to another machine](delegation.md)).
 
 The machine that runs it decides, on its own copy of the roster and of your identity. A start as you carries your key's signature over that one start, made at a console. A start from a session or an actor needs that machine's start setting to be **the network** or **delegated** (see below); an actor's carries a token its own machine made for that start. A session XenoNet couldn't check never starts one. The folder is a project or folder from its map, by id or path, a folder one of its sessions works in, or `~`. A session never starts bypassing its permission checks, and Codex runs with its own `config.toml`'s sandbox and approvals. A machine starts 20 sessions an hour at most, and 10 for any one machine that asks, or any one session, actor or you on the machine itself. A start passes the same limits as a message there: too many from one sender, or the same prompt again within a minute, is refused. While XenoNet is paused there (`xenonet live pause`), it starts nothing, whoever asks. A machine that has heard from no other machine of the network for ten minutes holds starts from them until it does.
+
+A start from another machine, a session or an actor, a delegated start and an intent's run run at the `vendor` level, in the app's own sandbox, and yours does too when you say so: see [Sandboxed starts](sandbox.md). An app with no sandbox to drive (Grok Build, Hermes Agent) refuses `vendor`.
 
 The first prompt says who asked: "[XenoNet] Started by you, at desk's console.", or "[XenoNet] desk says this was asked by the session «Fix the login form» (claude:…). It came from an agent, not from your user."
 
@@ -180,9 +185,25 @@ From a window host, change another machine's on its row in the Network panel. Na
 
 A Claude Code session XenoNet starts, and a turn it resumes or forks, asks XenoNet, through the xenonet MCP server's `permission` tool, whenever its settings don't settle a tool call. XenoNet answers only for its own runs; any other session asks in its own app.
 
-The prompt shows in Needs you on that machine and on every window host: "tower · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. A call that may read the run's environment, where the sign-in token for XenoNet's runs is, says so on its row. Allow is yours, and works a moment after the row shows. It asks you once (Touch ID on a Mac), here or on any window host, and the machine the run is on checks it against its own copy of your identity. An Allow from another machine goes only while that machine is connected. Deny asks nothing.
+The prompt shows in Needs you on that machine and on the window host that asked for the run (the one that started it, or that made the intent it works): "tower · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. Another window host of the same network is shown nothing of it. **Allow** lets it run this once; **Deny** tells the session no. A call that may read the run's environment, where the sign-in token for XenoNet's runs is, says so on its row. Allow is yours, and works a moment after the row shows. It asks you once (Touch ID on a Mac), here or on the window host that asked for the run, and the machine the run is on checks it against its own copy of your identity. An Allow from another machine goes only while that machine is connected. Deny asks nothing.
 
 Answers come only from XenoNet's window, never from a terminal or a session. An actor you gave `answer-prompts` may Deny, and Allow only the sessions and kinds of prompt you let it in the Actors panel, which asks you when you set or widen it. A run you delegated is answered by its machine within the delegation (see [Delegating work](delegation.md)). Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
+
+## Working on a machine you don't own
+
+A contractor's laptop or a rented VM can join its own network, with no identity of yours on it. Found a network for it (`work`, say), share into that network only the projects it needs (`atlas`), and leave the machine's own settings at their defaults.
+
+What you can do there: start a session on it from your own machine, in the folder of a project on it. The session runs on the guest machine, and its permission prompts come back to the window host that asked for the run, where you answer them. The guest machine never answers them.
+
+What the guest machine can reach on yours:
+
+- Sessions, claims, handoffs and intents in the projects shared into `work`, and nothing in the others. An id it knows or guesses for a session outside them gets the answer for an id that doesn't exist.
+- Starts only if you let `work` start sessions on your machine (`start: network`, set in the window), and then only in the folders of shared projects. Under the default (`start: you`) it starts nothing.
+- Wakes only of sessions in shared projects, and only under `work`'s wake setting.
+- No transcripts or stats: another machine's transcript opens only in a window host's window, and the guest isn't one.
+- No Xenolith spaces, unless you allow Xenolith's grant for `work` in **Network settings › Shared context**.
+
+Whoever holds root on the guest machine can ignore anything XenoNet does there: read the folders it works in, the sign-in of its runs and whatever it has been sent. What protects you is on your machines, which decide every act from another machine against what its network is shown. Share only what you'd hand that machine's owner.
 
 ## A2A agents
 

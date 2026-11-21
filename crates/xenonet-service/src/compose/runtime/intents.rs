@@ -209,6 +209,27 @@ fn pick_delegation(w: &Runtime, target: &str, named: Option<&str>) -> Result<Str
 /// The person's new intent, made here: kept, told to the network as an
 /// entry of this machine's feed, and given to the machine it names.
 pub fn make(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
+    // An intent belongs to one network, which everything done for it is
+    // done in. This machine in several, the request says which.
+    let networks = net(w).live_networks();
+    let named = text(body, "network");
+    let network = match (networks.as_slice(), named.as_deref()) {
+        ([], _) => return Err(status(409, "an intent travels in your network: make or join one first")),
+        ([one], None) => one.network.clone(),
+        (_, None) => {
+            let names = networks.iter().map(|m| format!("{} ({})", m.name, m.network)).collect::<Vec<_>>().join(", ");
+            return Err(status(409, format!("this machine is in several networks ({names}): say which the intent is for with network")));
+        }
+        (_, Some(n)) => match networks.iter().filter(|m| m.network == n || m.name == n).collect::<Vec<_>>().as_slice() {
+            [one] => one.network.clone(),
+            [] => return Err(status(404, format!("this machine isn't in a network called {n}"))),
+            _ => return Err(status(409, format!("two of this machine's networks are called {n}: say which by its id"))),
+        },
+    };
+    xenonet_net::ground::within(&network, || make_in_network(w, body, at_window))
+}
+
+fn make_in_network(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
     let gov = ground::governance(w).ok_or_else(|| status(409, "this machine's governance isn't plugged in, so it makes no intents"))?;
     let facts = gov.facts();
     let (Some(here), Some(network)) = (me(w), facts.network()) else {
@@ -226,6 +247,10 @@ pub fn make(w: &Runtime, body: &Value, at_window: bool) -> R<Value> {
     let arbiter = text(body, "arbiter").unwrap_or_else(|| here.clone());
     let project = text(body, "project").ok_or_else(|| status(400, "say which project it's worked in: a prj_ id"))?;
     xenonet_model::ids::ProjectId::parse(&project).map_err(|_| status(400, format!("{project} isn't a project's id")))?;
+    // Its goal travels in the network, so only one that is shown the project.
+    if !shown_in(w, network.as_str(), &project) {
+        return Err(status(409, format!("{project} isn't shared into this network, so an intent for it can't travel there: share it first, or pick another network")));
+    }
     // The app as a start takes it: the registry's first when none is named.
     let app = xenonet_engine::delivery::starts::request(&json!({ "app": text(body, "app"), "prompt": goal })).map_err(|e| status(400, e))?.app;
     let hours = body.get("hours").and_then(Value::as_f64).unwrap_or(DEFAULT_HOURS);
@@ -319,6 +344,13 @@ pub fn cancel(w: &Runtime, id: &str, at_window: bool) -> R<Value> {
     if !i.open() {
         return Err(status(409, format!("{id} has ended: it's {}", i.state)));
     }
+    // Told in the network the intent belongs to, and no other.
+    let network = i.network.clone();
+    xenonet_net::ground::within(&network, || cancel_here(w, &db, i, at_window))
+}
+
+fn cancel_here(w: &Runtime, db: &Db, i: IntentRow, at_window: bool) -> R<Value> {
+    let id = i.id.as_str();
     let (resource, act) = report_of(&i, IntentStep::Cancel).map_err(|e| status(400, e))?;
     let authority = signed(w, at_window, &resource, &act, &format!("cancel an intent of yours on {}", i.target))?;
     let now = now_ms() as i64;
@@ -383,7 +415,10 @@ pub fn list(w: &Runtime) -> R<Value> {
             json!({ "id": p.as_str(), "name": db.project(p).ok().flatten().map(|x| x.name), "checkout": checkout, "signed": db.confirmation(p.as_str()).ok().flatten().is_some() })
         })
         .collect();
-    Ok(json!({ "here": here, "intents": intents, "machines": machines, "delegations": delegations, "projects": projects }))
+    // This machine's networks, which a new intent has to choose between
+    // when there is more than one.
+    let networks: Vec<Value> = net(w).live_networks().into_iter().map(|m| json!({ "id": m.network, "name": m.name })).collect();
+    Ok(json!({ "here": here, "intents": intents, "machines": machines, "networks": networks, "delegations": delegations, "projects": projects }))
 }
 
 /// The page hears that the intents changed.
@@ -392,6 +427,17 @@ fn changed(w: &Runtime) {
 }
 
 // ---------- from other machines ----------
+
+/// Whether `network` is shown `project`: an intent is kept, offered,
+/// taken, given and worked only in a network that is, whoever made it.
+fn shown_in(w: &Runtime, network: &str, project: &str) -> bool {
+    ground::governance(w).is_some_and(|g| g.sharing(network).shows_project(project))
+}
+
+/// The project an intent is for, as what a frame about it reaches.
+fn project_of(i: &IntentRow) -> Result<xenonet_authz::Reaching, String> {
+    ProjectId::new(&i.project).map(xenonet_authz::Reaching::Project).map_err(|e| e.message)
+}
 
 /// An `intent` entry of `host`'s feed: an intent made there, or the
 /// person's cancel of one.
@@ -444,6 +490,11 @@ fn make_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     if g.facts.network().is_none_or(|n| n.as_str() != row.network) {
         return Err(format!("{} travels in another network", row.id));
+    }
+    // Neither kept nor passed on for a project its network isn't shown, in
+    // the words of an id nobody has.
+    if !shown_in(w, &row.network, &row.project) {
+        return Err(xenonet_authz::NOT_SEEN.to_string());
     }
     // Only from the feed of the machine whose device signed it.
     let authority = b.get("authority").cloned().unwrap_or_else(|| json!({}));
@@ -512,6 +563,7 @@ fn given_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
         db.hold_assign(&id, host, &target, now_ms() as i64).map_err(|e| e.message)?;
         return Ok(());
     };
+    in_its_network(&i)?;
     if i.arbiter != host {
         return Err(format!("an assign of {id} from {host}: only {}, its arbiter, assigns it", i.arbiter));
     }
@@ -591,6 +643,9 @@ fn check_take(w: &Runtime, i: &IntentRow, host: &str, evidence: &Value) -> Resul
     if !i.any() || !i.open() {
         return Err(format!("{} isn't an open intent for any machine", i.id));
     }
+    if !shown_in(w, &i.network, &i.project) {
+        return Err(xenonet_authz::NOT_SEEN.to_string());
+    }
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     let device = g.facts.view.as_ref().and_then(|v| v.member(host)).and_then(|m| m.device.clone()).ok_or_else(|| format!("{host} has no device of the person's"))?;
     let gov = ground::governance(w).ok_or("this machine's governance isn't plugged in")?;
@@ -616,7 +671,7 @@ fn check_take(w: &Runtime, i: &IntentRow, host: &str, evidence: &Value) -> Resul
 /// project the person confirmed here, with their signature. Once.
 fn offer(w: &Runtime, db: &Db, id: &str) {
     let (Some(here), Ok(Some(i))) = (me(w), db.intent(id)) else { return };
-    if !i.any() || i.state != "made" || i.assigned.is_some() {
+    if !i.any() || i.state != "made" || i.assigned.is_some() || !shown_in(w, &i.network, &i.project) {
         return;
     }
     if db.takes(id).unwrap_or_default().iter().any(|t| t.machine == here) {
@@ -642,6 +697,16 @@ fn offer(w: &Runtime, db: &Db, id: &str) {
     w.log("info", "intent", &format!("{here} took {id}"));
 }
 
+/// Whether the frame in hand is of the network `i` belongs to: an intent is
+/// taken and given out only in its own network, and a take or an assign that
+/// came in another is none of its business.
+fn in_its_network(i: &IntentRow) -> Result<(), String> {
+    match xenonet_net::ground::current() {
+        Some(n) if n == i.network => Ok(()),
+        _ => Err(format!("{} belongs to another network than the one this came in", i.id)),
+    }
+}
+
 /// A machine's take of an intent for any machine: checked and kept, or
 /// refused; kept as it came when the intent hasn't reached this machine
 /// yet, and checked when the arbiter goes through it.
@@ -649,8 +714,19 @@ fn take_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let id = text(b, "intent").ok_or("a take without its intent")?;
     let evidence = b.get("evidence").cloned().unwrap_or(Value::Null);
     let db = db(w)?;
-    if let Some(i) = db.intent(&id).map_err(|e| e.message)? {
-        check_take(w, &i, host, &evidence)?;
+    match db.intent(&id).map_err(|e| e.message)? {
+        Some(i) => {
+            in_its_network(&i)?;
+            check_take(w, &i, host, &evidence)?;
+        }
+        // Before the intent: the project the take names is the one it
+        // vouches for, which the network it came in must be shown.
+        None => {
+            let network = xenonet_net::ground::current().ok_or("a take outside a network's frame")?;
+            if text(&evidence, "project").is_some_and(|p| !shown_in(w, &network, &p)) {
+                return Err(xenonet_authz::NOT_SEEN.to_string());
+            }
+        }
     }
     db.add_take(&id, host, &evidence.to_string(), now_ms() as i64).map_err(|e| e.message)?;
     arbitrate(w, &db, &id);
@@ -674,7 +750,10 @@ fn arbitrate(w: &Runtime, db: &Db, id: &str) {
         if !db.assign_intent(id, &t.machine, now_ms() as i64).unwrap_or(false) {
             return;
         }
-        send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "assign", "intent": id, "target": t.machine, "until": i.until }));
+        // In the intent's network, whichever network the take came in.
+        xenonet_net::ground::within(&i.network, || {
+            send(w, To::All, Kind::Assign, json!({ "schema": SCHEMA, "op": "assign", "intent": id, "target": t.machine, "until": i.until }));
+        });
         w.log("info", "intent", &format!("{here} gave {id} to {}", t.machine));
         changed(w);
         if t.machine == here {
@@ -698,7 +777,10 @@ fn cancel_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String> {
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
     let carried = Carried::parse(b.get("authority").unwrap_or(&Value::Null));
     let p = ground::person(w, &g, Some(host), &carried, &resource, &act)?;
-    ground::judge(&g, &ground::remote(&g, p, resource, act), None)?;
+    // A cancel carries nothing of the project and only narrows, so it is
+    // held to no sharing: a project unshared since the intent started can
+    // still be stopped by the person who asked for it.
+    ground::judge(&g, &ground::remote(&g, p, resource, act).reaching(xenonet_authz::Reaching::Nothing), None)?;
     db.move_intent(&id, &["made", "assigned", "running"], "cancelled", now_ms() as i64).map_err(|e| e.message)?;
     if me(w).is_some_and(|m| i.worked_on() == Some(m.as_str())) {
         stop_run(w, &id);
@@ -716,8 +798,19 @@ pub(crate) fn report_in(w: &Runtime, host: &str, b: &Value) -> Result<(), String
     let Some(i) = db.intent(&id).map_err(|e| e.message)? else { return Err(format!("a report on {id}, which this machine doesn't hold")) };
     let (resource, act) = report_of(&i, step)?;
     let g = ground::ground(w, None).ok_or("this machine's governance isn't plugged in")?;
-    ground::judge(&g, &ground::remote(&g, Principal::Machine { id: ground::machine(host)? }, resource, act), None)?;
+    ground::judge(&g, &ground::remote(&g, Principal::Machine { id: ground::machine(host)? }, resource, act).reaching(project_of(&i)?), None)?;
     took(&db, &i, step, b)?;
+    // The run that machine started for the intent is its own, for the
+    // prompts it will send: only when this machine made the intent or
+    // arbitrates it (they asked for the run), and only the machine the
+    // intent is worked on, in the network the intent belongs to.
+    if step == IntentStep::Start
+        && me(w).is_some_and(|m| i.machine == m || i.arbiter == m)
+        && i.worked_on() == Some(host)
+        && xenonet_net::ground::current().is_none_or(|n| n == i.network)
+    {
+        w.starts.note_intent_run(host, &i.network, text(b, "agent").as_deref().filter(|a| a.starts_with("agt_")));
+    }
     changed(w);
     Ok(())
 }
@@ -773,7 +866,12 @@ pub fn work(w: &Runtime, id: &str) {
     if !w.intents.working.locked().insert(id.to_string()) {
         return;
     }
-    let outcome = work_now(w, id);
+    // On the thread that works it, in the network the intent belongs to.
+    let network = db(w).ok().and_then(|d| d.intent(id).ok().flatten()).map(|i| i.network);
+    let outcome = match network {
+        Some(n) => xenonet_net::ground::within(&n, || work_now(w, id)),
+        None => Ok(()),
+    };
     w.intents.working.locked().remove(id);
     match outcome {
         Ok(()) => {}
@@ -823,7 +921,14 @@ fn work_now(w: &Runtime, id: &str) -> Result<(), Worked> {
     if !db.move_intent(id, &["assigned"], "running", now_ms() as i64).map_err(|e| Worked::Failed(e.message))? {
         return Ok(());
     }
-    let request = xenonet_engine::delivery::starts::Request { folder, app: i.app.clone(), mode: None, prompt: String::new(), delegate: true };
+    let request = xenonet_engine::delivery::starts::Request {
+        folder,
+        app: i.app.clone(),
+        mode: None,
+        prompt: String::new(),
+        delegate: true,
+        confine: xenonet_engine::delivery::starts::ConfineAsk::Vendor(Vec::new()),
+    };
     let start = crate::compose::runtime::starts::Apart {
         request,
         prompt: Information::new(i.goal.clone()),
@@ -863,7 +968,13 @@ fn ran(w: &Runtime, id: &str, state: &str, a: &Value) {
 fn report_here(w: &Runtime, id: &str, step: IntentStep, body: &Value) {
     let Ok(db) = db(w) else { return };
     let Ok(Some(i)) = db.intent(id) else { return };
-    if let Err(why) = took(&db, &i, step, body) {
+    // Told in the network the intent belongs to: the thread that reports
+    // may be a run's, with no frame in hand.
+    xenonet_net::ground::within(&i.network, || report_in_network(w, &db, &i, id, step, body));
+}
+
+fn report_in_network(w: &Runtime, db: &Db, i: &IntentRow, id: &str, step: IntentStep, body: &Value) {
+    if let Err(why) = took(db, i, step, body) {
         w.log("warn", "intent", &format!("a report on {id} wasn't kept: {why}"));
         return;
     }
@@ -879,7 +990,9 @@ fn report_here(w: &Runtime, id: &str, step: IntentStep, body: &Value) {
     if let Some(t) = b.get("text").and_then(Value::as_str).map(|t| clip(t, NOTE_MAX)) {
         b["text"] = json!(t);
     }
-    if net(w).me().is_some() {
+    // Kept here, but told to a network only while it is shown the project:
+    // a note or an outcome is a word about it.
+    if net(w).me().is_some() && shown_in(w, &i.network, &i.project) {
         send(w, To::All, Kind::Report, b);
     }
     changed(w);
@@ -962,28 +1075,49 @@ pub fn report(w: &Runtime, by: Reporter, id: &str, step: &str, body: &Value) -> 
 pub fn tick(w: &Runtime) {
     let Ok(db) = db(w) else { return };
     let now = now_ms() as i64;
-    let here = me(w);
+    // Each intent is looked after in the network it belongs to, as this
+    // machine is named there.
     for i in db.intents_past(now).unwrap_or_default() {
-        if db.move_intent(&i.id, &["made", "assigned", "running"], "expired", now).unwrap_or(false) {
-            if here.is_some() && here.as_deref() == i.worked_on() {
-                stop_run(w, &i.id);
+        xenonet_net::ground::within(&i.network, || {
+            let here = me(w);
+            if db.move_intent(&i.id, &["made", "assigned", "running"], "expired", now).unwrap_or(false) {
+                if here.is_some() && here.as_deref() == i.worked_on() {
+                    stop_run(w, &i.id);
+                }
+                w.log("info", "intent", &format!("{} expired", i.id));
+                changed(w);
             }
-            w.log("info", "intent", &format!("{} expired", i.id));
-            changed(w);
-        }
+        });
     }
-    let Some(here) = here else { return };
     for i in db.intents().unwrap_or_default() {
-        if i.state == "assigned" && i.worked_on() == Some(here.as_str()) && !w.intents.working.locked().contains(&i.id) {
-            work_soon(w, &i.id);
-        }
-        // One for any machine not given out yet: a checkout confirmed
-        // since may let this machine take it, and as its arbiter, a take
-        // held may now be given it.
-        if i.any() && i.state == "made" {
-            offer(w, &db, &i.id);
-            arbitrate(w, &db, &i.id);
-        }
+        xenonet_net::ground::within(&i.network, || {
+            let Some(here) = me(w) else { return };
+            // A project this machine no longer shares into the network the
+            // intent belongs to isn't worked for it: the run is stopped and
+            // the intent ends here. It tells the network nothing, since a
+            // word about the intent would be a word about the project.
+            if i.state == "running"
+                && i.worked_on() == Some(here.as_str())
+                && net(w).live_networks().iter().any(|n| n.network == i.network)
+                && !shown_in(w, &i.network, &i.project)
+                && db.move_intent(&i.id, &["running"], "cancelled", now).unwrap_or(false)
+            {
+                stop_run(w, &i.id);
+                w.log("info", "intent", &format!("{} was stopped: {} isn't shared into its network any more", i.id, i.project));
+                changed(w);
+                return;
+            }
+            if i.state == "assigned" && i.worked_on() == Some(here.as_str()) && !w.intents.working.locked().contains(&i.id) {
+                work_soon(w, &i.id);
+            }
+            // One for any machine not given out yet: a checkout confirmed
+            // since may let this machine take it, and as its arbiter, a take
+            // held may now be given it.
+            if i.any() && i.state == "made" {
+                offer(w, &db, &i.id);
+                arbitrate(w, &db, &i.id);
+            }
+        });
     }
 }
 

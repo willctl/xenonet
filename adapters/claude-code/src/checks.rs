@@ -4,20 +4,22 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use xenonet_adapter::check::{connected, folder, privacy_fix, s, Facts, Folder};
+use xenonet_adapter::check::{connected, folder, privacy_fix, release, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 use xenonet_text::text::{display, truthy};
 use xenonet_text::units::plural;
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
-    vec![Box::new(Cli), Box::new(Auth), Box::new(Transcripts), Box::new(Usage), Box::new(Sessions)]
+    vec![Box::new(Cli), Box::new(Release), Box::new(Auth), Box::new(Sandbox), Box::new(Transcripts), Box::new(Usage), Box::new(Sessions)]
 }
 
 const GROUP: &str = "Claude Code";
 
 struct Cli;
+struct Release;
 struct Auth;
+struct Sandbox;
 struct Transcripts;
 struct Usage;
 struct Sessions;
@@ -37,6 +39,16 @@ impl Check for Cli {
         let v = c.run(&bin, &["--version"], 4000.0).await?;
         let version = re!(r"\d+\.\d+\.\d+").find(&s(v.get("stdout"))).map(|m| m.as_str().to_string());
         Ok(Verdict::ok(format!("{}{}", version.map_or(String::new(), |v| format!("version {v}, ")), c.tilde(&bin))))
+    }
+}
+
+#[async_trait(?Send)]
+impl Check for Release {
+    fn row(&self) -> CheckRow {
+        CheckRow { id: "claude.release", group: GROUP, title: "Claude Code is a version XenoNet's reader was checked against", slot: Slot::App }
+    }
+    async fn run(&self, c: &dyn CheckCtx) -> Result<Verdict, Stop> {
+        release(c, "claude", c.which("claude").await?).await
     }
 }
 
@@ -62,6 +74,62 @@ impl Check for Auth {
             }
         }
         Ok(Verdict::warn("couldn't tell from claude auth status", Some("Run claude auth status to see why.")))
+    }
+}
+
+#[async_trait(?Send)]
+impl Check for Sandbox {
+    fn row(&self) -> CheckRow {
+        CheckRow { id: "claude.sandbox", group: GROUP, title: "Claude Code's sandbox can run here", slot: Slot::App }
+    }
+    // A sandboxed start of Claude Code is refused where it has no sandbox,
+    // and Claude Code is told to fail where its sandbox can't start.
+    async fn run(&self, c: &dyn CheckCtx) -> Result<Verdict, Stop> {
+        if c.which("claude").await?.is_none() {
+            return Ok(Verdict::skip("Claude Code isn't installed"));
+        }
+        match Facts(c.facts()).platform().as_str() {
+            "darwin" => Ok(Verdict::ok("macOS's Seatbelt, which needs nothing installed")),
+            "win32" => Ok(Verdict::info(
+                "Claude Code has no sandbox on native Windows, so a sandboxed start of it is refused here",
+                Some("Run Claude Code under WSL2 to start it sandboxed."),
+            )),
+            _ => {
+                let mut missing = Vec::new();
+                for tool in ["bwrap", "socat"] {
+                    if c.which(tool).await?.is_none() {
+                        missing.push(tool);
+                    }
+                }
+                if missing.is_empty() {
+                    Ok(unix_sockets(std::env::consts::ARCH))
+                } else {
+                    Ok(Verdict::warn(
+                        format!("{} isn't on your PATH, which Claude Code's sandbox needs, so a sandboxed start of it here fails", missing.join(" and ")),
+                        Some("Install bubblewrap and socat: sudo apt-get install bubblewrap socat (Debian, Ubuntu), or dnf install bubblewrap socat (Fedora)."),
+                    ))
+                }
+            }
+        }
+    }
+}
+
+/// What the check says about Unix sockets once bwrap and socat are there.
+/// Claude Code's sandbox keeps a command off Unix sockets (the SSH agent's,
+/// Docker's) with a seccomp filter that it ships for x64 and arm64 only.
+/// Whether the filter loads can't be tested from outside Claude Code (it
+/// reports `sandbox_seccomp_unavailable` itself, in /sandbox), so this says
+/// so, and warns where it is known not to exist.
+fn unix_sockets(arch: &str) -> Verdict {
+    if matches!(arch, "x86_64" | "aarch64") {
+        Verdict::ok(format!(
+            "bwrap and socat are installed. Whether Claude Code's seccomp filter, which keeps a sandboxed command off Unix sockets such as the SSH agent's, loads can't be tested from outside Claude Code: /sandbox in claude shows it (this CPU, {arch}, is one it ships the filter for)"
+        ))
+    } else {
+        Verdict::warn(
+            format!("bwrap and socat are installed, but Claude Code's seccomp filter, which keeps a sandboxed command off Unix sockets such as the SSH agent's, isn't available for this CPU ({arch}): a sandboxed command could reach them"),
+            Some("Start sandboxed sessions on an x64 or arm64 machine."),
+        )
     }
 }
 
@@ -138,7 +206,15 @@ mod tests {
         let rows: Vec<(&str, Slot)> = all().iter().map(|c| (c.row().id, c.row().slot)).collect();
         assert_eq!(
             rows,
-            [("claude.cli", Slot::App), ("claude.auth", Slot::App), ("claude.transcripts", Slot::App), ("claude.usage", Slot::App), ("agents.claude", Slot::Sessions)]
+            [
+                ("claude.cli", Slot::App),
+                ("claude.release", Slot::App),
+                ("claude.auth", Slot::App),
+                ("claude.sandbox", Slot::App),
+                ("claude.transcripts", Slot::App),
+                ("claude.usage", Slot::App),
+                ("agents.claude", Slot::Sessions)
+            ]
         );
     }
 
@@ -159,6 +235,31 @@ mod tests {
         assert_eq!((v.status, v.fix.as_deref()), (Status::Fail, Some("Run claude and sign in with /login.")));
         let v = verdict(&Auth, &FakeCtx::new(facts()).cli("claude", "/bin/claude").answers("/bin/claude auth status", "not json"));
         assert_eq!((v.status, v.detail.as_str()), (Status::Warn, "couldn't tell from claude auth status"));
+    }
+
+    #[test]
+    fn the_sandbox_needs_bwrap_and_socat_on_linux() {
+        let linux = || json!({ "home": "/home/ada", "platform": "linux", "paths": {} });
+        let with = |tools: &[&str]| tools.iter().fold(FakeCtx::new(linux()).cli("claude", "/bin/claude"), |c, t| c.cli(t, &format!("/usr/bin/{t}")));
+        assert_eq!(verdict(&Sandbox, &FakeCtx::new(linux())).status, Status::Skip, "no Claude Code, nothing to say");
+        assert_eq!(verdict(&Sandbox, &with(&["bwrap", "socat"])).status, Status::Ok);
+        let v = verdict(&Sandbox, &with(&["bwrap"]));
+        assert_eq!(v.status, Status::Warn);
+        assert!(v.detail.starts_with("socat isn't on your PATH") && v.fix.unwrap().contains("bubblewrap"));
+        let v = verdict(&Sandbox, &FakeCtx::new(json!({ "home": "C:\\Users\\ada", "platform": "win32", "paths": {} })).cli("claude", "C:\\claude.exe"));
+        assert_eq!(v.status, Status::Info);
+        assert_eq!(verdict(&Sandbox, &FakeCtx::new(facts()).cli("claude", "/bin/claude")).status, Status::Ok, "macOS needs nothing");
+    }
+
+    #[test]
+    fn the_sandbox_check_says_what_it_cannot_test_about_unix_sockets() {
+        let ok = unix_sockets("aarch64");
+        assert_eq!(ok.status, Status::Ok);
+        assert!(ok.detail.contains("seccomp") && ok.detail.contains("can't be tested from outside"), "{}", ok.detail);
+        assert_eq!(unix_sockets("x86_64").status, Status::Ok);
+        let v = unix_sockets("x86");
+        assert_eq!(v.status, Status::Warn);
+        assert!(v.detail.contains("seccomp") && v.detail.contains("Unix sockets") && v.fix.is_some(), "{}", v.detail);
     }
 
     #[test]

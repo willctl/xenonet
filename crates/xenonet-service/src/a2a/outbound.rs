@@ -172,6 +172,10 @@ impl Ground for Here {
     fn own_machine(&self) -> &MachineId {
         &self.machine
     }
+    /// Never a network's: this ground is for decisions at a local door.
+    fn sees(&self, _: &NetworkId, _: Option<&ProjectId>) -> bool {
+        false
+    }
     fn role(&self, _: &NetworkId, _: &MachineId) -> Option<Role> {
         None
     }

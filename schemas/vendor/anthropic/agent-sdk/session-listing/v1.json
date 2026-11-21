@@ -35,6 +35,10 @@
     "tag": {
       "type": "string"
     },
+    "entrypoint": {
+      "type": "string",
+      "description": "Not an SDK field: XenoNet's reader adds the entrypoint the transcript's lines name (cli, t3-code…)"
+    },
     "createdAt": {
       "description": "Epoch milliseconds",
       "type": "number"

@@ -107,6 +107,14 @@ impl Store for Saved {
         let v = (!roots.is_empty()).then(|| Value::Array(roots.iter().cloned().map(Value::String).collect()));
         self.db.set_setting("workspace.roots", v.as_ref()).map_err(failed)
     }
+    fn app_roots(&self) -> R<Value> {
+        let v = self.db.setting("apps.roots").map_err(failed)?;
+        Ok(if v.is_object() { v } else { Value::Object(serde_json::Map::default()) })
+    }
+    fn set_app_roots(&self, roots: &Value) -> R<()> {
+        let v = roots.as_object().is_some_and(|m| !m.is_empty()).then_some(roots);
+        self.db.set_setting("apps.roots", v).map_err(failed)
+    }
     fn reconcile_checkouts(&self, found: &Value) -> R<Value> {
         let rows: Vec<_> =
             found.as_array().into_iter().flatten().filter_map(|f| checkouts::found_of(f.get("path")?.as_str()?, checkouts::Why::parse(f.get("why")?.as_str()?)?)).collect();
@@ -165,6 +173,9 @@ impl Store for Saved {
     fn set_identity_pin(&self, node: &str, identity: Option<&str>) -> R<()> {
         self.db.set_identity_pin(node, identity.map(|i| (i, (self.clock)()))).map_err(failed)
     }
+    fn set_identity_rule(&self, project: &str, rule: Option<&Value>) -> R<()> {
+        self.db.set_identity_rule(project, rule).map_err(failed)
+    }
     fn set_identity_known(&self, id: &str, value: &Value) -> R<()> {
         self.db.set_identity_known(id, value).map_err(failed)
     }
@@ -195,11 +206,20 @@ mod tests {
         assert_eq!(s.identities().unwrap()["pins"]["claude:a"], json!({ "identity": "github:x/y", "at": 1000 }));
         s.set_identity_pin("claude:a", None).unwrap();
         assert_eq!(s.identities().unwrap()["pins"], json!({}));
+        s.set_identity_rule("project:atlas", Some(&json!({ "git": "nova@example.com" }))).unwrap();
+        assert_eq!(s.identities().unwrap()["rules"], json!({ "project:atlas": { "git": "nova@example.com" } }));
+        s.set_identity_rule("project:atlas", None).unwrap();
+        assert!(s.identities().unwrap().get("rules").is_none(), "none left, none shown");
         assert_eq!(s.theme().unwrap(), Value::Null);
         s.set_theme("rime").unwrap();
         assert_eq!(s.theme().unwrap(), "rime");
         s.ack("claude:a").unwrap();
         assert_eq!(s.acks().unwrap(), json!({ "claude:a": 1000 }));
+        assert_eq!(s.app_roots().unwrap(), json!({}));
+        s.set_app_roots(&json!({ "claude": ["/h/.claude-work"] })).unwrap();
+        assert_eq!(s.app_roots().unwrap(), json!({ "claude": ["/h/.claude-work"] }));
+        s.set_app_roots(&json!({})).unwrap();
+        assert_eq!(s.app_roots().unwrap(), json!({}));
         s.set_workspace_root(Some("/p")).unwrap();
         assert_eq!(s.workspace_root().unwrap(), "/p");
         s.set_workspace_root(None).unwrap();

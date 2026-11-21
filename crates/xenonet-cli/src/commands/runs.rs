@@ -112,7 +112,38 @@ fn show(v: &Value) {
     }
 }
 
+fn show_domains(v: &Value) {
+    let list: Vec<&str> = v["domains"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    if list.is_empty() {
+        print("Runs you didn't start yourself reach no domain.");
+    } else {
+        print(format!("Runs you didn't start yourself may reach {}.", list.join(", ")));
+    }
+}
+
+/// `xenonet runs domains [set <domain>… | clear]`: the domains a sandboxed
+/// run that isn't yours may reach, which only you set.
+fn domains(args: &[String], flags: &Flags) -> Done {
+    let s = need(flags)?;
+    let (method, body) = match args.first().map(String::as_str) {
+        None | Some("status") => ("GET", Value::Null),
+        Some("set") => ("PUT", json!({ "domains": args[1..].iter().flat_map(|a| a.split(',')).filter(|d| !d.is_empty()).collect::<Vec<_>>() })),
+        Some("clear") => ("DELETE", Value::Null),
+        Some(sub) => return Err(Fail::new(format!("no such: xenonet runs domains {sub}. xenonet runs --help says more."), 2)),
+    };
+    let v = s.request(method, "/api/runs/sandbox-domains", (!body.is_null()).then_some(&body), &[]).map_err(|r| Fail::new(r.message, 1))?;
+    if flags.on("json") {
+        json(&v);
+    } else {
+        show_domains(&v);
+    }
+    Ok(0)
+}
+
 pub fn run(args: &[String], flags: &Flags) -> Done {
+    if args.first().map(String::as_str) == Some("domains") {
+        return domains(&args[1..], flags);
+    }
     let s = need(flags)?;
     let call = |method: &str, body: Option<&Value>| s.request(method, "/api/runs/sign-in", body, &[]).map_err(|r| Fail::new(r.message, 1));
     let v = match args.first().map_or("status", String::as_str) {

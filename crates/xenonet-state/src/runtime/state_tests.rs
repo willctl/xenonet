@@ -25,6 +25,11 @@ impl Drop for World {
 
 // A demo world of its own, on a port no other test uses.
 fn world() -> World {
+    world_with(crate::runtime::saved::in_memory())
+}
+
+// The same, over a store of the test's making.
+fn world_with(store: Saved) -> World {
     let port = 52000 + (std::process::id() % 900) as u16 * 10 + PORTS.fetch_add(1, Ordering::SeqCst);
     let demo = Arc::new(DemoWorld::new(port));
     let w = demo.create().expect("the demo's world");
@@ -38,7 +43,6 @@ fn world() -> World {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     // What the service saves as it starts the demo: Nova's identities.
-    let store = crate::runtime::saved::in_memory();
     crate::runtime::saved::seed(&store, &demo.remembered().expect("the demo's world"));
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
     let live = Live::new(
@@ -254,6 +258,115 @@ async fn identities_named_hidden_pinned_and_found_again() {
     assert!(s.pin_identity(json!("core"), id.clone()).await.is_err(), "only a session or a project");
     assert_eq!(s.pin_identity(json!(SESSION1), Value::Null).await.expect("unpinned")["pins"], json!([]));
     assert_ne!(items(s.rescan_identities().await.expect("again").get("identities")), &[] as &[Value]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_projects_rule_is_checked_on_the_map() {
+    let w = world();
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    s.refresh_repos().await;
+    s.refresh_map().await.expect("a map with the repos read");
+    let graph = s.graph().expect("graph").expect("a map");
+    let reads = |n: &Value, role: &str| items(n.get("identities")).iter().any(|l| l["role"] == role);
+    let project = items(graph.get("nodes"))
+        .iter()
+        .find(|n| n["kind"] == "project" && reads(n, "commits-as") && n.get("identityRule").is_none())
+        .expect("a project that commits as someone")
+        .clone();
+    let id = project["id"].as_str().unwrap().to_string();
+    assert!(project.get("identityRule").is_none(), "no rule, no check");
+    // A rule for an email nobody here commits with.
+    let d = s.set_identity_rule(json!(id), json!({ "nodeId": id, "git": "ada@acme.example" })).await.expect("a rule");
+    assert_eq!(d["rules"][&id]["git"], "ada@acme.example");
+    let n = s.node_of(&id).expect("the project");
+    assert_eq!((n["identityRule"]["git"]["state"].as_str(), n["identityRule"]["mismatch"].as_bool()), (Some("differs"), Some(true)), "{}", n["identityRule"]);
+    let warned = s.summary().expect("a summary");
+    assert!(items(warned.get("identityWarnings")).iter().any(|w| w["id"] == id.as_str()), "{warned}");
+    // A rule for the one it does commit with matches.
+    let uses = n["identityRule"]["git"]["uses"].as_str().expect("the email it commits with").to_string();
+    s.set_identity_rule(json!(id), json!({ "git": uses })).await.expect("another rule");
+    assert_eq!(s.node_of(&id).unwrap()["identityRule"]["mismatch"], false);
+    assert!(!items(s.summary().unwrap().get("identityWarnings")).iter().any(|w| w["id"] == id.as_str()), "nothing to warn of for it");
+    assert!(s.set_identity_rule(json!(SESSION1), json!({ "git": "ada@acme.example" })).await.is_err(), "only a project has a rule");
+    assert!(s.set_identity_rule(json!(id), json!({ "git": "not an email" })).await.is_err());
+    // Naming neither takes the rule out.
+    let gone = s.set_identity_rule(json!(id), json!({})).await.expect("no rule");
+    assert!(gone.get("rules").and_then(|r| r.get(&id)).is_none());
+    assert!(s.node_of(&id).unwrap().get("identityRule").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_demos_rule_doesnt_match_and_a_folder_finds_its_project() {
+    let w = world();
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    s.refresh_repos().await;
+    s.refresh_map().await.expect("a map with the repos read");
+    let warned = s.summary().expect("a summary");
+    assert_eq!(items(warned.get("identityWarnings")).len(), 1, "{warned}");
+    let id = warned["identityWarnings"][0]["id"].as_str().unwrap().to_string();
+    let path = s.node_of(&id).expect("the project")["path"].as_str().unwrap().to_string();
+    // The project's folder and a folder inside it both find it, with the rule and its check.
+    for folder in [path.clone(), format!("{path}/src/deeper")] {
+        let found = s.identity_project(&folder).expect("a project");
+        assert_eq!(
+            (found["project"]["id"].as_str(), found["rule"]["git"].as_str(), found["check"]["mismatch"].as_bool()),
+            (Some(id.as_str()), Some("hello@orbitworks.example"), Some(true)),
+            "{found}"
+        );
+    }
+    let outside = s.identity_project("/nowhere/at/all").expect("an answer");
+    assert!(outside["project"].is_null() && outside["rule"].is_null(), "{outside}");
+}
+
+/// A service just restarted has no map yet, but the store still holds the
+/// checkouts and the rules: a start into a ruled project's folder must find
+/// its rule there, never read "no project" and place nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folders_rule_is_found_in_the_store_while_the_map_is_empty() {
+    let w = world();
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    s.refresh_repos().await;
+    s.refresh_map().await.expect("a map with the repos read");
+    let id = items(s.summary().unwrap().get("identityWarnings"))[0]["id"].as_str().unwrap().to_string();
+    let path = s.node_of(&id).expect("the project")["path"].as_str().unwrap().to_string();
+    s.set_identity_rule(json!(id), json!({ "claude": "nova@example.com", "mode": "refuse" })).await.expect("a rule");
+    // The map as a restart leaves it: nothing built yet.
+    {
+        let mut g = lock(&s.inner);
+        g.map.graph = None;
+        g.map.index.clear();
+    }
+    let found = s.identity_project(&format!("{path}/src")).expect("an answer");
+    assert_eq!(
+        (found["project"]["id"].as_str(), found["rule"]["claude"].as_str(), found["rule"]["mode"].as_str()),
+        (Some(id.as_str()), Some("nova@example.com"), Some("refuse")),
+        "{found}"
+    );
+    let outside = s.identity_project("/nowhere/at/all").expect("an answer");
+    assert!(outside["rule"].is_null(), "{outside}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_id_found_in_two_folders_is_flagged_and_has_no_folder_to_resume_in() {
+    let node = |id: &str, root: Option<&str>| match root {
+        Some(r) => json!({ "id": id, "kind": "session", "root": r }),
+        None => json!({ "id": id, "kind": "session" }),
+    };
+    let list = vec![node("claude:a", None), node("claude:b", Some("/h/.claude-work")), node("claude:a", Some("/h/.claude-work")), node("claude:b", Some("/h/.claude-work"))];
+    let clashes = clashes_in(&[("claude", true, &list)]);
+    assert_eq!(clashes.into_iter().collect::<Vec<_>>(), ["claude:a".to_string()], "the same id in the same folder twice is no clash");
+    assert!(clashes_in(&[("claude", false, &list)]).is_empty(), "a list that failed says nothing");
+    assert_eq!(index_of(&list).len(), 2);
+    // The state refuses to name a folder for a clashing id, and still names the others'.
+    let w = world();
+    let s = &w.state;
+    lock(&s.inner).map.clashes.insert("claude:a".into());
+    let why = s.session_root("claude:a").unwrap_err().message;
+    assert!(why.contains("claude:a") && why.contains("more than one folder"), "{why}");
+    assert_eq!(s.session_root(SESSION1).unwrap(), None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -554,4 +667,114 @@ async fn a_project_space_is_tied_by_its_signed_marker_not_its_folder() {
     assert_eq!((tied, about), (false, Some(json!(prj))), "about atlas, owned by someone else: shown so, tied to nothing");
     s.end();
     std::fs::remove_dir_all(&home).expect("cleaned up");
+}
+
+/// A made-up home with Claude Code's default folder and the folders named,
+/// each holding a transcript of `id` for `cwd`, listed by the real
+/// listers.
+fn two_folders_world(tag: &str, named: &[&str], id: &str) -> (std::path::PathBuf, String, MapConfig) {
+    let home = std::env::temp_dir().join(format!("xenonet-state-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let p = home.join("Projects").join("atlas");
+    std::fs::create_dir_all(&p).expect("a project");
+    let home_s = std::fs::canonicalize(&home).expect("the home").to_string_lossy().into_owned();
+    let cwd = std::path::Path::new(&home_s).join("Projects").join("atlas").to_string_lossy().into_owned();
+    let line = json!({ "type": "user", "uuid": "u1", "parentUuid": null, "sessionId": id, "cwd": cwd, "version": "2.0.1", "timestamp": xenonet_text::time::iso(now_ms() - 60e3), "message": { "role": "user", "content": "Add a health check route" } });
+    for folder in named {
+        let at = std::path::Path::new(&home_s).join(folder).join("projects").join(cwd.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
+        std::fs::create_dir_all(&at).expect("Claude Code's folder");
+        std::fs::write(at.join(format!("{id}.jsonl")), xenonet_text::json::stringify(&line, 0) + "\n").expect("a transcript");
+    }
+    let mut env = process_env();
+    env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));
+    env.insert("XENONET_CLAUDE_USAGE".into(), json!("off"));
+    env.insert("XENONET_CLAUDE_DESKTOP_DIR".into(), json!(home.join("no-desktop").to_string_lossy()));
+    env.insert("XENONET_STATE_DIR".into(), json!(home.join(".state").to_string_lossy()));
+    env.insert("XENONET_CACHE_DIR".into(), json!(home.join(".cache").to_string_lossy()));
+    env.insert("XENONET_WIKI_DIR".into(), json!(home.join("no-wiki").to_string_lossy()));
+    env.insert("HOME".into(), json!(home_s));
+    for k in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XENONET_PROJECTS_DIR", "XENONET_READERS", "XENONET_NUMBAT_FILE", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"] {
+        env.shift_remove(k);
+    }
+    xenonet_platforms::install();
+    let mut cfg = MapConfig::new(false, false, env, &home_s, None);
+    let paths = named.iter().map(|f| std::path::Path::new(&home_s).join(f).to_string_lossy().into_owned()).collect();
+    cfg.name_roots(&std::collections::BTreeMap::from([("claude".to_string(), paths)]));
+    (home, home_s, cfg)
+}
+
+fn real_state(cfg: MapConfig, store: Saved) -> Arc<MapState> {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+    let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
+    let live = Live::new(&[(cfg.claude_projects_dir.clone(), "claude".into())], None, false, &cfg.home_dir, vendor.clone());
+    MapState::new(cfg, store, vendor, &WireEnv::new("0.0.0"), Readers::Real, live)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_session_id_in_two_named_folders_is_refused_a_turn_as_the_listers_find_it() {
+    let id = "0190d3e0-0000-7000-8000-00000000bbbb";
+    let (home, _, cfg) = two_folders_world("clash", &[".claude-work", ".claude-play"], id);
+    let s = real_state(cfg, crate::runtime::saved::in_memory());
+    s.refresh_map().await.expect("a map");
+    let why = s.session_root(&format!("claude:{id}")).expect_err("a clash").message;
+    assert!(why.contains("more than one folder"), "{why}");
+    // The same folder read twice, or an id found once, is no clash.
+    s.end();
+    std::fs::remove_dir_all(&home).expect("cleaned up");
+    let (home, _, cfg) = two_folders_world("noclash", &[".claude-work"], id);
+    let s = real_state(cfg, crate::runtime::saved::in_memory());
+    s.refresh_map().await.expect("a map");
+    assert!(s.session_root(&format!("claude:{id}")).expect("no clash").is_some_and(|r| r.ends_with(".claude-work")));
+    s.end();
+    std::fs::remove_dir_all(&home).expect("cleaned up");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_that_cannot_say_is_not_a_project_without_a_rule() {
+    let (store, fails) = crate::runtime::saved::flaky();
+    let w = world_with(store);
+    let s = &w.state;
+    s.refresh_map().await.expect("a map");
+    let path = s
+        .all_nodes()
+        .into_iter()
+        .find(|n| s_of(n, "kind") == Some("project") && s_of(n, "name") == Some("atlas-api"))
+        .and_then(|n| s_of(&n, "path").map(str::to_string))
+        .expect("atlas-api");
+    // The map's way: a project it knows.
+    assert!(s.identity_project(&path).is_ok());
+    fails.store(true, Ordering::SeqCst);
+    let why = s.identity_project(&path).expect_err("the rule can't be read").message;
+    assert!(why.contains("rule") && why.contains("unreadable"), "{why}");
+    // The store's way: the map isn't built yet.
+    {
+        let mut g = lock(&s.inner);
+        g.map.graph = None;
+        g.map.index.clear();
+    }
+    let why = s.identity_project(&path).expect_err("the rule can't be read").message;
+    assert!(why.contains("rule") && why.contains("unreadable"), "{why}");
+    fails.store(false, Ordering::SeqCst);
+    assert!(s.identity_project(&path).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_folder_below_a_ruled_project_is_placed_by_the_projects_rule() {
+    let (store, fails) = crate::runtime::saved::flaky();
+    let w = world_with(store);
+    let s = &w.state;
+    let notes = std::path::Path::new(&w.root).join("notes");
+    std::fs::create_dir_all(notes.join("sub")).expect("folders");
+    let (notes_s, sub_s) = (notes.to_string_lossy().into_owned(), notes.join("sub").to_string_lossy().into_owned());
+    // Outside git the store keeps the folder a session ran in at the
+    // subfolder itself, deeper than the project it is in.
+    let by_key = s.store.reconcile_checkouts(vec![json!({ "path": notes_s, "why": "folder" }), json!({ "path": sub_s, "why": "session" })]).expect("kept");
+    let notes_ch = by_key.get(&path_key(&notes_s).expect("a key")).expect("notes").clone();
+    let id = format!("project:{}", notes_ch["id"].as_str().expect("an id"));
+    s.store.set_identity_rule(&id, Some(&json!({ "claude": "nova@example.com", "mode": "refuse" })));
+    let found = s.identity_project(&format!("{sub_s}/deep")).expect("an answer");
+    assert_eq!((found["project"]["id"].as_str(), found["rule"]["claude"].as_str()), (Some(id.as_str()), Some("nova@example.com")), "{found}");
+    // And a store that can't say is no answer, not "no rule".
+    fails.store(true, Ordering::SeqCst);
+    assert!(s.identity_project(&format!("{sub_s}/deep")).is_err());
 }

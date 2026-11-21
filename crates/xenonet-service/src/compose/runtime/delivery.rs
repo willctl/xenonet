@@ -23,7 +23,7 @@ use xenonet_engine::delivery::resume;
 use xenonet_engine::delivery::router::Wake;
 use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
-use xenonet_engine::delivery::usage::plan_usage;
+use xenonet_engine::delivery::usage::plan_usage_in;
 use xenonet_engine::delivery::{Delivered, Error, Files};
 use xenonet_os::sync::Locked;
 use xenonet_store::engine::Shared;
@@ -332,11 +332,40 @@ pub struct RouterHost<'a> {
     /// Who was listening when the message was sent, for a route that runs
     /// after it (route()); None asks the engine now.
     pub listening: Option<&'a [String]>,
+    /// For a message from another machine, the machine and the network it
+    /// came in: what its wake is decided on.
+    pub via: Option<Via>,
+}
+
+/// The machine a message came from, by its host id in the network it came
+/// in, and that network.
+pub struct Via {
+    pub host: String,
+    pub network: String,
 }
 
 impl<'a> RouterHost<'a> {
     pub fn of(w: &'a Runtime) -> Self {
-        RouterHost { w, listening: None }
+        RouterHost { w, listening: None, via: None }
+    }
+
+    /// A wake of `agent` by the machine the message came from, decided like
+    /// any act from another machine, in the network it came in (`decide`
+    /// with `Door::Network`). With `consenting`, the session's consent is
+    /// taken as given, so the answer is whether the network sees the
+    /// session; without, whether the network's wake setting lets it alone.
+    fn decides_wake(&self, via: &Via, agent: &str, consenting: bool) -> bool {
+        xenonet_net::ground::within(&via.network, || {
+            let Some(mut g) = crate::compose::runtime::ground::ground(self.w, None) else { return false };
+            let (Ok(session), Ok(host)) = (xenonet_authz::SessionId::new(agent), crate::compose::runtime::ground::machine(&via.host)) else { return false };
+            g.place(self.w, agent);
+            if consenting {
+                g.consents.insert(agent.to_string(), xenonet_authz::Consent { here: true, actors: true });
+            }
+            let request =
+                crate::compose::runtime::ground::remote(&g, xenonet_authz::Principal::Machine { id: host }, xenonet_authz::Resource::Session(session), xenonet_authz::Act::Wake);
+            crate::compose::runtime::ground::judge(&g, &request, None).is_ok()
+        })
     }
 }
 
@@ -347,15 +376,26 @@ fn windows() -> bool {
 /// A provider's plan as the wake budget reads it, from the live snapshot's
 /// limits.
 fn usage(w: &Runtime, app: &str) -> Option<f64> {
+    usage_in(w, app, None)
+}
+
+/// The same for a session in a folder she named: that folder's own plan.
+fn usage_in(w: &Runtime, app: &str, root: Option<&str>) -> Option<f64> {
     let limits = match w.state().live_snapshot() {
         Ok(s) => s.get("limits").cloned().unwrap_or(Value::Null),
         Err(_) => Value::Null,
     };
-    plan_usage(&limits, app, now_ms())
+    plan_usage_in(&limits, app, root, now_ms())
 }
 
 fn store_error(e: xenonet_store::sql::SqlError) -> Error {
     Error(e.message().to_string())
+}
+
+/// `resume_deliver` for a test to call: the turn a wake or a copy runs.
+#[doc(hidden)]
+pub fn resume_turn(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork: bool) -> Delivered {
+    resume_deliver(w, agent, cwd, input, fork)
 }
 
 /// A turn resumed for a session (or, `fork`, a copy of it) with the
@@ -368,15 +408,51 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     // whose process has gone.
     let plan = if fork { resume::plan_fork(&mut plans, agent, settings, cwd) } else { resume::plan(&mut plans, agent, settings, cwd) };
     let (app, args) = plan.map_err(str::to_string)?;
-    let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().collect());
+    // A session started sandboxed is resumed, or copied, sandboxed: if its
+    // sandbox can't be made again, the turn isn't run bare.
+    let sandboxed = crate::compose::runtime::sandbox::for_turn(w, agent)?;
+    // How the session was placed by its start, the rule read again, and the
+    // folder it was found in: a turn is run as the start was, or not at all.
+    let placed = crate::compose::runtime::accounts::for_turn(w, &app, agent, cwd, sandboxed.is_some())?;
+    // A copy of a sandboxed or placed session is given its own id before it
+    // runs, and kept as sandboxed, marked and placed in the store first:
+    // waiting for its stream to name it would leave a copy whose run a
+    // restart interrupted with no record and no mark, to be resumed bare.
+    let args = match (fork && app == "claude", sandboxed.is_some() || placed != crate::compose::runtime::accounts::Placed::default()) {
+        (true, true) => {
+            let id = crate::compose::runtime::starts::uuid()?;
+            let child = format!("{app}:{id}");
+            if let Some(rec) = &sandboxed {
+                crate::compose::runtime::sandbox::fork_named(w, &child, rec)?;
+            }
+            crate::compose::runtime::accounts::fork_named(w, &child, &placed)?;
+            crate::compose::runtime::starts::note_fork(w, &child, agent);
+            resume::with_session_id(args, &id)
+        }
+        _ => args,
+    };
+    let mut args = args;
+    args.extend(placed.deny.iter().cloned());
+    let (args, own_env, temp) = match &sandboxed {
+        Some(rec) => {
+            let turn = crate::compose::runtime::sandbox::turn(w, &app, rec, &crate::compose::runtime::starts::uuid()?, args)?;
+            (turn.args, turn.env, turn.temp)
+        }
+        None => (args, Vec::new(), None),
+    };
+    let mut env: Vec<(String, String)> = if sandboxed.is_some() { crate::compose::runtime::sandbox::env(w) } else { resume::resume_env(w.starts.environment()) };
+    env.retain(|(k, _)| !own_env.iter().any(|(o, _)| o == k));
+    env.extend(own_env);
+    // A session found in a folder she named, or placed in one by a rule, runs
+    // in that folder with its own sign-in, whether it is resumed, copied or
+    // woken.
+    resume::in_root(&mut env, &app, placed.root.as_deref());
     // An app whose runs sign in (Claude Code) does with the token you gave
     // XenoNet's runs, and asks its permission prompts of you through this
     // XenoNet's server, waiting a minute past the hold for your answer, as
     // a start does.
     let ways = xenonet_engine::delivery::apps::of(&app).unwrap_or_default();
-    if let Some(s) = ways.sign_in {
-        crate::compose::runtime::starts::signed_env(w, s.variable, &mut env);
-    }
+    let sign_in = crate::compose::runtime::accounts::sign_in(w, &app, ways.sign_in, placed.root.is_some() || placed.ruled, &mut env);
     if let Some(v) = ways.tool_timeout {
         env.retain(|(k, _)| k != v);
         env.push((v.into(), crate::compose::runtime::starts::mcp_tool_timeout_ms(w).to_string()));
@@ -395,10 +471,10 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     } else {
         None
     };
-    let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input };
+    let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input, sign_in: sign_in.as_deref(), temp };
     match crate::compose::runtime::starts::run_turn(w, &r.runner, turn) {
         Ok(pid) => {
-            crate::compose::runtime::starts::after_resume(w, &r.runner, &app, &key, pid, fork.then_some(agent), prompt_file);
+            crate::compose::runtime::starts::after_resume(w, &r.runner, &app, &key, pid, fork.then_some(agent), prompt_file, sandboxed);
             Ok(if fork { format!("pid {pid}, a copy of the session") } else { format!("pid {pid}") })
         }
         Err(why) => {
@@ -499,8 +575,26 @@ impl router::Host for RouterHost<'_> {
     fn usage(&mut self, app: &str) -> Option<f64> {
         usage(self.w, app)
     }
-    fn wake_setting(&mut self) -> Wake {
-        Wake::parse(&crate::compose::runtime::network::net(self.w).reach().wake)
+    fn usage_of(&mut self, agent: &str) -> Option<f64> {
+        let app = agent.split(':').next().unwrap_or("");
+        // A session in a folder she named spends that folder's plan. One whose
+        // folder can't be told (an id in two folders, a folder she hasn't
+        // named) reads as a plan used up, so no wake is made for it, rather
+        // than as the app's own, whose plan it may not spend.
+        match crate::compose::runtime::accounts::session_root(self.w, app, agent) {
+            Ok(root) => usage_in(self.w, app, root.as_deref()),
+            Err(_) => Some(1.0),
+        }
+    }
+    fn wake_setting(&mut self, agent: &str) -> Wake {
+        match &self.via {
+            None => Wake::parse(&crate::compose::runtime::network::net(self.w).reach().wake),
+            Some(via) if self.decides_wake(via, agent, false) => Wake::Network,
+            Some(_) => Wake::Consent,
+        }
+    }
+    fn shown(&mut self, agent: &str) -> bool {
+        self.via.as_ref().is_none_or(|via| self.decides_wake(via, agent, true))
     }
     fn notify(&mut self, notice: Value) {
         self.w.emit(From::Delivery, "notify", notice);
@@ -597,7 +691,11 @@ impl router::Host for RouterHost<'_> {
 /// was sent: a listening hook can take the message and go before the route
 /// runs.
 pub fn route(w: &Runtime, m: &Value, listening: &[String]) {
-    let mut h = RouterHost { w, listening: Some(listening) };
+    let via = match (m["host"].as_str(), m["network"].as_str()) {
+        (Some(host), Some(network)) => Some(Via { host: host.to_string(), network: network.to_string() }),
+        _ => None,
+    };
+    let mut h = RouterHost { w, listening: Some(listening), via };
     if let Err(e) = w.router.core.route(&mut h, m) {
         w.emit(From::Delivery, "error", serde_json::json!({ "message": e.0 }));
     }

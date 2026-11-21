@@ -30,6 +30,78 @@ pub struct Start<'a> {
     pub prompt_file: Option<&'a str>,
 }
 
+/// What a sandboxed run is held to: it writes only in `folder` (its working
+/// folder), reads none of `home` but the folder, and reaches the network
+/// only at `domains` (none: not at all).
+#[derive(Clone, Copy, Debug)]
+pub struct Plan<'a> {
+    pub folder: &'a str,
+    pub home: &'a str,
+    pub domains: &'a [String],
+    /// XenoNet's port and the xenonet command, which its hooks and its MCP
+    /// server in the run go through.
+    pub port: &'a str,
+    pub bin: &'a str,
+    /// The run's own temp folder, for an app that is given one
+    /// (`SandboxWays::temp_var`).
+    pub temp: Option<&'a str>,
+}
+
+/// The files a sandboxed run is started with, for an app whose sandbox is
+/// settings.
+#[derive(Clone, Copy, Debug)]
+pub struct SandboxFiles<'a> {
+    pub plan: Plan<'a>,
+    /// The one settings file the run loads, instead of the user's, the
+    /// project's and the local ones.
+    pub settings: &'a str,
+    /// The one MCP configuration the run loads: XenoNet's server.
+    pub mcp: &'a str,
+    /// XenoNet's MCP server's name in the app's settings.
+    pub server: &'a str,
+    /// The run isn't the person's own: a start for someone else (a session,
+    /// an actor, another machine, a delegation, an intent). The app's own
+    /// permission mode is then never one a resumed session brings back.
+    pub not_own: bool,
+}
+
+/// The files of one sandboxed run: its settings (given the plan, the
+/// settings a session listens with, and XenoNet's server's name) and its MCP
+/// configuration.
+pub type SandboxMake = fn(&Plan<'_>, Option<&Value>, &str) -> (Value, Value);
+
+/// How an app's own sandbox is driven. An app without one has no
+/// `Ways::sandbox`, and a sandboxed start of it is refused.
+#[derive(Clone, Copy, Debug)]
+pub struct SandboxWays {
+    /// Why a sandboxed start can't run (in words), given whether this is
+    /// native Windows: None when it can.
+    pub unavailable: fn(&Plan<'_>, bool) -> Option<String>,
+    /// For an app whose sandbox is settings: the settings file of one run
+    /// (the sandbox's keys, the permission rules that hold what the sandbox
+    /// doesn't cover, and XenoNet's hooks), with `listen` the settings a
+    /// session listens with, merged in; and the MCP configuration that
+    /// holds XenoNet's server only, named `server`.
+    pub files: Option<SandboxMake>,
+    /// What a sandboxed run's answer and first prompt say it may reach,
+    /// beyond its folder: the words for the domains.
+    pub words: fn(&Plan<'_>) -> String,
+    /// The arguments of a turn of the app (a start, a resumed turn or a
+    /// copy), as they are without the sandbox, made to run in it with the
+    /// run's files. A resumed turn of a sandboxed session is sandboxed too.
+    pub turn: fn(&SandboxFiles<'_>, Vec<String>) -> Vec<String>,
+    /// Whether the app's sandbox lets its commands read the whole disk
+    /// (Codex's can't deny reads). A run's last words can carry any file it
+    /// reads, so such a sandbox isn't enough for a run that isn't the
+    /// person's own: those starts are refused.
+    pub reads_whole_disk: bool,
+    /// The variable that names the app's temp folder, for an app whose
+    /// sandbox lets a command write in that folder when it is shared by
+    /// every session of the user: each sandboxed run is given one of its
+    /// own in it.
+    pub temp_var: Option<&'static str>,
+}
+
 /// The command that starts a new session with a first prompt: the program
 /// and its arguments. The prompt goes on standard input, or in
 /// `Start::prompt_file`, never as an argument.
@@ -108,6 +180,8 @@ pub struct Ways {
     /// The alias that starts the app so that XenoNet reaches its server,
     /// for an app whose own server takes messages.
     pub server_alias: Option<&'static str>,
+    /// How the app's own sandbox is driven, if XenoNet can drive one.
+    pub sandbox: Option<SandboxWays>,
 }
 
 /// Whether lines of a run's output say something.
@@ -121,6 +195,10 @@ pub type PlanUsed = fn(Option<&Value>, f64) -> Option<Vec<f64>>;
 pub struct SignIn {
     /// The variable that hands a run the token.
     pub variable: &'static str,
+    /// The variable that tells the app to read the token from a descriptor
+    /// instead, which keeps it out of the environment (unix only): the
+    /// number it holds is the descriptor.
+    pub fd_variable: Option<&'static str>,
     /// Whether a run's output says the app isn't signed in.
     pub signed_out: fn(&str) -> bool,
 }

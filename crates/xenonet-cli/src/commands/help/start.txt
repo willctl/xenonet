@@ -4,15 +4,31 @@ Claude Code and Codex run headless, through XenoNet's runner; Grok Build
 and Hermes Agent run over ACP, in a session XenoNet holds open for
 replies.
 
-  xenonet start [--on <machine>] [--in <folder>]
+  xenonet start [--on <machine>] [--in <folder>] [--network <id|name>]
                 [--app claude|codex|grok|hermes-agent]
-                [--mode plan|acceptEdits|auto|dontAsk] "<prompt>"
+                [--mode plan|acceptEdits|auto|dontAsk]
+                [--confine off|vendor|cell] [--allow <domains>] "<prompt>"
 
   --on     another machine in your network, by its id; this one when left
            out. It must be online, and its XenoNet new enough to take starts
   --in     a project or folder by its id on that machine's map, a path it
            reports, or ~ (the default)
+  --network  which of this machine's networks the start goes through, by
+           its id or name; needed only when --on is in two or more of them,
+           and the answer says so
   --app    claude (the default), codex, grok or hermes-agent
+  --confine  how confined the run is. vendor holds it to its app's own
+           sandbox: Claude Code's or Codex's. It writes only in its folder
+           and reaches no network beyond --allow's domains. off leaves the
+           app's own settings. cell is a sealed cell, which isn't wired
+           to session starts yet, so it is refused. Left out, a start on
+           this machine is yours and off, and one on another machine is
+           vendor. An app with no sandbox to drive (Grok Build, Hermes
+           Agent) refuses vendor; Codex refuses it with domains, since its
+           sandbox can't name them. --sandbox means --confine vendor, and
+           --no-sandbox means --confine off
+  --allow  with vendor: the domains the run may reach, separated by
+           commas (github.com,*.npmjs.org); none by default
   --mode   a permission mode; left out, the session runs under your own
            settings. Codex takes its config.toml's and Hermes Agent its
            own, so no mode; Grok Build with a mode runs headless. A

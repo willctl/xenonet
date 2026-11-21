@@ -271,6 +271,22 @@ pub trait Ground {
     /// `machine`'s signing key, as the network's chain binds it.
     fn signing_key(&self, machine: &MachineId) -> Option<VerifyingKey>;
 
+    /// Whether `network` is shown `project`, which is what the person
+    /// shares into it: a network that has no say here, or none kept,
+    /// sees nothing. `None` asks about what sits in no project this
+    /// machine has confirmed a checkout of, which only a network shown
+    /// everything sees. A decision for a frame from another machine asks
+    /// this of the network the frame came in. Required, with no default,
+    /// so a ground can't forget it and see everything.
+    fn sees(&self, network: &NetworkId, project: Option<&ProjectId>) -> bool;
+
+    /// The project one of this machine's sessions is in, through a
+    /// checkout the person confirmed, when it is in one.
+    fn session_project(&self, session: &SessionId) -> Option<ProjectId> {
+        let _ = session;
+        None
+    }
+
     /// The consent rows for one of this machine's sessions.
     fn consent(&self, session: &SessionId) -> Consent;
 

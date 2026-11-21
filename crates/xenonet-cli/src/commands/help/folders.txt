@@ -1,0 +1,21 @@
+The folders each app is read from. Claude Code and Codex keep their sessions
+and sign-in in one folder, and people who keep accounts apart give each
+account a folder of its own (CLAUDE_CONFIG_DIR, CODEX_HOME). XenoNet reads the
+app's own folder, and reads another only once you name it here.
+
+  xenonet folders [list]                 each app's folders, and others it
+                                         found that look like one, which
+                                         nothing reads until you add them
+  xenonet folders add <app> <folder>     read this folder of the app too
+  xenonet folders remove <app> <folder>  stop reading it
+  --json                                 the answer as JSON
+
+Each folder has its own sign-in and its own timeline of accounts, so a
+session in a folder that has had one account is linked to it by its folder.
+Resuming, forking or waking a session runs it in the folder it was found in.
+Removing a folder takes XenoNet's hooks out of it at once and says so.
+
+Naming folders is yours, so it works from your own terminal and is refused
+from a session's. XenoNet reads the folders you named when its service
+starts, so run xenonet service stop and then xenonet service start after a
+change.

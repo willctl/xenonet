@@ -331,6 +331,9 @@ mod person {
         fn own_machine(&self) -> &MachineId {
             &self.own
         }
+        fn sees(&self, _: &NetworkId, _: Option<&xenonet_authz::ProjectId>) -> bool {
+            false
+        }
         fn role(&self, _: &NetworkId, _: &MachineId) -> Option<Role> {
             None
         }

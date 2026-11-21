@@ -417,6 +417,8 @@ struct Seen {
     branch: Option<String>,
     cwd: Option<String>,
     tag: Option<String>,
+    /// What started the session, as its lines say (`cli`, `t3-code`…).
+    entrypoint: Option<String>,
 }
 
 impl Seen {
@@ -441,6 +443,7 @@ impl Seen {
             branch: nonempty(last_value(&t.tail, "gitBranch")).or_else(|| nonempty(first_value(&t.head, "gitBranch"))),
             cwd: nonempty(relocated(&t.tail)).or_else(|| nonempty(first_value(&t.head, "cwd"))),
             tag: t.tail.split('\n').rfind(|l| l.contains("\"type\":\"tag\"") && l.contains("\"tag\":\"")).and_then(|l| nonempty(last_value(l, "tag"))),
+            entrypoint: nonempty(first_value(&t.head, "entrypoint")),
         }
     }
 }
@@ -452,7 +455,7 @@ fn listing(id: &str, file: &Path, t: &Seen) -> Option<Value> {
     let sidecar = if t.tail_title.is_none() { sidecar_title(file, id) } else { None };
     let custom = nonempty(t.tail_title.clone()).or(sidecar).or_else(|| t.later_title.clone());
     let summary = custom.clone().or_else(|| t.later_summary.clone())?;
-    let (first, created, branch, cwd, tag) = (t.first.clone(), t.created, t.branch.clone(), t.cwd.clone(), t.tag.clone());
+    let (first, created, branch, cwd, tag, entrypoint) = (t.first.clone(), t.created, t.branch.clone(), t.cwd.clone(), t.tag.clone(), t.entrypoint.clone());
     let mut m = Map::new();
     m.insert("sessionId".into(), json!(id));
     m.insert("summary".into(), json!(summary));
@@ -468,6 +471,9 @@ fn listing(id: &str, file: &Path, t: &Seen) -> Option<Value> {
     put("gitBranch", branch.map(Value::String));
     put("cwd", cwd.map(Value::String));
     put("tag", tag.map(Value::String));
+    // Not the SDK's own field: the reader adds what the transcript says
+    // started the session.
+    put("entrypoint", entrypoint.map(Value::String));
     put("createdAt", created.map(xenonet_text::json::number));
     Some(Value::Object(m))
 }

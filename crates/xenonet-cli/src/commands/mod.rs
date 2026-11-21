@@ -18,8 +18,10 @@ pub mod disconnect;
 pub mod doctor;
 pub mod drift;
 pub mod film;
+pub mod folders;
 pub mod gateway;
 pub mod hook;
+pub mod identity;
 pub mod install;
 pub mod intent;
 pub mod live;
@@ -92,7 +94,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("live", "Messages that reach sessions as they're sent: pause, consent, actors' scopes, audit", Some("[pause|resume|allow|disallow|grant|revoke|audit]")),
     cmd("spend", "About what today's work would cost at API prices, by app and by actor", None),
     cmd("messages", "What sessions and actors said to each other today", None),
+    cmd("identity", "The git email and push account a project should use, and a hook that stops a push under the wrong one", Some("<rule|check|hook> [<folder>]")),
     cmd("root", "The projects folder XenoNet reads, or read another", Some("[folder]")),
+    cmd("folders", "The folders each app is read from: list, add one of another account, remove", Some("[list|add|remove] [<app> <folder>]")),
     cmd(
         "net",
         "One network across your machines: create or join one, add a machine, see the hosts",
@@ -101,7 +105,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("svc", "Publish a local HTTP service to the network, for programs on its other machines", Some("[publish|unpublish|list]")),
     cmd("start", "Start a session here or on another machine, with a first prompt", Some("[--on <machine>] \"<prompt>\"")),
     cmd("intent", "Your intents: work asked for here, done on the machine it names", Some("[list|make|cancel]")),
-    cmd("runs", "The Claude Code sign-in for the sessions XenoNet runs itself", Some("[status|sign-in|forget]")),
+    cmd("runs", "The Claude Code sign-in for the sessions XenoNet runs itself", Some("[status|sign-in|forget|domains]")),
     cmd("search", "Search every {apps lines} transcript", Some("<words>")),
     cmd("theme", "The console's look and sound: list, switch, or make your own", Some("[id]")),
     cmd("film", "Render a film of today to an MP4, in a hidden window", None),
@@ -154,8 +158,10 @@ fn text(name: &str) -> &'static str {
         "doctor" => doctor::HELP,
         "drift" => drift::HELP,
         "film" => film::HELP,
+        "folders" => folders::HELP,
         "gateway" => gateway::HELP,
         "hook" => hook::HELP,
+        "identity" => identity::HELP,
         "install" => install::HELP,
         "live" => live::HELP,
         "logs" => logs::HELP,
@@ -199,8 +205,10 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "doctor" => doctor::run(args, flags),
         "drift" => drift::run(args, flags),
         "film" => film::run(args, flags),
+        "folders" => folders::run(args, flags),
         "gateway" => gateway::run(args, flags),
         "hook" => hook::run(args, flags),
+        "identity" => identity::run(args, flags),
         "install" => install::run(args, flags),
         "live" => live::run(args, flags),
         "logs" => logs::run(args, flags),

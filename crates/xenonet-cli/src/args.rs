@@ -83,7 +83,8 @@ const TAKES_VALUE: &[&str] = &[
 // Flags that take a value in one command only, because another command
 // reads the same name as a switch: xenonet net set --start network, but
 // a switch anywhere else.
-const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start", "network", "relay"])];
+const TAKES_VALUE_IN: &[(&str, &[&str])] =
+    &[("net", &["start", "network", "relay"]), ("identity", &["git", "push", "claude", "chatgpt", "mode"]), ("start", &["network", "allow", "confine"]), ("intent", &["network"])];
 const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
 /// Flags that take the word after them only when it's one of their
 /// choices, and are on alone: `--mdns on|off`, and `--mdns` on its own
@@ -184,7 +185,12 @@ fn camel(name: &str) -> String {
 }
 
 // Whether --key takes the word after it, in the command named so far.
-fn takes_value(key: &str, command: Option<&String>) -> bool {
+// xenonet identity check --push is the hook's switch, though identity rule
+// --push takes an account.
+fn takes_value(key: &str, command: Option<&String>, sub: Option<&String>) -> bool {
+    if key == "push" && command.is_some_and(|c| c == "identity") && sub.is_some_and(|s| s == "check") {
+        return false;
+    }
     TAKES_VALUE.contains(&key) || TAKES_VALUE_IN.iter().any(|(c, keys)| command.is_some_and(|w| w == c) && keys.contains(&key))
 }
 
@@ -223,7 +229,7 @@ pub fn parse(argv: &[String]) -> Parsed {
             let key = camel(k);
             if let Some(v) = v {
                 set(&mut flags, &key, v.to_string());
-            } else if takes_value(&key, rest.first()) && i + 1 < argv.len() {
+            } else if takes_value(&key, rest.first(), rest.get(1)) && i + 1 < argv.len() {
                 i += 1;
                 set(&mut flags, &key, argv[i].clone());
             } else if let Some(next) = argv.get(i + 1).filter(|n| TAKES_CHOICE.iter().any(|(k, choices)| *k == key && choices.contains(&n.as_str()))) {
@@ -296,10 +302,20 @@ mod tests {
         assert_eq!(parse(&args(&["net", "set", "--on", "desk", "--approve", "p1"])).flags, flags(json!({ "on": "desk", "approve": "p1" })));
         let start = parse(&args(&["start", "--on", "desk", "--in", "~/app", "--app", "codex", "--mode", "plan", "fix", "it"]));
         assert_eq!((start.rest, start.flags), (args(&["start", "fix", "it"]), flags(json!({ "on": "desk", "in": "~/app", "app": "codex", "mode": "plan" }))));
+        // A start and an intent name the network they go through.
+        let start = parse(&args(&["start", "--on", "contractor-vm", "--network", "work", "tidy", "up"]));
+        assert_eq!((start.rest, start.flags), (args(&["start", "tidy", "up"]), flags(json!({ "on": "contractor-vm", "network": "work" }))));
+        let intent = parse(&args(&["intent", "make", "fix it", "--on", "desk", "--network", "net_home"]));
+        assert_eq!((intent.rest, intent.flags), (args(&["intent", "make", "fix it"]), flags(json!({ "on": "desk", "network": "net_home" }))));
         assert_eq!(parse(&args(&["logs", "--component", "service", "--code", "doctor."])).flags, flags(json!({ "component": "service", "code": "doctor." })));
         assert_eq!(parse(&args(&["diagnose", "--model", "m"])).flags, flags(json!({ "model": "m" })));
         assert_eq!(parse(&args(&["refusals", "--provider", "claude"])).flags, flags(json!({ "provider": "claude" })));
         assert_eq!(parse(&args(&["live", "pause", "--hours", "2"])).flags, flags(json!({ "hours": "2" })));
+        // --push takes an account for identity rule, and is the hook's switch for identity check.
+        let rule = parse(&args(&["identity", "rule", "--git", "nova@example.com", "--push", "nova-dev@github.com"]));
+        assert_eq!(rule.flags, flags(json!({ "git": "nova@example.com", "push": "nova-dev@github.com" })));
+        let check = parse(&args(&["identity", "check", "--push", "origin", "https://github.com/acme/atlas.git"]));
+        assert_eq!((check.rest, check.flags), (args(&["identity", "check", "origin", "https://github.com/acme/atlas.git"]), flags(json!({ "push": true }))));
         // --start is a switch everywhere but net.
         assert_eq!(parse(&args(&["status", "--start", "--demo"])).flags, flags(json!({ "start": true, "demo": true })));
     }

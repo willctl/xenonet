@@ -135,6 +135,9 @@ pub struct Session {
     /// The Claude account and organization Claude desktop filed it under
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_account: Option<ClaudeAccount>,
+    /// The app that runs Claude Code for the person, when it isn't the CLI or Claude desktop: `t3-code`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs_in: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     /// The model provider, when it isn't your ChatGPT account's

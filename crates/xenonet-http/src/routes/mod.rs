@@ -1032,6 +1032,10 @@ async fn identities(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError
     if m == "GET" && route == "/api/identities" {
         return Ok(Some(Reply::json(200, state.identity_detection()?)));
     }
+    if m == "GET" && route == "/api/identities/project" {
+        let path = req.param("path").unwrap_or("").to_string();
+        return Ok(Some(Reply::json(200, state.identity_project(&path)?)));
+    }
     let get = |b: &Value, k: &str| b.get(k).cloned().unwrap_or(Value::Null);
     match (m.as_str(), route.as_str()) {
         ("POST", "/api/identities/name") => {
@@ -1045,6 +1049,10 @@ async fn identities(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError
         ("POST", "/api/identities/pin") => {
             let b = req.json_body().await?;
             Ok(Some(Reply::json(200, state.pin_identity(get(&b, "nodeId"), get(&b, "identity")).await?)))
+        }
+        ("POST", "/api/identities/rule") => {
+            let b = req.json_body().await?;
+            Ok(Some(Reply::json(200, state.set_identity_rule(get(&b, "nodeId"), b.clone()).await?)))
         }
         ("POST", "/api/identities/rescan") => Ok(Some(Reply::json(200, state.rescan_identities().await?))),
         _ => Ok(None),

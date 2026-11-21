@@ -22,6 +22,7 @@
   "identity": "claude",
   "limits": "claude",
   "team": "Q6L2SF6YDW",
+  "checked": "2.1.327",
   "connect": {
    "format": "claude-settings",
    "events": [
@@ -97,6 +98,7 @@
   "identity": "chatgpt",
   "limits": "codex",
   "team": "2DC432GLL2",
+  "checked": "0.171.0",
   "connect": {
    "format": "codex-hooks",
    "events": [
@@ -174,6 +176,7 @@
   },
   "context": 256000,
   "team": "5Y6N3AJ54S",
+  "checked": "1.0.77",
   "connect": {
    "format": "grok-hooks",
    "events": [

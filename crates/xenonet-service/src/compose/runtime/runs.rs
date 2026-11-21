@@ -143,6 +143,125 @@ pub struct Turn<'a> {
     pub cwd: &'a str,
     pub env: &'a [(String, String)],
     pub text: String,
+    /// The run's sign-in, for an app that takes it on a descriptor (unix:
+    /// Claude Code's CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR, which `env`
+    /// then names as 3). It is written into a pipe the run gets the read end
+    /// of, so it is in no environment a command could read.
+    pub sign_in: Option<&'a str>,
+    /// A folder made for this turn alone (a sandboxed run's temp folder),
+    /// removed once the turn and everything it started have ended, or when
+    /// it doesn't start.
+    pub temp: Option<crate::compose::runtime::sandbox::OwnTemp>,
+}
+
+/// The descriptor number a run reads its sign-in from.
+pub const SIGN_IN_FD: i32 = 3;
+
+/// A run in its process group: Adytum's exec, or on unix one that was given
+/// a descriptor, which Adytum's exec can't do.
+enum Proc {
+    Group(Spawned),
+    #[cfg(unix)]
+    Held(xenonet_os::process::Held),
+}
+
+impl Proc {
+    fn pid(&self) -> u32 {
+        match self {
+            Proc::Group(s) => s.pid(),
+            #[cfg(unix)]
+            Proc::Held(h) => h.pid(),
+        }
+    }
+
+    fn stdin(&mut self) -> Option<std::process::ChildStdin> {
+        match self {
+            Proc::Group(s) => s.stdin.take(),
+            #[cfg(unix)]
+            Proc::Held(h) => h.stdin.take(),
+        }
+    }
+
+    fn stdout(&mut self) -> Option<std::process::ChildStdout> {
+        match self {
+            Proc::Group(s) => s.stdout.take(),
+            #[cfg(unix)]
+            Proc::Held(h) => h.stdout.take(),
+        }
+    }
+
+    fn stderr(&mut self) -> Option<std::process::ChildStderr> {
+        match self {
+            Proc::Group(s) => s.stderr.take(),
+            #[cfg(unix)]
+            Proc::Held(h) => h.stderr.take(),
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn group_running(&self) -> bool {
+        match self {
+            Proc::Group(s) => s.group_running(),
+            #[cfg(unix)]
+            Proc::Held(h) => h.group_running(),
+        }
+    }
+
+    /// How it ended (its code, whether the deadline stopped it), once it has.
+    fn try_wait(&mut self) -> Result<Option<(Option<i32>, bool)>, ()> {
+        match self {
+            Proc::Group(s) => s.try_wait().map(|e| e.map(|e| (e.code, e.timed_out))).map_err(|_| ()),
+            #[cfg(unix)]
+            Proc::Held(h) => h.try_wait().map(|e| e.map(|e| (e.code, e.timed_out))).map_err(|_| ()),
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn kill_group(&mut self) {
+        match self {
+            Proc::Group(s) => s.kill_group(),
+            #[cfg(unix)]
+            Proc::Held(h) => h.kill_group(),
+        }
+    }
+
+    /// Windows: the child, for a job object (Adytum's exec only).
+    #[cfg(windows)]
+    fn child_mut(&mut self) -> &mut std::process::Child {
+        match self {
+            Proc::Group(s) => s.child_mut(),
+        }
+    }
+}
+
+/// Starts `how`: with a descriptor holding `token` on unix when there is
+/// one, else through Adytum's exec.
+fn spawn(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: Option<&str>) -> Result<Proc, adytum::Error> {
+    let deadline = Duration::from_secs_f64(runs::TURN_MS / 1000.0);
+    #[cfg(unix)]
+    if let Some(token) = token {
+        return spawn_held(how, cwd, env, token, deadline);
+    }
+    #[cfg(not(unix))]
+    let _ = token;
+    let cmd = command(how).cwd(cwd).deadline(deadline);
+    let cmd = env.iter().fold(cmd, |c, (k, v)| c.env(k, v));
+    Spawned::start(&cmd).map(Proc::Group)
+}
+
+/// A run that reads its sign-in from descriptor 3: a pipe whose read end
+/// the run has as descriptor 3, with the token and a newline written into
+/// it once the run has started, and our end closed (`Held::start`, which
+/// says what is left of a window). The run has descriptors 0 to 3 and no
+/// other. Made with std's command, since Adytum's exec has no way to pass a
+/// descriptor and is Adytum's own repository.
+#[cfg(unix)]
+fn spawn_held(how: &runs::Launch, cwd: &str, env: &[(String, String)], token: &str, deadline: Duration) -> Result<Proc, adytum::Error> {
+    let mut c = std::process::Command::new(&how.program);
+    c.args(&how.args).env_clear().envs(env.iter().map(|(k, v)| (k, v))).current_dir(cwd);
+    xenonet_os::process::Held::start(c, Some(deadline), Some(xenonet_os::process::Give { line: token, at: SIGN_IN_FD }))
+        .map(Proc::Held)
+        .map_err(|source| adytum::Error::Spawn { program: how.program.clone().into(), source })
 }
 
 /// The records, and the sessions whose runs this runner has under way:
@@ -290,7 +409,7 @@ impl Runner {
 
     /// One turn of `program`, once `admit` let it start.
     fn start(self: &Arc<Self>, t: Turn<'_>, program: &str) -> Result<u32, String> {
-        let Turn { key, app, args, cwd, env, text } = t;
+        let Turn { key, app, args, cwd, env, text, sign_in, temp } = t;
         let how = runs::launch(program, args, cfg!(windows))?;
         let id = xenonet_engine::network::new_id("run").map_err(|t| t.message)?;
         let logs = self.dir.as_ref().map(|d| d.join("runs"));
@@ -299,13 +418,12 @@ impl Runner {
         }
         let log_path = logs.as_ref().map(|l| l.join(format!("{id}.log")));
         let log = log_path.as_ref().and_then(|p| Log::open(p)).map(|l| Arc::new(Mutex::new(l)));
-        let cmd = command(&how).cwd(cwd).deadline(Duration::from_secs_f64(runs::TURN_MS / 1000.0));
-        let cmd = env.iter().fold(cmd, |c, (k, v)| c.env(k, v));
         let at = now_ms();
         // Its own group, so stopping the turn stops what it started.
-        let mut child = match Spawned::start(&cmd) {
+        let mut child = match spawn(&how, cwd, env, sign_in) {
             Ok(c) => c,
             Err(e) => {
+                drop(temp);
                 // No run, so no log of one.
                 if let Some(p) = &log_path {
                     drop(log);
@@ -323,13 +441,13 @@ impl Runner {
         let run = Run { id, key: key.to_string(), app: app.to_string(), pid: Some(f64::from(pid)), at, end: None, exit: None, ms: None, timed_out: false };
         self.state.locked().runs.push(run);
         self.save();
-        if let Some(o) = child.stdout.take() {
+        if let Some(o) = child.stdout() {
             drain(o, log.clone());
         }
-        if let Some(e) = child.stderr.take() {
+        if let Some(e) = child.stderr() {
             drain(e, log.clone());
         }
-        if let Some(mut stdin) = child.stdin.take() {
+        if let Some(mut stdin) = child.stdin() {
             std::thread::spawn(move || {
                 let _ = stdin.write_all(text.as_bytes());
             });
@@ -358,12 +476,12 @@ impl Runner {
                 #[cfg(not(windows))]
                 let others = child.group_running();
                 match child.try_wait() {
-                    Ok(Some(exit)) if !others => {
-                        code = exit.code;
-                        timed_out |= exit.timed_out;
+                    Ok(Some((exit, late))) if !others => {
+                        code = exit;
+                        timed_out |= late;
                         break;
                     }
-                    Err(_) => break,
+                    Err(()) => break,
                     _ => {}
                 }
                 if me.state.locked().stopping.contains(&key) {
@@ -385,6 +503,7 @@ impl Runner {
                     r.timed_out = timed_out;
                 }
             }
+            drop(temp);
             // Saved before the session is let go, so whoever sees it free
             // (a restart, the next run) reads how this one ended.
             me.save();
@@ -421,7 +540,7 @@ mod tests {
         let db = Arc::new(Db::memory().unwrap());
         let r = Runner::new(Some(dir.clone()), Some(db.clone()));
         let env = [("PATH".to_string(), "/usr/bin:/bin".to_string()), ("GO".to_string(), go.to_string_lossy().into_owned())];
-        let turn = |key| Turn { key, app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into() };
+        let turn = |key| Turn { key, app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into(), sign_in: None, temp: None };
         // Admitted is counted at once: a second message to the session, or
         // a fifth run, can't start one beside it before it has started.
         r.admit("claude:a").unwrap();
@@ -457,6 +576,45 @@ mod tests {
         assert!(log.contains("out: hello") && log.contains("err"), "{log}");
         let again = Runner::new(Some(dir.clone()), Some(db));
         assert_eq!(again.list(), r.list(), "the records are read back");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_runs_sign_in_comes_on_descriptor_3_and_in_no_environment() {
+        let dir = std::env::temp_dir().join(format!("xenonet-runner-fd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Stands in for Claude Code: opens /dev/fd/3 (a pipe, as on Linux)
+        // for a line, then for the rest, which ends at once only if no
+        // process holds the write end open (XenoNet's was closed and wasn't
+        // passed on), and lists any descriptor past 3.
+        let bin = dir.join("claude");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\nread line\nIFS= read -r tok < /dev/fd/3\nrest=$(cat < /dev/fd/3)\necho \"len: ${#tok} rest: ${#rest}\"\necho \"env: $(env | grep -c made-up-token)\"\nn=4; while [ $n -lt 120 ]; do [ -e /dev/fd/$n ] && echo \"open $n\"; n=$((n+1)); done\necho \"fds done\"\nexit 0\n",
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let cwd = dir.to_string_lossy().into_owned();
+        let r = Runner::new(Some(dir.clone()), None);
+        let env = [("PATH".to_string(), "/usr/bin:/bin".to_string()), ("CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR".to_string(), "3".to_string())];
+        r.admit("claude:fd").unwrap();
+        let turn = Turn { key: "claude:fd", app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into(), sign_in: Some("made-up-token-0123"), temp: None };
+        let pid = r.start(turn, &bin.to_string_lossy()).unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while r.running("claude:fd") {
+            assert!(Instant::now() < end, "the run ended: an end of the pair is still held");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let rec = r.list().into_iter().find(|x| x.pid == Some(f64::from(pid))).unwrap();
+        let log = std::fs::read_to_string(dir.join("runs").join(format!("{}.log", rec.id))).unwrap();
+        assert!(log.contains("len: 18 rest: 0"), "the run read its token from descriptor 3 and then the end: {log}");
+        assert!(log.contains("env: 0\n"), "it is in no environment: {log}");
+        assert!(log.contains("fds done") && !log.contains("open "), "the run has no descriptor past 3: {log}");
+        assert!(!log.contains("made-up-token"), "the token isn't printed: {log}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

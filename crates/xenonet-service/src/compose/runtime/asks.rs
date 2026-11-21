@@ -31,7 +31,7 @@
 //! The answer is what Claude Code takes from a permission prompt tool:
 //! `{"behavior":"allow","updatedInput":…}` or `{"behavior":"deny","message":…}`.
 
-use crate::compose::runtime::network::{clip, ms, net, send};
+use crate::compose::runtime::network::{clip, ms, net};
 use crate::compose::runtime::Runtime;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -66,6 +66,9 @@ pub struct Ask {
     pub warn: bool,
     pub at: f64,
     pub until: f64,
+    /// The network another machine's ask came in, which its answer goes
+    /// back into; None for an ask here.
+    pub network: Option<String>,
 }
 
 impl Ask {
@@ -102,6 +105,7 @@ impl Ask {
             warn,
             at: v.get("at").and_then(Value::as_f64).unwrap_or_else(now_ms),
             until: v.get("until").and_then(Value::as_f64).unwrap_or_else(|| now_ms() + HOLD_MS),
+            network: None,
         })
     }
 }
@@ -233,17 +237,31 @@ fn run_of_soon(w: &Runtime, me: &str) -> Option<String> {
     }
 }
 
-/// The other machines that are window hosts: where an ask shows.
-fn window_hosts(w: &Runtime) -> Vec<String> {
-    net(w).hosts().into_iter().filter(|h| h.window).map(|h| h.id).collect()
+/// The machines that are window hosts of `network`, by its own roster: where
+/// an ask of a run started in it shows.
+fn window_hosts(w: &Runtime, network: &str) -> Vec<String> {
+    net(w).hosts_in(network).into_iter().filter(|h| h.window).map(|h| h.id).collect()
 }
 
-fn to_windows(w: &Runtime, me: &str, body: &Value) {
+/// Sends a run's ask, or its end, to the window hosts of the network the
+/// run's start came in, and to no other: a window host of another network
+/// is not shown a run it didn't ask for. A run started here for no one
+/// has no such network, and its ask goes to no other machine.
+#[doc(hidden)]
+pub fn to_windows(w: &Runtime, me: &str, body: &Value) {
     if net(w).me().is_none() {
         return;
     }
+    let root = crate::compose::runtime::starts::fork_root(w, me);
+    let Some(network) = w.starts.network_of(me, root.as_deref()) else { return };
+    // A copy forked from a run names it, since the machine that asked for
+    // the run knows that one and not the copy.
+    let mut body = body.clone();
+    if let (Some(root), true) = (&root, body.is_object()) {
+        body["root"] = json!({ "session": root, "agent": crate::compose::runtime::network::wire_id(w, root) });
+    }
     let text = body.to_string();
-    for host in window_hosts(w) {
+    for host in window_hosts(w, &network) {
         let Ok(mid) = xenonet_engine::network::new_id("msg") else { continue };
         let frame = json!({
             "schema": "network/send/v1",
@@ -259,7 +277,7 @@ fn to_windows(w: &Runtime, me: &str, body: &Value) {
             "hops": 0,
             "at": ms(now_ms()),
         });
-        send(w, To::Host(host), FrameKind::Message, frame);
+        crate::compose::runtime::network::send_in(w, Some(network.clone()), To::Host(host), FrameKind::Message, frame, None);
     }
 }
 
@@ -278,6 +296,9 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     };
     let input = body.get("input").cloned().unwrap_or_else(|| json!({}));
     let tool = body.get("tool_name").and_then(Value::as_str).unwrap_or("a tool").to_string();
+    // A call that asks to leave the sandbox is the person's alone to allow:
+    // recorded as unchecked, which no delegation, grant or actor allows.
+    let by = if delegation::leaves_sandbox(&input) { xenonet_authz::Attestation::Unchecked } else { by };
     // A session started under your delegation: what the delegation covers
     // is allowed here and now; the rest comes to you, with why it wasn't
     // covered.
@@ -285,7 +306,8 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     let id = xenonet_engine::network::new_id("ask").map_err(|t| (500, t.message))?;
     let kind = prompt_kind(&tool);
     if let Some((folder, from)) = crate::compose::runtime::starts::delegated(w, me) {
-        match delegation::judge(&tool, &input, &folder, &w.setup.home, cfg!(windows)) {
+        let (judged, judged_folder) = resolved(&tool, &input, &folder, &w.setup.home);
+        match delegation::judge(&tool, &judged, &judged_folder, &w.setup.home, cfg!(windows)) {
             Verdict::Allow if !reads_env(&input) => {
                 match granted(
                     w,
@@ -320,10 +342,104 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
         warn: reads_env(&input),
         at: now,
         until: now + hold_ms(w),
+        network: None,
     };
     let answer = hold(w, me, a, kind, by).map(|(d, by, _)| (d, by));
     let (decision, why) = said(answer.as_ref(), hold_ms(w));
     Ok(answer_json(&decision, &input, &why))
+}
+
+/// The input of a tool call with the paths it names resolved through links
+/// as far as they exist, and the folder the same way: a link in the folder
+/// that points out of it is judged by where it points, not by its name. The
+/// answer to the call still carries the input as it was asked.
+fn resolved(tool: &str, input: &Value, folder: &str, home: &str) -> (Value, String) {
+    resolved_with(tool, input, folder, home, &mut |p| p.canonicalize().ok())
+}
+
+/// `resolved` with the way a path is resolved (`canon`: the real path, or
+/// None when it isn't there) given. A path is judged lexically first and
+/// only one that lies inside the folder is resolved: the service never
+/// touches a path an agent names outside it (`/net/...` is an automounter's
+/// and a FIFO blocks), and a path inside whose target is outside is judged
+/// by the target. `~` is the home folder. A Glob pattern's root (the
+/// folders before its first wildcard) is resolved the same way.
+fn resolved_with(tool: &str, input: &Value, folder: &str, home: &str, canon: &mut dyn FnMut(&std::path::Path) -> Option<std::path::PathBuf>) -> (Value, String) {
+    use std::path::{Component, Path, PathBuf};
+    // Windows paths resolve to `\\?\` names the judge doesn't read.
+    if cfg!(windows) {
+        return (input.clone(), folder.to_string());
+    }
+    // The nearest ancestor that exists is resolved, and the rest kept as written.
+    let mut real = |full: &Path| -> Option<PathBuf> {
+        let mut tail = Vec::new();
+        let mut at = full;
+        loop {
+            if let Some(done) = canon(at) {
+                return Some(tail.iter().rev().fold(done, |acc, x: &std::ffi::OsString| acc.join(x)));
+            }
+            tail.push(at.file_name()?.to_os_string());
+            at = at.parent()?;
+        }
+    };
+    let base = Path::new(folder);
+    let real_folder = real(base).unwrap_or_else(|| base.to_path_buf());
+    // The path as written, absolute: `~` is home, a relative path is under the folder.
+    let absolute = |p: &str| -> PathBuf {
+        match p.strip_prefix('~') {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') => PathBuf::from(format!("{home}{rest}")),
+            _ => base.join(p),
+        }
+    };
+    // Whether the path as written lies inside the folder, its `.` and `..`
+    // taken out as written first: one that climbs out is outside, and is
+    // never resolved. (Where a `..` follows a link, the resolved path is what
+    // the judge reads, so a path inside is still judged by where it leads.)
+    let inside = |full: &Path| -> bool {
+        let mut flat = PathBuf::new();
+        for c in full.components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !flat.pop() {
+                        return false;
+                    }
+                }
+                c => flat.push(c.as_os_str()),
+            }
+        }
+        flat.starts_with(base) || flat.starts_with(&real_folder)
+    };
+    let mut out = input.clone();
+    if let Some(o) = out.as_object_mut() {
+        for k in ["file_path", "notebook_path", "path"] {
+            let Some(p) = o.get(k).and_then(Value::as_str) else { continue };
+            let full = absolute(p);
+            if !inside(&full) {
+                continue;
+            }
+            if let Some(r) = real(&full) {
+                o.insert(k.to_string(), Value::String(r.to_string_lossy().into_owned()));
+            }
+        }
+        if tool == "Glob" {
+            if let Some(pattern) = o.get("pattern").and_then(Value::as_str) {
+                // The root: the parts before the first one with a wildcard.
+                let parts: Vec<&str> = pattern.split('/').collect();
+                let wild = parts.iter().position(|x| x.contains(['*', '?', '[', '{'])).unwrap_or(parts.len());
+                let root = parts[..wild].join("/");
+                let full = absolute(&root);
+                if !root.is_empty() && inside(&full) {
+                    if let Some(r) = real(&full).filter(|r| *r != full) {
+                        let rest = parts[wild..].join("/");
+                        let pattern = if rest.is_empty() { r.to_string_lossy().into_owned() } else { format!("{}/{rest}", r.to_string_lossy()) };
+                        o.insert("pattern".to_string(), Value::String(pattern));
+                    }
+                }
+            }
+        }
+    }
+    (out, real_folder.to_string_lossy().into_owned())
 }
 
 /// An answer as the asker hears it: allow or deny, and why a deny.
@@ -405,6 +521,7 @@ pub fn hold_acp(
         warn: reads_env(input),
         at: now,
         until: now + hold_ms(w),
+        network: None,
     };
     let (decision, _, allowed) = hold(w, me, a, kind, xenonet_authz::Attestation::ProcessChecked)?;
     allowed.filter(|_| decision == "allow")
@@ -493,14 +610,14 @@ pub fn answer(w: &Runtime, id: &str, decision: &str) -> Result<Option<String>, S
             return Ok(None);
         }
     }
-    let (host, session, tool) = there(w, id)?;
+    let (host, session, tool, network) = there(w, id)?;
     let authority = if allow {
         let (resource, act) = answer_act(&session, id, decision)?;
         crate::compose::runtime::ground::authority(&g.facts.identity, true, &resource, &act, &reason(&tool), g.facts.now)?
     } else {
         json!({})
     };
-    send_answer(w, &host, id, &session, decision, authority, g.facts.now)?;
+    send_answer(w, &host, network, id, &session, decision, authority, g.facts.now)?;
     Ok(Some(host))
 }
 
@@ -529,7 +646,7 @@ pub fn answer_as_actor(w: &Runtime, token: &str, id: &str, decision: &str) -> Re
             return Ok(None);
         }
     }
-    let (host, session, _) = there(w, id)?;
+    let (host, session, _, network) = there(w, id)?;
     if decision == "allow" {
         return Err(format!("an actor allows only the prompts asked on its own machine, inside its allow scope there: {host}'s is {host}'s to answer"));
     }
@@ -539,28 +656,34 @@ pub fn answer_as_actor(w: &Runtime, token: &str, id: &str, decision: &str) -> Re
         return Err("answering prompts needs the answer-prompts capability, which this actor wasn't allowed".into());
     }
     let authority = crate::compose::runtime::ground::actor_authority(w, bearer.slug.as_str(), vec![xenonet_authz::Action::Answer])?;
-    send_answer(w, &host, id, &session, decision, authority, g.facts.now)?;
+    send_answer(w, &host, network, id, &session, decision, authority, g.facts.now)?;
     Ok(Some(host))
 }
 
-// Another machine's ask waiting on this console: its host, session and tool.
-fn there(w: &Runtime, id: &str) -> Result<(String, String, String), String> {
+// Another machine's ask waiting on this console: its host, session, tool and the network it came in.
+fn there(w: &Runtime, id: &str) -> Result<(String, String, String, Option<String>), String> {
     let now = now_ms();
     let there = w.asks.there.locked();
     let Some(a) = there.iter().find(|a| a.id == id && a.until > now) else { return Err("that ask isn't waiting: it was answered, or its time ran out".into()) };
-    Ok((a.host.clone().unwrap_or_default(), a.session.clone(), a.tool.clone()))
+    Ok((a.host.clone().unwrap_or_default(), a.session.clone(), a.tool.clone(), a.network.clone()))
 }
 
 // An answer to another machine's ask, as `network/operator/v2`, then the ask
 // taken off this console.
-fn send_answer(w: &Runtime, host: &str, id: &str, session: &str, decision: &str, authority: Value, now: i64) -> Result<(), String> {
+//
+// It goes into the network the ask came in, not the first that has the
+// machine: that machine judges it there.
+#[expect(clippy::too_many_arguments, reason = "an answer is these eight things, each from a different place")]
+fn send_answer(w: &Runtime, host: &str, network: Option<String>, id: &str, session: &str, decision: &str, authority: Value, now: i64) -> Result<(), String> {
     let body = json!({
         "schema": "network/operator/v2",
         "answer": { "ask": id, "session": session, "decision": decision },
         "authority": authority,
         "at": ms(now as f64),
     });
-    net(w).send(xenonet_model::ops::Outgoing::new(To::Host(host.to_string()), FrameKind::Operator, body))?;
+    let mut out = xenonet_model::ops::Outgoing::new(To::Host(host.to_string()), FrameKind::Operator, body);
+    out.network = network;
+    net(w).send(out)?;
     answer_sent(w, id, decision);
     Ok(())
 }
@@ -580,20 +703,55 @@ pub fn answer_sent(w: &Runtime, id: &str, decision: &str) {
 }
 
 /// An ask from another machine (`message_in` routes the target here), or
-/// its end. What it asks is information, shown on this console: the
-/// answer is decided on the ask's id and the person's presence, never on
-/// its text.
-pub fn ask_in(w: &Runtime, from: &str, body: &xenonet_authz::Information<String>) {
+/// its end. `from` is the machine, `agent` the agent it says asks, and the
+/// network is the frame's.
+///
+/// A member that may message this machine is not thereby a run of its own:
+/// an ask is taken only for a run this machine asked `from` to start, in
+/// the network that start went through, which its own receipts named and
+/// have not ended (`StartSide::names_run`). Any other is dropped, and
+/// logged. What it asks is information, shown on this console: the answer
+/// is decided on the ask's id and the person's presence, never on its text.
+pub fn ask_in(w: &Runtime, from: &str, agent: Option<&str>, body: &xenonet_authz::Information<String>) {
     let Ok(v) = serde_json::from_str::<Value>(body.read()) else { return };
+    if v.get("op").and_then(Value::as_str) == Some("ask") {
+        let session = Ask::of(&v, from).map(|a| a.session).unwrap_or_default();
+        let network = xenonet_net::ground::current();
+        // A copy forked from a run asks under its own session and agent,
+        // and says which run it was forked from: that run is the one that
+        // must be named, by the machine that sends it.
+        let root = v.get("root").filter(|r| r.is_object());
+        let (session, agent) = match root {
+            Some(r) => (r.get("session").and_then(Value::as_str).unwrap_or(""), r.get("agent").and_then(Value::as_str)),
+            None => (session.as_str(), agent),
+        };
+        if !network.as_deref().is_some_and(|n| w.starts.names_run(from, n, session, agent)) {
+            return w.log("info", "net.ask", &format!("an ask from {from} was dropped: it names no run this machine asked {from} to start in this network"));
+        }
+    }
+    take_ask(w, from, &v);
+}
+
+/// An ask or its end, once `ask_in` has checked what run it is for.
+#[doc(hidden)]
+pub fn take_ask(w: &Runtime, from: &str, v: &Value) {
     let side = &w.asks;
     match v.get("op").and_then(Value::as_str) {
         Some("ask") => {
-            let Some(a) = Ask::of(&v, from) else { return };
+            let Some(mut a) = Ask::of(v, from) else { return };
+            a.network = xenonet_net::ground::current();
             let shown = a.to_json(None);
             {
                 let mut there = side.there.locked();
                 let now = now_ms();
-                there.retain(|x| x.until > now && x.id != a.id);
+                there.retain(|x| x.until > now);
+                // An answer names the ask by its id alone, so an id one
+                // machine's ask holds is not another's to take: the first
+                // keeps it, and the same machine's ask again replaces its own.
+                if there.iter().any(|x| x.id == a.id && x.host != a.host) {
+                    return w.log("info", "net.ask", &format!("an ask from {from} was dropped: another machine's ask already waits under its id"));
+                }
+                there.retain(|x| x.id != a.id);
                 there.push(a);
                 let from = there.len().saturating_sub(THERE_MAX);
                 there.drain(..from);
@@ -687,6 +845,106 @@ pub fn list(w: &Runtime) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A home folder with a project in it, a link in the project that leads
+    /// out to home, and the files a delegation must not reach through it.
+    #[cfg(unix)]
+    fn linked_home(name: &str) -> (std::path::PathBuf, String, String) {
+        let base = std::env::temp_dir().join(format!("xenonet-resolve-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("home/work")).unwrap();
+        let home = base.join("home").canonicalize().unwrap();
+        std::fs::create_dir_all(home.join(".config/gh")).unwrap();
+        std::fs::write(home.join(".config/gh/hosts.yml"), "x").unwrap();
+        std::fs::write(home.join(".zshrc"), "x").unwrap();
+        std::fs::write(home.join("work/notes.md"), "x").unwrap();
+        std::os::unix::fs::symlink(&home, home.join("work/up")).unwrap();
+        let (folder, home_s) = (home.join("work").to_string_lossy().into_owned(), home.to_string_lossy().into_owned());
+        (base, folder, home_s)
+    }
+
+    /// Whether the judge covers the call without asking you, after the
+    /// paths are resolved.
+    #[cfg(unix)]
+    fn covered(tool: &str, input: &Value, folder: &str, home: &str) -> bool {
+        let (judged, judged_folder) = resolved(tool, input, folder, home);
+        matches!(delegation::judge(tool, &judged, &judged_folder, home, false), Verdict::Allow)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_path_through_a_link_that_leaves_the_folder_is_judged_by_its_target() {
+        let (base, folder, home) = linked_home("tilde");
+        // Controls: inside the folder, by its name and by `~`, and through the link to a file in the folder.
+        assert!(covered("Read", &json!({ "file_path": format!("{folder}/notes.md") }), &folder, &home));
+        assert!(covered("Read", &json!({ "file_path": "~/work/notes.md" }), &folder, &home));
+        assert!(covered("Read", &json!({ "file_path": "~/work/up/work/notes.md" }), &folder, &home));
+        // Through `up`, which leads to home, with `~` and without it.
+        for path in ["~/work/up/.config/gh/hosts.yml", &format!("{folder}/up/.config/gh/hosts.yml"), "up/.config/gh/hosts.yml"] {
+            assert!(!covered("Read", &json!({ "file_path": path }), &folder, &home), "a read of {path}");
+        }
+        for path in ["~/work/up/.zshrc", &format!("{folder}/up/.zshrc")] {
+            for tool in ["Write", "Edit"] {
+                assert!(!covered(tool, &json!({ "file_path": path, "content": "x" }), &folder, &home), "{tool} of {path}");
+            }
+        }
+        // The input the run asked with is not changed by judging it.
+        let asked = json!({ "file_path": "~/work/up/.zshrc" });
+        let _ = resolved("Write", &asked, &folder, &home);
+        assert_eq!(asked["file_path"], "~/work/up/.zshrc");
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_glob_whose_root_leads_out_through_a_link_is_judged_by_where_it_leads() {
+        let (base, folder, home) = linked_home("glob");
+        assert!(covered("Glob", &json!({ "pattern": format!("{folder}/**/*.md") }), &folder, &home), "a pattern in the folder is covered");
+        assert!(covered("Glob", &json!({ "pattern": "*.md" }), &folder, &home));
+        for pattern in [format!("{folder}/up/**"), format!("{folder}/up/.config/**/*.yml"), "~/work/up/**".to_string(), "up/**".to_string()] {
+            assert!(!covered("Glob", &json!({ "pattern": pattern }), &folder, &home), "{pattern}");
+        }
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_path_outside_the_folder_is_never_resolved() {
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let mut canon = |p: &std::path::Path| {
+            seen.borrow_mut().push(p.to_string_lossy().into_owned());
+            None
+        };
+        let input = json!({ "file_path": "/net/x.example/y", "path": "/etc/hosts" });
+        let (judged, _) = resolved_with("Read", &input, "/home/jo/work", "/home/jo", &mut canon);
+        assert_eq!(judged, input, "left as asked");
+        assert!(!seen.borrow().iter().any(|p| p.starts_with("/net") || p.starts_with("/etc")), "never touched: {:?}", seen.borrow());
+        let globbed = json!({ "pattern": "/net/x.example/**" });
+        let _ = resolved_with("Glob", &globbed, "/home/jo/work", "/home/jo", &mut canon);
+        assert!(!seen.borrow().iter().any(|p| p.starts_with("/net")), "a pattern's root outside is never touched either");
+        // A path inside is the one it asks about.
+        let _ = resolved_with("Read", &json!({ "file_path": "/home/jo/work/a.rs" }), "/home/jo/work", "/home/jo", &mut canon);
+        assert!(seen.borrow().iter().any(|p| p == "/home/jo/work/a.rs"), "{:?}", seen.borrow());
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_with_dots_is_outside_and_never_resolved() {
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let mut canon = |p: &std::path::Path| {
+            seen.borrow_mut().push(p.to_string_lossy().into_owned());
+            None
+        };
+        for path in ["/home/jo/work/../../net/x.example/y", "/home/jo/work/sub/../../../etc/hosts", "../../net/x", "~/work/../../../etc/hosts"] {
+            let input = json!({ "file_path": path });
+            let (judged, _) = resolved_with("Read", &input, "/home/jo/work", "/home/jo", &mut canon);
+            assert_eq!(judged, input, "{path}: left as asked");
+        }
+        let globbed = json!({ "pattern": "/home/jo/work/../../net/x.example/**" });
+        let _ = resolved_with("Glob", &globbed, "/home/jo/work", "/home/jo", &mut canon);
+        assert!(!seen.borrow().iter().any(|p| p.contains("/net") || p.contains("/etc")), "never touched: {:?}", seen.borrow());
+        // A `..` that stays inside is read as written, up to where it leads.
+        let _ = resolved_with("Read", &json!({ "file_path": "/home/jo/work/sub/../a.rs" }), "/home/jo/work", "/home/jo", &mut canon);
+        assert!(seen.borrow().iter().any(|p| p == "/home/jo/work/sub/../a.rs"), "{:?}", seen.borrow());
+    }
 
     #[test]
     fn what_a_call_asks_in_a_line_and_the_answers_claude_code_takes() {

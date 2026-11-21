@@ -186,7 +186,7 @@ fn expected(c: &Case) -> Outcome {
 fn act_of(what: Do) -> (Resource, Act) {
     let m1 = || Resource::Machine(machine("m1"));
     let run = || Resource::Run { machine: machine("m1"), app: AppId::new("claude").unwrap(), folder: Folder::new("/work").unwrap() };
-    let start = |mode| Act::Start { app: AppId::new("claude").unwrap(), folder: Folder::new("/work").unwrap(), mode };
+    let start = |mode| Act::Start { app: AppId::new("claude").unwrap(), folder: Folder::new("/work").unwrap(), mode, confine: Some(Confine::Vendor { domains: vec![] }) };
     let n1 = || Resource::Network(network());
     match what {
         Do::Message => (m1(), Act::Message),

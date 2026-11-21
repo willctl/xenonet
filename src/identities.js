@@ -169,12 +169,24 @@ export function createIdentities({ sfx = () => {}, toast = () => {}, onFilter = 
     return out;
   }
 
+  // A project's own rule (which git email and push account it uses) against
+  // what the service read of it: its identityRule, checked there. A part it
+  // couldn't read is not a mismatch.
+  function ruleMismatches(node) {
+    const c = node?.identityRule;
+    if (!c?.mismatch) return [];
+    const out = [];
+    if (c.git?.state === "differs") out.push(masked ? "commits as another identity than the project's rule names" : `the project's rule says commit as ${c.rule.git}, but git here uses ${c.git.uses ?? "another identity"}`);
+    if (c.push?.state === "differs") out.push(masked ? "pushes as another account than the project's rule names" : `the project's rule says push as ${c.rule.push.login} on ${c.rule.push.host}, but a push here signs in as ${c.push.uses ?? "another account"}`);
+    return out;
+  }
+
   // Every project with a mismatch, for the identities window.
   function allMismatches() {
     if (!graphNow) return [];
     return graphNow.nodes
       .filter((n) => n.kind === "project")
-      .map((n) => ({ id: n.id, name: n.name, texts: mismatches(n.identities ?? []) }))
+      .map((n) => ({ id: n.id, name: n.name, texts: [...mismatches(n.identities ?? []), ...ruleMismatches(n)] }))
       .filter((w) => w.texts.length);
   }
 
@@ -191,7 +203,7 @@ export function createIdentities({ sfx = () => {}, toast = () => {}, onFilter = 
       rows += row("ran as", ran ? chipLink(ran.id) + how(ran) : `<span class="dim">not known${node.app === "codex" ? ": Codex doesn't record the account" : ""}</span>`);
     }
     for (const l of links.filter((x) => x.role !== "ran-as")) rows += row(node.kind === "session" && l.role === "owner" ? "repo owner" : ROLE_LABEL[l.role], chipLink(l.id) + how(l));
-    const warn = mismatches(links).map((t) => `<div class="id-warn">⚠ ${h(t)}</div>`).join("");
+    const warn = [...mismatches(links), ...ruleMismatches(node)].map((t) => `<div class="id-warn">⚠ ${h(t)}</div>`).join("");
     return `<div class="panel-title sub"><span>Identities</span><span class="tick">${masked ? "masked" : ""}</span></div>${warn}<div class="grid">${rows}</div>`;
   }
 

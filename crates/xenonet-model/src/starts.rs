@@ -16,9 +16,11 @@ pub fn answer_words(state: &str, host: &str, a: &Value) -> String {
     match state {
         "started" => {
             let folder = a.get("folder").and_then(Value::as_str).map(|f| format!(", in {f}")).unwrap_or_default();
+            // A sandboxed run says so, and what it may reach.
+            let sandbox = a.get("sandbox").and_then(|s| s.get("words")).and_then(Value::as_str).map(|w| format!(" {w}")).unwrap_or_default();
             match session {
-                Some(s) => format!("[XenoNet] Started {s}{on}{folder}. Message it as you would any session."),
-                None => format!("[XenoNet] Started a session{on}{folder}."),
+                Some(s) => format!("[XenoNet] Started {s}{on}{folder}.{sandbox} Message it as you would any session."),
+                None => format!("[XenoNet] Started a session{on}{folder}.{sandbox}"),
             }
         }
         "ended" => {

@@ -89,6 +89,21 @@ pub struct Nodes {
     compactor: Mutex<Option<JoinHandle<()>>>,
 }
 
+/// A store from before every network got a sharing row lacks one only for
+/// the first network (a later one was given "nothing" when it was adopted),
+/// and a missing row then meant "everything": that row is written now, so
+/// the network stays as it was. `networks` is in the order they were
+/// adopted. Any other network with no row (lost, or never written) is left
+/// without one and shown nothing, however often the store is opened. If the
+/// store can't say or write, nothing is written, the safe side.
+fn write_missing_first_row(persist: &dyn crate::persist::Persist, networks: &[crate::files::NetFile]) {
+    if let Some(first) = networks.first() {
+        if persist.sharing(&first.id).is_ok_and(|row| row.is_none()) {
+            let _ = persist.put_sharing(&first.id, &crate::share::Sharing::All);
+        }
+    }
+}
+
 impl Nodes {
     /// Every network this machine is in, from `<state>/network` and the
     /// store, with a sink that takes what arrives; nothing runs until
@@ -98,7 +113,9 @@ impl Nodes {
         let identity = Identity::open(dir.identity_dir(), opts.persist.clone(), opts.vault.clone())?;
         let common = Common::new(identity.clone());
         let mut nets = Vec::new();
-        for net in dir.read_networks()? {
+        let found = dir.read_networks()?;
+        write_missing_first_row(opts.persist.as_ref(), &found);
+        for net in found {
             nets.push(Node::open_in(opts.clone(), sink.clone(), common.clone(), Some(net))?);
         }
         let empty = Node::open_in(opts.clone(), sink.clone(), common.clone(), None)?;
@@ -517,10 +534,32 @@ impl Nodes {
         out
     }
 
-    // The node a call that names no network goes through: the network the
-    // body in hand arrived in, else the first.
+    /// The network a call is in: the one the body in hand arrived in
+    /// (`ground::within`), else the one network this machine is in. A call
+    /// in no frame from a machine in several networks is in none of them,
+    /// and so is one in a frame of a network this machine isn't in. What it
+    /// decides, it decides on no network's chain; what it reads of the
+    /// settings, it reads as `narrowest` does.
     fn current(&self) -> Option<Arc<Shared>> {
-        ground::current().and_then(|n| self.common.shared_of(&n)).or_else(|| self.common.shareds().into_iter().next())
+        match ground::current() {
+            Some(n) => self.common.shared_of(&n),
+            None => {
+                // A network this machine was removed from no longer counts:
+                // with one other, this machine is in one network. (In none
+                // but a removed one, that one still names it.)
+                let mut all = self.common.shareds();
+                if all.len() > 1 {
+                    all.retain(|s| !s.is_removed());
+                }
+                (all.len() == 1).then(|| all.remove(0))
+            }
+        }
+    }
+
+    /// The network that names this machine when nothing decides on it: the
+    /// call's own, else the one joined first (`Net::me`).
+    fn named(&self) -> Option<Arc<Shared>> {
+        self.current().or_else(|| self.common.shareds().into_iter().next())
     }
 }
 
@@ -593,15 +632,51 @@ async fn supervise(nodes: Weak<Nodes>) {
     }
 }
 
+/// Whether a network shown `sharing` is shown what `out` is about: a
+/// claim's project, a handoff's project (a handoff that names none is for
+/// whatever takes it, shown only where everything is). What is about no
+/// project is nobody's to hold back.
+fn shown_in(out: &Outgoing, sharing: &crate::share::Sharing) -> bool {
+    match out.kind {
+        Kind::Claims => sharing.shows_project(out.body.get("project").and_then(Value::as_str).unwrap_or("")),
+        Kind::Handoff => match out.body.pointer("/to/projectKey").and_then(Value::as_str) {
+            Some(p) => sharing.shows_project(p),
+            None => *sharing == crate::share::Sharing::All,
+        },
+        _ => true,
+    }
+}
+
+/// Whether `s`, a network, can take `out`: a handoff that names the one
+/// machine it is for goes only into networks that machine is in.
+fn holds_target(out: &Outgoing, s: &Shared) -> bool {
+    match (out.kind, out.body.get("for").and_then(Value::as_str)) {
+        (Kind::Handoff, Some(h)) => s.roster().view_ref().is_some_and(|v| v.member(h).is_some()),
+        _ => true,
+    }
+}
+
 impl Net for Nodes {
     fn networks(&self) -> Vec<Me> {
         self.common.shareds().iter().filter_map(|s| s.network()).map(|n| Me { network: n.id, name: n.name, host: n.host }).collect()
     }
 
     fn me(&self) -> Option<Me> {
-        let s = self.current()?;
+        let s = self.named()?;
         let n = s.network()?;
         Some(Me { network: n.id, name: n.name, host: n.host })
+    }
+
+    fn live_networks(&self) -> Vec<Me> {
+        self.common.shareds().iter().filter(|s| !s.is_removed()).filter_map(|s| s.network()).map(|n| Me { network: n.id, name: n.name, host: n.host }).collect()
+    }
+
+    fn networks_for(&self, project: Option<&str>) -> Vec<String> {
+        self.common.shareds().iter().flat_map(|s| Net::networks_for(s.as_ref(), project)).collect()
+    }
+
+    fn networks_with(&self, host: &str) -> Vec<String> {
+        self.common.shareds().iter().flat_map(|s| Net::networks_with(s.as_ref(), host)).collect()
     }
 
     fn hosts(&self) -> Vec<Host> {
@@ -616,6 +691,10 @@ impl Net for Nodes {
         out
     }
 
+    fn hosts_in(&self, network: &str) -> Vec<Host> {
+        self.common.shared_of(network).map(|s| Net::hosts(s.as_ref())).unwrap_or_default()
+    }
+
     fn send(&self, out: Outgoing) -> Result<(), String> {
         let nets = self.common.shareds();
         if nets.is_empty() {
@@ -624,6 +703,11 @@ impl Net for Nodes {
         // A network named, or the one the body in hand came in: there alone.
         if let Some(id) = out.network.clone().or_else(ground::current) {
             let s = self.common.shared_of(&id).ok_or_else(|| format!("this machine isn't in {id}"))?;
+            // What is about a project goes only into a network shown it,
+            // in a frame's network too.
+            if !shown_in(&out, &s.sharing(&id)) || !holds_target(&out, &s) {
+                return Ok(());
+            }
             let presence = (out.kind == Kind::Presence).then(|| out.body.clone());
             s.send(out.within(id))?;
             if let Some(body) = presence {
@@ -651,12 +735,12 @@ impl Net for Nodes {
                 }
                 Ok(())
             }
-            // Into each network its project is shared into.
-            Kind::Claims => {
-                let project = out.body.get("project").and_then(Value::as_str).unwrap_or("");
+            // Into each network its project is shared into; a handoff
+            // that names no project only into a network shown everything.
+            Kind::Claims | Kind::Handoff => {
                 for s in &nets {
                     let Some(id) = s.network().map(|n| n.id) else { continue };
-                    if !s.is_removed() && s.sharing(&id).shows_project(project) {
+                    if !s.is_removed() && shown_in(&out, &s.sharing(&id)) && holds_target(&out, s) {
                         s.send(Outgoing { network: Some(id), ..out.clone() })?;
                     }
                 }
@@ -673,8 +757,15 @@ impl Net for Nodes {
                     let id = s.network().map(|n| n.id).ok_or("this machine is leaving that network")?;
                     s.send(out.within(id))
                 }
+                // One network, or none named: with several, a body for
+                // everyone has to say which of them it is for.
                 To::All => {
-                    let s = &nets[0];
+                    // One it was removed from doesn't make it several.
+                    let live: Vec<&Arc<Shared>> = nets.iter().filter(|s| !s.is_removed()).collect();
+                    let live = if live.is_empty() { nets.iter().collect() } else { live };
+                    let [s] = live.as_slice() else {
+                        return Err(format!("this machine is in several networks ({}), so a body for everyone has to name the one it goes in", live.len()));
+                    };
                     let id = s.network().map(|n| n.id).ok_or("this machine is leaving that network")?;
                     s.send(out.within(id))
                 }
@@ -682,24 +773,43 @@ impl Net for Nodes {
         }
     }
 
+    // A call in no network, from a machine in several, reads the narrowest
+    // of them: titles only if any network asks for it, load shared only if
+    // every network takes it, a window host only where it is one in all,
+    // and no roster head, which is a network's own.
     fn roster_head(&self) -> Option<String> {
         self.current().and_then(|s| Net::roster_head(s.as_ref()))
     }
 
     fn titles_only(&self) -> bool {
-        self.current().is_some_and(|s| Net::titles_only(s.as_ref()))
+        match self.current() {
+            Some(s) => Net::titles_only(s.as_ref()),
+            None => self.common.shareds().iter().filter(|s| !s.is_removed()).any(|s| Net::titles_only(s.as_ref())),
+        }
     }
 
     fn share_load(&self) -> bool {
-        self.current().is_none_or(|s| Net::share_load(s.as_ref()))
+        match self.current() {
+            Some(s) => Net::share_load(s.as_ref()),
+            None => self.common.shareds().iter().filter(|s| !s.is_removed()).all(|s| Net::share_load(s.as_ref())),
+        }
     }
 
     fn is_window_host(&self) -> bool {
-        self.current().is_some_and(|s| Net::is_window_host(s.as_ref()))
+        match self.current() {
+            Some(s) => Net::is_window_host(s.as_ref()),
+            None => {
+                let all: Vec<_> = self.common.shareds().into_iter().filter(|s| !s.is_removed()).collect();
+                !all.is_empty() && all.iter().all(|s| Net::is_window_host(s.as_ref()))
+            }
+        }
     }
 
     fn reach(&self) -> Reach {
-        self.current().map(|s| Net::reach(s.as_ref())).unwrap_or_default()
+        match self.current() {
+            Some(s) => Net::reach(s.as_ref()),
+            None => Reach::narrowest(&self.common.shareds().iter().filter(|s| !s.is_removed()).map(|s| Net::reach(s.as_ref())).collect::<Vec<_>>()),
+        }
     }
 
     fn host_can(&self, host: &str, what: &str) -> bool {
@@ -720,16 +830,43 @@ impl Net for Nodes {
 }
 
 /// The governance an act is decided on: the chain of the network it came
-/// in (`ground::within`), else the first network's.
+/// in (`ground::within`), else the one network this machine is in. In no
+/// frame, with several networks, an act is decided on no network's chain.
 impl Governance for Nodes {
     fn facts(&self) -> Facts {
         match self.current() {
             Some(s) => s.facts(),
-            None => self.empty.shared().facts(),
+            None => {
+                // In no frame, with several networks, no chain decides: the
+                // narrowest settings of the networks this machine is in
+                // do, so a call that names none is never freer than the
+                // strictest of them. (Not those it was removed from.)
+                let mut facts = self.empty.shared().facts();
+                let mut all = self.common.shareds();
+                if all.iter().any(|s| !s.is_removed()) {
+                    all.retain(|s| !s.is_removed());
+                }
+                if !all.is_empty() {
+                    let settings: Vec<_> = all.iter().map(|s| xenonet_authz::Ground::settings(&s.facts(), None)).collect();
+                    facts.narrowed = Some(ground::narrowest(&settings));
+                }
+                facts
+            }
         }
     }
     fn identity(&self) -> Arc<Identity> {
         self.common.identity.clone()
+    }
+    /// A network this machine isn't in is shown nothing.
+    fn sharing(&self, network: &str) -> crate::share::Sharing {
+        self.common.shared_of(network).map_or_else(|| crate::share::Sharing::default_for(false), |s| s.sharing(network))
+    }
+    fn host_of_machine(&self, machine: &str) -> Option<String> {
+        let mut nets = self.common.shareds();
+        if let Some(now) = ground::current() {
+            nets.sort_by_key(|s| s.network().is_none_or(|n| n.id != now));
+        }
+        nets.iter().find_map(|s| s.roster().view_ref()?.members.values().find(|m| m.machine.id() == machine).map(|m| m.id.clone()))
     }
     fn want_person(&self, host: &str, person: &str) {
         let s = self.current().filter(|s| s.roster().view_ref().is_some_and(|v| v.member(host).is_some()));
@@ -751,6 +888,51 @@ impl Drop for Nodes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn net(id: &str) -> crate::files::NetFile {
+        crate::files::NetFile { id: id.into(), name: id.into(), host: "me".into(), founder: "me".into(), titles_only: false, share_load: true, joined: 0 }
+    }
+
+    #[test]
+    fn opening_a_store_with_no_rows_shows_the_first_network_everything_and_no_other_anything() {
+        use crate::persist::{Memory, Persist};
+        use crate::share::Sharing;
+        let kept = Memory::default();
+        let (a, b) = (net("net_a"), net("net_b"));
+        kept.put_network(&a).unwrap();
+        kept.put_network(&b).unwrap();
+        for _ in 0..2 {
+            write_missing_first_row(&kept, &[a.clone(), b.clone()]);
+            assert_eq!(kept.sharing("net_a").unwrap(), Some(Sharing::All));
+            assert_eq!(kept.sharing("net_b").unwrap(), None, "a later network with no row is shown nothing, however often it opens");
+        }
+        // The second's explicit row is left alone, and a row the person
+        // narrowed on the first stays narrowed.
+        kept.put_sharing("net_b", &Sharing::Projects(["prj_x".to_string()].into())).unwrap();
+        kept.put_sharing("net_a", &Sharing::default_for(false)).unwrap();
+        write_missing_first_row(&kept, &[a, b]);
+        assert_eq!(kept.sharing("net_a").unwrap(), Some(Sharing::default_for(false)));
+        assert_eq!(kept.sharing("net_b").unwrap(), Some(Sharing::Projects(["prj_x".to_string()].into())));
+    }
+
+    #[test]
+    fn a_second_networks_lost_row_stays_lost_when_the_store_is_opened() {
+        use crate::persist::{Memory, Persist};
+        use crate::share::Sharing;
+        let kept = Memory::default();
+        let (a, b) = (net("net_a"), net("net_b"));
+        kept.put_network(&a).unwrap();
+        kept.put_network(&b).unwrap();
+        kept.put_sharing("net_a", &Sharing::All).unwrap();
+        kept.put_sharing("net_b", &Sharing::default_for(false)).unwrap();
+        // net_b's row goes (Memory forgets whole networks only, so put it back).
+        let networks = kept.networks().unwrap();
+        kept.forget("net_b").unwrap();
+        kept.put_network(&b).unwrap();
+        write_missing_first_row(&kept, &networks);
+        assert_eq!(kept.sharing("net_b").unwrap(), None, "still shown nothing");
+        assert_eq!(kept.sharing("net_a").unwrap(), Some(Sharing::All));
+    }
 
     #[test]
     fn the_home_relay_is_one_every_network_lists() {

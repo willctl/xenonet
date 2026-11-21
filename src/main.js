@@ -524,10 +524,15 @@ async function answerAsk(id, decision) {
   needsYou.refresh();
   return { ok: r.ok, error: r.error };
 }
+// Projects whose rule for a git identity and push account doesn't match,
+// as the service checked it (identityRule on the project's node).
+function identityWarnings() {
+  return (fullGraph?.nodes ?? []).filter((n) => n.kind === "project" && n.identityRule?.mismatch).map((n) => ({ id: n.id, title: n.name ?? n.id, text: n.identityRule.words ?? null }));
+}
 function needsYouNow() {
   const view = actorRequests.view();
   const sessions = (lastLive?.sessions ?? []).filter((s) => s.needsYou && hud.index.has(s.id)).map((s) => ({ id: s.id, app: s.app, title: hud.index.get(s.id)?.title ?? s.id, kind: s.needsYou.kind, text: s.needsYou.text, since: s.needsYou.since, host: s.host ?? null, stale: !!s.stale }));
-  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting, hints: [...signIns.values()], asks: runAsks });
+  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting, hints: [...signIns.values()], asks: runAsks, identities: identityWarnings() });
 }
 // The Needs you panel (needs-you.js), which answers them: from the
 // palette, N, the strip's button and the tray's menu.
@@ -1077,6 +1082,7 @@ function applyGraph(graph = serverGraph) {
   hud.setData(scene.setData(scoped));
   renderScope(scoped.scope, scopeCounts(graph, scope));
   if (!replay.active) hud.refreshFilters();
+  needsYou.refresh();
 }
 
 // The network's other machines changed (network.js's view): drawn again

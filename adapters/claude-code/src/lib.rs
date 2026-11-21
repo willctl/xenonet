@@ -133,12 +133,21 @@ fn listen_command(file: &str) -> String {
     format!("claude --settings {file}")
 }
 
+/// The variable XenoNet's runs sign in with (`claude setup-token`), which a
+/// sandboxed run's commands must not be given.
+pub(crate) const SIGN_IN_VARIABLE: &str = "CLAUDE_CODE_OAUTH_TOKEN";
+
+/// The variable that makes Claude Code read that token from a descriptor
+/// (up to a newline) and delete the variable, as of 2.1.327.
+pub(crate) const SIGN_IN_FD_VARIABLE: &str = "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR";
+
 mod asked;
 pub mod checks;
 pub mod connect;
 pub mod map;
 mod open;
 pub mod reader;
+pub mod sandbox;
 pub mod watch;
 
 /// The adapter.
@@ -178,7 +187,7 @@ impl Platform for Adapter {
             fork: Some(fork),
             permission_tool: Some(permission_tool),
             tool_timeout: Some("MCP_TOOL_TIMEOUT"),
-            sign_in: Some(SignIn { variable: "CLAUDE_CODE_OAUTH_TOKEN", signed_out }),
+            sign_in: Some(SignIn { variable: SIGN_IN_VARIABLE, fd_variable: Some(SIGN_IN_FD_VARIABLE), signed_out }),
             session_of: Some(session_of),
             finish: Some(finish),
             reported: Some(delivery::reported_claude_style),
@@ -186,6 +195,7 @@ impl Platform for Adapter {
             version: Some(("claude", &["--version"])),
             channel_command: Some(channel_command),
             listen_command: Some(listen_command),
+            sandbox: Some(sandbox::ways()),
             ..Ways::default()
         })
     }
@@ -230,6 +240,34 @@ impl Platform for Adapter {
 
     fn transcript_dirs(&self, folder: &str) -> Vec<String> {
         vec![folder.to_string()]
+    }
+
+    fn sign_in_vars(&self) -> Vec<&'static str> {
+        [
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_CUSTOM_HEADERS",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+        ]
+        .to_vec()
+    }
+
+    fn refuse_args(&self) -> Vec<String> {
+        // Claude Code's own switch for permission deny rules, which join
+        // those of its settings.
+        ["--disallowedTools", "Bash(git commit:*)", "Bash(git push:*)", "Bash(gh:*)"].map(String::from).to_vec()
+    }
+
+    fn root_paths(&self, root: &str) -> Option<xenonet_adapter::platform::RootPaths> {
+        Some(xenonet_adapter::platform::RootPaths { folder: xenonet_os::paths::join(root, "projects"), signin: xenonet_os::paths::join(root, ".claude.json") })
+    }
+
+    fn root_candidates(&self, home: &str, look: &mut dyn xenonet_adapter::dirs::Look) -> Vec<String> {
+        xenonet_adapter::platform::sibling_roots(home, ".claude", &["projects", ".claude.json", ".credentials.json"], look)
     }
 
     fn session_files(&self) -> Option<Box<dyn xenonet_adapter::platform::SessionFiles>> {
