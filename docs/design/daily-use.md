@@ -152,5 +152,10 @@ Scenario 1 needs no new code, only both machines on a current release.
   (a new run and a resumed turn) and Claude Code 2.1.327, which led to each
   Claude Code run getting a temp folder of its own (see
   [the sandbox](../guide/sandbox.md)). Not seen on Linux yet.
+- git fails in a confined Claude Code run while the person has a
+  `~/.gitconfig`, since the run can't read the home folder. Open: give
+  such runs `GIT_CONFIG_GLOBAL=/dev/null` (git would then make up an
+  author from the account's name and host unless the run is given one),
+  or allow reading that one file.
 - Cell starts are refused until a cell can carry the app's sign-in and
   bring its session back to the map.
