@@ -6,8 +6,8 @@
 //! its own `--json` answers with an argument list and a short deadline, and
 //! turns what comes back into a verdict. Eidolon not being there is an info
 //! with the line that builds it, never a failure of XenoNet's doctor.
-//! Nothing secret is read or shown: Eidolon's holder entry holds only
-//! public keys and only its name is used here.
+//! Nothing secret is read or shown: `eidolon ls` gives only public keys,
+//! and only target names and holder names are used here.
 
 use crate::checks::{info, ok, unreadable, warn, Ctx};
 use adytum::doctor::{Finding, Verdict};
@@ -16,8 +16,7 @@ use xenonet_os::error::Failure;
 use xenonet_text::units::plural;
 
 /// The checks, in order: id, group and title.
-pub const CHECKS: [(&str, &str, &str); 2] =
-    [("cells.adytum", "Integrations", "Adytum can keep cells"), ("cells.eidolon", "Integrations", "Eidolon holds this machine's identities")];
+pub const CHECKS: [(&str, &str, &str); 2] = [("cells.adytum", "Integrations", "Adytum can keep cells"), ("cells.eidolon", "Integrations", "Eidolon keeps this machine's targets")];
 
 /// How to get the tools' programs, from checkouts of their repositories.
 const BUILD: &str =
@@ -25,12 +24,13 @@ const BUILD: &str =
 
 const ADYTUM_MS: f64 = 6000.0;
 const EIDOLON_MS: f64 = 3000.0;
-/// What one finding or one eidolon may say, and how many are listed.
+/// What one finding or one target may say, and how many are listed.
 const SAID_MAX: usize = 160;
 const LISTED: usize = 5;
 
 /// The demo's made-up answers, in the tools' own shapes: one warning from
-/// Adytum, a machine called `desk`, one eidolon open and one sealed.
+/// Adytum, and a machine called `desk` holding one target with another
+/// moving to `tower`.
 fn demo_adytum() -> Vec<Finding> {
     vec![
         Finding { id: "limactl", message: "limactl 2.1.2 is installed.".into(), verdict: Verdict::Ok },
@@ -41,10 +41,9 @@ fn demo_adytum() -> Vec<Finding> {
         },
     ]
 }
-const DEMO_MACHINE: &str = r#"{"name":"desk","sign":"demo","seal":"demo"}"#;
-const DEMO_LS: &str = r#"{"ok":true,"eidolons":[
-  {"eidolon":"eid_demo0000000000000001","wall":"wall_demo","state":{"open":{"cell":"adytum-demo-1"}},"generation":1,"seat_here":true,"pending_move":false,"facets":2},
-  {"eidolon":"eid_demo0000000000000002","wall":"wall_demo","state":"sealed","generation":3,"seat_here":true,"pending_move":false,"facets":1}]}"#;
+const DEMO_LS: &str = r#"{"key":"ssh-ed25519 AAAAdemo","targets":[
+  {"target":"firefox","holder":"desk","held_here":true,"generation":4,"pending_to":null},
+  {"target":"notes","holder":"desk","held_here":true,"generation":2,"pending_to":"tower"}]}"#;
 
 pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
     let demo = c.f.data.get("demo").and_then(Value::as_bool) == Some(true);
@@ -96,14 +95,13 @@ async fn adytum(c: &Ctx<'_>, demo: bool) -> Value {
 
 async fn eidolon(c: &Ctx<'_>, demo: bool) -> Value {
     if demo {
-        return eidolon_verdict(DEMO_MACHINE, "", DEMO_LS);
+        return eidolon_verdict(DEMO_LS, "");
     }
     let Some(file) = c.which("eidolon").await else { return absent("Eidolon") };
-    let (machine, ls) = (ask(c, &file, &["machine", "show", "--json"], EIDOLON_MS).await, ask(c, &file, &["ls", "--json"], EIDOLON_MS).await);
-    match (machine, ls) {
-        (Said::Out { stdout: m, stderr: e }, Said::Out { stdout: l, .. }) => eidolon_verdict(&m, &e, &l),
-        (Said::Late, _) | (_, Said::Late) => warn(format!("eidolon didn't answer within {} seconds", EIDOLON_MS / 1000.0), Some("Run eidolon ls yourself to see where it waits.")),
-        _ => warn("eidolon is on the PATH but doesn't start", Some(BUILD)),
+    match ask(c, &file, &["ls", "--json"], EIDOLON_MS).await {
+        Said::Out { stdout, stderr } => eidolon_verdict(&stdout, &stderr),
+        Said::Late => warn(format!("eidolon didn't answer within {} seconds", EIDOLON_MS / 1000.0), Some("Run eidolon ls yourself to see where it waits.")),
+        Said::Gone => warn("eidolon is on the PATH but doesn't start", Some(BUILD)),
     }
 }
 
@@ -162,52 +160,34 @@ pub fn adytum_verdict(findings: &[Finding]) -> Value {
     warn(detail, (!fixes.is_empty()).then(|| fixes.join(" ")).as_deref())
 }
 
-/// Eidolon's machine entry and holdings as a verdict. `machine` and `err`
-/// are `eidolon machine show --json`'s stdout and stderr, `ls` is
-/// `eidolon ls --json`'s stdout.
-pub fn eidolon_verdict(machine: &str, err: &str, ls: &str) -> Value {
-    let name = match parse(machine).and_then(|m| m.get("name").and_then(Value::as_str).map(tidy)) {
-        Some(n) => Some(n),
-        // With --json the refusal comes on stdout; stderr is read too.
-        None => match parse(machine).or_else(|| parse(err)) {
-            // Not set up yet is a fact, not a fault.
-            Some(e) if e.get("code").and_then(Value::as_str) == Some("not_initialised") => None,
-            Some(e) if e.get("ok") == Some(&json!(false)) => {
-                let said = |k: &str| tidy(e.get(k).and_then(Value::as_str).unwrap_or_default());
-                return warn(format!("Eidolon can't read this machine's identity: {}", said("message")), Some(&said("fix")).filter(|f| !f.is_empty()).map(String::as_str));
-            }
-            _ => return warn(unreadable("eidolon machine show"), None),
-        },
-    };
-    let Some(rows) = parse(ls).and_then(|v| v.get("eidolons").and_then(Value::as_array).cloned()) else { return warn(unreadable("eidolon ls"), None) };
-    let who = name.as_ref().map_or_else(|| "This machine has no identity yet".to_string(), |n| format!("This machine is {n}"));
-    let mut open = Vec::new();
-    let (mut sealed, mut retired) = (0, 0);
-    for r in &rows {
-        let id = tidy(r.get("eidolon").and_then(Value::as_str).unwrap_or("?"));
-        match r.get("state") {
-            Some(Value::String(s)) if s == "sealed" => sealed += 1,
-            Some(Value::String(s)) if s == "retired" => retired += 1,
-            Some(s) => match s.get("open").and_then(|o| o.get("cell")).and_then(Value::as_str) {
-                Some(cell) => open.push(format!("{id} in {}", tidy(cell))),
-                None => sealed += 1,
-            },
-            None => sealed += 1,
-        }
+/// `eidolon ls --json` as a verdict: whether this machine has a key, which
+/// targets it holds and which moves wait for an ack. `ls` and `err` are its
+/// stdout and stderr; with --json a refusal comes on stdout.
+pub fn eidolon_verdict(ls: &str, err: &str) -> Value {
+    let Some(v) = parse(ls).or_else(|| parse(err)) else { return warn(unreadable("eidolon ls"), None) };
+    if let Some(e) = v.get("error") {
+        let said = |k: &str| tidy(e.get(k).and_then(Value::as_str).unwrap_or_default());
+        return warn(format!("Eidolon can't list its targets: {}", said("message")), Some(&said("fix")).filter(|f| !f.is_empty()).map(String::as_str));
     }
-    let held = plural(rows.len() as f64, "eidolon", None);
-    let mut detail = format!("{who}; it holds {held}");
-    if !rows.is_empty() {
-        let retired = if retired > 0 { format!(", {retired} retired") } else { String::new() };
-        detail = format!("{detail} ({} open, {sealed} sealed{retired})", open.len());
+    let Some(rows) = v.get("targets").and_then(Value::as_array) else { return warn(unreadable("eidolon ls"), None) };
+    if v.get("key").is_none_or(Value::is_null) {
+        return info("Eidolon has no key on this machine yet", Some("Run eidolon key init, then add each machine with eidolon holders add."));
     }
-    if !open.is_empty() {
-        detail = format!("{detail}. Open: {}{}", open.iter().take(LISTED).cloned().collect::<Vec<_>>().join("; "), more(open.len()));
+    let name = |r: &Value| tidy(r.get("target").and_then(Value::as_str).unwrap_or("?"));
+    let here: Vec<String> = rows.iter().filter(|r| r.get("held_here") == Some(&json!(true))).map(name).collect();
+    let moving: Vec<String> = rows.iter().filter_map(|r| r.get("pending_to").and_then(Value::as_str).map(|to| format!("{} to {}", name(r), tidy(to)))).collect();
+    let mut detail = format!("Eidolon holds {} of {} here", here.len(), plural(rows.len() as f64, "target", None));
+    if !here.is_empty() {
+        detail = format!("{detail}: {}{}", here.iter().take(LISTED).cloned().collect::<Vec<_>>().join(", "), more(here.len()));
     }
-    if name.is_none() {
-        return info(detail, Some("Run eidolon machine init --name <name> to give this machine an identity."));
+    if moving.is_empty() {
+        return ok(detail);
     }
-    ok(detail)
+    let waits = plural(moving.len() as f64, "move waits", Some("moves wait"));
+    warn(
+        format!("{detail}. {waits} for an ack: {}{}", moving.iter().take(LISTED).cloned().collect::<Vec<_>>().join("; "), more(moving.len())),
+        Some("Run the same eidolon send again, or eidolon settle with the receiver's ack."),
+    )
 }
 
 #[cfg(test)]
@@ -216,8 +196,10 @@ mod tests {
     use crate::checks::{self, Facts};
     use crate::fake::{ready, Fake};
 
-    const HOLDER: &str = r#"{"name":"desk","sign":"AAAA","seal":"BBBB"}"#;
-    const NOT_SET_UP: &str = r#"{"ok":false,"code":"not_initialised","message":"This machine has no identity yet.","fix":"Run `eidolon machine init --name <name>` first."}"#;
+    const LS: &str = r#"{"key":"ssh-ed25519 AAAA","targets":[
+      {"target":"firefox","holder":"desk","held_here":true,"pending_to":null},
+      {"target":"notes","holder":"desk","held_here":true,"pending_to":"tower"},
+      {"target":"work","holder":"tower","held_here":false,"pending_to":null}]}"#;
 
     fn finding(id: &'static str, message: &str, verdict: Verdict) -> Finding {
         Finding { id, message: message.into(), verdict }
@@ -239,33 +221,31 @@ mod tests {
     }
 
     #[test]
-    fn eidolon_says_who_it_is_and_what_is_open_where() {
-        let ls = r#"{"ok":true,"eidolons":[
-          {"eidolon":"eid_a","state":{"open":{"cell":"adytum-one"}}},
-          {"eidolon":"eid_b","state":"sealed"},
-          {"eidolon":"eid_c","state":"retired"}]}"#;
-        let v = eidolon_verdict(HOLDER, "", ls);
-        assert_eq!(v["status"], "ok");
-        assert_eq!(v["detail"], "This machine is desk; it holds 3 eidolons (1 open, 1 sealed, 1 retired). Open: eid_a in adytum-one");
-        assert!(!v.to_string().contains("AAAA") && !v.to_string().contains("BBBB"), "no key is shown");
-        assert_eq!(eidolon_verdict(HOLDER, "", r#"{"ok":true,"eidolons":[]}"#)["detail"], "This machine is desk; it holds 0 eidolons");
+    fn eidolon_lists_what_it_holds_and_what_waits_for_an_ack() {
+        let v = eidolon_verdict(LS, "");
+        assert_eq!(v["status"], "warn");
+        assert_eq!(v["detail"], "Eidolon holds 2 of 3 targets here: firefox, notes. 1 move waits for an ack: notes to tower");
+        assert!(v["fix"].as_str().unwrap().contains("eidolon settle"));
+        let settled = eidolon_verdict(r#"{"key":"ssh-ed25519 AAAA","targets":[{"target":"firefox","held_here":true,"pending_to":null}]}"#, "");
+        assert_eq!((settled["status"].as_str(), settled["detail"].as_str()), (Some("ok"), Some("Eidolon holds 1 of 1 target here: firefox")));
+        assert_eq!(eidolon_verdict(r#"{"key":"ssh-ed25519 AAAA","targets":[]}"#, "")["detail"], "Eidolon holds 0 of 0 targets here");
     }
 
     #[test]
-    fn eidolon_without_an_identity_is_an_info_with_the_command_that_makes_one() {
-        let v = eidolon_verdict("", NOT_SET_UP, r#"{"ok":true,"eidolons":[]}"#);
-        assert_eq!(eidolon_verdict(NOT_SET_UP, "", r#"{"ok":true,"eidolons":[]}"#)["status"], "info", "stdout carries it with --json");
+    fn eidolon_without_a_key_is_an_info_with_the_command_that_makes_one() {
+        let v = eidolon_verdict(r#"{"key":null,"targets":[]}"#, "");
         assert_eq!(v["status"], "info");
-        assert!(v["fix"].as_str().unwrap().contains("eidolon machine init --name <name>"));
+        assert!(v["fix"].as_str().unwrap().contains("eidolon key init"));
     }
 
     #[test]
-    fn eidolon_answers_that_cannot_be_read_are_a_warning() {
-        assert_eq!(eidolon_verdict("garbage", "", "{}")["status"], "warn");
-        assert_eq!(eidolon_verdict(HOLDER, "", "garbage")["status"], "warn");
-        let damaged = r#"{"ok":false,"code":"key_store","message":"This machine's keys are missing or damaged.","fix":"Restore the keys folder."}"#;
-        let v = eidolon_verdict("", damaged, "{}");
-        assert_eq!((v["status"].as_str(), v["fix"].as_str()), (Some("warn"), Some("Restore the keys folder.")));
+    fn eidolon_answers_that_cannot_be_read_or_refuse_are_a_warning() {
+        assert_eq!(eidolon_verdict("garbage", "")["status"], "warn");
+        assert_eq!(eidolon_verdict("{}", "")["status"], "warn");
+        let refused = r#"{"error":{"code":"busy","message":"Another eidolon command holds firefox.","fix":"Wait for it to finish."}}"#;
+        let v = eidolon_verdict("", refused);
+        assert_eq!((v["status"].as_str(), v["fix"].as_str()), (Some("warn"), Some("Wait for it to finish.")));
+        assert_eq!(eidolon_verdict(refused, "")["status"], "warn", "stdout carries it with --json");
     }
 
     #[test]
@@ -292,12 +272,11 @@ mod tests {
     fn eidolon_is_asked_with_argument_lists() {
         let asked = |file: &str, args: &[&str]| -> Value {
             match args {
-                ["machine", "show", "--json"] => json!({ "code": 0, "stdout": HOLDER, "stderr": "" }),
-                ["ls", "--json"] => json!({ "code": 0, "stdout": r#"{"ok":true,"eidolons":[{"eidolon":"eid_a","state":"sealed"}]}"#, "stderr": "" }),
+                ["ls", "--json"] => json!({ "code": 0, "stdout": LS, "stderr": "" }),
                 other => panic!("{file} {other:?}"),
             }
         };
-        assert_eq!(drive("cells.eidolon", true, asked, false)["detail"], "This machine is desk; it holds 1 eidolon (0 open, 1 sealed)");
+        assert!(drive("cells.eidolon", true, asked, false)["detail"].as_str().unwrap().starts_with("Eidolon holds 2 of 3 targets here"));
     }
 
     #[test]
@@ -313,7 +292,6 @@ mod tests {
         let a = drive("cells.adytum", true, |_, _| unreachable!("the demo runs no program"), true);
         assert_eq!(a["status"], "warn");
         let e = drive("cells.eidolon", false, |_, _| unreachable!("the demo runs no program"), true);
-        assert_eq!(e["status"], "ok");
-        assert!(e["detail"].as_str().unwrap().starts_with("This machine is desk; it holds 2 eidolons"), "{e}");
+        assert!(e["detail"].as_str().unwrap().starts_with("Eidolon holds 2 of 2 targets here"), "{e}");
     }
 }

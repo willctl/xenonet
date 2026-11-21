@@ -12,7 +12,7 @@ Related: [authorization](authorization.md), [rust-core](rust-core.md) (the layer
 | `xenonet-service`'s one-shot runs (`compose/runtime/runs.rs`) | `Spawned` too, with the turn's deadline. The pid is recorded at spawn, output is logged live, and a stop kills the group. |
 | `xenonet-service`'s OpenShell jobs (`compose/integrations/openshell.rs`) | `adytum::openshell` (the `openshell` feature). It provides each command's argument list, the native or WSL profile, the policy file's hash, the `policy_denied` check and sandbox names. XenoNet keeps the job records, the confirm-before-upload step, retrieval and reviews. |
 | `xenonet doctor`, cells group | `adytum::doctor` (the `doctor` feature): it reads the machine and its findings become the check's verdict, where the `adytum` command is installed. |
-| `xenonet-engine::confine`, `xenonet-service::cells` | The `cell` confinement level, below: `Wall` in the engine; `adytum::Cells` and `adytum::lima` (the `lima` feature) in the runner, with `adytum::testing`'s fake driver in its tests. |
+| `xenonet-engine::confine`, `xenonet-service::cells` | The `cell` confinement level, below: `Wall` in the engine; `adytum::Cells` with `adytum::SystemDrivers` and `adytum::lima` (the `lima` feature) in the runner, which makes each cell as `Kind::Lima` and runs its commands through `Cells::driver_of`; `adytum::testing`'s `FakeDriver`, which is also the `Drivers`, in its tests. |
 
 `scripts/rust-layers.mjs` holds the rule:
 - The workspace lists `adytum` with no features: its types, wall rules and process runner, a library any crate may use.

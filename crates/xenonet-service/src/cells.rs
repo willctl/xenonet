@@ -26,7 +26,7 @@
 //!   thrown away whole if it holds anything but plain files and folders.
 //!   The caller looks at it and then calls [`CellRunner::discard_result`].
 
-use adytum::{CellId, CellName, CellSpec, Cells, Driver, DriverKind, ExecOpts, ImagePin, Resources};
+use adytum::{CellId, CellName, CellSpec, Cells, Drivers, ExecOpts, Kind, LimaOptions, Resources};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,13 +41,12 @@ const DEFAULT_DEADLINE: Duration = Duration::from_mins(30);
 /// The cell name prefix in production.
 pub const PRODUCTION_PREFIX: &str = "adytum-xn-";
 
-/// Runs plans in cells made by `driver`, recorded in the ledger under `home`.
+/// Runs plans in cells made by `drivers`, recorded in the ledger under `home`.
 pub struct CellRunner {
-    driver: Arc<dyn Driver>,
-    driver_kind: DriverKind,
+    drivers: Arc<dyn Drivers>,
+    kind: Kind,
     home: PathBuf,
     prefix: String,
-    image: ImagePin,
     apps: Vec<CellApp>,
 }
 
@@ -56,13 +55,13 @@ impl CellRunner {
     /// the pinned default image. `apps` is what that image holds.
     pub fn lima(adytum_home: PathBuf, apps: Vec<CellApp>) -> Result<Self, ConfineError> {
         let image = adytum::lima::image(adytum::lima::DEFAULT_IMAGE).ok_or_else(|| ConfineError::Host("the default cell image is not pinned".into()))?;
-        let driver = adytum::lima::Lima::system(adytum::lima::lima_home_in(&adytum_home)).map_err(host)?;
-        Ok(Self::with_driver(Arc::new(driver), DriverKind::Lima, adytum_home, image, apps))
+        let drivers = adytum::SystemDrivers::new(adytum::lima::lima_home_in(&adytum_home));
+        Ok(Self::with_drivers(Arc::new(drivers), Kind::Lima(LimaOptions::new(image)), adytum_home, apps))
     }
 
-    /// Any driver, for another kind of cell or a test's fake.
-    pub fn with_driver(driver: Arc<dyn Driver>, driver_kind: DriverKind, home: PathBuf, image: ImagePin, apps: Vec<CellApp>) -> Self {
-        Self { driver, driver_kind, home, prefix: PRODUCTION_PREFIX.to_owned(), image, apps }
+    /// Any drivers, for another kind of cell or a test's fake.
+    pub fn with_drivers(drivers: Arc<dyn Drivers>, kind: Kind, home: PathBuf, apps: Vec<CellApp>) -> Self {
+        Self { drivers, kind, home, prefix: PRODUCTION_PREFIX.to_owned(), apps }
     }
 
     /// Names cells with this prefix instead (`adytum-test-` in tests).
@@ -125,7 +124,7 @@ impl CellRunner {
 
     /// Adytum's cells under `home`: its ledger, with the driver.
     fn cells(&self) -> Result<Cells, ConfineError> {
-        Cells::open(&self.home, self.driver.clone()).map_err(host)
+        Cells::open(&self.home, self.drivers.clone()).map_err(host)
     }
 
     async fn run_async(&self, plan: &CellPlan) -> Result<CellRun, ConfineError> {
@@ -151,12 +150,11 @@ impl CellRunner {
         cells.reconcile().await.map_err(host)?;
         let spec = CellSpec {
             name: name.clone(),
-            driver: self.driver_kind,
-            image: self.image.clone(),
+            kind: self.kind.clone(),
+            parent: None,
             wall: plan.wall.clone(),
             resources: Resources::default(),
             ports: Vec::new(),
-            automation_port: None,
             // The project is copied in; the host's folders are never mounted.
             mounts: Vec::new(),
             sealed: true,
@@ -164,7 +162,7 @@ impl CellRunner {
             clone_from: None,
         };
         cells.create(&spec).await.map_err(host)?;
-        let mut guard = Guard { driver: self.driver.clone(), home: self.home.clone(), name: name.clone(), armed: true };
+        let mut guard = Guard { drivers: self.drivers.clone(), home: self.home.clone(), name: name.clone(), armed: true };
         let ran = self.run_in(&cells, name, plan, stage).await;
         if plan.keep && ran.is_ok() {
             guard.armed = false;
@@ -184,18 +182,19 @@ impl CellRunner {
 
     async fn run_in(&self, cells: &Cells, name: &CellName, plan: &CellPlan, stage: &Path) -> Result<CellRun, ConfineError> {
         cells.start(name).await.map_err(host)?;
+        let driver = cells.driver_of(name).map_err(host)?;
         let folder = Self::project_folder_name(&plan.project)?;
         let guest_project = format!("{GUEST_IN}/{folder}");
         // Both as the cell's user, so the program owns its home and its copy.
         let home = ["mkdir", "-p", "--", CELL_HOME].map(String::from);
-        let made = self.driver.exec(name, &home, ExecOpts { deadline: Some(Duration::from_mins(2)), ..ExecOpts::default() }).await.map_err(host)?;
+        let made = driver.exec(name, &home, ExecOpts { deadline: Some(Duration::from_mins(2)), ..ExecOpts::default() }).await.map_err(host)?;
         if !made.success() {
             return Err(ConfineError::Host(format!("the cell's home could not be made: {}", made.stderr_lossy().trim())));
         }
         let staged = stage.join("in");
         std::fs::create_dir(&staged).map_err(|e| ConfineError::Host(format!("the staged copy could not be made: {e}")))?;
         stage_project(&plan.project, &staged, &plan.copy_exclude).map_err(|e| ConfineError::Host(format!("the project could not be staged: {e}")))?;
-        self.driver.copy_in(name, &staged, &guest_project, None).await.map_err(host)?;
+        driver.copy_in(name, &staged, &guest_project, None).await.map_err(host)?;
 
         // The driver runs it as the cell's user. `env -i` empties whatever
         // the guest's login gave, then names exactly the plan's variables.
@@ -205,13 +204,13 @@ impl CellRunner {
         argv.push(plan.program.clone());
         argv.extend(plan.args.iter().cloned());
         let opts = ExecOpts { stdin: plan.stdin.clone(), deadline: Some(plan.deadline.unwrap_or(DEFAULT_DEADLINE)), ..ExecOpts::default() };
-        let out = self.driver.exec(name, &argv, opts).await.map_err(host)?;
+        let out = driver.exec(name, &argv, opts).await.map_err(host)?;
 
         let mut result = None;
         if plan.copy_out {
             let dest = stage.join("out");
             std::fs::create_dir(&dest).map_err(|e| ConfineError::Host(format!("the folder for the result could not be made (it must not exist): {e}")))?;
-            self.driver.copy_out(name, &guest_project, &dest).await.map_err(host)?;
+            driver.copy_out(name, &guest_project, &dest).await.map_err(host)?;
             check_plain(&dest)?;
             result = Some(dest);
         }
@@ -235,7 +234,7 @@ impl CellRunner {
 /// an early `?`, a panic. The normal end calls [`Guard::remove`] and the
 /// guard is then disarmed.
 struct Guard {
-    driver: Arc<dyn Driver>,
+    drivers: Arc<dyn Drivers>,
     home: PathBuf,
     name: CellName,
     armed: bool,
@@ -256,11 +255,11 @@ impl Drop for Guard {
         }
         // A thread and runtime of their own: Drop may run inside a runtime
         // that is unwinding, which cannot start another.
-        let (driver, home, name) = (self.driver.clone(), self.home.clone(), self.name.clone());
+        let (drivers, home, name) = (self.drivers.clone(), self.home.clone(), self.name.clone());
         let _ = std::thread::spawn(move || {
             let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
             rt.block_on(async {
-                if let Ok(cells) = Cells::open(&home, driver) {
+                if let Ok(cells) = Cells::open(&home, drivers) {
                     let _ = cells.remove(&name).await;
                 }
             });
@@ -373,7 +372,7 @@ mod tests {
     use super::*;
     use adytum::exec::{Duplex, Output};
     use adytum::testing::{failed, ok, Exec, FakeDriver, Leaves, Op};
-    use adytum::{Arch, CellState, Listed};
+    use adytum::{Arch, CellId, CellState, Driver, Host, ImagePin, KindName, Listed};
     use std::sync::Mutex;
     use xenonet_engine::confine::{plan, CellRequest, Confinement};
 
@@ -387,12 +386,15 @@ mod tests {
         out_symlink: bool,
     }
 
-    /// Adytum's fake driver, and what its own copies don't do: it lists
-    /// what was copied in before the staged copy goes, and writes a file
-    /// (and maybe a link) into the result folder.
+    /// Adytum's fake driver, and what its own copies don't do: it keeps
+    /// the specs it was asked to create (the fake forgets a removed cell's),
+    /// lists what was copied in before the staged copy goes, and writes a
+    /// file (and maybe a link) into the result folder.
+    #[derive(Clone)]
     struct Fake {
         inner: FakeDriver,
-        copied: Mutex<Vec<String>>,
+        created: Arc<Mutex<Vec<CellSpec>>>,
+        copied: Arc<Mutex<Vec<String>>>,
         #[cfg(unix)]
         out_symlink: bool,
     }
@@ -415,8 +417,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Driver for Fake {
-        async fn create(&self, spec: &CellSpec) -> adytum::Result<()> {
-            self.inner.create(spec).await
+        async fn create(&self, spec: &CellSpec, id: &CellId) -> adytum::Result<()> {
+            self.created.lock().expect("lock").push(spec.clone());
+            self.inner.create(spec, id).await
         }
         async fn start(&self, name: &CellName) -> adytum::Result<()> {
             self.inner.start(name).await
@@ -424,8 +427,8 @@ mod tests {
         async fn exec(&self, name: &CellName, argv: &[String], opts: ExecOpts) -> adytum::Result<Output> {
             self.inner.exec(name, argv, opts).await
         }
-        async fn stream(&self, name: &CellName, argv: &[String]) -> adytum::Result<Duplex> {
-            self.inner.stream(name, argv).await
+        async fn stream(&self, name: &CellName, argv: &[String], opts: ExecOpts) -> adytum::Result<Duplex> {
+            self.inner.stream(name, argv, opts).await
         }
         async fn copy_in(&self, name: &CellName, host: &Path, guest: &str, owner: Option<&adytum::GuestUser>) -> adytum::Result<()> {
             self.copied.lock().expect("lock").push(listing(host));
@@ -442,11 +445,20 @@ mod tests {
         async fn stop(&self, name: &CellName) -> adytum::Result<()> {
             self.inner.stop(name).await
         }
-        async fn remove(&self, name: &CellName) -> adytum::Result<()> {
-            self.inner.remove(name).await
+        async fn remove(&self, name: &CellName, id: &CellId) -> adytum::Result<()> {
+            self.inner.remove(name, id).await
         }
         async fn list(&self) -> adytum::Result<Vec<Listed>> {
             self.inner.list().await
+        }
+    }
+
+    impl Drivers for Fake {
+        fn driver(&self, _kind: KindName, _host: Host) -> adytum::Result<Arc<dyn Driver>> {
+            Ok(Arc::new(self.clone()))
+        }
+        fn machine_kinds(&self) -> Vec<KindName> {
+            vec![KindName::Lima]
         }
     }
 
@@ -489,13 +501,14 @@ mod tests {
         }
         let driver = Arc::new(Fake {
             inner,
-            copied: Mutex::new(Vec::new()),
+            created: Arc::default(),
+            copied: Arc::default(),
             #[cfg(unix)]
             out_symlink: behave.out_symlink,
         });
         let image = ImagePin::new("https://example.test/a.img".into(), format!("sha256:{}", "ab".repeat(32)), Arch::Aarch64).expect("a pin");
         let apps = vec![CellApp { app: "fake-agent".into(), program: "/bin/sh".into() }];
-        let r = CellRunner::with_driver(driver.clone(), DriverKind::Lima, home.to_path_buf(), image, apps).with_prefix("adytum-test-").expect("prefix");
+        let r = CellRunner::with_drivers(driver.clone(), Kind::Lima(LimaOptions::new(image)), home.to_path_buf(), apps).with_prefix("adytum-test-").expect("prefix");
         (r, driver, execs)
     }
 
@@ -537,7 +550,7 @@ mod tests {
         let verbs: Vec<&str> = calls.iter().map(|l| l.split(' ').next().unwrap_or("")).collect();
         assert_eq!(verbs, ["create", "start", "exec", "copy_in", "exec", "remove"], "{calls:?}");
         let name: CellName = run.cell.parse().expect("a name");
-        let spec = driver.inner.spec(&name).expect("the spec");
+        let spec = driver.created.lock().expect("lock").iter().find(|s| s.name == name).cloned().expect("the spec");
         assert!(spec.sealed && spec.mounts.is_empty() && spec.ports.is_empty() && spec.network.is_none());
         assert_eq!(spec.wall, xenonet_engine::confine::wall_for_identity("git:x").expect("wall"));
         let execs = execs.lock().expect("lock");
